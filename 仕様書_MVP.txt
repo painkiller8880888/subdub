@@ -1,0 +1,117 @@
+STT/翻訳表示機能
+
+0.開発要件
+システム構成{
+Runtime: Python 3.10+ / ROCm 6.0
+Inference Engine:
+LLM: Gemma4 / ollama
+ASR: faster-whisper
+}
+
+1. システムアーキテクチャ (Module Architecture)
+システムは以下の3層で構築する。
+① フロントエンド
+UI/UX: streamlitを使い、右に原文、左に訳文のカラムを設け、上にスクロールアウトする形。セグメントIDごとに同じ行を使用する。サイドバーにファイル選択のダイアログボックスと翻訳開始ボタンを設ける。
+
+② ミドルウェア (Python Backend)
+サンプリングレート変換: 音声をpythonで16kHzに変換。リサンプリング実行時に、scipy.signal.resample_polyライブラリ標準のカイザー窓を用いたローパスフィルタを適用し、エイリアシング（折り返し雑音）を防止する。
+VAD (Voice Activity Detection): Silero VAD で無音区間を判定し、音声をセグメント化。確率0.6以上でトリガーし、0.35でリリースしてASRに送信。
+ASRパイプライン: Faster-Whisper Large-v3 int8 をCPUで稼働。VADから送信された音声セグメントをテキスト化し、セグメントIDを付与してフロントエンドとキューに渡す。
+キュー/プロンプト管理: ASRで作成された原文と、推論エンジンから渡された訳文のキューを管理する。ASRから渡された原文は推論エンジンから訳文が戻るまでキューで保持され続ける。訳文のキューが消えたときに古いIDからプロンプトによって原文が渡され、翻訳待ちのキューが常に1以下であるように管理される。
+
+③ 推論エンジン (lemonade / Gemma4)
+メインモデル (ローカルLLM / Gemma4 E4B): LLMが対象言語への翻訳を行い、ミドルウェアに返す。
+
+システムプロンプト
+You are a translation engine.
+Core Rules:
+Keep IDs consistent. Never change IDs.
+Your job is to translate provided script, and output with JSON.
+
+Output only valid JSON like below.
+"output_schema": {
+  "format": [
+    {
+      "seg": "セグメントID",
+      "trans": "翻訳文",
+    }
+  ]
+}
+
+LLM入力スキーマ
+
+  "original_language": "English"
+  "target_language": "Japanese"
+  "seg": "1"
+  "orginal": "I think we should"
+
+
+**あなたは優秀なコーディングエージェントです**
+
+# 役割
+あなたは優秀なPythonエンジニアです。以下の仕様書に基づき、音声認識（ASR）およびLLMを用いたローカル翻訳アプリの実装を行ってください。
+
+# 0. 動作環境・技術要件
+- 環境: Python 3.10+, ROCm 6.0環境
+- ミドルウェア構成: フロントエンド(Streamlit)とは別プロセスでバックエンドサーバーを稼働させます。
+- LLM環境: Ollama (対象モデル名: `Gemma4`)
+- ASR: faster-whisper
+
+# 1. システムアーキテクチャ (3層構造)
+
+## ① フロントエンド (Streamlit UI)
+- 画面レイアウト:
+  - 画面を左右の2カラムに分割し、左カラムに「訳文」、右カラムに「原文」を表示します。
+  - セグメントIDを使って行（水平位置）を同期し、対訳が行単位で揃って表示されるようにします。
+  - 翻訳が完了した古い結果からどんどん上にスクロールアウト（チャットのように新しいものが下から追加）していくUIとします。
+- サイドバー・コントロール機能: 
+  - 翻訳対象ファイルの選択機能（ダイアログまたはアップロードUI等）
+  - **対象音声の再生コンポーネント**（Streamlitの `st.audio` 等を利用し、UI上で選択ファイルが再生できるようにすること）
+  - 「翻訳開始」実行ボタン
+  
+## ② ミドルウェア (別プロセスのPython Backend)
+- アーキテクチャ: FastAPI等を利用してAPIサーバーを構築し、フロントエンドとは非同期（WebSocketあるいはロングポーリング等）で連携してリアルタイムに結果を返せるように設計してください。
+- サンプリングレート変換:
+  - 取得した音声をPythonで16kHzに変換します。
+  - 変換の際、`scipy.signal.resample_poly` を使用し、標準のカイザー窓を用いたローパスフィルタを適用してエイリアシング（折り返し雑音）を防止してください。
+- VAD (Voice Activity Detection):
+  - Silero VAD を使用して無音区間を判定し、音声をセグメント化します。
+  - パラメータ設定: 確率0.6以上でトリガーし、0.35でリリース（終了）としてASR処理に送ります。
+- ASRパイプライン:
+  - `faster-whisper` (Large-v3, int8) を使用します。
+  - **【重要】**: LLM推論にVRAMリソースを完全に割り当てる意図的な設計方針として、ASR推論は**必ず【CPU】で処理するよう（device="cpu"）に設定**してください。
+  - VADから送られた音声セグメントをテキスト化し、固有の「セグメントID」を付与して後続のキューに渡します。
+- キュー / プロンプト管理:
+  - ASRで作成された「原文キュー」と、推論エンジン（LLM）から返る「訳文キュー」を管理し連携させます。
+  - ASRからの原文は、推論エンジンから訳文が返るまで保持し続けます。
+  - **【重要】**: LLMへの翻訳待ちキューテンポが常に「1以下」になるよう厳密に管理してください。すなわち、前の訳文キューが完了して消えたタイミングで、一番古いID順から原文プロンプトをLLMへ渡す単一行・直列の処理としてください。
+
+## ③ 推論エンジン (Ollama / LLM)
+- メインモデル: Ollama上で稼働している `Gemma4` モデルへリクエストを投げます (`ollama run Gemma4` で動く想定のAPIアクセス)。
+- システムプロンプト:
+```text
+You are a translation engine.
+Core Rules:
+Keep IDs consistent. Never change IDs.
+Your job is to translate provided script, and output with JSON.
+
+Output only valid JSON like below.
+"output_schema": {
+  "format": [
+    {
+      "seg": "セグメントID",
+      "trans": "翻訳文"
+    }
+  ]
+}
+
+LLMへの入力（ユーザープロンプト）スキーマ: 言語指定は固定（英語→日本語）とします。
+"original_language": "English"
+"target_language": "Japanese"
+"seg": "{セグメントID}"
+"orginal": "{ASRからの原文テキスト}"
+実装上の指示・制約
+Streamlitのフロントエンド（app.py等）とミドルウェアバックエンド（server.py等）にファイルを明確に分割してください。
+フロントエンド上でファイルの選択通知をバックエンドに送りながら、音声再生を行いつつ、翻訳結果をリアルタイムまたは順次フロントに描画していくためのストリーミング処理を破綻なく実装してください。
+LLMの出力結果はJSONで返される想定ですが、パースエラー（余計な文字が入る等）を考慮し、壊れにくい堅牢なエラーハンドリングを設けてください。
+最後に、開発者が迷うことなく動作テストを行えるよう、両サーバーの「起動コマンド」や「セットアップ手順（必要なパッケージ一覧等）」も合わせて出力してください

@@ -1,0 +1,81 @@
+youtubeリアルタイム翻訳システム仕様書
+
+0.開発要件
+vite / wxt (テンプレートreact, パッケージnpm)によるchrome拡張開発。
+システム構成{
+Runtime: Python 3.10+ / ROCm 6.0
+Inference Engine:
+LLM: llama-cpp-python (hipBLAS enabled) / lemonade
+}
+メモリ管理計画 (VRAM Budget)
+{
+Total VRAM: RADEON 7700XT 12,288 MB
+Gemma4 Q4_K_M: 4,800 MB (Fixed)
+KV Cache & Workspace: 2,500 MB (Capped)
+System Reserve: 1,500 MB
+Limit: 12,000 MB 以内に収まるようコンテキスト長を調整。
+}
+APIインターフェース: HTTP REST (OpenAI 互換規格)。/v1/chat/completions 等を使用。
+
+レイテンシの要件はMVPと実装を確認してから策定する。
+
+1. システムアーキテクチャ (Module Architecture)
+システムは以下の3層で構築する。
+① フロントエンド (Chrome Extension)
+通信: WebSocketによる双方向ストリーミング。
+音声: Offscreen Document を音声キャプチャの実行基盤として採用する。Service Worker から受け取った streamId を用いて Offscreen 上で getUserMedia を実行し、AudioWorkletでパケット化した音声データをバックエンドへ48kHz / 16bit PCMの100msごとにバイナリ送信送する。
+UI/UX: 動画ウィンドウとは別のウィンドウを作成。翻訳言語(JP/EN)のドロップボックスを設置。書き出し原文を左、翻訳文を右に表示する。それぞれの訳文のIDとタイムスタンプに基づき、[unconfirmed, tentative, final]を動的に更新する。ペルソナ設定に基づいて発言者の枠色を変える。古いセンテンスはスクロールアウトさせるが、ユーザーがスクロールさせた位置は保持する。
+メッセージフロー: 
+-制御フロー: content scriptでのユーザーによる開始指示 → Service Worker → Offscreen Document の順でキャプチャ開始を指示。同時にTranslation Windowを生成する。
+-データフロー（音声）: YouTube → Offscreen Document → Backend (WebSocket)
+-データフロー（翻訳結果）: Backend → Offscreen Document → Service Worker → Translation Window
+-生存戦略: Offscreen Document → Service Worker へ30秒ごとにsendMessageを送る
+Offscreenの仕様と責務: Oscreen Windowはユーザーが翻訳開始をトリガーし、未作成の場合のみ作成される。動画が終了したか、websocketが切断した際に破棄される。音声処理とWebSocket維持を担当する。Reasonパラメータ=chrome.offscreen.createDocument({ reasons: ['USER_MEDIA', 'AUDIO_PLAYBACK'] })
+
+② ミドルウェア (Python Backend)
+サンプリングレート変換: ブラウザからのバイナリ音声をpythonで16kHzに変換。リサンプリング実行時に、scipy.signal.resample_polyライブラリ標準のカイザー窓を用いたローパスフィルタを適用し、エイリアシング（折り返し雑音）を防止する。
+音声クレンジングアップ:　入力レベルを自動調整し、rnnoiseでノイズを抑制する。
+VAD (Voice Activity Detection): Silero VAD で無音区間を判定し、音声をセグメント化。確率0.6以上でトリガーし、0.35でリリースして、セグメントを作成する。無音を2.5秒感知した場合、end_of_speechイベントを発火する。
+訳文管理: 推論エンジンから入力されたunconfirmed文を保管し、is_EOSがtrueの場合tentativeに移行する。end_of_speechイベントが発火した場合、unconfirmed文をLLMに渡す。tentative文はスライディングウィンドウ型バッファクラスに2つまで保持し、新しいIDのtentative文が追加されたときに最も古いIDの文がfinalとなる。
+ペルソナ管理: 推論エンジンから渡されたspeakerの内容をリスト化し、ペルソナライブラリから情報を取得する。
+履歴管理: final文のスキーマを会話ログと会話履歴に追加する。ログは全履歴を保持する。会話履歴は20セグメントまでの履歴を保持し、新しいセグメントが追加された場合最も古いIDのセグメントを消去する。動画が終了したら会話ログ全文をログファイルとして生成する。
+コンテキスト・バインド: 原文、会話履歴、サマリー、ペルソナ、IDを発行した空のtentativeフレーム、unconfirmed文を統合したプロンプトを構築し、音声セグメントとともに推論エンジンへ送信する。
+
+③ 推論エンジン (lemonade / Gemma4)
+メインモデル (ローカルLLM / Gemma4 E4B): LLMが原語を自動判定し、書き起こしと対象言語への翻訳と話者判別を行う。サブモデルが生成したサマリー、ペルソナをコンテキストとして使用する。訳文をunconfirmed文として返す。文末を検知した場合tentative文として返す。end_of_speechイベントが発火した、あるいは文末を検知したunconfirmed文に対し、"is_EOS": "true"を付与する。tentative文が文脈と矛盾していた場合はこれも翻訳し直す。final文は確定したものとみなし、修正を行わない。
+サブモデル (クラウドLLM / Gemini3 Flash): 会話履歴のサマリー生成およびコンテキスト圧縮。5分毎に会話ログのを送信して、3行程度のサマリー、トピックと頻出単語を生成させる。
+APIキーは/.gitignore/.envに格納。
+
+2. 実装すべきコア機能
+2.1 訳文カスタマイズ
+人物ごとの性格・口調を設定したパーソナルデータ「静的ペルソナ」による翻訳のパーソナライズ。
+訳文は以下の優先順位で翻訳される。1.意味の正確性, 2.文脈の整合性(会話履歴とサブモデルが生成したサマリーによる補完), 3.ペルソナの反映(静的ペルソナによる訳文の雰囲気・口調の変化)
+2.2 スライディング・ウィンドウ翻訳
+LLMは常に以下のセットを受け取って推論する。
+[サマリー]: サブモデルが作成した過去の全体要約。
+[会話履歴]: 20セグメントまで保存される確定訳文の履歴。
+[tentative文バッファ]: 修正余地のある直近2文。新たに文が追加された場合、古いIDの文はfinal文となる。
+[unconfirmed文フレーム]: 入力予定のテキスト。文末を検知した場合tentativeに移行しバッファクラスに追加される。
+2.3 文末判定
+音声セグメントで文末を検知した場合、文全体をtentative状態にする。
+(静的判定): 音声入力（VAD）が 2.5秒途切れた場合、end_of_speechイベントを発火する。
+(動的判定): LLMが「文の途切れ」と判断しつつも次の入力が 1秒来ない場合、仮の訳文を出力してUI上の停滞を防ぐ。
+2.4 欠落補完
+音声データが欠落（ロス）した際、[LOST_AUDIO]のセグメントを渡して次のセグメントへ移行する。
+2.4 プロンプトキュー管理
+
+
+3. エラーハンドリング & パフォーマンス
+パイプライン・パラレル: 「音声受信 → STT,翻訳（Gemma）」の各工程を非同期で回し、音声入力が続いている間も並行して翻訳を生成する。
+非同期サマリー: サマリーはクラウドで実行。サマリー生成中も翻訳は「前世代のサマリー」を使用して推論を継続し、ブロックを防止する。
+Catch-up機構: 音声キューが3秒以上滞留した場合、中間結果の生成をスキップし、最新セグメントの確定翻訳にリソースを集中させる。
+
+4. 開発マイルストーン (Implementation Steps)
+Step 1: 疎通とASR統合 (Pipe-lining)
+WebSocketでの音声受信から、Faster-Whisperによるテキスト化までの最速パスを構築。
+Step 2: ファジー検索とヒント付与 (Pre-processing Logic)
+RapidFuzz/Metaphoneを用いた辞書検索の実装。LLMへのプロンプト注入を自動化。
+Step 3: 思考翻訳の実装 (Advanced Translation)
+Gemma 4にヒントを解釈させ、誤字修正を伴う高精度翻訳を実現。文末判定によるステート遷移の実装。
+Step 4: 感性翻訳とサマリー循環 (Optimization)
+ペルソナ反映と、Gemini 3による非同期サマリー生成の結合。長時間のストリーミング耐性テスト。
