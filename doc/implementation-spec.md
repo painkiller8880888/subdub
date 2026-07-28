@@ -38,7 +38,9 @@
 ### 2.3 VOICEVOX
 
 - VOICEVOX ENGINE はローカル HTTP API として使用する。
-- 使用キャラクターと style ID は **TBD** とする。
+- 使用する VOICEVOX キャラクターは四国めたんとずんだもんで確定する。
+- `character_concept01.png` 側のメンターへ四国めたん、`character_concept02.png` 側の見習いへずんだもんを割り当てる。
+- 各キャラクターで使用する具体的な style ID は **TBD** とする。
 - 具体的な style ID をソースコードへハードコードしない。
 - イントネーションの手動編集方式は **TBD** とする。
 - MVP は VOICEVOX が返した未編集の `audio_query` をキャッシュできるところまで実装し、イントネーション編集 UI は作らない。
@@ -53,7 +55,10 @@
 
 ### 2.5 AI モデル
 
-- WebUI、OpenCode、レビュー、その他プロジェクト内外で使用する具体的なモデル ID はすべて **TBD** とする。
+- WebUI、OpenCode、レビュー、その他プロジェクト内外の AI 用途は、初期実装では Gemma 4 31B Instruct を共通の仮モデルとする。
+- OpenRouter の暫定モデル ID は `google/gemma-4-31b-it` とする。
+- `:free` variant は既定にせず、人間がモデル選択画面から明示的に選択した場合だけ使用する。
+- 将来の用途別モデル選定は **TBD** とし、MVP の利用実績と評価結果を基に見直す。
 - モデル ID を生成ロジックへハードコードしない。
 - モデル未選択の場合、AI を使う操作だけを実行不可にする。非 AI の編集、素材管理、音声生成、プレビュー、レンダリングは利用可能とする。
 - 実行ごとに選択されたモデル ID、プロバイダー、プライバシー設定を実行ログへ記録する。
@@ -133,7 +138,104 @@ WebUI はファイル、SQLite、外部 API を直接操作しない。ファイ
 - Zod
 - SQLite
 
-具体的な WebUI フレームワーク、HTTP ルーター、SQLite ドライバー、テストランナー、およびライブラリのバージョンは TBD とする。
+具体的な WebUI フレームワーク、HTTP ルーター、SQLite ドライバー、テストランナー、および初期バージョンは 4.4 のとおり確定する。
+
+### 4.4 確定した技術選定
+
+以下を 2026-07-28 時点の初期実装構成として採用する。
+
+#### WebUI とローカルサーバー
+
+- WebUI: React SPA + Vite
+- 画面ルーティング: React Router の library mode
+- サーバー状態: TanStack Query
+- HTTP API: Fastify
+- 開発時:
+  - Vite dev server が WebUI を配信する。
+  - `/api` を Fastify の loopback address へ proxy する。
+- 製品実行時:
+  - Vite が WebUI を静的ファイルへビルドする。
+  - Fastify が同一 origin で静的 WebUI と `/api` を配信する。
+  - listen address は `127.0.0.1` とし、LAN へ公開しない。
+- Remotion のプレビューは `@remotion/player` を WebUI に埋め込む。
+- MP4 レンダリング、サムネイル生成、メディア解析は Fastify のリクエスト処理内で直接完了を待たず、子プロセスまたは worker へ渡す。
+- SSR、React Server Components、Server Actions は使用しない。
+- 初期実装は 1 つの `package.json` を持つ単一パッケージとし、WebUI、API、共有スキーマを `src/` 内のディレクトリ境界で分離する。
+
+採用理由:
+
+- ローカル単一ユーザー用で SEO、SSR、エッジ配信が不要なため、SPA の方が実行モデルと障害範囲が単純になる。
+- ファイル、SQLite、VOICEVOX、Remotion renderer を扱う Node.js バックエンドの生存期間を、画面フレームワークのサーバー機能から独立させられる。
+- 開発時は Vite の HMR を利用し、製品実行時は Fastify だけを起動するため、利用者が複数プロセスを管理する必要がない。
+- Fastify v5 は Node.js 20 以上を対象としており、Node.js 24 LTS の方針と整合する。
+
+#### SQLite とマイグレーション
+
+- SQLite ドライバー: `better-sqlite3`
+- クエリと型: `drizzle-orm`
+- マイグレーション生成: `drizzle-kit`
+- マイグレーション適用: バックエンド起動時に Drizzle migrator を実行
+- スキーマの正本: `src/db/schema.ts`
+- 生成 SQL: `src/db/migrations/` へ保存し Git 管理
+- 適用履歴: SQLite 内の migration table
+
+運用規則:
+
+- `drizzle-kit generate` で SQL を生成し、人間が内容を確認してからコミットする。
+- 既存 DB へ `drizzle-kit push` を直接実行しない。
+- マイグレーション前に SQLite backup API または安全なファイルコピーでバックアップする。
+- 起動時は `PRAGMA foreign_keys = ON`、`journal_mode = WAL`、適切な `busy_timeout` を設定する。
+- 複数テーブルを更新する操作は明示的な transaction にする。
+- DB 接続はバックエンドプロセスが所有し、WebUI とレンダリング子プロセスから直接開かない。
+- 全文検索は SQLite FTS5 を使用し、通常テーブルと同期する migration または trigger を明示的に管理する。
+
+採用理由:
+
+- `better-sqlite3` は transaction を含む同期 API が単純で、単一ユーザーのローカルアプリに適する。
+- 2026-07-28 時点で Node.js 24 の組み込み `node:sqlite` は Release Candidate のため、初期版の保存基盤には採用しない。
+- Drizzle は SQLite と `better-sqlite3` を公式にサポートし、TypeScript スキーマからレビュー可能な SQL migration を生成できる。
+
+#### 初期バージョン基準
+
+次表を初回 scaffold 時の固定値とする。実際の導入時には `pnpm install --save-exact` を使用し、Node.js 24、VOICEVOX 接続、Remotion の短いレンダリング、SQLite migration のスモークテストが通った組み合わせを `pnpm-lock.yaml` で固定する。
+
+| 分類 | パッケージ | 初期固定値 |
+|---|---|---:|
+| Runtime | Node.js | `24.18.0` |
+| Package manager | pnpm | `11.17.0` |
+| UI | `react`, `react-dom` | `19.2.8` |
+| UI build | `vite` | `8.1.5` |
+| UI build | `@vitejs/plugin-react` | `6.0.4` |
+| Routing | `react-router` | `7.18.0` |
+| Server state | `@tanstack/react-query` | `5.101.4` |
+| API | `fastify` | `5.10.0` |
+| Schema | `zod` | `4.4.3` |
+| Database | `better-sqlite3` | `12.10.0` |
+| Database | `drizzle-orm` | `0.45.2` |
+| Migration | `drizzle-kit` | `0.31.10` |
+| Video | `remotion`, `@remotion/player`, `@remotion/renderer`, `@remotion/cli` | `4.0.499` |
+| Language | `typescript` | `6.0.3` |
+| Unit/integration test | `vitest` | `4.1.10` |
+| E2E test | `@playwright/test` | `1.61.1` |
+
+バージョン規則:
+
+- `package.json` の直接依存は `^` や `~` を付けず exact version とする。
+- すべての `remotion` と `@remotion/*` は必ず同じ exact version に揃える。
+- canary、alpha、beta、RC パッケージは使用しない。
+- TypeScript 7.0.2 は調査時点で公開直後のため、初期版は 6.0.3 を使用する。移行は主要ツールの対応確認後に別変更として行う。
+- minor、major update は自動適用しない。依存更新専用ブランチで型検査、テスト、短い動画レンダリング、代表フレーム比較を通す。
+- セキュリティ修正を除き、MVP 実装中はバージョン更新をまとめて行わない。
+
+参考:
+
+- [Vite Getting Started](https://vite.dev/guide/)
+- [Fastify v5 migration guide](https://fastify.dev/docs/v5.0.x/Guides/Migration-Guide-V5/)
+- [Drizzle SQLite](https://orm.drizzle.team/docs/sqlite/get-started-sqlite)
+- [Drizzle migrations](https://orm.drizzle.team/docs/migrations)
+- [Node.js 24 SQLite](https://nodejs.org/download/release/latest-v24.x/docs/api/sqlite.html)
+- [Remotion npm package](https://www.npmjs.com/package/remotion)
+- [OpenRouter: Gemma 4 31B](https://openrouter.ai/google/gemma-4-31b-it)
 
 ## 5. リポジトリ構成
 
@@ -325,9 +427,11 @@ type AiSettings = {
 };
 ```
 
-- `defaultModelId` の初期値は `null` とする。
+- 新規プロジェクトの `defaultModelId` は暫定的に `google/gemma-4-31b-it` とする。
+- `null` は AI を使用しないプロジェクトまたは移行中データのために許可する。
 - ZDR の初期値は `true` とする。
-- モデルは AI 実行時に明示選択できる。未選択時に自動選択しない。
+- AI 実行画面ではプロジェクトの暫定既定値を初期選択し、人間が実行ごとに変更できる。
+- 設定されたモデルがモデル一覧に存在しない、structured output に非対応、または ZDR 条件を満たさない場合は自動代替せず実行を拒否する。
 
 ### 7.5 キャラクター
 
@@ -335,9 +439,12 @@ type AiSettings = {
 type Character = {
   id: string;
   name: string;
+  role: "mentor" | "learner";
   personality: string;
   speakingStyle: string;
+  voicevoxSpeakerName: "四国めたん" | "ずんだもん";
   voicevoxStyleId: number | null;
+  themeColorToken: "character.metan" | "character.zundamon";
   voice: {
     speedScale: number;
     pitchScale: number;
@@ -362,6 +469,21 @@ type MouthPair = {
 ```
 
 - キャラクターは MVP では正確に 2 件とする。
+- 初期キャラクター設定は次の対応とする。
+
+| 安定 ID | 役割 | VOICEVOX | デザイン参照 | 色トークン |
+|---|---|---|---|---|
+| `character-mentor` | `mentor` | 四国めたん | [`character_concept01.png`](./assets/character_concept01.png) | `character.metan` |
+| `character-learner` | `learner` | ずんだもん | [`character_concept02.png`](./assets/character_concept02.png) | `character.zundamon` |
+
+- コンセプト画像内の固有名、ロゴ、赤・黒・白の配色は参考要素であり、正本データまたは最終素材として使用しない。
+- 四国めたん側はメンター・案内役、ずんだもん側は生徒・見習い役を基本とする。
+- デザインの方向性は、ワシをモチーフにした頭身の低い作業服キャラクター、太く明瞭な輪郭、判別しやすい表情、全身とバストアップの差分とする。
+- 実装用素材では、制服の差し色、字幕の話者色、WebUI の speaker chip を `character.metan` と `character.zundamon` から取得する。
+- 色トークンの具体的な値は、VOICEVOX の各キャラクターを想起でき、字幕のコントラスト要件を満たす値として素材制作時に決定する。
+- コンセプトシート自体は白背景、複数ポーズ、説明文を含むため、Remotion の描画素材には使用しない。
+- 最終素材は `public/shared-assets/characters/{characterId}/{expression}/{mouth}.png` へ、共通キャンバスと透過背景で書き出す。
+- MVP の表情は `neutral`、`smile`、`explain`、`caution` の 4 種類へ整理し、それぞれ `closed` と `open` の口差分を用意する。
 - `voicevoxStyleId` が `null` のキャラクターを含む場合、音声生成を拒否する。
 - 各 voice 設定の許容範囲は接続中の VOICEVOX ENGINE の仕様に合わせてアダプター層で検証する。
 
@@ -930,6 +1052,8 @@ POST   /api/projects/{projectId}/thumbnail/render
 ### 12.1 OpenRouter
 
 - API キーは `OPENROUTER_API_KEY` からバックエンドだけが読む。
+- 初期実装の暫定既定モデルは `google/gemma-4-31b-it` とする。
+- WebUI の構成案、台本レビュー、ビジュアル検索意図、レイアウトレビュー、OpenCode 内の各役割は、用途別評価を行うまで同じ暫定モデルを使用する。
 - モデル一覧は認証済み利用可能モデルを取得し、text 出力と structured output 対応で絞り込む。
 - 構成案生成は非ストリーミングとする。
 - structured output は strict JSON Schema を使用し、受信後に Zod で再検証する。
@@ -976,6 +1100,16 @@ POST   /api/projects/{projectId}/thumbnail/render
 失敗時は新しいマニフェストを保存せず、全エラーを line ID、assignment ID、パスと関連付けて返す。
 
 ## 14. WebUI
+
+### 14.0 UI イメージ
+
+![台本編集画面のUIコンセプト](./assets/webui-script-editor-concept.png)
+
+この画像は台本編集画面の情報設計を確認するためのコンセプトであり、最終デザインではない。実装時に維持する要素は、左側の制作工程ナビゲーション、上部の工程状態、Remotion プレビュー、セリフカード、右側のビジュアル設定、保存状態、検証結果である。画像内の人物、素材、具体的な配色、細かな文言は確定仕様に含めない。
+
+生成条件は [`webui-script-editor-concept.prompt.md`](./assets/webui-script-editor-concept.prompt.md) に保存する。
+
+画像内の人物は仮置きである。実装時のプレビューには 7.5 の四国めたん／ずんだもん音声へ対応するワシ型キャラクター素材を使用し、speaker chip と字幕の色も同じキャラクター色トークンへ置き換える。
 
 ### 14.1 画面
 
@@ -1198,7 +1332,7 @@ SQLite にはキー入力単位ではなく、保存、承認、レビュー判�
 - query、WAV、audio index
 - 差分再生成
 
-この Phase の実運用完了にはキャラクターと style ID の決定が必要である。
+この Phase の実運用完了には、四国めたんとずんだもんで使用する style ID の決定が必要である。
 
 ### Phase 5: 動画
 
@@ -1215,32 +1349,35 @@ SQLite にはキー入力単位ではなく、保存、承認、レビュー判�
 - 正解例
 - 検索、集計、エクスポート
 
-## 21. 未決事項
+## 21. 決定状況と未決事項
 
-### 21.1 実装着手前に決める
+### 21.1 今回解決した事項
 
 1. **WebUI フレームワークとローカルサーバー構成**  
-   React、Remotion、Node.js は確定しているが、画面と API を同一フレームワークに置くか、別サーバーに分けるかが未決である。
+   Vite + React SPA、Fastify API、製品実行時は Fastify から同一 origin 配信する構成を採用する。
 
 2. **SQLite ドライバーとマイグレーション手段**  
-   DB の責務と論理スキーマは定義できるが、同期・非同期ドライバー、migration runner、FTS の組み込み方が未決である。
+   better-sqlite3 + Drizzle ORM + Drizzle Kit、起動時 migration を採用する。
 
 3. **パッケージの具体的なバージョン**  
-   Node.js 24 LTS との互換性を確認して固定する必要がある。
+   4.4 のバージョン表を初期固定値として採用する。
+
+4. **AI の暫定モデル**: 全 AI 用途の初期値を `google/gemma-4-31b-it` とする。
+
+5. **VOICEVOX キャラクター**: 四国めたんとずんだもんを使用する。style ID は別途決定する。
+
+6. **キャラクターデザインの方向性**: `character_concept01.png` と `character_concept02.png` のワシ型キャラクターを基礎とし、差し色を VOICEVOX キャラクターのテーマに合わせる。
 
 ### 21.2 該当機能の実装前に決める
 
-1. **全 AI 用途の具体的なモデル ID**  
-   WebUI の構成案、台本レビュー、ビジュアル検索意図、レイアウトレビュー、OpenCode 内の役割を含む。
+1. **用途別 AI モデルの本決定**: MVP は Gemma 4 31B で開始できる。構成案、台本レビュー、ビジュアル検索意図、レイアウトレビュー、OpenCode の役割ごとに変更するかは利用実績を基に判断する。
 
-2. **VOICEVOX のキャラクターと style ID**  
-   音声生成の実運用と、キャラクターごとの既定音声設定に必要である。
+2. **VOICEVOX の style ID**: 四国めたんとずんだもんのどのスタイルを既定にするかを決める必要がある。ENGINE の `/speakers` 応答から選択し、数値を生成ロジックへ直接埋め込まない。
 
 3. **イントネーション編集の正本と UI**  
    `project.json` に差分を持つか、VOICEVOX query の派生キャッシュを編集対象にするか、用語 DB と分離した accent 辞書を持つかを決める必要がある。
 
-4. **キャラクターの最終デザインと強調色**  
-   最終レイアウト、字幕色、キャラクター素材の検収に必要である。
+4. **キャラクターの最終素材とテーマ色の具体値**: デザイン方針と音声キャラクターの対応は確定した。透過 PNG の最終差分、四国めたん／ずんだもん用色トークンの具体値、コントラストを素材制作時に確定する。
 
 5. **オープニング、エンディング、アイキャッチの採用範囲**  
    `doc.md` 16.1 では挿入機能が必須だが、17.16 では必要性が保留されている。MVP で機能だけ実装するか、採用判断まで機能を遅らせるかを決める必要がある。
@@ -1262,7 +1399,7 @@ SQLite にはキー入力単位ではなく、保存、承認、レビュー判�
 
 ## 22. 実装開始時の完了条件
 
-Phase 0 を開始する前に、21.1 の 3 項目を決定して本書へ追記する。Phase 0 完了条件は次のとおり。
+21.1 の基盤技術が確定したため、Phase 0 は開始可能である。依存関係を導入した直後に 4.4 のスモークテストを実施し、問題がある場合はバージョンだけを本書へ記録して調整する。Phase 0 完了条件は次のとおり。
 
 - 空のプロジェクトを Zod で生成、保存、再読込できる。
 - 不正 JSON を既存ファイルへ上書きしない。
