@@ -42,8 +42,9 @@
 - `character_concept01.png` 側のメンターへ四国めたん、`character_concept02.png` 側の見習いへずんだもんを割り当てる。
 - 各キャラクターで使用する具体的な style ID は **TBD** とする。
 - 具体的な style ID をソースコードへハードコードしない。
-- イントネーションの手動編集方式は **TBD** とする。
-- MVP は VOICEVOX が返した未編集の `audio_query` をキャッシュできるところまで実装し、イントネーション編集 UI は作らない。
+- VOICEVOX が返した未編集の `audio_query` は再生成可能な派生キャッシュとして扱う。
+- 人間が確定したイントネーション調整は、セリフ単位の独立 JSON を正本として永続化する。`project.json` と query キャッシュには含めない。
+- 固有名詞 DB は共通の読みを管理し、文脈依存のアクセント・モーラ調整はセリフ単位の調整 JSON で管理する。
 
 ### 2.4 固有名詞・社内用語
 
@@ -58,7 +59,8 @@
 - WebUI、OpenCode、レビュー、その他プロジェクト内外の AI 用途は、初期実装では Gemma 4 31B Instruct を共通の仮モデルとする。
 - OpenRouter の暫定モデル ID は `google/gemma-4-31b-it` とする。
 - `:free` variant は既定にせず、人間がモデル選択画面から明示的に選択した場合だけ使用する。
-- 将来の用途別モデル選定は **TBD** とし、MVP の利用実績と評価結果を基に見直す。
+- AI 呼び出しは用途を `AiTaskKind` で識別するが、初期状態の用途別上書きは空とし、すべて共通の暫定モデルへ解決する。
+- 将来の用途別モデル選定は、MVP の利用実績と評価結果を基に見直す。モデルの差し替えに生成ロジックの変更を必要としない構造にする。
 - モデル ID を生成ロジックへハードコードしない。
 - モデル未選択の場合、AI を使う操作だけを実行不可にする。非 AI の編集、素材管理、音声生成、プレビュー、レンダリングは利用可能とする。
 - 実行ごとに選択されたモデル ID、プロバイダー、プライバシー設定を実行ログへ記録する。
@@ -419,8 +421,17 @@ type ProjectBrief = {
 ### 7.4 AI 設定
 
 ```ts
+type AiTaskKind =
+  | "outline_generation"
+  | "script_generation"
+  | "script_review"
+  | "visual_search_intent"
+  | "layout_review"
+  | "opencode";
+
 type AiSettings = {
   defaultModelId: string | null;
+  taskModelOverrides: Partial<Record<AiTaskKind, string>>;
   zdr: boolean;
   dataCollection: "deny";
   allowProviderFallbacks: true;
@@ -428,6 +439,9 @@ type AiSettings = {
 ```
 
 - 新規プロジェクトの `defaultModelId` は暫定的に `google/gemma-4-31b-it` とする。
+- 新規プロジェクトの `taskModelOverrides` は空オブジェクトとする。したがって初期実装では、すべての `AiTaskKind` が `google/gemma-4-31b-it` へ解決される。
+- 実行モデルは「実行時の明示上書き、`taskModelOverrides[taskKind]`、`defaultModelId`」の優先順で決定する。
+- プロンプト、入力組み立て、structured output schema、評価指標は `AiTaskKind` ごとに分離し、モデル ID とは独立して管理する。
 - `null` は AI を使用しないプロジェクトまたは移行中データのために許可する。
 - ZDR の初期値は `true` とする。
 - AI 実行画面ではプロジェクトの暫定既定値を初期選択し、人間が実行ごとに変更できる。
@@ -669,18 +683,66 @@ type BackgroundDefinition =
 
 ### 7.9 音声、挿入素材、サムネイル
 
-生成済み音声の duration、VOICEVOX query、フレーム値は派生データであり `project.json` へ保存しない。
+生成済み音声の duration、VOICEVOX query、フレーム値は派生データであり `project.json` へ保存しない。人間が確定した音声調整は `projects/{projectId}/voice-adjustments/{lineId}.json` へ分離し、Git 管理可能な正本データとして保存する。
+
+```ts
+type VoiceAdjustmentFile = {
+  adjustmentVersion: "1.0.0";
+  lineId: string;
+  base: {
+    baseHash: string;
+    resolvedSpokenText: string;
+    styleId: number;
+    voicevoxEngineVersion: string;
+  };
+  scalarOverrides: Partial<{
+    speedScale: number;
+    pitchScale: number;
+    intonationScale: number;
+    volumeScale: number;
+    prePhonemeLength: number;
+    postPhonemeLength: number;
+  }>;
+  accentPhrases: VoicevoxAccentPhrase[] | null;
+  editedAt: string;
+};
+
+type VoicevoxAccentPhrase = {
+  moras: VoicevoxMora[];
+  accent: number;
+  pause_mora: VoicevoxMora | null;
+  is_interrogative: boolean;
+};
+
+type VoicevoxMora = {
+  text: string;
+  consonant: string | null;
+  consonant_length: number | null;
+  vowel: string;
+  vowel_length: number;
+  pitch: number;
+};
+```
+
+- `VoicevoxAccentPhrase` と `VoicevoxMora` の実装型は、接続対象の VOICEVOX ENGINE OpenAPI から生成した型を使用し、上記フィールドを Zod で検証する。
+- `baseHash` は解決後の読み上げ文、style ID、VOICEVOX ENGINE の互換性に影響する版情報、キャラクター既定値、セリフ上書きから生成する。
+- 全体パラメーターだけを変更した場合、`accentPhrases` は `null` とし、最新の未編集 query に `scalarOverrides` を適用する。
+- アクセント句、アクセント核、モーラ単位の音高・長さ・無声化を変更した場合、確定した `accent_phrases` のスナップショットを `accentPhrases` に保存する。
+- 保存済み `baseHash` が現在値と一致しない調整は `needs_review` と表示し、音声生成へ自動適用しない。
+- 不一致時は「調整を破棄して再生成」「未編集 query と比較して再調整」のいずれかを人間が選択する。位置番号を使った自動マージは行わない。
+- 調整ファイルは一時ファイルへ書き出してから rename し、保存途中の破損を防ぐ。
+- 調整をすべてリセットした場合は、対応する調整ファイルを削除し、未編集 query とキャラクター既定値へ戻す。
 
 ```ts
 type AudioPlan = {
-  bgm: AudioTrack | null;
+  sectionBgms: SectionBgm[];
   soundEffects: SoundEffect[];
 };
 
 type InsertPlan = {
-  opening: InsertClip | null;
-  ending: InsertClip | null;
-  eyeCatches: InsertClip[];
+  opening: PlaceholderInsert;
+  ending: PlaceholderInsert;
+  eyeCatches: EyeCatchPlaceholder[];
 };
 
 type ThumbnailPlan = {
@@ -688,14 +750,15 @@ type ThumbnailPlan = {
   title: string;
   subtitle: string | null;
   departmentOrSystem: string;
-  manualVersion: string;
+  manualVersion: string | null;
   characterId: string | null;
   representativeVisualPath: string | null;
   layout: "standard";
 };
 
-type AudioTrack = {
+type SectionBgm = {
   id: string;
+  sectionId: string;
   path: string;
   volume: number;
   loop: boolean;
@@ -711,18 +774,33 @@ type SoundEffect = {
   volume: number;
 };
 
-type InsertClip = {
+type PlaceholderInsert = {
   id: string;
-  path: string;
-  volume: number;
+  kind: "placeholder";
+  slot: "opening" | "ending";
+  durationMs: 2000;
+};
+
+type EyeCatchPlaceholder = {
+  id: string;
+  kind: "placeholder";
+  slot: "eye_catch";
+  beforeSectionId: string;
+  durationMs: 2000;
 };
 ```
 
-挿入素材、BGM、効果音、サムネイルへのキャラクター表示の運用範囲は TBD である。データ上は `null` または空配列で無効化できるようにし、未設定でも本編を生成可能とする。
-
 - 音量は `0` 以上 `1` 以下とする。
 - `offsetMs` はセリフ区間の開始からの相対値とする。
-- BGM のダッキング規則は TBD のため、MVP のデータ契約には含めない。
+- BGM はセクションごとに 0 件または 1 件とし、同じ `sectionId` の重複を拒否する。BGM を設定しないセクションは無音とする。
+- BGM の再生範囲は、対象セクションの最初のセリフ開始から最後のセリフ終了までとする。素材が短い場合は `loop` に従い、長い場合はセクション終了位置で切る。
+- セクション境界では前セクションの BGM を `fadeOutMs` で終了させ、次セクションの BGM を `fadeInMs` で開始する。MVP では曲同士を重ねるクロスフェードを行わない。
+- 自動ダッキング、音量キーフレーム、1 セクション内の複数曲は MVP の対象外とする。
+- opening と ending は必須で、初期値と保存値をそれぞれ 2000 ms の無音プレースホルダーとする。
+- eye catch はセクション境界にだけ追加でき、`beforeSectionId` が示すセクションの直前へ 2000 ms の無音プレースホルダーを挿入する。最初のセクションの前と同じ境界へは追加できない。
+- プレースホルダーは Remotion の共通コンポーネントで識別用ラベルを描画し、外部動画ファイルを必要としない。本番用 OP、ED、アイキャッチへの置換は MVP 後のスキーマ拡張とする。
+- プレースホルダー区間では本編用 BGM と効果音を再生しない。
+- サムネイルは `title` と `departmentOrSystem` を必須の非空文字列とする。背景画像、補足、版数、キャラクター、代表ビジュアルは任意とし、未指定時は共通テンプレートの既定背景を使用する。
 
 ## 8. 派生データ
 
@@ -779,24 +857,32 @@ type RenderBackground = {
 
 type RenderAudioTrack = {
   id: string;
+  sectionId: string;
   from: number;
   durationInFrames: number;
   src: string;
   volume: number;
   loop: boolean;
+  fadeInFrames: number;
+  fadeOutFrames: number;
 };
 
 type RenderInsert = {
   id: string;
+  kind: "placeholder";
+  slot: "opening" | "ending" | "eye_catch";
+  beforeSectionId: string | null;
   from: number;
   durationInFrames: number;
-  src: string;
-  volume: number;
+  label: string;
 };
 ```
 
 - フレーム範囲は半開区間 `[from, from + durationInFrames)` とする。
 - ミリ秒からフレームへの変換は `Math.ceil((ms / 1000) * fps)` とする。
+- 30 fps の MVP では各 2000 ms プレースホルダーを正確に 60 フレームとして扱う。
+- タイムラインコンパイラは本編内のセリフ相対位置を計算した後、opening と eye catch の長さだけ後続要素をシフトし、最後に ending を追加する。
+- セクション BGM はプレースホルダー挿入後の最終的なセクションフレーム範囲へ解決する。
 - 配列はタイムライン順に安定ソートする。
 - 同一入力に対する出力順序と JSON シリアライズ順を固定する。
 - `sourceProjectHash` または参照チェックサムが不一致の場合、キャッシュを使用しない。
@@ -826,7 +912,7 @@ type AudioIndexEntry = {
 };
 ```
 
-`cacheKey` は少なくとも、解決後の読み上げ文、style ID、キャラクター音声設定、セリフ単位の上書き、適用用語の ID と更新日時、VOICEVOX ENGINE の互換性に影響する版情報から生成する。
+`cacheKey` は少なくとも、解決後の読み上げ文、style ID、キャラクター音声設定、セリフ単位の上書き、適用用語の ID と更新日時、VOICEVOX ENGINE の互換性に影響する版情報、適用した調整ファイルのチェックサムから生成する。
 
 ## 9. 固有名詞・社内用語 DB
 
@@ -1001,7 +1087,7 @@ POST   /api/projects/{projectId}/script/approve
 POST   /api/projects/{projectId}/script/review
 ```
 
-AI 生成 API は `modelId` を必須とし、モデル未選択時に既定モデルを推測しない。生成に失敗した場合、既存の構成案または台本を変更しない。
+AI 生成 API はエンドポイントに対応する `taskKind` をサーバー側で確定し、リクエストの `modelId` は実行時上書きとして任意に受け取る。上書きがない場合はプロジェクト設定から上記の優先順で解決し、解決結果が `null` の場合は実行を拒否する。生成に失敗した場合、既存の構成案または台本を変更しない。
 
 ### 11.4 用語
 
@@ -1035,6 +1121,11 @@ POST   /api/projects/{projectId}/visuals/approve
 GET    /api/voicevox/status
 GET    /api/voicevox/styles
 POST   /api/projects/{projectId}/voice/resolve-text
+GET    /api/projects/{projectId}/lines/{lineId}/voice/query
+GET    /api/projects/{projectId}/lines/{lineId}/voice/adjustment
+PUT    /api/projects/{projectId}/lines/{lineId}/voice/adjustment
+DELETE /api/projects/{projectId}/lines/{lineId}/voice/adjustment
+POST   /api/projects/{projectId}/lines/{lineId}/voice/preview
 POST   /api/projects/{projectId}/voice/generate
 POST   /api/projects/{projectId}/voice/generate-all
 GET    /api/projects/{projectId}/voice/status
@@ -1053,7 +1144,9 @@ POST   /api/projects/{projectId}/thumbnail/render
 
 - API キーは `OPENROUTER_API_KEY` からバックエンドだけが読む。
 - 初期実装の暫定既定モデルは `google/gemma-4-31b-it` とする。
-- WebUI の構成案、台本レビュー、ビジュアル検索意図、レイアウトレビュー、OpenCode 内の各役割は、用途別評価を行うまで同じ暫定モデルを使用する。
+- WebUI の構成案、台本生成、台本レビュー、ビジュアル検索意図、レイアウトレビュー、OpenCode は別の `AiTaskKind` として実装するが、用途別評価を行うまでは同じ暫定モデルを使用する。
+- OpenCode のエージェントは役割別に分けても、初期設定ではすべて `google/gemma-4-31b-it` を参照する。
+- 実行ログには `taskKind`、解決されたモデル ID、モデル選択元 `run_override | task_override | default` を記録する。
 - モデル一覧は認証済み利用可能モデルを取得し、text 出力と structured output 対応で絞り込む。
 - 構成案生成は非ストリーミングとする。
 - structured output は strict JSON Schema を使用し、受信後に Zod で再検証する。
@@ -1069,7 +1162,10 @@ POST   /api/projects/{projectId}/thumbnail/render
 - 接続先は `VOICEVOX_ENGINE_URL`、既定値は `http://127.0.0.1:50021` とする。
 - 起動確認に失敗した場合、音声操作だけを無効にし、編集内容は保持する。
 - セリフごとに `audio_query` を取得し、`cache/voicevox-query/{lineId}-{cacheKey}.json` へ保存する。
-- イントネーション編集が TBD の間、保存した query を WebUI から変更する API は提供しない。
+- WebUI は「基本」「アクセント」「詳細」の 3 段階で編集する。「基本」は全体パラメーター、「アクセント」はアクセント句とアクセント核、「詳細」はモーラ単位の音高、長さ、無声化を扱う。
+- 編集中の試聴 WAV は一時キャッシュへ生成し、明示的な保存操作でのみ `voice-adjustments/{lineId}.json` を更新する。
+- 項目単位のリセット、セリフ全体のリセット、キャラクター既定値への復帰を提供する。
+- 音声生成時は未編集 query を基礎とし、`baseHash` が一致する手動調整を適用してから `synthesis` へ送る。
 - `synthesis` の WAV を再エンコードせず保存する。
 - ファイル名は `doc.md` 6.5 の規則に従う。
 - 生成中にエラーが発生しても、以前成功した WAV と audio index を壊さない。
@@ -1150,12 +1246,20 @@ POST   /api/projects/{projectId}/thumbnail/render
 - 上部: 同一 `RenderManifest` を使う Remotion プレビュー
 - 中央: セクションとセリフカード
 - 右側: ビジュアル、背景、キャラクター確認の切り替えペイン
+- 各セクション見出し: BGM の選択、差し替え、解除、単体試聴、音量、ループ、フェード、セクション音声との合成試聴
 - セリフカード: ID、話者、表情、字幕、読み上げ、字幕プレビュー、音声状態、素材、並べ替え、複製、削除
 - 話者付きテキストの一括貼り付けと機械的なカード分割
 - `spokenText` に登録用語が含まれる場合、解決後読み上げと適用用語を表示
 - 変更は自動保存、承認は明示操作
 
-### 14.4 エラー表示
+### 14.4 挿入プレースホルダーとサムネイル
+
+- opening と ending の 2 秒プレースホルダーをタイムラインの先頭と末尾へ常時表示する。
+- セクション境界メニューから eye catch の追加と削除を行う。追加後は 2 秒のプレースホルダーをプレビューへ即時反映する。
+- サムネイル画面ではタイトルと部門名または対象システム名を必須入力とし、補足、版数、背景画像、代表ビジュアル、キャラクターは任意入力とする。
+- サムネイルは固定テンプレートの 1280 × 720 プレビューを常時表示し、キャラクターの表示・非表示と、四国めたん側・ずんだもん側の選択を可能にする。
+
+### 14.5 エラー表示
 
 少なくとも次を区別する。
 
@@ -1180,6 +1284,7 @@ POST   /api/projects/{projectId}/thumbnail/render
 | `subtitleText`、表情 | マニフェスト |
 | ビジュアル割り当て | ビジュアル承認、マニフェスト |
 | 背景、挿入素材、BGM、効果音 | マニフェスト |
+| サムネイル構成 | サムネイル出力 |
 | 用語の読みまたは状態 | 該当セリフの音声 |
 
 「見直し対象」は既存ファイルの削除を意味しない。古い生成物を stale と表示し、新しい生成が成功するまで保持する。
@@ -1193,6 +1298,9 @@ POST   /api/projects/{projectId}/thumbnail/render
 - 数値範囲
 - 相対パスの安全性
 - セクションとセリフの順序
+- セクション BGM の重複、参照先、フェード長
+- プレースホルダーの固定長と eye catch の境界参照
+- サムネイルの必須タイトルと部門・対象システム名
 
 ### 16.2 承認前
 
@@ -1208,6 +1316,8 @@ POST   /api/projects/{projectId}/thumbnail/render
 - 空でない `spokenText`
 - 用語適用結果
 - 音声パラメーターの範囲
+- 調整ファイルの Zod 検証
+- 調整ファイルの `lineId` と `baseHash`
 
 ### 16.4 レンダリング前
 
@@ -1274,6 +1384,9 @@ SQLite にはキー入力単位ではなく、保存、承認、レビュー判�
 - SQLite migration
 - OpenRouter 成功、schema 違反、429、認証失敗
 - VOICEVOX query と WAV のキャッシュ
+- 音声調整の保存、再読込、リセット、base hash 不一致時の適用拒否
+- セクション BGM と 2 秒プレースホルダーを含むタイムライン計算
+- 任意項目がすべて未設定のサムネイル生成
 - `VideoProject` から `RenderManifest` 生成
 - レンダリングジョブの状態遷移
 
@@ -1331,6 +1444,8 @@ SQLite にはキー入力単位ではなく、保存、承認、レビュー判�
 - VOICEVOX 接続確認と style 一覧
 - query、WAV、audio index
 - 差分再生成
+- 基本、アクセント、モーラ詳細の編集とセリフ単位の試聴
+- `voice-adjustments/{lineId}.json` の保存、stale 判定、リセット
 
 この Phase の実運用完了には、四国めたんとずんだもんで使用する style ID の決定が必要である。
 
@@ -1340,6 +1455,8 @@ SQLite にはキー入力単位ではなく、保存、承認、レビュー判�
 - Remotion コンポーネント
 - WebUI プレビュー
 - MP4、サムネイル
+- セクション別 BGM と境界フェード
+- opening、ending、eye catch の 2 秒プレースホルダー
 - 検証と代表フレーム比較
 
 ### Phase 6: 改善ログ
@@ -1368,25 +1485,24 @@ SQLite にはキー入力単位ではなく、保存、承認、レビュー判�
 
 6. **キャラクターデザインの方向性**: `character_concept01.png` と `character_concept02.png` のワシ型キャラクターを基礎とし、差し色を VOICEVOX キャラクターのテーマに合わせる。
 
+7. **イントネーション編集の正本と UI**: 未編集の `audio_query` は派生キャッシュ、人間が確定した調整は `voice-adjustments/{lineId}.json` に保存する。WebUI では基本、アクセント、モーラ詳細の 3 段階で編集する。
+
+8. **BGM**: MVP からセクションごとに 0 件または 1 件の曲を設定する。固定音量、ループ、前後フェードを扱い、自動ダッキングとクロスフェードは行わない。
+
+9. **サムネイル**: タイトルと部門名または対象システム名だけを必須とし、補足、版数、背景、代表ビジュアル、キャラクター表示は任意とする。
+
+10. **OP、ED、アイキャッチ**: MVP では本番素材を生成せず、OP と ED は常設、アイキャッチは選択したセクション境界へ、いずれも 2 秒の無音プレースホルダーを挿入する。
+
 ### 21.2 該当機能の実装前に決める
 
-1. **用途別 AI モデルの本決定**: MVP は Gemma 4 31B で開始できる。構成案、台本レビュー、ビジュアル検索意図、レイアウトレビュー、OpenCode の役割ごとに変更するかは利用実績を基に判断する。
+1. **用途別 AI モデルの本決定**: 用途識別と上書き機構は初期実装へ含めるが、割り当てはすべて Gemma 4 31B とする。構成案、台本生成、台本レビュー、ビジュアル検索意図、レイアウトレビュー、OpenCode を個別モデルへ変更するかは利用実績を基に判断する。
 
 2. **VOICEVOX の style ID**: 四国めたんとずんだもんのどのスタイルを既定にするかを決める必要がある。ENGINE の `/speakers` 応答から選択し、数値を生成ロジックへ直接埋め込まない。
 
-3. **イントネーション編集の正本と UI**  
-   `project.json` に差分を持つか、VOICEVOX query の派生キャッシュを編集対象にするか、用語 DB と分離した accent 辞書を持つかを決める必要がある。
+3. **キャラクターの最終素材とテーマ色の具体値**: デザイン方針と音声キャラクターの対応は確定した。透過 PNG の最終差分、四国めたん／ずんだもん用色トークンの具体値、コントラストを素材制作時に確定する。
 
-4. **キャラクターの最終素材とテーマ色の具体値**: デザイン方針と音声キャラクターの対応は確定した。透過 PNG の最終差分、四国めたん／ずんだもん用色トークンの具体値、コントラストを素材制作時に確定する。
-
-5. **オープニング、エンディング、アイキャッチの採用範囲**  
-   `doc.md` 16.1 では挿入機能が必須だが、17.16 では必要性が保留されている。MVP で機能だけ実装するか、採用判断まで機能を遅らせるかを決める必要がある。
-
-6. **BGM と効果音の採用範囲**  
-   音量既定値、ダッキング、ループ、フェード規則に影響する。
-
-7. **サムネイルのキャラクター表示規則**  
-   必須、任意、非表示のどれを既定にするかが未決である。本書では `characterId: null` を許可している。
+4. **効果音の採用範囲**
+   使用場面、標準音量、同時再生数の警告基準を決める必要がある。
 
 ### 21.3 将来判断でよい
 
@@ -1396,6 +1512,7 @@ SQLite にはキー入力単位ではなく、保存、承認、レビュー判�
 4. 複数のキャラクターレイアウトプリセットを追加するか。
 5. AI 台本初稿を導入するための品質基準をどう定義するか。
 6. SQLite のバックアップ周期と JSON Lines / CSV の標準エクスポート形式。
+7. OP、ED、アイキャッチの本番素材、音声、可変尺、置換操作をどう定義するか。
 
 ## 22. 実装開始時の完了条件
 
