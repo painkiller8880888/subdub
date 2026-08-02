@@ -20,14 +20,14 @@ export const renderManifestFixture = {
   fps: 30,
   width: 1920,
   height: 1080,
-  durationInFrames: 420,
+  durationInFrames: 480,
   lines: [
     {
       id: "intro-mentor-1",
       sectionId: "section-intro",
       from: 60,
       durationInFrames: 45,
-      speechFrom: 60,
+      speechFrom: 0,
       speechDurationInFrames: 40,
       audioPath: "audio/speech-intro-mentor.wav",
       subtitleText: "社内申請の登録手順を説明します。",
@@ -39,7 +39,7 @@ export const renderManifestFixture = {
       sectionId: "section-intro",
       from: 105,
       durationInFrames: 40,
-      speechFrom: 108,
+      speechFrom: 3,
       speechDurationInFrames: 35,
       audioPath: "audio/speech-intro-learner.wav",
       subtitleText: "まず、申請前の確認から始めます。",
@@ -49,9 +49,9 @@ export const renderManifestFixture = {
     {
       id: "main-mentor-1",
       sectionId: "section-main",
-      from: 165,
+      from: 210,
       durationInFrames: 45,
-      speechFrom: 165,
+      speechFrom: 0,
       speechDurationInFrames: 40,
       audioPath: "audio/speech-main-mentor.wav",
       subtitleText: "申請メニューから「新規申請」を選びます。",
@@ -61,9 +61,9 @@ export const renderManifestFixture = {
     {
       id: "main-learner-1",
       sectionId: "section-main",
-      from: 210,
+      from: 255,
       durationInFrames: 50,
-      speechFrom: 212,
+      speechFrom: 2,
       speechDurationInFrames: 42,
       audioPath: "audio/speech-main-learner.wav",
       subtitleText: "内容を確認してから登録します。",
@@ -73,9 +73,9 @@ export const renderManifestFixture = {
     {
       id: "outro-mentor-1",
       sectionId: "section-outro",
-      from: 330,
+      from: 375,
       durationInFrames: 45,
-      speechFrom: 330,
+      speechFrom: 0,
       speechDurationInFrames: 40,
       audioPath: "audio/speech-outro-mentor.wav",
       subtitleText: "完了画面が表示されたら登録終了です。",
@@ -106,7 +106,7 @@ export const renderManifestFixture = {
     },
     {
       id: "visual-main-photo",
-      from: 165,
+      from: 210,
       durationInFrames: 95,
       kind: "photo",
       src: "media/application-form.png",
@@ -122,7 +122,7 @@ export const renderManifestFixture = {
     },
     {
       id: "visual-outro-document",
-      from: 330,
+      from: 375,
       durationInFrames: 45,
       kind: "document_scan",
       src: "media/completion-report.pdf",
@@ -147,7 +147,7 @@ export const renderManifestFixture = {
     },
     {
       sectionId: "section-main",
-      from: 165,
+      from: 210,
       durationInFrames: 95,
       background: {
         kind: "image",
@@ -157,7 +157,7 @@ export const renderManifestFixture = {
     },
     {
       sectionId: "section-outro",
-      from: 330,
+      from: 375,
       durationInFrames: 45,
       background: { kind: "solid", colorToken: "background" }
     }
@@ -177,7 +177,7 @@ export const renderManifestFixture = {
     {
       id: "bgm-main",
       sectionId: "section-main",
-      from: 165,
+      from: 210,
       durationInFrames: 95,
       src: "audio/bgm-main.ogg",
       volume: 0.2,
@@ -191,7 +191,7 @@ export const renderManifestFixture = {
       id: "effect-confirm",
       lineId: "main-learner-1",
       category: "confirm",
-      from: 215,
+      from: 260,
       durationInFrames: 12,
       src: "media/confirm.wav",
       volume: 0.2
@@ -200,7 +200,7 @@ export const renderManifestFixture = {
       id: "effect-attention",
       lineId: "outro-mentor-1",
       category: "attention",
-      from: 330,
+      from: 375,
       durationInFrames: 10,
       src: "media/attention.wav",
       volume: 0.15
@@ -222,7 +222,7 @@ export const renderManifestFixture = {
       slot: "eye_catch",
       beforeSectionId: "section-main",
       from: 150,
-      durationInFrames: 15,
+      durationInFrames: 60,
       label: "section-main"
     },
     {
@@ -230,8 +230,8 @@ export const renderManifestFixture = {
       kind: "placeholder",
       slot: "ending",
       beforeSectionId: null,
-      from: 375,
-      durationInFrames: 45,
+      from: 420,
+      durationInFrames: 60,
       label: "ending"
     }
   ]

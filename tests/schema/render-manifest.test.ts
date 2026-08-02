@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   renderManifestSchema,
+  type RenderVisual,
   type RenderManifest
 } from "../../src/schema/index.js";
 import { renderManifestFixture } from "../fixtures/render-manifest.js";
@@ -28,6 +29,17 @@ function expectInvalid(
       expectedPath.every((segment, index) => issue.path[index] === segment)
     )
   ).toBe(true);
+}
+
+function getVisualDisplayMetric(visual: RenderVisual): number {
+  switch (visual.kind) {
+    case "video":
+      return visual.display.playbackRate;
+    case "photo":
+      return visual.display.scale;
+    case "document_scan":
+      return visual.display.page;
+  }
 }
 
 describe("renderManifestSchema", () => {
@@ -81,22 +93,72 @@ describe("renderManifestSchema", () => {
     expectInvalid(invalidPlaybackRate, ["visuals", 0, "display", "playbackRate"]);
   });
 
-  it("keeps speech intervals inside their line intervals", () => {
-    const speechBeforeLine = clone(renderManifestFixture);
-    speechBeforeLine.lines[0].speechFrom = 59;
-    expectInvalid(speechBeforeLine, ["lines", 0, "speechFrom"]);
-
+  it("keeps relative speech intervals inside their line intervals", () => {
     const speechAfterLine = clone(renderManifestFixture);
-    speechAfterLine.lines[0].speechDurationInFrames = 46;
+    speechAfterLine.lines[0].speechFrom = 10;
     expectInvalid(speechAfterLine, [
       "lines",
       0,
       "speechDurationInFrames"
     ]);
 
+    const speechDurationAfterLine = clone(renderManifestFixture);
+    speechDurationAfterLine.lines[0].speechDurationInFrames = 46;
+    expectInvalid(speechDurationAfterLine, [
+      "lines",
+      0,
+      "speechDurationInFrames"
+    ]);
+
     const outsideRoot = clone(renderManifestFixture);
-    outsideRoot.visuals[2].from = 400;
+    outsideRoot.visuals[2].from = 450;
     expectInvalid(outsideRoot, ["visuals", 2, "durationInFrames"]);
+  });
+
+  it("rejects overlapping lines while allowing timeline gaps", () => {
+    const overlappingLines = clone(renderManifestFixture);
+    overlappingLines.lines[1].from = 100;
+    expectInvalid(overlappingLines, ["lines", 1, "from"]);
+  });
+
+  it("pairs each render visual kind with its display kind", () => {
+    const mismatchedVisual = clone(renderManifestFixture);
+    const display = mismatchedVisual.visuals[0].display as unknown as {
+      kind: string;
+    };
+    display.kind = "photo";
+    expectInvalid(mismatchedVisual, ["visuals", 0, "display", "kind"]);
+  });
+
+  it("requires correctly placed 2000ms placeholder inserts", () => {
+    const invalidOpeningDuration = clone(renderManifestFixture);
+    invalidOpeningDuration.inserts[0].durationInFrames = 1;
+    expectInvalid(invalidOpeningDuration, [
+      "inserts",
+      0,
+      "durationInFrames"
+    ]);
+
+    const invalidOpeningPosition = clone(renderManifestFixture);
+    invalidOpeningPosition.inserts[0].from = 1;
+    expectInvalid(invalidOpeningPosition, ["inserts", 0, "from"]);
+
+    const invalidEndingPosition = clone(renderManifestFixture);
+    invalidEndingPosition.inserts[2].from = 419;
+    expectInvalid(invalidEndingPosition, ["inserts", 2, "from"]);
+
+    const invalidEyeCatchDuration = clone(renderManifestFixture);
+    invalidEyeCatchDuration.inserts[1].durationInFrames = 59;
+    expectInvalid(invalidEyeCatchDuration, [
+      "inserts",
+      1,
+      "durationInFrames"
+    ]);
+  });
+
+  it("exports kind-paired visual types through the schema barrel", () => {
+    const video = clone(renderManifestFixture).visuals[0];
+    expect(getVisualDisplayMetric(video)).toBe(1);
   });
 
   it("rejects duplicate ids and source asset paths", () => {

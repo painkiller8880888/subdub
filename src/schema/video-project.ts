@@ -223,12 +223,26 @@ export const audioPlanSchema = strictObject({
   soundEffects: z.array(soundEffectSchema)
 });
 
-export const placeholderInsertSchema = strictObject({
+const placeholderInsertFields = {
   id: idSchema,
   kind: z.literal("placeholder"),
-  slot: z.enum(["opening", "ending"]),
   durationMs: z.literal(2000)
+};
+
+export const openingPlaceholderSchema = strictObject({
+  ...placeholderInsertFields,
+  slot: z.literal("opening")
 });
+
+export const endingPlaceholderSchema = strictObject({
+  ...placeholderInsertFields,
+  slot: z.literal("ending")
+});
+
+export const placeholderInsertSchema = z.discriminatedUnion("slot", [
+  openingPlaceholderSchema,
+  endingPlaceholderSchema
+]);
 
 export const eyeCatchPlaceholderSchema = strictObject({
   id: idSchema,
@@ -239,8 +253,8 @@ export const eyeCatchPlaceholderSchema = strictObject({
 });
 
 export const insertPlanSchema = strictObject({
-  opening: placeholderInsertSchema,
-  ending: placeholderInsertSchema,
+  opening: openingPlaceholderSchema,
+  ending: endingPlaceholderSchema,
   eyeCatches: z.array(eyeCatchPlaceholderSchema)
 });
 
@@ -670,6 +684,8 @@ export type SectionBgm = z.infer<typeof sectionBgmSchema>;
 export type SoundEffect = z.infer<typeof soundEffectSchema>;
 export type AudioPlan = z.infer<typeof audioPlanSchema>;
 export type PlaceholderInsert = z.infer<typeof placeholderInsertSchema>;
+export type OpeningPlaceholder = z.infer<typeof openingPlaceholderSchema>;
+export type EndingPlaceholder = z.infer<typeof endingPlaceholderSchema>;
 export type EyeCatchPlaceholder = z.infer<typeof eyeCatchPlaceholderSchema>;
 export type InsertPlan = z.infer<typeof insertPlanSchema>;
 export type ThumbnailPlan = z.infer<typeof thumbnailPlanSchema>;

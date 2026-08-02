@@ -178,6 +178,14 @@ describe("videoProjectSchema", () => {
       "durationMs"
     ]);
 
+    const invalidOpeningSlot = clone(videoProjectFixture);
+    Object.assign(invalidOpeningSlot.inserts.opening, { slot: "ending" });
+    expectInvalid(invalidOpeningSlot, [
+      "inserts",
+      "opening",
+      "slot"
+    ]);
+
     const invalidEyeCatch = clone(videoProjectFixture);
     Object.assign(invalidEyeCatch.inserts.eyeCatches[0], { durationMs: 1000 });
     expectInvalid(invalidEyeCatch, [

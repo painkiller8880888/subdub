@@ -2,9 +2,10 @@ import { z } from "zod";
 
 import {
   backgroundDefinitionSchema,
-  displaySchema,
+  documentDisplaySchema,
   expressionSchema,
-  visualAssetKindSchema
+  imageDisplaySchema,
+  videoDisplaySchema
 } from "./common.js";
 import {
   idSchema,
@@ -34,14 +35,36 @@ export const renderLineSchema = strictObject({
   expression: expressionSchema
 });
 
-export const renderVisualSchema = strictObject({
+const renderVisualFields = {
   id: idSchema,
   from: nonNegativeIntegerSchema,
   durationInFrames: positiveIntegerSchema,
-  kind: visualAssetKindSchema,
-  src: relativePosixPathSchema,
-  display: displaySchema
+  src: relativePosixPathSchema
+};
+
+export const renderVideoSchema = strictObject({
+  ...renderVisualFields,
+  kind: z.literal("video"),
+  display: videoDisplaySchema
 });
+
+export const renderPhotoSchema = strictObject({
+  ...renderVisualFields,
+  kind: z.literal("photo"),
+  display: imageDisplaySchema
+});
+
+export const renderDocumentScanSchema = strictObject({
+  ...renderVisualFields,
+  kind: z.literal("document_scan"),
+  display: documentDisplaySchema
+});
+
+export const renderVisualSchema = z.discriminatedUnion("kind", [
+  renderVideoSchema,
+  renderPhotoSchema,
+  renderDocumentScanSchema
+]);
 
 export const renderBackgroundSchema = strictObject({
   sectionId: idSchema,
@@ -144,6 +167,24 @@ function validateTimelineOrder(
   }
 }
 
+function validateTimelineNoOverlap(
+  items: ReadonlyArray<{ from: number; durationInFrames: number }>,
+  pathRoot: string,
+  ctx: z.RefinementCtx
+): void {
+  for (let index = 1; index < items.length; index += 1) {
+    const previous = items[index - 1];
+    const current = items[index];
+    if (current.from < previous.from + previous.durationInFrames) {
+      addIssue(
+        ctx,
+        [pathRoot, index, "from"],
+        "timeline intervals must not overlap"
+      );
+    }
+  }
+}
+
 function validateTimelineBounds(
   items: ReadonlyArray<{ from: number; durationInFrames: number }>,
   pathRoot: string,
@@ -219,6 +260,7 @@ export const renderManifestSchema = renderManifestBaseSchema.superRefine(
     validateTimelineOrder(manifest.audioTracks, "audioTracks", ctx);
     validateTimelineOrder(manifest.soundEffects, "soundEffects", ctx);
     validateTimelineOrder(manifest.inserts, "inserts", ctx);
+    validateTimelineNoOverlap(manifest.lines, "lines", ctx);
 
     validateTimelineBounds(
       manifest.lines,
@@ -265,16 +307,9 @@ export const renderManifestSchema = renderManifestBaseSchema.superRefine(
       }
       sectionIds.add(line.sectionId);
 
-      if (line.speechFrom < line.from) {
-        addIssue(
-          ctx,
-          ["lines", index, "speechFrom"],
-          "speech interval must start within the line interval"
-        );
-      }
       if (
         line.speechFrom + line.speechDurationInFrames >
-        line.from + line.durationInFrames
+        line.durationInFrames
       ) {
         addIssue(
           ctx,
@@ -345,6 +380,49 @@ export const renderManifestSchema = renderManifestBaseSchema.superRefine(
     }
     if (endingInserts.length !== 1) {
       addIssue(ctx, ["inserts"], "exactly one ending insert is required");
+    }
+
+    const expectedPlaceholderDurationInFrames = Math.ceil(2 * manifest.fps);
+    for (const [index, insert] of manifest.inserts.entries()) {
+      if (
+        insert.durationInFrames !== expectedPlaceholderDurationInFrames
+      ) {
+        addIssue(
+          ctx,
+          ["inserts", index, "durationInFrames"],
+          "placeholder durationInFrames must match 2000ms at the manifest fps"
+        );
+      }
+    }
+
+    if (openingInserts.length === 1) {
+      const openingIndex = manifest.inserts.findIndex(
+        (insert) => insert.slot === "opening"
+      );
+      if (openingInserts[0].from !== 0) {
+        addIssue(
+          ctx,
+          ["inserts", openingIndex, "from"],
+          "opening insert must start at frame 0"
+        );
+      }
+    }
+
+    if (endingInserts.length === 1) {
+      const endingIndex = manifest.inserts.findIndex(
+        (insert) => insert.slot === "ending"
+      );
+      const ending = endingInserts[0];
+      if (
+        ending.from + ending.durationInFrames !==
+        manifest.durationInFrames
+      ) {
+        addIssue(
+          ctx,
+          ["inserts", endingIndex, "from"],
+          "ending insert must end at the manifest duration"
+        );
+      }
     }
 
     const firstSectionId = manifest.lines[0]?.sectionId;
