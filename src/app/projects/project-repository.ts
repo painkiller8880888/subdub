@@ -282,7 +282,7 @@ export class ProjectRepository {
   async read(projectId: unknown): Promise<VideoProject> {
     const safeProjectId = this.validateProjectId(projectId);
     const paths = await this.resolveProjectPaths(safeProjectId);
-    return this.readResolvedProject(paths);
+    return this.readProjectWithExpectedId(safeProjectId, paths);
   }
 
   async save(
@@ -302,11 +302,10 @@ export class ProjectRepository {
     expectedRevision: unknown
   ): Promise<VideoProject> {
     const paths = await this.resolveProjectPaths(projectId);
-    const currentProject = await this.readResolvedProject(paths);
-
-    if (currentProject.metadata.id !== projectId) {
-      throw currentProjectIdMismatchError();
-    }
+    const currentProject = await this.readProjectWithExpectedId(
+      projectId,
+      paths
+    );
 
     const candidateResult = videoProjectSchema.safeParse(candidate);
     if (!candidateResult.success) {
@@ -522,6 +521,17 @@ export class ProjectRepository {
     }
 
     return projectResult.data;
+  }
+
+  private async readProjectWithExpectedId(
+    projectId: string,
+    paths: ResolvedProjectPaths
+  ): Promise<VideoProject> {
+    const project = await this.readResolvedProject(paths);
+    if (project.metadata.id !== projectId) {
+      throw currentProjectIdMismatchError();
+    }
+    return project;
   }
 
   private async removeTemporaryFile(filePath: string): Promise<void> {

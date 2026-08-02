@@ -244,6 +244,14 @@ describe("ProjectRepository", () => {
     const before = await readProjectBytes();
     const repository = new ProjectRepository(workspaceRoot);
 
+    const readError = await expectRepositoryError(
+      () => repository.read(projectId),
+      "PROJECT_CURRENT_ID_MISMATCH",
+      422
+    );
+
+    expectSafeExternalError(readError);
+
     const error = await expectRepositoryError(
       () => repository.save(projectId, clone(videoProjectFixture), 0),
       "PROJECT_CURRENT_ID_MISMATCH",
