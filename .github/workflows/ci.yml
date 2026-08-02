@@ -38,11 +38,11 @@ jobs:
         run: |
           set -euo pipefail
 
-          pnpm dev > "$RUNNER_TEMP/subdub-dev.log" 2>&1 &
+          setsid pnpm dev > "$RUNNER_TEMP/subdub-dev.log" 2>&1 &
           dev_pid=$!
 
           cleanup() {
-            kill "$dev_pid" 2>/dev/null || true
+            kill -- "-$dev_pid" 2>/dev/null || true
             wait "$dev_pid" 2>/dev/null || true
           }
           trap cleanup EXIT
@@ -68,11 +68,11 @@ jobs:
         run: |
           set -euo pipefail
 
-          pnpm start > "$RUNNER_TEMP/subdub-start.log" 2>&1 &
+          setsid pnpm start > "$RUNNER_TEMP/subdub-start.log" 2>&1 &
           start_pid=$!
 
           cleanup() {
-            kill "$start_pid" 2>/dev/null || true
+            kill -- "-$start_pid" 2>/dev/null || true
             wait "$start_pid" 2>/dev/null || true
           }
           trap cleanup EXIT
