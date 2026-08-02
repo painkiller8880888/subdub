@@ -17,6 +17,8 @@ export type ProjectRepositoryErrorCode =
   | "PROJECT_JSON_PARSE_FAILED"
   | "PROJECT_CURRENT_VALIDATION_FAILED"
   | "PROJECT_CANDIDATE_VALIDATION_FAILED"
+  | "PROJECT_CURRENT_ID_MISMATCH"
+  | "PROJECT_CANDIDATE_ID_MISMATCH"
   | "PROJECT_UPDATED_VALIDATION_FAILED"
   | "PROJECT_EXPECTED_REVISION_INVALID"
   | "PROJECT_REVISION_CONFLICT"
@@ -97,6 +99,8 @@ const defaultFileSystem: ProjectRepositoryFileSystem = {
   unlink: (filePath) => fs.unlink(filePath),
   realpath: (filePath) => fs.realpath(filePath)
 };
+
+const projectSaveLocks = new Map<string, Promise<void>>();
 
 function getFileSystemErrorCode(error: unknown): string | undefined {
   if (typeof error !== "object" || error === null || !("code" in error)) {
@@ -198,6 +202,22 @@ function candidateValidationFailedError(
   );
 }
 
+function currentProjectIdMismatchError(): ProjectRepositoryError {
+  return new ProjectRepositoryError(
+    "PROJECT_CURRENT_ID_MISMATCH",
+    422,
+    "The current project ID does not match the requested project."
+  );
+}
+
+function candidateProjectIdMismatchError(): ProjectRepositoryError {
+  return new ProjectRepositoryError(
+    "PROJECT_CANDIDATE_ID_MISMATCH",
+    422,
+    "The candidate project ID does not match the requested project."
+  );
+}
+
 function updatedValidationFailedError(
   issues: readonly ProjectValidationIssue[]
 ): ProjectRepositoryError {
@@ -260,7 +280,8 @@ export class ProjectRepository {
   }
 
   async read(projectId: unknown): Promise<VideoProject> {
-    const paths = await this.resolveProjectPaths(projectId);
+    const safeProjectId = this.validateProjectId(projectId);
+    const paths = await this.resolveProjectPaths(safeProjectId);
     return this.readResolvedProject(paths);
   }
 
@@ -269,14 +290,33 @@ export class ProjectRepository {
     candidate: unknown,
     expectedRevision: unknown
   ): Promise<VideoProject> {
+    const safeProjectId = this.validateProjectId(projectId);
+    return this.withSaveLock(safeProjectId, () =>
+      this.saveUnlocked(safeProjectId, candidate, expectedRevision)
+    );
+  }
+
+  private async saveUnlocked(
+    projectId: string,
+    candidate: unknown,
+    expectedRevision: unknown
+  ): Promise<VideoProject> {
     const paths = await this.resolveProjectPaths(projectId);
     const currentProject = await this.readResolvedProject(paths);
+
+    if (currentProject.metadata.id !== projectId) {
+      throw currentProjectIdMismatchError();
+    }
 
     const candidateResult = videoProjectSchema.safeParse(candidate);
     if (!candidateResult.success) {
       throw candidateValidationFailedError(
         validationIssues(candidateResult.error)
       );
+    }
+
+    if (candidateResult.data.metadata.id !== projectId) {
+      throw candidateProjectIdMismatchError();
     }
 
     const expectedRevisionResult =
@@ -294,6 +334,8 @@ export class ProjectRepository {
       revision: currentProject.revision + 1,
       metadata: {
         ...candidateResult.data.metadata,
+        id: currentProject.metadata.id,
+        createdAt: currentProject.metadata.createdAt,
         updatedAt: new Date().toISOString()
       }
     };
@@ -335,12 +377,10 @@ export class ProjectRepository {
       throw renameFailedError();
     }
 
-    return this.read(projectId);
+    return updatedProjectResult.data;
   }
 
-  private async resolveProjectPaths(
-    projectId: unknown
-  ): Promise<ResolvedProjectPaths> {
+  private validateProjectId(projectId: unknown): string {
     const projectIdResult = idSchema.safeParse(projectId);
     if (!projectIdResult.success) {
       throw invalidProjectIdError();
@@ -357,6 +397,12 @@ export class ProjectRepository {
       throw invalidProjectIdError();
     }
 
+    return safeProjectId;
+  }
+
+  private async resolveProjectPaths(
+    safeProjectId: string
+  ): Promise<ResolvedProjectPaths> {
     const managementRootPath = await this.resolveExistingPath(
       this.workspaceRoot
     );
@@ -405,6 +451,29 @@ export class ProjectRepository {
       projectDirectoryPath,
       projectFilePath
     };
+  }
+
+  private async withSaveLock<T>(
+    projectId: string,
+    operation: () => Promise<T>
+  ): Promise<T> {
+    const lockKey = `${this.workspaceRoot}\0${projectId}`;
+    const previous = projectSaveLocks.get(lockKey) ?? Promise.resolve();
+    let release: () => void = () => undefined;
+    const current = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    projectSaveLocks.set(lockKey, current);
+
+    await previous;
+    try {
+      return await operation();
+    } finally {
+      release();
+      if (projectSaveLocks.get(lockKey) === current) {
+        projectSaveLocks.delete(lockKey);
+      }
+    }
   }
 
   private async resolveExistingPath(filePath: string): Promise<string | null> {

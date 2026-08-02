@@ -120,6 +120,7 @@ describe("ProjectRepository", () => {
     });
     const candidate = clone(videoProjectFixture);
     candidate.metadata.title = "保存後のタイトル";
+    candidate.metadata.createdAt = "2026-08-03T12:00:00.000Z";
     const beforeUpdatedAt = candidate.metadata.updatedAt;
 
     const saved = await repository.save(projectId, candidate, 0);
@@ -128,6 +129,9 @@ describe("ProjectRepository", () => {
 
     expect(saved.revision).toBe(1);
     expect(saved.metadata.title).toBe("保存後のタイトル");
+    expect(saved.metadata.createdAt).toBe(
+      videoProjectFixture.metadata.createdAt
+    );
     expect(saved.metadata.updatedAt).not.toBe(beforeUpdatedAt);
     expect(saved.metadata.updatedAt).toMatch(
       /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/
@@ -182,6 +186,40 @@ describe("ProjectRepository", () => {
     expectSafeExternalError(error);
   });
 
+  it("serializes concurrent saves so only one update succeeds", async () => {
+    const firstRepository = new ProjectRepository(workspaceRoot);
+    const secondRepository = new ProjectRepository(workspaceRoot);
+    const firstCandidate = clone(videoProjectFixture);
+    firstCandidate.metadata.title = "並行保存A";
+    const secondCandidate = clone(videoProjectFixture);
+    secondCandidate.metadata.title = "並行保存B";
+
+    const results = await Promise.allSettled([
+      firstRepository.save(projectId, firstCandidate, 0),
+      secondRepository.save(projectId, secondCandidate, 0)
+    ]);
+    const fulfilled = results.filter(
+      (result): result is PromiseFulfilledResult<VideoProject> =>
+        result.status === "fulfilled"
+    );
+    const rejected = results.filter(
+      (result): result is PromiseRejectedResult => result.status === "rejected"
+    );
+
+    expect(fulfilled).toHaveLength(1);
+    expect(rejected).toHaveLength(1);
+    expect(rejected[0].reason).toBeInstanceOf(ProjectRepositoryError);
+    if (!(rejected[0].reason instanceof ProjectRepositoryError)) {
+      throw rejected[0].reason;
+    }
+    expect(rejected[0].reason.code).toBe("PROJECT_REVISION_CONFLICT");
+    expect(rejected[0].reason.status).toBe(409);
+
+    const finalProject = await firstRepository.read(projectId);
+    expect(finalProject.revision).toBe(1);
+    expect(["並行保存A", "並行保存B"]).toContain(finalProject.metadata.title);
+  });
+
   it("rejects an invalid candidate without changing the current bytes", async () => {
     const repository = new ProjectRepository(workspaceRoot);
     const before = await readProjectBytes();
@@ -191,6 +229,41 @@ describe("ProjectRepository", () => {
     const error = await expectRepositoryError(
       () => repository.save(projectId, invalidCandidate, 0),
       "PROJECT_CANDIDATE_VALIDATION_FAILED",
+      422
+    );
+
+    expect(await readProjectBytes()).toEqual(before);
+    expect(await listTemporaryFiles()).toEqual([]);
+    expectSafeExternalError(error);
+  });
+
+  it("rejects a current JSON ID that does not match the directory ID", async () => {
+    const invalidCurrent = clone(videoProjectFixture);
+    invalidCurrent.metadata.id = "other-project";
+    await writeProject(invalidCurrent);
+    const before = await readProjectBytes();
+    const repository = new ProjectRepository(workspaceRoot);
+
+    const error = await expectRepositoryError(
+      () => repository.save(projectId, clone(videoProjectFixture), 0),
+      "PROJECT_CURRENT_ID_MISMATCH",
+      422
+    );
+
+    expect(await readProjectBytes()).toEqual(before);
+    expect(await listTemporaryFiles()).toEqual([]);
+    expectSafeExternalError(error);
+  });
+
+  it("rejects a candidate JSON ID that does not match the directory ID", async () => {
+    const repository = new ProjectRepository(workspaceRoot);
+    const candidate = clone(videoProjectFixture);
+    candidate.metadata.id = "other-project";
+    const before = await readProjectBytes();
+
+    const error = await expectRepositoryError(
+      () => repository.save(projectId, candidate, 0),
+      "PROJECT_CANDIDATE_ID_MISMATCH",
       422
     );
 
@@ -307,6 +380,32 @@ describe("ProjectRepository", () => {
     await expect(fs.access(temporaryFiles[0])).rejects.toBeDefined();
     expect(await listTemporaryFiles()).toEqual([]);
     expectSafeExternalError(error);
+  });
+
+  it("returns the validated result without reading again after rename", async () => {
+    let readFileCount = 0;
+    const repository = new ProjectRepository({
+      workspaceRoot,
+      fileSystem: {
+        readFile: async (filePath) => {
+          readFileCount += 1;
+          if (readFileCount > 1) {
+            throw new Error("post-rename reads are not allowed");
+          }
+          return fs.readFile(filePath, { encoding: "utf8" });
+        }
+      }
+    });
+    const candidate = clone(videoProjectFixture);
+    candidate.metadata.title = "再読込なしの保存";
+
+    const saved = await repository.save(projectId, candidate, 0);
+    const rawSaved = await fs.readFile(projectFile, "utf8");
+
+    expect(readFileCount).toBe(1);
+    expect(saved.revision).toBe(1);
+    expect(saved.metadata.title).toBe("再読込なしの保存");
+    expect(JSON.parse(rawSaved)).toEqual(saved);
   });
 
   it("rejects unsafe IDs before touching the filesystem", async () => {
