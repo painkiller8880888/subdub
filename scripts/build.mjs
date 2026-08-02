@@ -1,4 +1,13 @@
+import { rm } from "node:fs/promises";
+
 import { runPnpm } from "./process-utils.mjs";
+
+const distRoot = new URL("../dist/", import.meta.url);
+
+await rm(distRoot, {
+  recursive: true,
+  force: true
+});
 
 const commands = [
   ["exec", "vite", "build"],

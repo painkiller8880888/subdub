@@ -10,7 +10,6 @@ export async function startServer(options: AppOptions = {}): Promise<void> {
   try {
     await app.listen({ host: SERVER_HOST, port: SERVER_PORT });
   } catch (error) {
-    app.log.error(error);
     await app.close();
     throw error;
   }

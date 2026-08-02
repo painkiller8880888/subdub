@@ -60,10 +60,16 @@ pnpm build
 pnpm start
 ```
 
+`pnpm build`は`pnpm dev`を別シェルで実行中でも実行できます。ただし`pnpm dev`のFastifyと`pnpm start`はどちらも`127.0.0.1:3000`を使用するため、製品起動前に開発用シェルで`Ctrl+C`を押して`pnpm dev`を停止してください。`pnpm start`はサーバーを待ち受け続け、正常時はプロンプトに戻りません。
+
 製品起動ではFastifyが`dist/web`のVite成果物と`/api`を同一originで配信します。
 
 - SPA: <http://127.0.0.1:3000/>
 - API: <http://127.0.0.1:3000/api/health>
+
+## CI
+
+`.github/workflows/ci.yml`はNode.js `24.18.0`とpnpm `11.17.0`を使用し、依存導入、`pnpm verify`、開発サーバーのWebUI/API確認、製品サーバーのSPA/API確認を実行します。
 
 ## ディレクトリ境界
 

@@ -1,0 +1,92 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24.18.0"
+
+      - name: Set up pnpm
+        shell: bash
+        run: |
+          corepack enable
+          corepack install --global pnpm@11.17.0
+          node --version
+          pnpm --version
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Verify
+        run: pnpm verify
+
+      - name: Smoke test development servers
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          pnpm dev > "$RUNNER_TEMP/subdub-dev.log" 2>&1 &
+          dev_pid=$!
+
+          cleanup() {
+            kill "$dev_pid" 2>/dev/null || true
+            wait "$dev_pid" 2>/dev/null || true
+          }
+          trap cleanup EXIT
+
+          for attempt in {1..30}; do
+            if web_html="$(curl --fail --silent http://127.0.0.1:5173/)" \
+              && grep -q "subdub" <<< "$web_html" \
+              && health_json="$(curl --fail --silent http://127.0.0.1:5173/api/health)" \
+              && [[ "$health_json" == '{"status":"ok"}' ]] \
+              && direct_health="$(curl --fail --silent http://127.0.0.1:3000/api/health)" \
+              && [[ "$direct_health" == '{"status":"ok"}' ]]; then
+              exit 0
+            fi
+
+            sleep 1
+          done
+
+          cat "$RUNNER_TEMP/subdub-dev.log"
+          exit 1
+
+      - name: Smoke test production server
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          pnpm start > "$RUNNER_TEMP/subdub-start.log" 2>&1 &
+          start_pid=$!
+
+          cleanup() {
+            kill "$start_pid" 2>/dev/null || true
+            wait "$start_pid" 2>/dev/null || true
+          }
+          trap cleanup EXIT
+
+          for attempt in {1..30}; do
+            if web_html="$(curl --fail --silent http://127.0.0.1:3000/)" \
+              && grep -q "subdub" <<< "$web_html" \
+              && health_json="$(curl --fail --silent http://127.0.0.1:3000/api/health)" \
+              && [[ "$health_json" == '{"status":"ok"}' ]]; then
+              exit 0
+            fi
+
+            sleep 1
+          done
+
+          cat "$RUNNER_TEMP/subdub-start.log"
+          exit 1
