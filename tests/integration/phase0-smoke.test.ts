@@ -106,8 +106,8 @@ describe("Phase 0 integration smoke", () => {
     );
     const bytesAfterCreate = await fs.readFile(projectFile);
     await expect(repository.create(emptyProject)).rejects.toMatchObject({
-      code: "PROJECT_WRITE_FAILED",
-      status: 500
+      code: "PROJECT_ALREADY_EXISTS",
+      status: 409
     });
     await expect(fs.readFile(projectFile)).resolves.toEqual(bytesAfterCreate);
 

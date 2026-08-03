@@ -13,6 +13,7 @@ import {
   videoProjectSchema,
   type VideoProject
 } from "../../src/schema/index.js";
+import { createEmptyVideoProject } from "../fixtures/empty-video-project.js";
 import { videoProjectFixture } from "../fixtures/video-project.js";
 
 const projectId = videoProjectFixture.metadata.id;
@@ -90,6 +91,13 @@ describe("ProjectRepository", () => {
   async function listTemporaryFiles(): Promise<string[]> {
     const entries = await fs.readdir(projectDirectory);
     return entries.filter((entry) => entry.startsWith("project.json."));
+  }
+
+  function createProjectCandidate(): VideoProject {
+    return createEmptyVideoProject({
+      projectId,
+      createdAt: "2026-08-03T00:00:00.000Z"
+    });
   }
 
   function expectSafeExternalError(error: ProjectRepositoryError): void {
@@ -387,6 +395,97 @@ describe("ProjectRepository", () => {
     expect(temporaryFiles).toHaveLength(1);
     await expect(fs.access(temporaryFiles[0])).rejects.toBeDefined();
     expect(await listTemporaryFiles()).toEqual([]);
+    expectSafeExternalError(error);
+  });
+
+  it("removes a create temp directory after a write failure so the ID can be retried", async () => {
+    await fs.rm(projectDirectory, { recursive: true, force: true });
+    const candidate = createProjectCandidate();
+    const temporaryFiles: string[] = [];
+    const repository = new ProjectRepository({
+      workspaceRoot,
+      fileSystem: {
+        writeFile: async (filePath, contents) => {
+          temporaryFiles.push(filePath);
+          await fs.writeFile(filePath, contents, {
+            encoding: "utf8",
+            flag: "wx"
+          });
+          throw new Error("injected create write failure");
+        }
+      }
+    });
+
+    const error = await expectRepositoryError(
+      () => repository.create(candidate),
+      "PROJECT_WRITE_FAILED",
+      500
+    );
+
+    expectSafeExternalError(error);
+    expect(temporaryFiles).toHaveLength(1);
+    await expect(fs.access(temporaryFiles[0])).rejects.toBeDefined();
+    await expect(fs.stat(projectDirectory)).rejects.toBeDefined();
+    expect(await fs.readdir(path.join(workspaceRoot, "projects"))).toEqual([]);
+
+    await expect(new ProjectRepository(workspaceRoot).create(candidate)).resolves.toEqual(
+      candidate
+    );
+  });
+
+  it("removes a create temp directory after a rename failure so the ID can be retried", async () => {
+    await fs.rm(projectDirectory, { recursive: true, force: true });
+    const candidate = createProjectCandidate();
+    const temporaryFiles: string[] = [];
+    const repository = new ProjectRepository({
+      workspaceRoot,
+      fileSystem: {
+        writeFile: async (filePath, contents) => {
+          temporaryFiles.push(filePath);
+          await fs.writeFile(filePath, contents, {
+            encoding: "utf8",
+            flag: "wx"
+          });
+        },
+        rename: async () => {
+          throw new Error("injected create rename failure");
+        }
+      }
+    });
+
+    const error = await expectRepositoryError(
+      () => repository.create(candidate),
+      "PROJECT_RENAME_FAILED",
+      500
+    );
+
+    expectSafeExternalError(error);
+    expect(temporaryFiles).toHaveLength(1);
+    await expect(fs.access(temporaryFiles[0])).rejects.toBeDefined();
+    await expect(fs.stat(projectDirectory)).rejects.toBeDefined();
+    expect(await fs.readdir(path.join(workspaceRoot, "projects"))).toEqual([]);
+
+    await expect(new ProjectRepository(workspaceRoot).create(candidate)).resolves.toEqual(
+      candidate
+    );
+  });
+
+  it("reports a duplicate create as a conflict without changing the existing bytes", async () => {
+    await fs.rm(projectDirectory, { recursive: true, force: true });
+    const candidate = createProjectCandidate();
+    const repository = new ProjectRepository(workspaceRoot);
+    await repository.create(candidate);
+    const before = await fs.readFile(path.join(projectDirectory, "project.json"));
+
+    const error = await expectRepositoryError(
+      () => repository.create(candidate),
+      "PROJECT_ALREADY_EXISTS",
+      409
+    );
+
+    expect(await fs.readFile(path.join(projectDirectory, "project.json"))).toEqual(
+      before
+    );
     expectSafeExternalError(error);
   });
 

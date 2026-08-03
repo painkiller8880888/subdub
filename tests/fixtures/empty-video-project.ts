@@ -99,9 +99,9 @@ export function createEmptyVideoProject(
       globalDirectives: []
     },
     aiSettings: {
-      defaultModelId: null,
+      defaultModelId: "google/gemma-4-31b-it",
       taskModelOverrides: {},
-      zdr: false,
+      zdr: true,
       dataCollection: "deny",
       allowProviderFallbacks: true
     },
