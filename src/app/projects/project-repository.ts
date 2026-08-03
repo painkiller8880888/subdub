@@ -76,6 +76,7 @@ export interface ProjectRepositoryFileSystem {
     directoryPath: string,
     options?: { recursive?: boolean }
   ): Promise<void>;
+  readdir(directoryPath: string): Promise<string[]>;
   rmdir(directoryPath: string): Promise<void>;
   readFile(filePath: string): Promise<string>;
   writeFile(filePath: string, contents: string): Promise<void>;
@@ -104,6 +105,7 @@ const defaultFileSystem: ProjectRepositoryFileSystem = {
   mkdir: async (directoryPath, options) => {
     await fs.mkdir(directoryPath, options);
   },
+  readdir: (directoryPath) => fs.readdir(directoryPath),
   rmdir: (directoryPath) => fs.rmdir(directoryPath),
   readFile: (filePath) => fs.readFile(filePath, { encoding: "utf8" }),
   writeFile: (filePath, contents) =>
@@ -290,6 +292,12 @@ function isExistingDestinationError(error: unknown): boolean {
   return code === "EEXIST" || code === "ENOTEMPTY" || code === "EISDIR";
 }
 
+function isProjectTemporaryDirectoryName(entryName: string): boolean {
+  return (
+    entryName.startsWith(".subdub-project-") && entryName.endsWith(".tmp")
+  );
+}
+
 export class ProjectRepository {
   private readonly workspaceRoot: string;
   private readonly fileSystem: ProjectRepositoryFileSystem;
@@ -315,6 +323,71 @@ export class ProjectRepository {
     const safeProjectId = this.validateProjectId(projectId);
     const paths = await this.resolveProjectPaths(safeProjectId);
     return this.readProjectWithExpectedId(safeProjectId, paths);
+  }
+
+  async list(): Promise<VideoProject[]> {
+    const managementRootPath = await this.resolveExistingPath(
+      this.workspaceRoot
+    );
+    if (managementRootPath === null) {
+      return [];
+    }
+
+    const projectsPath = path.resolve(this.workspaceRoot, "projects");
+    const resolvedProjectsPath = await this.resolveExistingPath(projectsPath);
+    if (resolvedProjectsPath === null) {
+      return [];
+    }
+    this.assertInsideManagementRoot(
+      managementRootPath,
+      resolvedProjectsPath
+    );
+
+    let entryNames: string[];
+    try {
+      entryNames = await this.fileSystem.readdir(projectsPath);
+    } catch (error) {
+      if (isMissingPathError(error)) {
+        return [];
+      }
+      throw readFailedError();
+    }
+
+    const projects: VideoProject[] = [];
+    for (const entryName of [...entryNames].sort()) {
+      if (isProjectTemporaryDirectoryName(entryName)) {
+        continue;
+      }
+
+      const projectId = this.validateProjectId(entryName);
+      const projectDirectoryPath = path.resolve(projectsPath, projectId);
+      if (!isPathInside(this.workspaceRoot, projectDirectoryPath)) {
+        throw invalidProjectPathError();
+      }
+
+      const resolvedProjectDirectoryPath = await this.resolveExistingPath(
+        projectDirectoryPath
+      );
+      if (resolvedProjectDirectoryPath === null) {
+        continue;
+      }
+      this.assertInsideManagementRoot(
+        managementRootPath,
+        resolvedProjectDirectoryPath
+      );
+      if (!isPathInside(resolvedProjectsPath, resolvedProjectDirectoryPath)) {
+        throw invalidProjectPathError();
+      }
+
+      projects.push(
+        await this.readProjectWithExpectedId(projectId, {
+          projectDirectoryPath,
+          projectFilePath: path.join(projectDirectoryPath, "project.json")
+        })
+      );
+    }
+
+    return projects;
   }
 
   async create(candidate: unknown): Promise<VideoProject> {
@@ -556,6 +629,9 @@ export class ProjectRepository {
       managementRootPath,
       resolvedProjectDirectoryPath
     );
+    if (!isPathInside(resolvedProjectsPath, resolvedProjectDirectoryPath)) {
+      throw invalidProjectPathError();
+    }
 
     const projectFilePath = path.join(projectDirectoryPath, "project.json");
     const resolvedProjectFilePath = await this.resolveExistingPath(
@@ -566,6 +642,11 @@ export class ProjectRepository {
         managementRootPath,
         resolvedProjectFilePath
       );
+      if (
+        !isPathInside(resolvedProjectDirectoryPath, resolvedProjectFilePath)
+      ) {
+        throw invalidProjectPathError();
+      }
     }
 
     return {

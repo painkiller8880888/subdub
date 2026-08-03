@@ -2,8 +2,15 @@ import { type ZodType } from "zod";
 
 import {
   apiErrorResponseSchema,
-  type ApiErrorDetail
+  projectCreateRequestSchema,
+  projectCreateResponseSchema,
+  projectDetailResponseSchema,
+  projectListResponseSchema,
+  type ApiErrorDetail,
+  type ProjectCreateRequest,
+  type ProjectSummary
 } from "../../schema/api.js";
+import type { VideoProject } from "../../schema/video-project.js";
 
 export type ApiClientErrorData = {
   readonly status: number;
@@ -90,4 +97,35 @@ export async function fetchApi<T>(
   }
 
   return parsedResponse.data;
+}
+
+export async function fetchProjects(): Promise<ProjectSummary[]> {
+  const response = await fetchApi("/api/projects", projectListResponseSchema);
+  return response.data;
+}
+
+export async function createProject(
+  input: ProjectCreateRequest
+): Promise<VideoProject> {
+  const validatedInput = projectCreateRequestSchema.parse(input);
+  const response = await fetchApi(
+    "/api/projects",
+    projectCreateResponseSchema,
+    {
+      method: "POST",
+      headers: {
+        "content-type": "application/json"
+      },
+      body: JSON.stringify(validatedInput)
+    }
+  );
+  return response.data;
+}
+
+export async function fetchProject(projectId: string): Promise<VideoProject> {
+  const response = await fetchApi(
+    `/api/projects/${encodeURIComponent(projectId)}`,
+    projectDetailResponseSchema
+  );
+  return response.data;
 }

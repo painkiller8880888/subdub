@@ -5,6 +5,10 @@ import { type FastifyInstance } from "fastify";
 
 import { buildApp, type AppOptions } from "./app.js";
 import { API_HOST, API_PORT } from "./config.js";
+import {
+  ProjectRepository
+} from "../app/projects/project-repository.js";
+import { ProjectService } from "../app/projects/project-service.js";
 import type { BackupDatabase } from "../db/backup.js";
 import {
   initializeWorkspaceDatabase,
@@ -19,6 +23,7 @@ export type ServerOptions = AppOptions & {
   backupDatabase?: BackupDatabase;
   databasePath?: string;
   migrationsFolder?: MigrationFolder;
+  projectRepository?: ProjectRepository;
   workspaceRoot?: string;
 };
 
@@ -44,6 +49,8 @@ export async function initializeServer(
     backupDatabase,
     databasePath,
     migrationsFolder,
+    projectRepository,
+    projectService: suppliedProjectService,
     workspaceRoot = process.cwd(),
     ...appOptions
   } = options;
@@ -57,7 +64,16 @@ export async function initializeServer(
   });
 
   try {
-    const app = buildApp(appOptions);
+    const resolvedProjectService =
+      suppliedProjectService ??
+      new ProjectService({
+        repository:
+          projectRepository ?? new ProjectRepository({ workspaceRoot })
+      });
+    const app = buildApp({
+      ...appOptions,
+      projectService: resolvedProjectService
+    });
     app.addHook("onClose", async () => {
       database.close();
     });
