@@ -18,7 +18,12 @@ describe("GET /api/health", () => {
     });
 
     expect(response.statusCode).toBe(200);
-    expect(response.json()).toEqual({ status: "ok" });
+    expect(response.headers["content-type"]).toMatch(/^application\/json/);
+    expect(response.json()).toEqual({
+      data: {
+        status: "ok"
+      }
+    });
   });
 });
 

@@ -1,9 +1,10 @@
 import { useQuery } from "@tanstack/react-query";
 import { Route, Routes } from "react-router";
 
-type HealthResponse = {
-  status: string;
-};
+import {
+  healthResponseSchema,
+  type HealthResponse
+} from "../schema/api";
 
 async function fetchHealth(): Promise<HealthResponse> {
   const response = await fetch("/api/health");
@@ -12,7 +13,12 @@ async function fetchHealth(): Promise<HealthResponse> {
     throw new Error(`API request failed with status ${response.status}.`);
   }
 
-  return (await response.json()) as HealthResponse;
+  const parsedResponse = healthResponseSchema.safeParse(await response.json());
+  if (!parsedResponse.success) {
+    throw new Error("API response format is invalid.");
+  }
+
+  return parsedResponse.data;
 }
 
 function HomePage() {
@@ -26,7 +32,7 @@ function HomePage() {
   if (healthQuery.isError) {
     healthMessage = "API接続に失敗しました。Fastifyが起動しているか確認してください。";
   } else if (healthQuery.isSuccess) {
-    healthMessage = `API接続: 正常 (${healthQuery.data.status})`;
+    healthMessage = `API接続: 正常 (${healthQuery.data.data.status})`;
   }
 
   return (

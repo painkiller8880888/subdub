@@ -1,29 +1,32 @@
 import fastifyStatic from "@fastify/static";
 import Fastify, { type FastifyInstance } from "fastify";
 
+import { createApiSuccessResponse } from "../schema/api.js";
+import { registerApiErrorHandler } from "./middleware/error-handler.js";
+import { registerNotFoundHandler } from "./middleware/not-found-handler.js";
+
 export type AppOptions = {
   staticRoot?: string;
 };
 
 export function buildApp(options: AppOptions = {}): FastifyInstance {
   const app = Fastify({ logger: false });
+  registerApiErrorHandler(app);
 
-  app.get("/api/health", async () => ({ status: "ok" }));
+  app.get("/api/health", async () =>
+    createApiSuccessResponse({ status: "ok" })
+  );
 
   if (options.staticRoot !== undefined) {
     app.register(fastifyStatic, {
       root: options.staticRoot,
       prefix: "/"
     });
-
-    app.setNotFoundHandler((request, reply) => {
-      if (request.method === "GET" && !request.url.startsWith("/api/")) {
-        return reply.sendFile("index.html");
-      }
-
-      return reply.code(404).send({ error: "Not Found" });
-    });
   }
+
+  registerNotFoundHandler(app, {
+    staticFallback: options.staticRoot !== undefined
+  });
 
   return app;
 }
