@@ -171,6 +171,115 @@ describe("common API error handling", () => {
     expect(error.details).toEqual([]);
   });
 
+  it("maps Fastify body-limit errors to a 413 API error", async () => {
+    app = buildApp();
+    app.post(
+      "/api/body-limit",
+      {
+        bodyLimit: 16
+      },
+      async () => createApiSuccessResponse({ ok: true })
+    );
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/body-limit",
+      headers: {
+        "content-type": "application/json"
+      },
+      payload: JSON.stringify({ content: "too large" })
+    });
+
+    expect(response.statusCode).toBe(413);
+    const error = parseApiError(response);
+    expect(error.code).toBe("REQUEST_BODY_TOO_LARGE");
+    expect(error.details).toEqual([]);
+  });
+
+  it("maps unsupported media types to a 415 API error", async () => {
+    app = buildApp();
+    app.post("/api/unsupported-media", async () =>
+      createApiSuccessResponse({ ok: true })
+    );
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/unsupported-media",
+      headers: {
+        "content-type": "application/x-subdub-unknown"
+      },
+      payload: "unsupported"
+    });
+
+    expect(response.statusCode).toBe(415);
+    const error = parseApiError(response);
+    expect(error.code).toBe("UNSUPPORTED_MEDIA_TYPE");
+    expect(error.details).toEqual([]);
+  });
+
+  it("maps an empty JSON body to a safe 400 API error", async () => {
+    app = buildApp();
+    app.post("/api/empty-json", async () =>
+      createApiSuccessResponse({ ok: true })
+    );
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/empty-json",
+      headers: {
+        "content-type": "application/json"
+      },
+      payload: ""
+    });
+
+    expect(response.statusCode).toBe(400);
+    const error = parseApiError(response);
+    expect(error.code).toBe("REQUEST_VALIDATION_FAILED");
+    expect(error.details).toEqual([]);
+  });
+
+  it("maps a Content-Length mismatch to a safe 400 API error", async () => {
+    app = buildApp();
+    app.post("/api/content-length-mismatch", async () =>
+      createApiSuccessResponse({ ok: true })
+    );
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/content-length-mismatch",
+      headers: {
+        "content-length": "1",
+        "content-type": "application/json"
+      },
+      payload: JSON.stringify({ content: "longer than one byte" })
+    });
+
+    expect(response.statusCode).toBe(400);
+    const error = parseApiError(response);
+    expect(error.code).toBe("REQUEST_VALIDATION_FAILED");
+    expect(error.details).toEqual([]);
+  });
+
+  it("does not classify arbitrary validation properties as Fastify validation", async () => {
+    app = buildApp();
+    app.get("/api/validation-shaped-error", async () => {
+      throw {
+        validation: [],
+        message: "upstream failure"
+      };
+    });
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/api/validation-shaped-error"
+    });
+
+    expect(response.statusCode).toBe(500);
+    const error = parseApiError(response);
+    expect(error.code).toBe("INTERNAL_SERVER_ERROR");
+    expect(error.details).toEqual([]);
+  });
+
   it("preserves repository business codes, statuses, and issues", async () => {
     app = buildApp();
     app.get("/api/project-not-found", async () => {

@@ -9,10 +9,12 @@ import type { ApiErrorDetail } from "../../schema/api.js";
 export const API_ERROR_CODE = {
   requestValidationFailed: "REQUEST_VALIDATION_FAILED",
   apiNotFound: "API_NOT_FOUND",
+  requestBodyTooLarge: "REQUEST_BODY_TOO_LARGE",
+  unsupportedMediaType: "UNSUPPORTED_MEDIA_TYPE",
   internalServerError: "INTERNAL_SERVER_ERROR"
 };
 
-export type ApiErrorStatus = 400 | 404 | 409 | 422 | 500;
+export type ApiErrorStatus = 400 | 404 | 409 | 413 | 415 | 422 | 500;
 
 export type MappedApiError = {
   readonly code: string;
@@ -27,9 +29,22 @@ type UnknownRecord = Record<string, unknown>;
 type FastifyValidationIssue = UnknownRecord;
 
 type FastifyValidationError = {
+  readonly code: "FST_ERR_VALIDATION";
   readonly validation: readonly FastifyValidationIssue[];
-  readonly validationContext?: unknown;
-  readonly statusCode?: unknown;
+  readonly validationContext: FastifyValidationContext;
+  readonly statusCode: 400;
+};
+
+type FastifyValidationContext =
+  | "body"
+  | "headers"
+  | "params"
+  | "querystring";
+
+type FastifyRequestErrorMapping = {
+  readonly code: string;
+  readonly status: ApiErrorStatus;
+  readonly message: string;
 };
 
 const genericValidationMessage = "リクエストの入力内容が不正です。";
@@ -62,6 +77,36 @@ const projectRepositoryMessages: Record<
   PROJECT_RENAME_FAILED: "プロジェクトを保存できませんでした。"
 };
 
+const fastifyRequestErrorMappings: Readonly<
+  Record<string, FastifyRequestErrorMapping>
+> = {
+  FST_ERR_CTP_BODY_TOO_LARGE: {
+    code: API_ERROR_CODE.requestBodyTooLarge,
+    status: 413,
+    message: "リクエスト本文が大きすぎます。"
+  },
+  FST_ERR_CTP_INVALID_MEDIA_TYPE: {
+    code: API_ERROR_CODE.unsupportedMediaType,
+    status: 415,
+    message: "サポートされていないメディアタイプです。"
+  },
+  FST_ERR_CTP_INVALID_CONTENT_LENGTH: {
+    code: API_ERROR_CODE.requestValidationFailed,
+    status: 400,
+    message: genericValidationMessage
+  },
+  FST_ERR_CTP_EMPTY_JSON_BODY: {
+    code: API_ERROR_CODE.requestValidationFailed,
+    status: 400,
+    message: genericValidationMessage
+  },
+  FST_ERR_CTP_INVALID_JSON_BODY: {
+    code: API_ERROR_CODE.requestValidationFailed,
+    status: 400,
+    message: genericValidationMessage
+  }
+};
+
 function isRecord(value: unknown): value is UnknownRecord {
   return typeof value === "object" && value !== null;
 }
@@ -71,6 +116,8 @@ function isSupportedStatus(value: unknown): value is ApiErrorStatus {
     value === 400 ||
     value === 404 ||
     value === 409 ||
+    value === 413 ||
+    value === 415 ||
     value === 422 ||
     value === 500
   );
@@ -180,11 +227,48 @@ function mapProjectValidationDetails(
 function isFastifyValidationError(
   error: unknown
 ): error is FastifyValidationError {
-  if (!isRecord(error) || !Array.isArray(error.validation)) {
+  if (
+    !isRecord(error) ||
+    error.code !== "FST_ERR_VALIDATION" ||
+    error.statusCode !== 400 ||
+    !isFastifyValidationContext(error.validationContext) ||
+    !Array.isArray(error.validation) ||
+    error.validation.length === 0
+  ) {
     return false;
   }
 
   return error.validation.every(isRecord);
+}
+
+function isFastifyValidationContext(
+  value: unknown
+): value is FastifyValidationContext {
+  return (
+    value === "body" ||
+    value === "headers" ||
+    value === "params" ||
+    value === "querystring"
+  );
+}
+
+function getFastifyRequestErrorMapping(
+  error: unknown
+): FastifyRequestErrorMapping | undefined {
+  if (!isRecord(error) || typeof error.code !== "string") {
+    return undefined;
+  }
+
+  if (
+    !Object.prototype.hasOwnProperty.call(
+      fastifyRequestErrorMappings,
+      error.code
+    )
+  ) {
+    return undefined;
+  }
+
+  return fastifyRequestErrorMappings[error.code];
 }
 
 function decodeJsonPointerSegment(segment: string): string {
@@ -295,28 +379,21 @@ export function mapApiError(error: unknown): MappedApiError {
     };
   }
 
-  if (isFastifyValidationError(error)) {
-    const status = isSupportedStatus(error.statusCode)
-      ? error.statusCode
-      : 400;
+  const fastifyRequestError = getFastifyRequestErrorMapping(error);
+  if (fastifyRequestError !== undefined) {
     return {
-      code: API_ERROR_CODE.requestValidationFailed,
-      status,
-      message: genericValidationMessage,
-      details: mapFastifyValidationDetails(error),
-      shouldLog: status >= 500
+      ...fastifyRequestError,
+      details: [],
+      shouldLog: false
     };
   }
 
-  if (
-    isRecord(error) &&
-    error.code === "FST_ERR_CTP_INVALID_JSON_BODY"
-  ) {
+  if (isFastifyValidationError(error)) {
     return {
       code: API_ERROR_CODE.requestValidationFailed,
       status: 400,
       message: genericValidationMessage,
-      details: [],
+      details: mapFastifyValidationDetails(error),
       shouldLog: false
     };
   }
