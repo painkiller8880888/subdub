@@ -9,3 +9,19 @@ coverage/
 !.env.example
 
 *.log
+
+# ローカル実行時データ（各拠点で個別に生成される。同期不要）
+library/*.sqlite
+library/*.sqlite-*
+library/media/
+library/thumbnails/
+projects/
+public/shared-assets/
+
+# テストツールの出力
+playwright-report/
+test-results/
+
+# OS固有ファイル（自宅・職場でOSが違う場合の保険）
+.DS_Store
+Thumbs.db
