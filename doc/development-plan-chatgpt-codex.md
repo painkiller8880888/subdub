@@ -379,6 +379,9 @@ SQLiteへ用語テーブルを追加し、一覧、検索、登録、編集、�
 
 完了条件は、用語を登録し、停止し、再有効化でき、物理削除なしで履歴を保持できることである。
 
+PRでは、次を実際に試すことを推奨します。
+pnpm exec drizzle-kit generate --name=test-table
+
 #### P2-04 読み上げ解決プレビュー
 
 長い表記を優先し、priorityとterm IDで決定論的に用語を置換する。`literal`モードと除外用語を扱い、元の`spokenText`と`subtitleText`は変更しない。
