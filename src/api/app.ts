@@ -1,16 +1,20 @@
 import fastifyStatic from "@fastify/static";
-import Fastify, { type FastifyInstance } from "fastify";
+import Fastify, {
+  type FastifyInstance,
+  type FastifyServerOptions
+} from "fastify";
 
 import { createApiSuccessResponse } from "../schema/api.js";
 import { registerApiErrorHandler } from "./middleware/error-handler.js";
 import { registerNotFoundHandler } from "./middleware/not-found-handler.js";
 
 export type AppOptions = {
+  logger?: FastifyServerOptions["logger"];
   staticRoot?: string;
 };
 
 export function buildApp(options: AppOptions = {}): FastifyInstance {
-  const app = Fastify({ logger: false });
+  const app = Fastify({ logger: options.logger ?? false });
   registerApiErrorHandler(app);
 
   app.get("/api/health", async () =>

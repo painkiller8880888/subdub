@@ -19,6 +19,7 @@ export function registerApiErrorHandler(app: FastifyInstance): void {
       request.log.error(
         {
           requestId: request.id,
+          errorCode: mappedError.code,
           errorName: getUnexpectedErrorName(error)
         },
         "Unexpected API error"

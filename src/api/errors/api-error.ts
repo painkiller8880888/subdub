@@ -34,6 +34,8 @@ type FastifyValidationError = {
 
 const genericValidationMessage = "リクエストの入力内容が不正です。";
 const genericInternalMessage = "サーバーで予期しないエラーが発生しました。";
+const redactedPathSegment = "[redacted]";
+const safeFieldPathSegmentPattern = /^[a-z][A-Za-z0-9_]{0,63}$/;
 
 const projectRepositoryMessages: Record<
   ProjectRepositoryErrorCode,
@@ -64,10 +66,6 @@ function isRecord(value: unknown): value is UnknownRecord {
   return typeof value === "object" && value !== null;
 }
 
-function isPathSegment(value: unknown): value is string | number {
-  return typeof value === "string" || typeof value === "number";
-}
-
 function isSupportedStatus(value: unknown): value is ApiErrorStatus {
   return (
     value === 400 ||
@@ -78,27 +76,104 @@ function isSupportedStatus(value: unknown): value is ApiErrorStatus {
   );
 }
 
-function sanitizeDetailMessage(message: string): string {
-  if (
-    /(?:api[_ -]?key|authorization|cookie|bearer|openrouter_api_key)/i.test(
-      message
-    ) ||
-    /(?:[A-Za-z]:[\\/]|(?:^|[\s("'])\/(?:Users|home|private|tmp|var|workspace)(?:[\\/]|\b))/i.test(
-      message
-    )
-  ) {
-    return "入力内容を確認してください。";
-  }
+function sanitizePath(path: readonly unknown[]): Array<string | number> {
+  return path.map((segment) => {
+    if (
+      typeof segment === "number" &&
+      Number.isSafeInteger(segment) &&
+      segment >= 0
+    ) {
+      return segment;
+    }
 
-  return message;
+    if (
+      typeof segment === "string" &&
+      safeFieldPathSegmentPattern.test(segment)
+    ) {
+      return segment;
+    }
+
+    return redactedPathSegment;
+  });
 }
 
-function mapValidationDetails(
-  issues: readonly { path: readonly unknown[]; message: string }[]
+function getZodValidationMessage(code: string): string {
+  switch (code) {
+    case "invalid_type":
+    case "invalid_format":
+    case "invalid_key":
+    case "invalid_element":
+      return "入力形式が不正です。";
+    case "too_small":
+      return "入力値が小さすぎます。";
+    case "too_big":
+      return "入力値が大きすぎます。";
+    case "unrecognized_keys":
+      return "未定義の項目があります。";
+    case "invalid_union":
+      return "入力値の選択肢が不正です。";
+    case "not_multiple_of":
+    case "invalid_value":
+    case "custom":
+    default:
+      return genericValidationMessage;
+  }
+}
+
+function getFastifyValidationMessage(keyword: unknown): string {
+  switch (keyword) {
+    case "required":
+      return "必須項目です。";
+    case "additionalProperties":
+      return "未定義の項目です。";
+    case "minLength":
+    case "minItems":
+    case "minimum":
+      return "入力値が小さすぎます。";
+    case "maxLength":
+    case "maxItems":
+    case "maximum":
+      return "入力値が大きすぎます。";
+    case "format":
+    case "type":
+      return "入力形式が不正です。";
+    default:
+      return genericValidationMessage;
+  }
+}
+
+function getProjectValidationMessage(
+  code: ProjectRepositoryErrorCode
+): string {
+  switch (code) {
+    case "PROJECT_CURRENT_VALIDATION_FAILED":
+      return "現在のプロジェクトデータが不正です。";
+    case "PROJECT_CANDIDATE_VALIDATION_FAILED":
+      return "保存するプロジェクトデータが不正です。";
+    case "PROJECT_UPDATED_VALIDATION_FAILED":
+      return "更新後のプロジェクトデータが不正です。";
+    default:
+      return "プロジェクトデータを確認してください。";
+  }
+}
+
+function mapZodValidationDetails(
+  issues: readonly { path: readonly unknown[]; code: string }[]
 ): ApiErrorDetail[] {
   return issues.map((issue) => ({
-    path: issue.path.filter(isPathSegment),
-    message: sanitizeDetailMessage(issue.message)
+    path: sanitizePath(issue.path),
+    message: getZodValidationMessage(issue.code)
+  }));
+}
+
+function mapProjectValidationDetails(
+  code: ProjectRepositoryErrorCode,
+  issues: readonly { path: readonly unknown[] }[]
+): ApiErrorDetail[] {
+  const message = getProjectValidationMessage(code);
+  return issues.map((issue) => ({
+    path: sanitizePath(issue.path),
+    message
   }));
 }
 
@@ -193,22 +268,20 @@ function mapFastifyValidationDetails(
   error: FastifyValidationError
 ): ApiErrorDetail[] {
   return error.validation.map((issue) => ({
-    path: getValidationPath(issue, error.validationContext),
-    message:
-      typeof issue.message === "string"
-        ? sanitizeDetailMessage(issue.message)
-        : genericValidationMessage
+    path: sanitizePath(getValidationPath(issue, error.validationContext)),
+    message: getFastifyValidationMessage(issue.keyword)
   }));
 }
 
 export function mapApiError(error: unknown): MappedApiError {
   if (error instanceof ProjectRepositoryError) {
+    const status = isSupportedStatus(error.status) ? error.status : 500;
     return {
       code: error.code,
-      status: isSupportedStatus(error.status) ? error.status : 500,
+      status,
       message: projectRepositoryMessages[error.code],
-      details: mapValidationDetails(error.issues),
-      shouldLog: false
+      details: mapProjectValidationDetails(error.code, error.issues),
+      shouldLog: status >= 500
     };
   }
 
@@ -217,20 +290,21 @@ export function mapApiError(error: unknown): MappedApiError {
       code: API_ERROR_CODE.requestValidationFailed,
       status: 422,
       message: genericValidationMessage,
-      details: mapValidationDetails(error.issues),
+      details: mapZodValidationDetails(error.issues),
       shouldLog: false
     };
   }
 
   if (isFastifyValidationError(error)) {
+    const status = isSupportedStatus(error.statusCode)
+      ? error.statusCode
+      : 400;
     return {
       code: API_ERROR_CODE.requestValidationFailed,
-      status: isSupportedStatus(error.statusCode)
-        ? error.statusCode
-        : 400,
+      status,
       message: genericValidationMessage,
       details: mapFastifyValidationDetails(error),
-      shouldLog: false
+      shouldLog: status >= 500
     };
   }
 

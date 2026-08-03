@@ -1,6 +1,7 @@
 import { promises as fs } from "node:fs";
 import { tmpdir } from "node:os";
 import * as path from "node:path";
+import { PassThrough } from "node:stream";
 
 import type { FastifyInstance } from "fastify";
 import { afterEach, describe, expect, it } from "vitest";
@@ -8,6 +9,7 @@ import { z } from "zod";
 
 import { ProjectRepositoryError } from "../../src/app/projects/project-repository.js";
 import { buildApp } from "../../src/api/app.js";
+import { mapApiError } from "../../src/api/errors/api-error.js";
 import {
   apiErrorResponseSchema,
   createApiSuccessResponse
@@ -104,7 +106,7 @@ describe("common API error handling", () => {
       0,
       "title"
     ]);
-    expect(error.details[0]?.message).toContain("string");
+    expect(error.details[0]?.message).toBe("入力値が小さすぎます。");
   });
 
   it("converts Fastify request validation into a 400 response", async () => {
@@ -229,9 +231,180 @@ describe("common API error handling", () => {
     expect(validationError.details).toEqual([
       {
         path: ["sections", 1, "lines", 2, "subtitleText"],
-        message: "字幕テキストが必要です。"
+        message: "保存するプロジェクトデータが不正です。"
       }
     ]);
+  });
+
+  it("redacts unsafe Zod issue messages and path segments", async () => {
+    app = buildApp();
+    const zodSecret = "# INPUT_MATERIAL_SENTINEL\\n資料本文";
+    app.get("/api/zod-sensitive", async () => {
+      z
+        .object({})
+        .superRefine((_value, context) => {
+          context.addIssue({
+            code: "custom",
+            path: [
+              "/opt/subdub/projects/example/project.json",
+              "/mnt/data/source.md",
+              "/root/private-data/project.json",
+              "\\\\server\\share\\project.json",
+              zodSecret,
+              "sections",
+              0
+            ],
+            message: zodSecret
+          });
+        })
+        .parse({});
+      return createApiSuccessResponse({ ok: true });
+    });
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/api/zod-sensitive"
+    });
+
+    expect(response.statusCode).toBe(422);
+    const error = parseApiError(response);
+    expect(error.details).toEqual([
+      {
+        path: [
+          "[redacted]",
+          "[redacted]",
+          "[redacted]",
+          "[redacted]",
+          "[redacted]",
+          "sections",
+          0
+        ],
+        message: "リクエストの入力内容が不正です。"
+      }
+    ]);
+    expect(response.body).not.toContain(zodSecret);
+    expect(response.body).not.toContain("INPUT_MATERIAL_SENTINEL");
+    expect(response.body).not.toContain("/opt");
+    expect(response.body).not.toContain("/mnt");
+    expect(response.body).not.toContain("/root");
+    expect(response.body).not.toContain("server");
+  });
+
+  it("redacts unsafe repository issue messages and path segments", async () => {
+    app = buildApp();
+    const repositorySecret = "UNSAFE_REPOSITORY_SOURCE_MATERIAL_SENTINEL";
+    app.get("/api/project-sensitive-details", async () => {
+      throw new ProjectRepositoryError(
+        "PROJECT_CANDIDATE_VALIDATION_FAILED",
+        422,
+        "internal validation detail",
+        [
+          {
+            path: [
+              "/opt/subdub/projects/example/project.json",
+              "/mnt/data/source.md",
+              "/root/private-data/project.json",
+              "\\\\server\\share\\project.json",
+              "body",
+              "sections",
+              0,
+              "lines"
+            ],
+            message: repositorySecret
+          }
+        ]
+      );
+    });
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/api/project-sensitive-details"
+    });
+
+    expect(response.statusCode).toBe(422);
+    const error = parseApiError(response);
+    expect(error.details).toEqual([
+      {
+        path: [
+          "[redacted]",
+          "[redacted]",
+          "[redacted]",
+          "[redacted]",
+          "body",
+          "sections",
+          0,
+          "lines"
+        ],
+        message: "保存するプロジェクトデータが不正です。"
+      }
+    ]);
+    expect(response.body).not.toContain(repositorySecret);
+    expect(response.body).not.toContain("/opt");
+    expect(response.body).not.toContain("/mnt");
+    expect(response.body).not.toContain("/root");
+    expect(response.body).not.toContain("server");
+  });
+
+  it("logs server-side project failures with the request ID and code", async () => {
+    const logStream = new PassThrough();
+    const logChunks: string[] = [];
+    logStream.on("data", (chunk: Buffer) => {
+      logChunks.push(chunk.toString("utf8"));
+    });
+    app = buildApp({
+      logger: {
+        level: "error",
+        stream: logStream
+      }
+    });
+    app.get("/api/project-read-failure", async () => {
+      throw new ProjectRepositoryError(
+        "PROJECT_READ_FAILED",
+        500,
+        "internal read failure C:\\private\\project.json"
+      );
+    });
+    app.get("/api/unexpected-logged", async () => {
+      throw new Error("internal unexpected failure");
+    });
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/api/project-read-failure"
+    });
+
+    expect(response.statusCode).toBe(500);
+    const error = parseApiError(response);
+    const unexpectedResponse = await app.inject({
+      method: "GET",
+      url: "/api/unexpected-logged"
+    });
+    expect(unexpectedResponse.statusCode).toBe(500);
+    const unexpectedError = parseApiError(unexpectedResponse);
+    await new Promise<void>((resolve) => {
+      setImmediate(resolve);
+    });
+    const logs = logChunks.join("");
+    expect(logs).toContain(`"requestId":"${error.requestId}"`);
+    expect(logs).toContain('"errorCode":"PROJECT_READ_FAILED"');
+    expect(logs).toContain(`"requestId":"${unexpectedError.requestId}"`);
+    expect(logs).toContain('"errorCode":"INTERNAL_SERVER_ERROR"');
+    expect(logs).not.toContain("internal read failure");
+    logStream.destroy();
+  });
+
+  it("logs every 500-level repository error code", () => {
+    for (const code of [
+      "PROJECT_READ_FAILED",
+      "PROJECT_WRITE_FAILED",
+      "PROJECT_RENAME_FAILED",
+      "PROJECT_UPDATED_VALIDATION_FAILED"
+    ] as const) {
+      expect(
+        mapApiError(new ProjectRepositoryError(code, 500, "internal"))
+          .shouldLog
+      ).toBe(true);
+    }
   });
 
   it("returns a generic 500 without exposing unexpected error data", async () => {
