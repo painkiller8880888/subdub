@@ -22,6 +22,7 @@ export type ProjectRepositoryErrorCode =
   | "PROJECT_UPDATED_VALIDATION_FAILED"
   | "PROJECT_EXPECTED_REVISION_INVALID"
   | "PROJECT_REVISION_CONFLICT"
+  | "PROJECT_ALREADY_EXISTS"
   | "PROJECT_WRITE_FAILED"
   | "PROJECT_RENAME_FAILED";
 
@@ -71,6 +72,11 @@ export class ProjectRepositoryError extends Error {
 }
 
 export interface ProjectRepositoryFileSystem {
+  mkdir(
+    directoryPath: string,
+    options?: { recursive?: boolean }
+  ): Promise<void>;
+  rmdir(directoryPath: string): Promise<void>;
   readFile(filePath: string): Promise<string>;
   writeFile(filePath: string, contents: string): Promise<void>;
   rename(sourcePath: string, destinationPath: string): Promise<void>;
@@ -81,6 +87,7 @@ export interface ProjectRepositoryFileSystem {
 export type ProjectRepositoryOptions = {
   workspaceRoot: string;
   fileSystem?: Partial<ProjectRepositoryFileSystem>;
+  now?: () => Date;
 };
 
 type ResolvedProjectPaths = {
@@ -88,7 +95,16 @@ type ResolvedProjectPaths = {
   readonly projectFilePath: string;
 };
 
+type ResolvedCreateProjectPaths = ResolvedProjectPaths & {
+  readonly managementRootPath: string;
+  readonly temporaryDirectoryPath: string;
+};
+
 const defaultFileSystem: ProjectRepositoryFileSystem = {
+  mkdir: async (directoryPath, options) => {
+    await fs.mkdir(directoryPath, options);
+  },
+  rmdir: (directoryPath) => fs.rmdir(directoryPath),
   readFile: (filePath) => fs.readFile(filePath, { encoding: "utf8" }),
   writeFile: (filePath, contents) =>
     fs.writeFile(filePath, contents, {
@@ -245,6 +261,14 @@ function revisionConflictError(): ProjectRepositoryError {
   );
 }
 
+function projectAlreadyExistsError(): ProjectRepositoryError {
+  return new ProjectRepositoryError(
+    "PROJECT_ALREADY_EXISTS",
+    409,
+    "The project already exists."
+  );
+}
+
 function writeFailedError(): ProjectRepositoryError {
   return new ProjectRepositoryError(
     "PROJECT_WRITE_FAILED",
@@ -261,14 +285,21 @@ function renameFailedError(): ProjectRepositoryError {
   );
 }
 
+function isExistingDestinationError(error: unknown): boolean {
+  const code = getFileSystemErrorCode(error);
+  return code === "EEXIST" || code === "ENOTEMPTY" || code === "EISDIR";
+}
+
 export class ProjectRepository {
   private readonly workspaceRoot: string;
   private readonly fileSystem: ProjectRepositoryFileSystem;
+  private readonly now: () => Date;
 
   constructor(options: ProjectRepositoryOptions | string) {
     if (typeof options === "string") {
       this.workspaceRoot = path.resolve(options);
       this.fileSystem = defaultFileSystem;
+      this.now = () => new Date();
       return;
     }
 
@@ -277,12 +308,36 @@ export class ProjectRepository {
       ...defaultFileSystem,
       ...options.fileSystem
     };
+    this.now = options.now ?? (() => new Date());
   }
 
   async read(projectId: unknown): Promise<VideoProject> {
     const safeProjectId = this.validateProjectId(projectId);
     const paths = await this.resolveProjectPaths(safeProjectId);
     return this.readProjectWithExpectedId(safeProjectId, paths);
+  }
+
+  async create(candidate: unknown): Promise<VideoProject> {
+    const candidateResult = videoProjectSchema.safeParse(candidate);
+    if (!candidateResult.success) {
+      throw candidateValidationFailedError(
+        validationIssues(candidateResult.error)
+      );
+    }
+
+    if (candidateResult.data.revision !== 0) {
+      throw candidateValidationFailedError([
+        {
+          path: ["revision"],
+          message: "a new project must start at revision 0"
+        }
+      ]);
+    }
+
+    const projectId = this.validateProjectId(candidateResult.data.metadata.id);
+    return this.withSaveLock(projectId, () =>
+      this.createUnlocked(projectId, candidateResult.data)
+    );
   }
 
   async save(
@@ -335,7 +390,7 @@ export class ProjectRepository {
         ...candidateResult.data.metadata,
         id: currentProject.metadata.id,
         createdAt: currentProject.metadata.createdAt,
-        updatedAt: new Date().toISOString()
+        updatedAt: this.now().toISOString()
       }
     };
     const updatedProjectResult = videoProjectSchema.safeParse(
@@ -377,6 +432,73 @@ export class ProjectRepository {
     }
 
     return updatedProjectResult.data;
+  }
+
+  private async createUnlocked(
+    projectId: string,
+    project: VideoProject
+  ): Promise<VideoProject> {
+    const paths = await this.resolveCreateProjectPaths(projectId);
+    const serializedProject = `${JSON.stringify(project, null, 2)}\n`;
+    const temporaryFilePath = path.join(
+      paths.temporaryDirectoryPath,
+      "project.json"
+    );
+    let temporaryDirectoryCreated = false;
+
+    try {
+      try {
+        await this.fileSystem.mkdir(paths.temporaryDirectoryPath, {
+          recursive: false
+        });
+      } catch {
+        throw writeFailedError();
+      }
+      temporaryDirectoryCreated = true;
+
+      let resolvedTemporaryDirectoryPath: string;
+      try {
+        resolvedTemporaryDirectoryPath = await this.fileSystem.realpath(
+          paths.temporaryDirectoryPath
+        );
+      } catch {
+        throw writeFailedError();
+      }
+      this.assertInsideManagementRoot(
+        paths.managementRootPath,
+        resolvedTemporaryDirectoryPath
+      );
+
+      try {
+        await this.fileSystem.writeFile(temporaryFilePath, serializedProject);
+      } catch {
+        throw writeFailedError();
+      }
+
+      try {
+        await this.fileSystem.rename(
+          paths.temporaryDirectoryPath,
+          paths.projectDirectoryPath
+        );
+      } catch (error) {
+        if (
+          isExistingDestinationError(error) ||
+          (await this.projectDirectoryExists(paths))
+        ) {
+          throw projectAlreadyExistsError();
+        }
+        throw renameFailedError();
+      }
+
+      return project;
+    } finally {
+      if (temporaryDirectoryCreated) {
+        await this.removeTemporaryDirectory(
+          paths.temporaryDirectoryPath,
+          temporaryFilePath
+        );
+      }
+    }
   }
 
   private validateProjectId(projectId: unknown): string {
@@ -450,6 +572,90 @@ export class ProjectRepository {
       projectDirectoryPath,
       projectFilePath
     };
+  }
+
+  private async resolveCreateProjectPaths(
+    safeProjectId: string
+  ): Promise<ResolvedCreateProjectPaths> {
+    try {
+      await this.fileSystem.mkdir(this.workspaceRoot, { recursive: true });
+    } catch {
+      throw writeFailedError();
+    }
+
+    const managementRootPath = await this.resolveExistingPath(
+      this.workspaceRoot
+    );
+    if (managementRootPath === null) {
+      throw writeFailedError();
+    }
+
+    const projectsPath = path.resolve(this.workspaceRoot, "projects");
+    try {
+      await this.fileSystem.mkdir(projectsPath, { recursive: true });
+    } catch {
+      throw writeFailedError();
+    }
+
+    const resolvedProjectsPath = await this.resolveExistingPath(projectsPath);
+    if (resolvedProjectsPath === null) {
+      throw writeFailedError();
+    }
+    this.assertInsideManagementRoot(
+      managementRootPath,
+      resolvedProjectsPath
+    );
+
+    const projectDirectoryPath = path.resolve(projectsPath, safeProjectId);
+    if (!isPathInside(this.workspaceRoot, projectDirectoryPath)) {
+      throw invalidProjectPathError();
+    }
+
+    const resolvedProjectDirectoryPath = await this.resolveExistingPath(
+      projectDirectoryPath
+    );
+    if (resolvedProjectDirectoryPath !== null) {
+      this.assertInsideManagementRoot(
+        managementRootPath,
+        resolvedProjectDirectoryPath
+      );
+      throw projectAlreadyExistsError();
+    }
+
+    const temporaryDirectoryPath = path.join(
+      projectsPath,
+      `.subdub-project-${safeProjectId}.${randomUUID()}.tmp`
+    );
+
+    return {
+      projectDirectoryPath,
+      projectFilePath: path.join(projectDirectoryPath, "project.json"),
+      managementRootPath,
+      temporaryDirectoryPath
+    };
+  }
+
+  private async projectDirectoryExists(
+    paths: ResolvedCreateProjectPaths
+  ): Promise<boolean> {
+    try {
+      const resolvedProjectDirectoryPath = await this.fileSystem.realpath(
+        paths.projectDirectoryPath
+      );
+      this.assertInsideManagementRoot(
+        paths.managementRootPath,
+        resolvedProjectDirectoryPath
+      );
+      return true;
+    } catch (error) {
+      if (isMissingPathError(error)) {
+        return false;
+      }
+      if (error instanceof ProjectRepositoryError) {
+        throw error;
+      }
+      throw renameFailedError();
+    }
   }
 
   private async withSaveLock<T>(
@@ -539,6 +745,18 @@ export class ProjectRepository {
       await this.fileSystem.unlink(filePath);
     } catch {
       // The original project is more important than a cleanup error.
+    }
+  }
+
+  private async removeTemporaryDirectory(
+    directoryPath: string,
+    filePath: string
+  ): Promise<void> {
+    await this.removeTemporaryFile(filePath);
+    try {
+      await this.fileSystem.rmdir(directoryPath);
+    } catch {
+      // The directory may already have been renamed or removed.
     }
   }
 }

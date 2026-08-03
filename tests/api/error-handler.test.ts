@@ -296,6 +296,13 @@ describe("common API error handling", () => {
         "internal conflict detail"
       );
     });
+    app.get("/api/project-already-exists", async () => {
+      throw new ProjectRepositoryError(
+        "PROJECT_ALREADY_EXISTS",
+        409,
+        "internal duplicate detail"
+      );
+    });
     app.get("/api/project-validation", async () => {
       throw new ProjectRepositoryError(
         "PROJECT_CANDIDATE_VALIDATION_FAILED",
@@ -328,6 +335,15 @@ describe("common API error handling", () => {
     expect(conflictResponse.statusCode).toBe(409);
     expect(parseApiError(conflictResponse).code).toBe(
       "PROJECT_REVISION_CONFLICT"
+    );
+
+    const alreadyExistsResponse = await app.inject({
+      method: "GET",
+      url: "/api/project-already-exists"
+    });
+    expect(alreadyExistsResponse.statusCode).toBe(409);
+    expect(parseApiError(alreadyExistsResponse).code).toBe(
+      "PROJECT_ALREADY_EXISTS"
     );
 
     const validationResponse = await app.inject({

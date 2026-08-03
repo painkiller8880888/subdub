@@ -1,0 +1,39 @@
+# Generated and local-only data.
+node_modules/
+dist/
+coverage/
+.vite/
+.pnpm-store/
+projects/
+library/
+public/shared-assets/
+playwright-report/
+test-results/
+
+# Existing documentation and lock metadata retain their repository layout.
+doc/
+README.md
+pnpm-lock.yaml
+
+# Existing files are intentionally excluded until they receive a separate,
+# scoped formatting change. New files in these directories remain checked.
+scripts/dev.mjs
+scripts/process-utils.mjs
+src/api/errors/api-error.ts
+src/api/server.ts
+src/db/client.ts
+src/db/migrations/meta/_journal.json
+src/schema/api.ts
+src/schema/primitives.ts
+src/schema/render-manifest.ts
+src/schema/video-project.ts
+src/web/App.tsx
+src/web/styles.css
+tests/api/error-handler.test.ts
+tests/api/server.test.ts
+tests/app/project-repository.test.ts
+tests/db/sqlite.test.ts
+tests/fixtures/video-project.ts
+tests/schema/api.test.ts
+tests/schema/render-manifest.test.ts
+tests/schema/video-project.test.ts

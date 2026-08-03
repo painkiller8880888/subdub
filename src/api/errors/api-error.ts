@@ -73,6 +73,7 @@ const projectRepositoryMessages: Record<
     "更新後のプロジェクトデータを検証できませんでした。",
   PROJECT_EXPECTED_REVISION_INVALID: "expectedRevisionが不正です。",
   PROJECT_REVISION_CONFLICT: "プロジェクトが別の内容へ更新されています。",
+  PROJECT_ALREADY_EXISTS: "プロジェクトは既に存在します。",
   PROJECT_WRITE_FAILED: "プロジェクトを保存できませんでした。",
   PROJECT_RENAME_FAILED: "プロジェクトを保存できませんでした。"
 };

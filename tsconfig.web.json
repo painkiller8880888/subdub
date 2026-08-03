@@ -9,5 +9,10 @@
     "noEmit": true,
     "types": ["node", "vite/client"]
   },
-  "include": ["vite.config.ts", "src/web/**/*.ts", "src/web/**/*.tsx"]
+  "include": [
+    "vite.config.ts",
+    "src/schema/**/*.ts",
+    "src/web/**/*.ts",
+    "src/web/**/*.tsx"
+  ]
 }
