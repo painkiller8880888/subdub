@@ -470,6 +470,48 @@ describe("ProjectRepository", () => {
     );
   });
 
+  it("reports temporary directory creation failures and allows the ID to be retried", async () => {
+    await fs.rm(projectDirectory, { recursive: true, force: true });
+    const candidate = createProjectCandidate();
+    let temporaryDirectoryMkdirAttempts = 0;
+    let writeFileAttempts = 0;
+    const repository = new ProjectRepository({
+      workspaceRoot,
+      fileSystem: {
+        mkdir: async (directoryPath, options) => {
+          if (path.basename(directoryPath).startsWith(".subdub-project-")) {
+            temporaryDirectoryMkdirAttempts += 1;
+            throw new Error("injected temporary directory mkdir failure");
+          }
+          await fs.mkdir(directoryPath, options);
+        },
+        writeFile: async (filePath, contents) => {
+          writeFileAttempts += 1;
+          await fs.writeFile(filePath, contents, {
+            encoding: "utf8",
+            flag: "wx"
+          });
+        }
+      }
+    });
+
+    const error = await expectRepositoryError(
+      () => repository.create(candidate),
+      "PROJECT_WRITE_FAILED",
+      500
+    );
+
+    expectSafeExternalError(error);
+    expect(temporaryDirectoryMkdirAttempts).toBe(1);
+    expect(writeFileAttempts).toBe(0);
+    await expect(fs.stat(projectDirectory)).rejects.toBeDefined();
+    expect(await fs.readdir(path.join(workspaceRoot, "projects"))).toEqual([]);
+
+    await expect(new ProjectRepository(workspaceRoot).create(candidate)).resolves.toEqual(
+      candidate
+    );
+  });
+
   it("reports a duplicate create as a conflict without changing the existing bytes", async () => {
     await fs.rm(projectDirectory, { recursive: true, force: true });
     const candidate = createProjectCandidate();

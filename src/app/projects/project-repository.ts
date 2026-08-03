@@ -447,9 +447,13 @@ export class ProjectRepository {
     let temporaryDirectoryCreated = false;
 
     try {
-      await this.fileSystem.mkdir(paths.temporaryDirectoryPath, {
-        recursive: false
-      });
+      try {
+        await this.fileSystem.mkdir(paths.temporaryDirectoryPath, {
+          recursive: false
+        });
+      } catch {
+        throw writeFailedError();
+      }
       temporaryDirectoryCreated = true;
 
       let resolvedTemporaryDirectoryPath: string;
