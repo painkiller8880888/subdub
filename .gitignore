@@ -13,6 +13,7 @@ coverage/
 # ローカル実行時データ（各拠点で個別に生成される。同期不要）
 library/*.sqlite
 library/*.sqlite-*
+library/*.sqlite.*
 library/media/
 library/thumbnails/
 projects/

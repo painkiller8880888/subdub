@@ -8,5 +8,5 @@
     "noEmit": true,
     "types": ["node"]
   },
-  "include": ["src/api/**/*.ts"]
+  "include": ["src/api/**/*.ts", "src/db/**/*.ts"]
 }

@@ -8,5 +8,5 @@
     "noEmit": true,
     "types": ["node", "vitest"]
   },
-  "include": ["tests/**/*.ts", "src/api/**/*.ts"]
+  "include": ["tests/**/*.ts", "src/api/**/*.ts", "src/db/**/*.ts"]
 }

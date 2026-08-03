@@ -1,4 +1,4 @@
-import { rm } from "node:fs/promises";
+import { cp, rm } from "node:fs/promises";
 
 import { runPnpm } from "./process-utils.mjs";
 
@@ -20,3 +20,9 @@ for (const args of commands) {
     process.exit(exitCode);
   }
 }
+
+await cp(
+  new URL("../src/db/migrations/", import.meta.url),
+  new URL("../dist/db/migrations/", import.meta.url),
+  { recursive: true }
+);
