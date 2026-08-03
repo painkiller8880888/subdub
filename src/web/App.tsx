@@ -1,18 +1,30 @@
 import { useQuery } from "@tanstack/react-query";
 import { Route, Routes } from "react-router";
 
-type HealthResponse = {
-  status: string;
-};
+import {
+  ApiClientError,
+  ApiClientProtocolError,
+  fetchApi
+} from "./api/client";
+import {
+  healthResponseSchema,
+  type HealthResponse
+} from "../schema/api";
 
 async function fetchHealth(): Promise<HealthResponse> {
-  const response = await fetch("/api/health");
+  return fetchApi("/api/health", healthResponseSchema);
+}
 
-  if (!response.ok) {
-    throw new Error(`API request failed with status ${response.status}.`);
+function getHealthErrorMessage(error: unknown): string {
+  if (error instanceof ApiClientError) {
+    return `APIエラー: ${error.code} (HTTP ${error.status})`;
   }
 
-  return (await response.json()) as HealthResponse;
+  if (error instanceof ApiClientProtocolError) {
+    return "APIとの通信または応答形式の確認に失敗しました。";
+  }
+
+  return "API接続に失敗しました。Fastifyが起動しているか確認してください。";
 }
 
 function HomePage() {
@@ -24,9 +36,9 @@ function HomePage() {
 
   let healthMessage = "API接続を確認中…";
   if (healthQuery.isError) {
-    healthMessage = "API接続に失敗しました。Fastifyが起動しているか確認してください。";
+    healthMessage = getHealthErrorMessage(healthQuery.error);
   } else if (healthQuery.isSuccess) {
-    healthMessage = `API接続: 正常 (${healthQuery.data.status})`;
+    healthMessage = `API接続: 正常 (${healthQuery.data.data.status})`;
   }
 
   return (

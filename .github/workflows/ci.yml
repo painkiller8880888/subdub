@@ -38,6 +38,13 @@ jobs:
         run: |
           set -euo pipefail
 
+          assert_health_response() {
+            node -e '
+              const value = JSON.parse(process.argv[1]);
+              if (value?.data?.status !== "ok") process.exit(1);
+            ' "$1"
+          }
+
           setsid pnpm dev > "$RUNNER_TEMP/subdub-dev.log" 2>&1 &
           dev_pid=$!
 
@@ -51,9 +58,9 @@ jobs:
             if web_html="$(curl --fail --silent http://127.0.0.1:5173/)" \
               && grep -q "subdub" <<< "$web_html" \
               && health_json="$(curl --fail --silent http://127.0.0.1:5173/api/health)" \
-              && [[ "$health_json" == '{"status":"ok"}' ]] \
+              && assert_health_response "$health_json" \
               && direct_health="$(curl --fail --silent http://127.0.0.1:3000/api/health)" \
-              && [[ "$direct_health" == '{"status":"ok"}' ]]; then
+              && assert_health_response "$direct_health"; then
               exit 0
             fi
 
@@ -68,6 +75,13 @@ jobs:
         run: |
           set -euo pipefail
 
+          assert_health_response() {
+            node -e '
+              const value = JSON.parse(process.argv[1]);
+              if (value?.data?.status !== "ok") process.exit(1);
+            ' "$1"
+          }
+
           setsid pnpm start > "$RUNNER_TEMP/subdub-start.log" 2>&1 &
           start_pid=$!
 
@@ -81,7 +95,7 @@ jobs:
             if web_html="$(curl --fail --silent http://127.0.0.1:3000/)" \
               && grep -q "subdub" <<< "$web_html" \
               && health_json="$(curl --fail --silent http://127.0.0.1:3000/api/health)" \
-              && [[ "$health_json" == '{"status":"ok"}' ]]; then
+              && assert_health_response "$health_json"; then
               exit 0
             fi
 
