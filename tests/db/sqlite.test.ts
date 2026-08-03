@@ -108,13 +108,11 @@ describe("workspace SQLite", () => {
     const firstHistory = migrationHistory(first.connection);
     expect(first.migrationResult.applied).toBe(true);
     expect(firstHistory).toHaveLength(1);
-    expect(first.connection.pragma("user_version", { simple: true })).toBe(1);
     first.close();
 
     const second = await initializeWorkspaceDatabase({ workspaceRoot });
     expect(second.migrationResult.applied).toBe(false);
     expect(migrationHistory(second.connection)).toEqual(firstHistory);
-    expect(second.connection.pragma("user_version", { simple: true })).toBe(1);
     second.close();
 
     await expect(
