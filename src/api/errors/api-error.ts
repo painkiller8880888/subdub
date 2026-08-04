@@ -52,10 +52,10 @@ const genericInternalMessage = "サーバーで予期しないエラーが発生
 const redactedPathSegment = "[redacted]";
 const safeFieldPathSegmentPattern = /^[a-z][A-Za-z0-9_]{0,63}$/;
 
-const projectRepositoryMessages: Record<
+const projectRepositoryMessages: Partial<Record<
   ProjectRepositoryErrorCode,
   string
-> = {
+>> = {
   PROJECT_ID_INVALID: "プロジェクトIDが不正です。",
   PROJECT_PATH_INVALID: "プロジェクトの保存先が不正です。",
   PROJECT_NOT_FOUND: "プロジェクトが見つかりません。",
@@ -364,7 +364,10 @@ export function mapApiError(error: unknown): MappedApiError {
     return {
       code: error.code,
       status,
-      message: error.publicMessage ?? projectRepositoryMessages[error.code],
+      message:
+        error.publicMessage ??
+        projectRepositoryMessages[error.code] ??
+        genericInternalMessage,
       details: mapProjectValidationDetails(error.code, error.issues),
       shouldLog: status >= 500
     };

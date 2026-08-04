@@ -1,10 +1,11 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { promises as fs, type Dirent } from "node:fs";
 import * as path from "node:path";
 
 import {
   idSchema,
   nonNegativeIntegerSchema,
+  projectBriefSchema,
   videoProjectSchema,
   type VideoProject
 } from "../../schema/index.js";
@@ -24,7 +25,11 @@ export type ProjectRepositoryErrorCode =
   | "PROJECT_REVISION_CONFLICT"
   | "PROJECT_ALREADY_EXISTS"
   | "PROJECT_WRITE_FAILED"
-  | "PROJECT_RENAME_FAILED";
+  | "PROJECT_RENAME_FAILED"
+  | "PROJECT_SOURCE_NOT_FOUND"
+  | "PROJECT_SOURCE_READ_FAILED"
+  | "PROJECT_SOURCE_HASH_MISMATCH"
+  | "PROJECT_ROLLBACK_FAILED";
 
 export type ProjectValidationIssue = {
   readonly path: ReadonlyArray<string | number>;
@@ -97,11 +102,19 @@ export type ProjectRepositoryOptions = {
 type ResolvedProjectPaths = {
   readonly projectDirectoryPath: string;
   readonly projectFilePath: string;
+  readonly sourceDirectoryPath: string;
+  readonly sourceFilePath: string;
 };
 
 type ResolvedCreateProjectPaths = ResolvedProjectPaths & {
   readonly managementRootPath: string;
   readonly temporaryDirectoryPath: string;
+};
+
+export type ProjectSourceDocument = {
+  readonly markdown: string;
+  readonly sha256: string;
+  readonly revision: number;
 };
 
 const defaultFileSystem: ProjectRepositoryFileSystem = {
@@ -291,6 +304,46 @@ function renameFailedError(): ProjectRepositoryError {
   );
 }
 
+function sourceNotFoundError(): ProjectRepositoryError {
+  return new ProjectRepositoryError(
+    "PROJECT_SOURCE_NOT_FOUND",
+    422,
+    "The project source is missing.",
+    [],
+    "Project source is unavailable."
+  );
+}
+
+function sourceReadFailedError(): ProjectRepositoryError {
+  return new ProjectRepositoryError(
+    "PROJECT_SOURCE_READ_FAILED",
+    500,
+    "The project source could not be read.",
+    [],
+    "Project source could not be read."
+  );
+}
+
+function sourceHashMismatchError(): ProjectRepositoryError {
+  return new ProjectRepositoryError(
+    "PROJECT_SOURCE_HASH_MISMATCH",
+    422,
+    "The project source hash does not match the project data.",
+    [],
+    "Project source integrity could not be verified."
+  );
+}
+
+function rollbackFailedError(): ProjectRepositoryError {
+  return new ProjectRepositoryError(
+    "PROJECT_ROLLBACK_FAILED",
+    500,
+    "The project save could not be rolled back safely.",
+    [],
+    "Project save rollback failed."
+  );
+}
+
 function isExistingDestinationError(error: unknown): boolean {
   const code = getFileSystemErrorCode(error);
   return code === "EEXIST" || code === "ENOTEMPTY" || code === "EISDIR";
@@ -300,6 +353,10 @@ function isProjectTemporaryDirectoryName(entryName: string): boolean {
   return (
     entryName.startsWith(".subdub-project-") && entryName.endsWith(".tmp")
   );
+}
+
+function sha256(contents: string): string {
+  return createHash("sha256").update(contents, "utf8").digest("hex");
 }
 
 function projectListEntryError(
@@ -340,6 +397,19 @@ export class ProjectRepository {
     const safeProjectId = this.validateProjectId(projectId);
     const paths = await this.resolveProjectPaths(safeProjectId);
     return this.readProjectWithExpectedId(safeProjectId, paths);
+  }
+
+  async readSource(projectId: unknown): Promise<ProjectSourceDocument> {
+    const safeProjectId = this.validateProjectId(projectId);
+    const paths = await this.resolveProjectPaths(safeProjectId);
+    const project = await this.readProjectWithExpectedId(safeProjectId, paths);
+    const markdown = await this.readValidatedSource(paths, project);
+
+    return {
+      markdown,
+      sha256: sha256(markdown),
+      revision: project.revision
+    };
   }
 
   async list(): Promise<VideoProject[]> {
@@ -429,7 +499,13 @@ export class ProjectRepository {
         projects.push(
           await this.readProjectWithExpectedId(projectId, {
             projectDirectoryPath,
-            projectFilePath
+            projectFilePath,
+            sourceDirectoryPath: path.join(projectDirectoryPath, "source"),
+            sourceFilePath: path.join(
+              projectDirectoryPath,
+              "source",
+              "source.md"
+            )
           })
         );
       } catch (error) {
@@ -478,6 +554,231 @@ export class ProjectRepository {
     return this.withSaveLock(safeProjectId, () =>
       this.saveUnlocked(safeProjectId, candidate, expectedRevision)
     );
+  }
+
+  async saveSource(
+    projectId: unknown,
+    markdown: unknown,
+    expectedRevision: unknown
+  ): Promise<VideoProject> {
+    const safeProjectId = this.validateProjectId(projectId);
+    return this.withSaveLock(safeProjectId, () =>
+      this.saveSourceUnlocked(safeProjectId, markdown, expectedRevision)
+    );
+  }
+
+  async saveBrief(
+    projectId: unknown,
+    brief: unknown,
+    expectedRevision: unknown
+  ): Promise<VideoProject> {
+    const safeProjectId = this.validateProjectId(projectId);
+    return this.withSaveLock(safeProjectId, () =>
+      this.saveBriefUnlocked(safeProjectId, brief, expectedRevision)
+    );
+  }
+
+  private async saveBriefUnlocked(
+    projectId: string,
+    brief: unknown,
+    expectedRevision: unknown
+  ): Promise<VideoProject> {
+    const paths = await this.resolveProjectPaths(projectId);
+    const currentProject = await this.readProjectWithExpectedId(
+      projectId,
+      paths
+    );
+    const briefResult = projectBriefSchema.safeParse(brief);
+    if (!briefResult.success) {
+      throw candidateValidationFailedError(validationIssues(briefResult.error));
+    }
+
+    const expectedRevisionResult =
+      nonNegativeIntegerSchema.safeParse(expectedRevision);
+    if (!expectedRevisionResult.success) {
+      throw expectedRevisionInvalidError();
+    }
+    if (expectedRevisionResult.data !== currentProject.revision) {
+      throw revisionConflictError();
+    }
+    await this.readValidatedSource(paths, currentProject);
+
+    const updatedProjectResult = videoProjectSchema.safeParse({
+      ...currentProject,
+      revision: currentProject.revision + 1,
+      brief: briefResult.data,
+      metadata: {
+        ...currentProject.metadata,
+        updatedAt: this.now().toISOString()
+      }
+    });
+    if (!updatedProjectResult.success) {
+      throw updatedValidationFailedError(
+        validationIssues(updatedProjectResult.error)
+      );
+    }
+
+    return this.writeProjectCandidate(paths, updatedProjectResult.data);
+  }
+
+  private async saveSourceUnlocked(
+    projectId: string,
+    markdown: unknown,
+    expectedRevision: unknown
+  ): Promise<VideoProject> {
+    const paths = await this.resolveProjectPaths(projectId);
+    const currentProject = await this.readProjectWithExpectedId(
+      projectId,
+      paths
+    );
+    if (typeof markdown !== "string") {
+      throw candidateValidationFailedError([
+        { path: ["markdown"], message: "markdown must be a string" }
+      ]);
+    }
+
+    const expectedRevisionResult =
+      nonNegativeIntegerSchema.safeParse(expectedRevision);
+    if (!expectedRevisionResult.success) {
+      throw expectedRevisionInvalidError();
+    }
+    if (expectedRevisionResult.data !== currentProject.revision) {
+      throw revisionConflictError();
+    }
+
+    await this.readValidatedSource(paths, currentProject);
+    const updatedProjectResult = videoProjectSchema.safeParse({
+      ...currentProject,
+      revision: currentProject.revision + 1,
+      source: {
+        ...currentProject.source,
+        sha256: sha256(markdown)
+      },
+      metadata: {
+        ...currentProject.metadata,
+        updatedAt: this.now().toISOString()
+      }
+    });
+    if (!updatedProjectResult.success) {
+      throw updatedValidationFailedError(
+        validationIssues(updatedProjectResult.error)
+      );
+    }
+
+    return this.writeSourceAndProjectFiles(
+      paths,
+      markdown,
+      updatedProjectResult.data
+    );
+  }
+
+  private async writeProjectCandidate(
+    paths: ResolvedProjectPaths,
+    project: VideoProject
+  ): Promise<VideoProject> {
+    const serializedProject = `${JSON.stringify(project, null, 2)}\n`;
+    const temporaryFilePath = path.join(
+      paths.projectDirectoryPath,
+      `project.json.${randomUUID()}.tmp`
+    );
+
+    try {
+      await this.fileSystem.writeFile(temporaryFilePath, serializedProject);
+    } catch (error) {
+      if (getFileSystemErrorCode(error) !== "EEXIST") {
+        await this.removeTemporaryFile(temporaryFilePath);
+      }
+      throw writeFailedError();
+    }
+
+    try {
+      await this.fileSystem.rename(
+        temporaryFilePath,
+        paths.projectFilePath
+      );
+    } catch {
+      await this.removeTemporaryFile(temporaryFilePath);
+      throw renameFailedError();
+    }
+
+    return project;
+  }
+
+  private async writeSourceAndProjectFiles(
+    paths: ResolvedProjectPaths,
+    markdown: string,
+    project: VideoProject
+  ): Promise<VideoProject> {
+    const saveToken = randomUUID();
+    const sourceTemporaryFilePath = path.join(
+      paths.projectDirectoryPath,
+      `source.md.${saveToken}.tmp`
+    );
+    const projectTemporaryFilePath = path.join(
+      paths.projectDirectoryPath,
+      `project.json.${saveToken}.tmp`
+    );
+    const sourceBackupFilePath = path.join(
+      paths.projectDirectoryPath,
+      `source.md.${saveToken}.bak`
+    );
+    const projectBackupFilePath = path.join(
+      paths.projectDirectoryPath,
+      `project.json.${saveToken}.bak`
+    );
+
+    try {
+      await this.fileSystem.writeFile(sourceTemporaryFilePath, markdown);
+      await this.fileSystem.writeFile(
+        projectTemporaryFilePath,
+        `${JSON.stringify(project, null, 2)}\n`
+      );
+    } catch {
+      await this.removeTemporaryFile(sourceTemporaryFilePath);
+      await this.removeTemporaryFile(projectTemporaryFilePath);
+      throw writeFailedError();
+    }
+
+    let projectBackupReady = false;
+    let sourceBackupReady = false;
+    try {
+      await this.fileSystem.rename(
+        paths.projectFilePath,
+        projectBackupFilePath
+      );
+      projectBackupReady = true;
+      await this.fileSystem.rename(paths.sourceFilePath, sourceBackupFilePath);
+      sourceBackupReady = true;
+      await this.fileSystem.rename(
+        sourceTemporaryFilePath,
+        paths.sourceFilePath
+      );
+      await this.fileSystem.rename(
+        projectTemporaryFilePath,
+        paths.projectFilePath
+      );
+    } catch {
+      const sourceRollbackSucceeded = await this.restoreBackup(
+        sourceBackupFilePath,
+        paths.sourceFilePath,
+        sourceBackupReady
+      );
+      const projectRollbackSucceeded = await this.restoreBackup(
+        projectBackupFilePath,
+        paths.projectFilePath,
+        projectBackupReady
+      );
+      await this.removeTemporaryFile(sourceTemporaryFilePath);
+      await this.removeTemporaryFile(projectTemporaryFilePath);
+      if (!sourceRollbackSucceeded || !projectRollbackSucceeded) {
+        throw rollbackFailedError();
+      }
+      throw renameFailedError();
+    }
+
+    await this.removeTemporaryFile(sourceBackupFilePath);
+    await this.removeTemporaryFile(projectBackupFilePath);
+    return project;
   }
 
   private async saveUnlocked(
@@ -731,7 +1032,13 @@ export class ProjectRepository {
 
     return {
       projectDirectoryPath,
-      projectFilePath
+      projectFilePath,
+      sourceDirectoryPath: path.join(projectDirectoryPath, "source"),
+      sourceFilePath: path.join(
+        projectDirectoryPath,
+        "source",
+        "source.md"
+      )
     };
   }
 
@@ -791,6 +1098,12 @@ export class ProjectRepository {
     return {
       projectDirectoryPath,
       projectFilePath: path.join(projectDirectoryPath, "project.json"),
+      sourceDirectoryPath: path.join(projectDirectoryPath, "source"),
+      sourceFilePath: path.join(
+        projectDirectoryPath,
+        "source",
+        "source.md"
+      ),
       managementRootPath,
       temporaryDirectoryPath
     };
@@ -850,6 +1163,85 @@ export class ProjectRepository {
         return null;
       }
       throw readFailedError();
+    }
+  }
+
+  private async readValidatedSource(
+    paths: ResolvedProjectPaths,
+    project: VideoProject
+  ): Promise<string> {
+    const managementRootPath = await this.resolveExistingPath(
+      this.workspaceRoot
+    );
+    if (managementRootPath === null) {
+      throw sourceNotFoundError();
+    }
+    const resolvedSourceDirectoryPath = await this.resolveExistingPath(
+      paths.sourceDirectoryPath
+    );
+    if (resolvedSourceDirectoryPath === null) {
+      throw sourceNotFoundError();
+    }
+    this.assertInsideManagementRoot(
+      managementRootPath,
+      resolvedSourceDirectoryPath
+    );
+    if (!isPathInside(paths.projectDirectoryPath, resolvedSourceDirectoryPath)) {
+      throw invalidProjectPathError();
+    }
+
+    const resolvedSourceFilePath = await this.resolveExistingPath(
+      paths.sourceFilePath
+    );
+    if (resolvedSourceFilePath === null) {
+      throw sourceNotFoundError();
+    }
+    this.assertInsideManagementRoot(
+      managementRootPath,
+      resolvedSourceFilePath
+    );
+    if (!isPathInside(resolvedSourceDirectoryPath, resolvedSourceFilePath)) {
+      throw invalidProjectPathError();
+    }
+
+    let contents: string;
+    try {
+      contents = await this.fileSystem.readFile(paths.sourceFilePath);
+    } catch (error) {
+      if (isMissingPathError(error)) {
+        throw sourceNotFoundError();
+      }
+      throw sourceReadFailedError();
+    }
+
+    if (sha256(contents) !== project.source.sha256) {
+      throw sourceHashMismatchError();
+    }
+    return contents;
+  }
+
+  private async restoreBackup(
+    backupPath: string,
+    destinationPath: string,
+    backupReady: boolean
+  ): Promise<boolean> {
+    if (!backupReady) {
+      return true;
+    }
+
+    try {
+      await this.fileSystem.unlink(destinationPath);
+    } catch (error) {
+      if (!isMissingPathError(error)) {
+        return false;
+      }
+    }
+
+    try {
+      await this.fileSystem.rename(backupPath, destinationPath);
+      return true;
+    } catch {
+      return false;
     }
   }
 

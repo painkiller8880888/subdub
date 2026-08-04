@@ -1,7 +1,9 @@
 import { randomUUID } from "node:crypto";
 
 import {
+  projectBriefSaveRequestSchema,
   projectCreateRequestSchema,
+  projectSourceSaveRequestSchema,
   projectSummarySchema,
   type ProjectSummary
 } from "../../schema/api.js";
@@ -109,6 +111,28 @@ export class ProjectService {
 
   async read(projectId: unknown): Promise<VideoProject> {
     return this.repository.read(projectId);
+  }
+
+  async readSource(projectId: unknown) {
+    return this.repository.readSource(projectId);
+  }
+
+  async saveSource(projectId: unknown, input: unknown): Promise<VideoProject> {
+    const request = projectSourceSaveRequestSchema.parse(input);
+    return this.repository.saveSource(
+      projectId,
+      request.markdown,
+      request.expectedRevision
+    );
+  }
+
+  async saveBrief(projectId: unknown, input: unknown): Promise<VideoProject> {
+    const request = projectBriefSaveRequestSchema.parse(input);
+    return this.repository.saveBrief(
+      projectId,
+      request.brief,
+      request.expectedRevision
+    );
   }
 }
 

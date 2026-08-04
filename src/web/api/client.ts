@@ -2,12 +2,19 @@ import { type ZodType } from "zod";
 
 import {
   apiErrorResponseSchema,
+  projectBriefSaveRequestSchema,
   projectCreateRequestSchema,
   projectCreateResponseSchema,
   projectDetailResponseSchema,
   projectListResponseSchema,
+  projectMutationResponseSchema,
+  projectSourceReadResponseSchema,
+  projectSourceSaveRequestSchema,
   type ApiErrorDetail,
+  type ProjectBriefSaveRequest,
   type ProjectCreateRequest,
+  type ProjectSourceContent,
+  type ProjectSourceSaveRequest,
   type ProjectSummary
 } from "../../schema/api.js";
 import type { VideoProject } from "../../schema/video-project.js";
@@ -126,6 +133,54 @@ export async function fetchProject(projectId: string): Promise<VideoProject> {
   const response = await fetchApi(
     `/api/projects/${encodeURIComponent(projectId)}`,
     projectDetailResponseSchema
+  );
+  return response.data;
+}
+
+export async function fetchProjectSource(
+  projectId: string
+): Promise<ProjectSourceContent & { revision: number }> {
+  const response = await fetchApi(
+    `/api/projects/${encodeURIComponent(projectId)}/source`,
+    projectSourceReadResponseSchema
+  );
+  return { ...response.data, revision: response.revision };
+}
+
+export async function saveProjectSource(
+  projectId: string,
+  input: ProjectSourceSaveRequest
+): Promise<VideoProject> {
+  const validatedInput = projectSourceSaveRequestSchema.parse(input);
+  const response = await fetchApi(
+    `/api/projects/${encodeURIComponent(projectId)}/source`,
+    projectMutationResponseSchema,
+    {
+      method: "PUT",
+      headers: {
+        "content-type": "application/json"
+      },
+      body: JSON.stringify(validatedInput)
+    }
+  );
+  return response.data;
+}
+
+export async function saveProjectBrief(
+  projectId: string,
+  input: ProjectBriefSaveRequest
+): Promise<VideoProject> {
+  const validatedInput = projectBriefSaveRequestSchema.parse(input);
+  const response = await fetchApi(
+    `/api/projects/${encodeURIComponent(projectId)}/brief`,
+    projectMutationResponseSchema,
+    {
+      method: "PUT",
+      headers: {
+        "content-type": "application/json"
+      },
+      body: JSON.stringify(validatedInput)
+    }
   );
   return response.data;
 }

@@ -32,7 +32,8 @@ try {
     payload: { title: "Build verification project" }
   });
   assert.equal(createResponse.statusCode, 200);
-  const createdProjectId = createResponse.json().data.metadata.id;
+  const created = createResponse.json();
+  const createdProjectId = created.data.metadata.id;
 
   const projectPage = await first.app.inject({
     method: "GET",
@@ -40,6 +41,30 @@ try {
   });
   assert.equal(projectPage.statusCode, 200);
   assert.match(projectPage.headers["content-type"], /^text\/html/);
+
+  const sourceSave = await first.app.inject({
+    method: "PUT",
+    url: `/api/projects/${createdProjectId}/source`,
+    payload: {
+      markdown: "# Build verification\n\nPersisted source",
+      expectedRevision: created.revision
+    }
+  });
+  assert.equal(sourceSave.statusCode, 200);
+  const sourceSaved = sourceSave.json();
+
+  const briefSave = await first.app.inject({
+    method: "PUT",
+    url: `/api/projects/${createdProjectId}/brief`,
+    payload: {
+      brief: {
+        ...created.data.brief,
+        audience: "Build verification audience"
+      },
+      expectedRevision: sourceSaved.revision
+    }
+  });
+  assert.equal(briefSave.statusCode, 200);
 
   await first.app.close();
   assert.equal(first.database.connection.open, false);
@@ -55,6 +80,20 @@ try {
     url: `/api/projects/${createdProjectId}`
   });
   assert.equal(persistedProject.statusCode, 200);
+  assert.equal(
+    persistedProject.json().data.brief.audience,
+    "Build verification audience"
+  );
+
+  const persistedSource = await second.app.inject({
+    method: "GET",
+    url: `/api/projects/${createdProjectId}/source`
+  });
+  assert.equal(persistedSource.statusCode, 200);
+  assert.equal(
+    persistedSource.json().data.markdown,
+    "# Build verification\n\nPersisted source"
+  );
 
   const persistedProjectPage = await second.app.inject({
     method: "GET",
