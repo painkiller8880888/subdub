@@ -1,5 +1,6 @@
 import { getOpenRouterApiKey, type Environment } from "./config.js";
 import { OpenRouterAdapterError, OPENROUTER_ERROR_CODE } from "./errors.js";
+import { OpenRouterHttpClient, type Sleep } from "./http-client.js";
 import {
   openRouterModelsResponseSchema,
   openRouterZdrEndpointsResponseSchema,
@@ -30,8 +31,6 @@ export type ModelListResult = {
   readonly cached: boolean;
 };
 
-type FetchLike = typeof fetch;
-
 type CacheEntry<T> = {
   readonly value: T;
   readonly fetchedAtMs: number;
@@ -41,7 +40,8 @@ type CacheEntry<T> = {
 export type OpenRouterModelServiceOptions = {
   readonly apiKey?: string;
   readonly env?: Environment;
-  readonly fetch?: FetchLike;
+  readonly fetch?: typeof fetch;
+  readonly sleep?: Sleep;
   readonly baseUrl?: string;
   readonly now?: () => Date;
   readonly cacheTtlMs?: number;
@@ -107,11 +107,9 @@ function toCapabilities(
 
 export class OpenRouterModelService {
   private readonly apiKey: string | undefined;
-  private readonly fetchImpl: FetchLike;
-  private readonly baseUrl: string;
+  private readonly httpClient: OpenRouterHttpClient | undefined;
   private readonly now: () => Date;
   private readonly cacheTtlMs: number;
-  private readonly timeoutMs: number;
   private modelCache:
     CacheEntry<readonly OpenRouterModelResponse[]> | undefined;
   private zdrCache: CacheEntry<readonly OpenRouterZdrEndpoint[]> | undefined;
@@ -127,11 +125,18 @@ export class OpenRouterModelService {
         : options.apiKey.trim().length > 0
           ? options.apiKey.trim()
           : undefined;
-    this.fetchImpl = options.fetch ?? globalThis.fetch;
-    this.baseUrl = (options.baseUrl ?? OPENROUTER_BASE_URL).replace(/\/$/, "");
     this.now = options.now ?? (() => new Date());
     this.cacheTtlMs = options.cacheTtlMs ?? MODEL_CACHE_TTL_MS;
-    this.timeoutMs = options.timeoutMs ?? OPENROUTER_REQUEST_TIMEOUT_MS;
+    if (this.apiKey !== undefined) {
+      this.httpClient = new OpenRouterHttpClient({
+        apiKey: this.apiKey,
+        baseUrl: options.baseUrl ?? OPENROUTER_BASE_URL,
+        fetch: options.fetch,
+        sleep: options.sleep,
+        now: this.now,
+        timeoutMs: options.timeoutMs ?? OPENROUTER_REQUEST_TIMEOUT_MS
+      });
+    }
   }
 
   async listModels(
@@ -260,37 +265,12 @@ export class OpenRouterModelService {
   }
 
   private async fetchJson(path: string): Promise<unknown> {
-    const apiKey = this.requireApiKey();
-    let response: Response;
-    try {
-      response = await this.fetchImpl(`${this.baseUrl}${path}`, {
-        method: "GET",
-        signal: AbortSignal.timeout(this.timeoutMs),
-        headers: {
-          Accept: "application/json",
-          Authorization: `Bearer ${apiKey}`
-        }
-      });
-    } catch {
-      throw new OpenRouterAdapterError(OPENROUTER_ERROR_CODE.unavailable);
+    this.requireApiKey();
+    if (this.httpClient === undefined) {
+      throw new OpenRouterAdapterError(OPENROUTER_ERROR_CODE.notConfigured);
     }
 
-    if (response.status === 401 || response.status === 403) {
-      throw new OpenRouterAdapterError(OPENROUTER_ERROR_CODE.authFailed, {
-        upstreamStatus: response.status
-      });
-    }
-
-    if (!response.ok) {
-      throw new OpenRouterAdapterError(OPENROUTER_ERROR_CODE.unavailable, {
-        upstreamStatus: response.status,
-        retryAfterMs: parseRetryAfter(
-          response.headers.get("retry-after"),
-          this.getNowMs()
-        )
-      });
-    }
-
+    const { response } = await this.httpClient.request(path, { method: "GET" });
     try {
       return await response.json();
     } catch {
@@ -303,25 +283,4 @@ export function createOpenRouterModelService(
   options: OpenRouterModelServiceOptions = {}
 ): OpenRouterModelService {
   return new OpenRouterModelService(options);
-}
-
-function parseRetryAfter(
-  value: string | null,
-  nowMs: number
-): number | undefined {
-  if (value === null) {
-    return undefined;
-  }
-
-  const seconds = Number(value);
-  if (Number.isFinite(seconds) && seconds >= 0) {
-    return Math.ceil(seconds * 1000);
-  }
-
-  const retryAtMs = Date.parse(value);
-  if (Number.isNaN(retryAtMs)) {
-    return undefined;
-  }
-
-  return Math.max(0, retryAtMs - nowMs);
 }

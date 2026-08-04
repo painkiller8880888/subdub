@@ -137,6 +137,13 @@ export const projectMutationResponseSchema = z
   })
   .strict();
 
+export const outlineGenerateRequestSchema = z
+  .object({
+    expectedRevision: nonNegativeIntegerSchema,
+    modelId: z.string().min(1).optional()
+  })
+  .strict();
+
 export const modelsQuerySchema = z
   .object({
     refresh: z.enum(["true", "false"]).optional()
@@ -199,6 +206,9 @@ export type ProjectBriefSaveRequest = z.infer<
 >;
 export type ProjectMutationResponse = z.infer<
   typeof projectMutationResponseSchema
+>;
+export type OutlineGenerateRequest = z.infer<
+  typeof outlineGenerateRequestSchema
 >;
 export type ModelsQuery = z.infer<typeof modelsQuerySchema>;
 export type ModelSummary = z.infer<typeof modelSummarySchema>;

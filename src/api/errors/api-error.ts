@@ -9,6 +9,7 @@ import {
   OPENROUTER_ERROR_CODE,
   type OpenRouterErrorCode
 } from "../../openrouter/errors.js";
+import { OutlineGenerationError } from "../../app/projects/outline-generation-errors.js";
 import type { ApiErrorDetail } from "../../schema/api.js";
 
 export const API_ERROR_CODE = {
@@ -19,6 +20,10 @@ export const API_ERROR_CODE = {
   internalServerError: "INTERNAL_SERVER_ERROR",
   openRouterNotConfigured: OPENROUTER_ERROR_CODE.notConfigured,
   openRouterAuthFailed: OPENROUTER_ERROR_CODE.authFailed,
+  openRouterPaymentRequired: OPENROUTER_ERROR_CODE.paymentRequired,
+  openRouterRateLimited: OPENROUTER_ERROR_CODE.rateLimited,
+  openRouterBadGateway: OPENROUTER_ERROR_CODE.badGateway,
+  openRouterRequestFailed: OPENROUTER_ERROR_CODE.requestFailed,
   openRouterUnavailable: OPENROUTER_ERROR_CODE.unavailable,
   openRouterResponseInvalid: OPENROUTER_ERROR_CODE.responseInvalid
 };
@@ -26,10 +31,12 @@ export const API_ERROR_CODE = {
 export type ApiErrorStatus =
   | 400
   | 404
+  | 402
   | 409
   | 413
   | 415
   | 422
+  | 429
   | 500
   | 502
   | 503;
@@ -68,7 +75,7 @@ type FastifyRequestErrorMapping = {
 const genericValidationMessage = "リクエストの入力内容が不正です。";
 const genericInternalMessage = "サーバーで予期しないエラーが発生しました。";
 const openRouterMessages: Readonly<
-  Record<OpenRouterErrorCode, { status: 502 | 503; message: string }>
+  Record<OpenRouterErrorCode, { status: 402 | 429 | 502 | 503; message: string }>
 > = {
   [OPENROUTER_ERROR_CODE.notConfigured]: {
     status: 503,
@@ -77,6 +84,22 @@ const openRouterMessages: Readonly<
   [OPENROUTER_ERROR_CODE.authFailed]: {
     status: 502,
     message: "OpenRouter authentication failed."
+  },
+  [OPENROUTER_ERROR_CODE.paymentRequired]: {
+    status: 402,
+    message: "OpenRouter balance is insufficient."
+  },
+  [OPENROUTER_ERROR_CODE.rateLimited]: {
+    status: 429,
+    message: "OpenRouter rate limit was reached."
+  },
+  [OPENROUTER_ERROR_CODE.badGateway]: {
+    status: 502,
+    message: "OpenRouter returned a bad gateway response."
+  },
+  [OPENROUTER_ERROR_CODE.requestFailed]: {
+    status: 502,
+    message: "OpenRouter rejected the request."
   },
   [OPENROUTER_ERROR_CODE.unavailable]: {
     status: 503,
@@ -113,7 +136,9 @@ const projectRepositoryMessages: Partial<Record<
   PROJECT_REVISION_CONFLICT: "プロジェクトが別の内容へ更新されています。",
   PROJECT_ALREADY_EXISTS: "プロジェクトは既に存在します。",
   PROJECT_WRITE_FAILED: "プロジェクトを保存できませんでした。",
-  PROJECT_RENAME_FAILED: "プロジェクトを保存できませんでした。"
+  PROJECT_RENAME_FAILED: "プロジェクトを保存できませんでした。",
+  PROJECT_RUN_LOG_INVALID: "AI実行ログが不正です。",
+  PROJECT_RUN_LOG_WRITE_FAILED: "AI実行ログを保存できませんでした。"
 };
 
 const fastifyRequestErrorMappings: Readonly<
@@ -154,10 +179,12 @@ function isSupportedStatus(value: unknown): value is ApiErrorStatus {
   return (
     value === 400 ||
     value === 404 ||
+    value === 402 ||
     value === 409 ||
     value === 413 ||
     value === 415 ||
     value === 422 ||
+    value === 429 ||
     value === 500 ||
     value === 502 ||
     value === 503
@@ -399,10 +426,26 @@ function mapFastifyValidationDetails(
 }
 
 export function mapApiError(error: unknown): MappedApiError {
-  if (error instanceof OpenRouterAdapterError) {
-    const mapped = openRouterMessages[error.code];
+  if (error instanceof OutlineGenerationError) {
     return {
       code: error.code,
+      status: error.status,
+      message: error.message,
+      details: error.details,
+      shouldLog: false
+    };
+  }
+
+  if (error instanceof OpenRouterAdapterError) {
+    const code =
+      error.upstreamStatus === 429
+        ? OPENROUTER_ERROR_CODE.rateLimited
+        : error.upstreamStatus === 502
+          ? OPENROUTER_ERROR_CODE.badGateway
+          : error.code;
+    const mapped = openRouterMessages[code];
+    return {
+      code,
       status: mapped.status,
       message: mapped.message,
       details: [],

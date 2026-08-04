@@ -20,7 +20,8 @@
     "build": "node scripts/build.mjs",
     "verify:build": "node scripts/verify-build.mjs",
     "start": "node --env-file-if-exists=.env dist/api/production.js",
-    "verify": "node scripts/verify.mjs"
+    "verify": "node scripts/verify.mjs",
+    "verify:openrouter:outline": "node --env-file-if-exists=.env node_modules/tsx/dist/cli.mjs scripts/verify-openrouter-outline.mjs"
   },
   "dependencies": {
     "@fastify/static": "8.2.0",

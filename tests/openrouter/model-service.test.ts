@@ -345,6 +345,7 @@ describe("OpenRouter model service", () => {
   });
 
   it("preserves retry metadata without exposing upstream response bodies", async () => {
+    const sleeps: number[] = [];
     const fetch = vi.fn(
       async () =>
         new Response(JSON.stringify({ secret: "upstream-secret" }), {
@@ -357,12 +358,19 @@ describe("OpenRouter model service", () => {
     );
 
     await expect(
-      new OpenRouterModelService({ apiKey: "secret-key", fetch }).listModels()
+      new OpenRouterModelService({
+        apiKey: "secret-key",
+        fetch,
+        sleep: async (milliseconds) => {
+          sleeps.push(milliseconds);
+        }
+      }).listModels()
     ).rejects.toMatchObject({
       code: OPENROUTER_ERROR_CODE.unavailable,
       upstreamStatus: 429,
       retryAfterMs: 2500
     });
+    expect(sleeps).toEqual([2500, 2500, 2500, 2500]);
   });
 
   it("aborts an upstream request at the configured timeout", async () => {

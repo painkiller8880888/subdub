@@ -7,9 +7,11 @@ import Fastify, {
 import { createApiSuccessResponse } from "../schema/api.js";
 import { ProjectService } from "../app/projects/project-service.js";
 import { createOpenRouterModelService } from "../openrouter/model-service.js";
+import { OutlineGenerationService } from "../app/projects/outline-generation-service.js";
 import { registerApiErrorHandler } from "./middleware/error-handler.js";
 import { registerNotFoundHandler } from "./middleware/not-found-handler.js";
 import { registerModelRoutes } from "./routes/models.js";
+import { registerOutlineRoutes } from "./routes/outline.js";
 import { registerProjectRoutes } from "./routes/projects.js";
 
 export type AppOptions = {
@@ -19,6 +21,7 @@ export type AppOptions = {
     "listModels"
   >;
   projectService?: ProjectService;
+  outlineGenerationService?: Pick<OutlineGenerationService, "generate">;
   staticRoot?: string;
 };
 
@@ -36,6 +39,10 @@ export function buildApp(options: AppOptions = {}): FastifyInstance {
 
   if (options.projectService !== undefined) {
     registerProjectRoutes(app, options.projectService);
+  }
+
+  if (options.outlineGenerationService !== undefined) {
+    registerOutlineRoutes(app, options.outlineGenerationService);
   }
 
   if (options.staticRoot !== undefined) {

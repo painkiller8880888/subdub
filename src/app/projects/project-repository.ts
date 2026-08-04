@@ -3,9 +3,11 @@ import { promises as fs, type Dirent } from "node:fs";
 import * as path from "node:path";
 
 import {
+  aiRunLogSchema,
   idSchema,
   nonNegativeIntegerSchema,
   projectBriefSchema,
+  outlineSchema,
   videoProjectSchema,
   type VideoProject
 } from "../../schema/index.js";
@@ -29,7 +31,9 @@ export type ProjectRepositoryErrorCode =
   | "PROJECT_SOURCE_NOT_FOUND"
   | "PROJECT_SOURCE_READ_FAILED"
   | "PROJECT_SOURCE_HASH_MISMATCH"
-  | "PROJECT_ROLLBACK_FAILED";
+  | "PROJECT_ROLLBACK_FAILED"
+  | "PROJECT_RUN_LOG_INVALID"
+  | "PROJECT_RUN_LOG_WRITE_FAILED";
 
 export type ProjectValidationIssue = {
   readonly path: ReadonlyArray<string | number>;
@@ -115,6 +119,12 @@ export type ProjectSourceDocument = {
   readonly markdown: string;
   readonly sha256: string;
   readonly revision: number;
+};
+
+export type ProjectGenerationSnapshot = {
+  readonly project: VideoProject;
+  readonly markdown: string;
+  readonly sourceHash: string;
 };
 
 const defaultFileSystem: ProjectRepositoryFileSystem = {
@@ -344,6 +354,22 @@ function rollbackFailedError(): ProjectRepositoryError {
   );
 }
 
+function runLogInvalidError(): ProjectRepositoryError {
+  return new ProjectRepositoryError(
+    "PROJECT_RUN_LOG_INVALID",
+    500,
+    "The AI run log is invalid."
+  );
+}
+
+function runLogWriteFailedError(): ProjectRepositoryError {
+  return new ProjectRepositoryError(
+    "PROJECT_RUN_LOG_WRITE_FAILED",
+    500,
+    "The AI run log could not be written."
+  );
+}
+
 function isExistingDestinationError(error: unknown): boolean {
   const code = getFileSystemErrorCode(error);
   return code === "EEXIST" || code === "ENOTEMPTY" || code === "EISDIR";
@@ -400,16 +426,28 @@ export class ProjectRepository {
   }
 
   async readSource(projectId: unknown): Promise<ProjectSourceDocument> {
-    const safeProjectId = this.validateProjectId(projectId);
-    const paths = await this.resolveProjectPaths(safeProjectId);
-    const project = await this.readProjectWithExpectedId(safeProjectId, paths);
-    const markdown = await this.readValidatedSource(paths, project);
+    const snapshot = await this.readGenerationSnapshot(projectId);
 
     return {
-      markdown,
-      sha256: sha256(markdown),
-      revision: project.revision
+      markdown: snapshot.markdown,
+      sha256: snapshot.sourceHash,
+      revision: snapshot.project.revision
     };
+  }
+
+  async readGenerationSnapshot(
+    projectId: unknown
+  ): Promise<ProjectGenerationSnapshot> {
+    const safeProjectId = this.validateProjectId(projectId);
+    return this.withSaveLock(safeProjectId, async () => {
+      const paths = await this.resolveProjectPaths(safeProjectId);
+      const project = await this.readProjectWithExpectedId(
+        safeProjectId,
+        paths
+      );
+      const markdown = await this.readValidatedSource(paths, project);
+      return { project, markdown, sourceHash: sha256(markdown) };
+    });
   }
 
   async list(): Promise<VideoProject[]> {
@@ -578,6 +616,59 @@ export class ProjectRepository {
     );
   }
 
+  async saveOutline(
+    projectId: unknown,
+    outline: unknown,
+    expectedRevision: unknown
+  ): Promise<VideoProject> {
+    const safeProjectId = this.validateProjectId(projectId);
+    return this.withSaveLock(safeProjectId, () =>
+      this.saveOutlineUnlocked(safeProjectId, outline, expectedRevision)
+    );
+  }
+
+  async writeRunLog(
+    projectId: unknown,
+    runId: unknown,
+    runLog: unknown
+  ): Promise<void> {
+    const safeProjectId = this.validateProjectId(projectId);
+    const safeRunIdResult = idSchema.safeParse(runId);
+    if (!safeRunIdResult.success) {
+      throw runLogInvalidError();
+    }
+    const runLogResult = aiRunLogSchema.safeParse(runLog);
+    if (!runLogResult.success) {
+      throw runLogInvalidError();
+    }
+    if (
+      runLogResult.data.projectId !== safeProjectId ||
+      runLogResult.data.runId !== safeRunIdResult.data
+    ) {
+      throw runLogInvalidError();
+    }
+
+    const paths = await this.resolveProjectPaths(safeProjectId);
+    const runsDirectoryPath = path.join(paths.projectDirectoryPath, "runs");
+    const runFilePath = path.join(runsDirectoryPath, `${safeRunIdResult.data}.json`);
+    const temporaryFilePath = path.join(
+      runsDirectoryPath,
+      `${safeRunIdResult.data}.${randomUUID()}.tmp`
+    );
+
+    try {
+      await this.fileSystem.mkdir(runsDirectoryPath, { recursive: true });
+      await this.fileSystem.writeFile(
+        temporaryFilePath,
+        `${JSON.stringify(runLogResult.data, null, 2)}\n`
+      );
+      await this.fileSystem.rename(temporaryFilePath, runFilePath);
+    } catch {
+      await this.removeTemporaryFile(temporaryFilePath);
+      throw runLogWriteFailedError();
+    }
+  }
+
   private async saveBriefUnlocked(
     projectId: string,
     brief: unknown,
@@ -607,6 +698,48 @@ export class ProjectRepository {
       ...currentProject,
       revision: currentProject.revision + 1,
       brief: briefResult.data,
+      metadata: {
+        ...currentProject.metadata,
+        updatedAt: this.now().toISOString()
+      }
+    });
+    if (!updatedProjectResult.success) {
+      throw updatedValidationFailedError(
+        validationIssues(updatedProjectResult.error)
+      );
+    }
+
+    return this.writeProjectCandidate(paths, updatedProjectResult.data);
+  }
+
+  private async saveOutlineUnlocked(
+    projectId: string,
+    outline: unknown,
+    expectedRevision: unknown
+  ): Promise<VideoProject> {
+    const paths = await this.resolveProjectPaths(projectId);
+    const currentProject = await this.readProjectWithExpectedId(
+      projectId,
+      paths
+    );
+    const outlineResult = outlineSchema.safeParse(outline);
+    if (!outlineResult.success) {
+      throw candidateValidationFailedError(validationIssues(outlineResult.error));
+    }
+    const expectedRevisionResult =
+      nonNegativeIntegerSchema.safeParse(expectedRevision);
+    if (!expectedRevisionResult.success) {
+      throw expectedRevisionInvalidError();
+    }
+    if (expectedRevisionResult.data !== currentProject.revision) {
+      throw revisionConflictError();
+    }
+    await this.readValidatedSource(paths, currentProject);
+
+    const updatedProjectResult = videoProjectSchema.safeParse({
+      ...currentProject,
+      revision: currentProject.revision + 1,
+      outline: outlineResult.data,
       metadata: {
         ...currentProject.metadata,
         updatedAt: this.now().toISOString()
