@@ -38,6 +38,15 @@ export const openRouterModelsFixture = {
       expiration_date: null
     },
     {
+      id: "zdr-structured-mismatch/model",
+      name: "ZDR Structured Mismatch Model",
+      context_length: 8192,
+      pricing: { prompt: "0.1", completion: "0.2" },
+      architecture: { output_modalities: ["text"] },
+      supported_parameters: ["max_tokens", "structured_outputs"],
+      expiration_date: null
+    },
+    {
       id: "expired/model",
       name: "Expired Model",
       context_length: 8192,
@@ -56,6 +65,11 @@ export const openRouterZdrFixture = {
       provider_name: "Fixture Provider",
       supported_parameters: ["structured_outputs"],
       unknown_field: "allowed"
+    },
+    {
+      model_id: "zdr-structured-mismatch/model",
+      provider_name: "Fixture ZDR Provider",
+      supported_parameters: ["max_tokens"]
     }
   ]
 } as const;

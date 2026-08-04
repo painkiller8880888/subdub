@@ -3,11 +3,13 @@ import { OpenRouterAdapterError, OPENROUTER_ERROR_CODE } from "./errors.js";
 import {
   openRouterModelsResponseSchema,
   openRouterZdrEndpointsResponseSchema,
-  type OpenRouterModelResponse
+  type OpenRouterModelResponse,
+  type OpenRouterZdrEndpoint
 } from "./schemas.js";
 
 export const OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1" as const;
 export const MODEL_CACHE_TTL_MS = 5 * 60 * 1000;
+export const OPENROUTER_REQUEST_TIMEOUT_MS = 10 * 1000;
 
 export type OpenRouterModelCapabilities = {
   readonly id: string;
@@ -43,6 +45,7 @@ export type OpenRouterModelServiceOptions = {
   readonly baseUrl?: string;
   readonly now?: () => Date;
   readonly cacheTtlMs?: number;
+  readonly timeoutMs?: number;
 };
 
 function isCacheFresh(
@@ -57,9 +60,27 @@ function isExpired(expirationDate: string | null, nowMs: number): boolean {
   return expirationDate !== null && Date.parse(expirationDate) <= nowMs;
 }
 
+export function isSelectableModel(
+  model: OpenRouterModelCapabilities,
+  now = new Date()
+): boolean {
+  return (
+    model.outputModalities.includes("text") &&
+    model.structuredOutputs &&
+    !isExpired(model.expirationDate, now.getTime())
+  );
+}
+
+export function filterSelectableModels(
+  models: readonly OpenRouterModelCapabilities[],
+  now = new Date()
+): readonly OpenRouterModelCapabilities[] {
+  return models.filter((model) => isSelectableModel(model, now));
+}
+
 function toCapabilities(
   model: OpenRouterModelResponse,
-  zdrModelIds: ReadonlySet<string>
+  zdrStructuredOutputModelIds: ReadonlySet<string>
 ): OpenRouterModelCapabilities {
   return {
     id: model.id,
@@ -72,7 +93,7 @@ function toCapabilities(
     expirationDate: model.expiration_date,
     structuredOutputs:
       model.supported_parameters.includes("structured_outputs"),
-    zdrAvailable: zdrModelIds.has(model.id)
+    zdrAvailable: zdrStructuredOutputModelIds.has(model.id)
   };
 }
 
@@ -82,12 +103,14 @@ export class OpenRouterModelService {
   private readonly baseUrl: string;
   private readonly now: () => Date;
   private readonly cacheTtlMs: number;
+  private readonly timeoutMs: number;
   private modelCache:
     CacheEntry<readonly OpenRouterModelResponse[]> | undefined;
-  private zdrCache: CacheEntry<ReadonlySet<string>> | undefined;
+  private zdrCache: CacheEntry<readonly OpenRouterZdrEndpoint[]> | undefined;
   private modelInFlight:
     Promise<CacheEntry<readonly OpenRouterModelResponse[]>> | undefined;
-  private zdrInFlight: Promise<CacheEntry<ReadonlySet<string>>> | undefined;
+  private zdrInFlight:
+    Promise<CacheEntry<readonly OpenRouterZdrEndpoint[]>> | undefined;
 
   constructor(options: OpenRouterModelServiceOptions = {}) {
     this.apiKey =
@@ -100,6 +123,7 @@ export class OpenRouterModelService {
     this.baseUrl = (options.baseUrl ?? OPENROUTER_BASE_URL).replace(/\/$/, "");
     this.now = options.now ?? (() => new Date());
     this.cacheTtlMs = options.cacheTtlMs ?? MODEL_CACHE_TTL_MS;
+    this.timeoutMs = options.timeoutMs ?? OPENROUTER_REQUEST_TIMEOUT_MS;
   }
 
   async listModels(
@@ -111,19 +135,19 @@ export class OpenRouterModelService {
       this.getUserModels(refresh),
       this.getZdrEndpoints(refresh)
     ]);
-    const nowMs = this.now().getTime();
-    const zdrModelIds = zdrEndpoints.value;
-    const candidateModels = models.value
-      .map((model) => toCapabilities(model, zdrModelIds))
-      .filter(
-        (model) =>
-          model.outputModalities.includes("text") &&
-          model.structuredOutputs &&
-          !isExpired(model.expirationDate, nowMs)
-      );
+    const zdrStructuredOutputModelIds = new Set(
+      zdrEndpoints.value
+        .filter((endpoint) =>
+          endpoint.supported_parameters.includes("structured_outputs")
+        )
+        .map((endpoint) => endpoint.model_id)
+    );
+    const capabilities = models.value.map((model) =>
+      toCapabilities(model, zdrStructuredOutputModelIds)
+    );
 
     return {
-      models: candidateModels,
+      models: capabilities,
       fetchedAt: new Date(
         Math.max(models.fetchedAtMs, zdrEndpoints.fetchedAtMs)
       ).toISOString(),
@@ -187,7 +211,9 @@ export class OpenRouterModelService {
 
   private async getZdrEndpoints(
     refresh: boolean
-  ): Promise<CacheEntry<ReadonlySet<string>> & { cached: boolean }> {
+  ): Promise<
+    CacheEntry<readonly OpenRouterZdrEndpoint[]> & { cached: boolean }
+  > {
     const nowMs = this.getNowMs();
     if (!refresh && isCacheFresh(this.zdrCache, nowMs, this.cacheTtlMs)) {
       return { ...this.zdrCache, cached: true };
@@ -206,10 +232,10 @@ export class OpenRouterModelService {
 
       const fetchedAtMs = this.getNowMs();
       const entry = {
-        value: new Set(parsed.data.data.map((endpoint) => endpoint.model_id)),
+        value: parsed.data.data,
         fetchedAtMs,
         fetchedAt: new Date(fetchedAtMs).toISOString()
-      } satisfies CacheEntry<ReadonlySet<string>>;
+      } satisfies CacheEntry<readonly OpenRouterZdrEndpoint[]>;
       this.zdrCache = entry;
       return entry;
     });
@@ -231,6 +257,7 @@ export class OpenRouterModelService {
     try {
       response = await this.fetchImpl(`${this.baseUrl}${path}`, {
         method: "GET",
+        signal: AbortSignal.timeout(this.timeoutMs),
         headers: {
           Accept: "application/json",
           Authorization: `Bearer ${apiKey}`
@@ -241,11 +268,19 @@ export class OpenRouterModelService {
     }
 
     if (response.status === 401 || response.status === 403) {
-      throw new OpenRouterAdapterError(OPENROUTER_ERROR_CODE.authFailed);
+      throw new OpenRouterAdapterError(OPENROUTER_ERROR_CODE.authFailed, {
+        upstreamStatus: response.status
+      });
     }
 
     if (!response.ok) {
-      throw new OpenRouterAdapterError(OPENROUTER_ERROR_CODE.unavailable);
+      throw new OpenRouterAdapterError(OPENROUTER_ERROR_CODE.unavailable, {
+        upstreamStatus: response.status,
+        retryAfterMs: parseRetryAfter(
+          response.headers.get("retry-after"),
+          this.getNowMs()
+        )
+      });
     }
 
     try {
@@ -260,4 +295,25 @@ export function createOpenRouterModelService(
   options: OpenRouterModelServiceOptions = {}
 ): OpenRouterModelService {
   return new OpenRouterModelService(options);
+}
+
+function parseRetryAfter(
+  value: string | null,
+  nowMs: number
+): number | undefined {
+  if (value === null) {
+    return undefined;
+  }
+
+  const seconds = Number(value);
+  if (Number.isFinite(seconds) && seconds >= 0) {
+    return Math.ceil(seconds * 1000);
+  }
+
+  const retryAtMs = Date.parse(value);
+  if (Number.isNaN(retryAtMs)) {
+    return undefined;
+  }
+
+  return Math.max(0, retryAtMs - nowMs);
 }

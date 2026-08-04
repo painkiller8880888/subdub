@@ -32,6 +32,42 @@ function modelList() {
         expirationDate: null,
         structuredOutputs: true,
         zdrAvailable: true
+      },
+      {
+        id: "no-structured/model",
+        displayName: "No Structured Model",
+        contextLength: 8192,
+        inputPrice: "0.1",
+        outputPrice: "0.2",
+        outputModalities: ["text"],
+        supportedParameters: ["max_tokens"],
+        expirationDate: null,
+        structuredOutputs: false,
+        zdrAvailable: true
+      },
+      {
+        id: "image-only/model",
+        displayName: "Image Only Model",
+        contextLength: 8192,
+        inputPrice: "0.1",
+        outputPrice: "0.2",
+        outputModalities: ["image"],
+        supportedParameters: ["structured_outputs"],
+        expirationDate: null,
+        structuredOutputs: true,
+        zdrAvailable: true
+      },
+      {
+        id: "expired/model",
+        displayName: "Expired Model",
+        contextLength: 8192,
+        inputPrice: "0.1",
+        outputPrice: "0.2",
+        outputModalities: ["text"],
+        supportedParameters: ["structured_outputs"],
+        expirationDate: "2020-01-01T00:00:00.000Z",
+        structuredOutputs: true,
+        zdrAvailable: true
       }
     ],
     fetchedAt: "2026-08-04T00:00:00.000Z",
@@ -66,6 +102,9 @@ describe("models API", () => {
     expect(
       modelsResponseSchema.parse(response.json()).data.models
     ).toHaveLength(1);
+    expect(modelsResponseSchema.parse(response.json()).data.models[0]?.id).toBe(
+      "eligible/model"
+    );
     expect(calls).toEqual([{ refresh: true }]);
     expect(
       modelsResponseSchema.safeParse({

@@ -5,7 +5,10 @@ import {
   modelsQuerySchema,
   modelsResponseSchema
 } from "../../schema/api.js";
-import type { OpenRouterModelService } from "../../openrouter/model-service.js";
+import {
+  filterSelectableModels,
+  type OpenRouterModelService
+} from "../../openrouter/model-service.js";
 
 export function registerModelRoutes(
   app: FastifyInstance,
@@ -16,7 +19,7 @@ export function registerModelRoutes(
     const result = await modelService.listModels({ refresh: query.refresh });
     return modelsResponseSchema.parse(
       createApiSuccessResponse({
-        models: result.models,
+        models: filterSelectableModels(result.models),
         fetchedAt: result.fetchedAt,
         cached: result.cached
       })

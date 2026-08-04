@@ -7,6 +7,7 @@ import {
 } from "../../src/openrouter/errors.js";
 import {
   MODEL_CACHE_TTL_MS,
+  OPENROUTER_REQUEST_TIMEOUT_MS,
   OpenRouterModelService
 } from "../../src/openrouter/model-service.js";
 import {
@@ -40,7 +41,7 @@ function fixtureFetch() {
 }
 
 describe("OpenRouter model service", () => {
-  it("normalizes user models, preserves prices, and filters candidates", async () => {
+  it("normalizes the complete capability list and preserves prices", async () => {
     const { calls, fetch } = fixtureFetch();
     const service = new OpenRouterModelService({
       apiKey: "fixture-key",
@@ -51,8 +52,10 @@ describe("OpenRouter model service", () => {
 
     const result = await service.listModels();
 
-    expect(result.models).toHaveLength(1);
-    expect(result.models[0]).toEqual({
+    expect(result.models).toHaveLength(5);
+    expect(
+      result.models.find((model) => model.id === "eligible/model")
+    ).toEqual({
       id: "eligible/model",
       displayName: "Eligible Model",
       contextLength: 131072,
@@ -64,12 +67,93 @@ describe("OpenRouter model service", () => {
       structuredOutputs: true,
       zdrAvailable: true
     });
+    expect(
+      result.models.find(
+        (model) => model.id === "zdr-structured-mismatch/model"
+      )
+    ).toMatchObject({
+      structuredOutputs: true,
+      zdrAvailable: false
+    });
     expect(calls).toHaveLength(2);
     expect(calls[0]?.init?.headers).toEqual({
       Accept: "application/json",
       Authorization: "Bearer fixture-key"
     });
     expect(result.cached).toBe(false);
+  });
+
+  it("keeps resolver reasons for capabilities returned by the service", async () => {
+    const { fetch } = fixtureFetch();
+    const service = new OpenRouterModelService({
+      apiKey: "fixture-key",
+      fetch,
+      now: () => NOW
+    });
+    const result = await service.listModels();
+    const { resolveModel } =
+      await import("../../src/openrouter/model-resolver.js");
+    const baseSettings = {
+      defaultModelId: "no-structured/model",
+      taskModelOverrides: {},
+      zdr: false,
+      dataCollection: "deny",
+      allowProviderFallbacks: true
+    } as const;
+
+    expect(
+      resolveModel({
+        settings: baseSettings,
+        taskKind: "outline_generation",
+        models: result.models,
+        now: () => NOW
+      })
+    ).toEqual({ ok: false, reason: "MODEL_STRUCTURED_OUTPUT_UNSUPPORTED" });
+
+    expect(
+      resolveModel({
+        settings: { ...baseSettings, defaultModelId: "expired/model" },
+        taskKind: "outline_generation",
+        models: result.models,
+        now: () => NOW
+      })
+    ).toEqual({ ok: false, reason: "MODEL_EXPIRED" });
+
+    expect(
+      resolveModel({
+        settings: { ...baseSettings, defaultModelId: "image-only/model" },
+        taskKind: "outline_generation",
+        models: result.models,
+        now: () => NOW
+      })
+    ).toEqual({ ok: false, reason: "MODEL_TEXT_OUTPUT_UNSUPPORTED" });
+  });
+
+  it("requires structured output support on the same ZDR endpoint", async () => {
+    const { fetch } = fixtureFetch();
+    const service = new OpenRouterModelService({
+      apiKey: "fixture-key",
+      fetch,
+      now: () => NOW
+    });
+    const result = await service.listModels();
+    const { resolveModel } =
+      await import("../../src/openrouter/model-resolver.js");
+
+    expect(
+      resolveModel({
+        settings: {
+          defaultModelId: "zdr-structured-mismatch/model",
+          taskModelOverrides: {},
+          zdr: true,
+          dataCollection: "deny",
+          allowProviderFallbacks: true
+        },
+        taskKind: "outline_generation",
+        models: result.models,
+        now: () => NOW
+      })
+    ).toEqual({ ok: false, reason: "MODEL_ZDR_ENDPOINT_UNAVAILABLE" });
   });
 
   it("uses ZDR endpoint model IDs and keeps ZDR disabled permissive", async () => {
@@ -209,6 +293,72 @@ describe("OpenRouter model service", () => {
         fetch: invalidShapeFetch as unknown as typeof globalThis.fetch
       }).listModels()
     ).rejects.toBeInstanceOf(OpenRouterAdapterError);
+
+    const invalidZdrShapeFetch = vi.fn(async (input: string | URL) =>
+      String(input).endsWith("/models/user")
+        ? response(openRouterModelsFixture)
+        : response({
+            data: [{ model_id: "eligible/model", supported_parameters: "bad" }]
+          })
+    );
+    await expect(
+      new OpenRouterModelService({
+        apiKey: "secret-key",
+        fetch: invalidZdrShapeFetch as unknown as typeof globalThis.fetch
+      }).listModels()
+    ).rejects.toMatchObject({
+      code: OPENROUTER_ERROR_CODE.responseInvalid
+    });
+  });
+
+  it("preserves retry metadata without exposing upstream response bodies", async () => {
+    const fetch = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ secret: "upstream-secret" }), {
+          status: 429,
+          headers: {
+            "content-type": "application/json",
+            "retry-after": "2.5"
+          }
+        })
+    );
+
+    await expect(
+      new OpenRouterModelService({ apiKey: "secret-key", fetch }).listModels()
+    ).rejects.toMatchObject({
+      code: OPENROUTER_ERROR_CODE.unavailable,
+      upstreamStatus: 429,
+      retryAfterMs: 2500
+    });
+  });
+
+  it("aborts an upstream request at the configured timeout", async () => {
+    const fetch = vi.fn(
+      (_input: string | URL | Request, init?: RequestInit) =>
+        new Promise<Response>((_resolve, reject) => {
+          const signal = init?.signal;
+          if (signal == null) {
+            reject(new Error("missing abort signal"));
+            return;
+          }
+          if (signal.aborted) {
+            reject(signal.reason);
+            return;
+          }
+          signal.addEventListener("abort", () => reject(signal.reason), {
+            once: true
+          });
+        })
+    );
+
+    await expect(
+      new OpenRouterModelService({
+        apiKey: "fixture-key",
+        fetch,
+        timeoutMs: 1
+      }).listModels()
+    ).rejects.toMatchObject({ code: OPENROUTER_ERROR_CODE.unavailable });
+    expect(OPENROUTER_REQUEST_TIMEOUT_MS).toBeGreaterThan(1);
   });
 
   it("reads only the injected environment value and never exposes it in adapter errors", () => {

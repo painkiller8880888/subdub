@@ -42,7 +42,8 @@ export const openRouterModelsResponseSchema = z
 
 export const openRouterZdrEndpointSchema = z
   .object({
-    model_id: z.string().min(1)
+    model_id: z.string().min(1),
+    supported_parameters: z.array(z.string())
   })
   .passthrough();
 
