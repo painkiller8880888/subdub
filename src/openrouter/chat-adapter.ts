@@ -1,6 +1,10 @@
 import { getOpenRouterApiKey, type Environment } from "./config.js";
 import { OpenRouterAdapterError, OPENROUTER_ERROR_CODE } from "./errors.js";
-import { OpenRouterHttpClient, type Sleep } from "./http-client.js";
+import {
+  OpenRouterHttpClient,
+  parseRetryAfter,
+  type Sleep
+} from "./http-client.js";
 import { openRouterChatCompletionResponseSchema } from "./schemas.js";
 
 export type OutlineChatMessage = {
@@ -62,8 +66,71 @@ function getProvider(value: unknown): string | null {
     : null;
 }
 
-function invalidResponse(): OpenRouterAdapterError {
-  return new OpenRouterAdapterError(OPENROUTER_ERROR_CODE.responseInvalid);
+function invalidResponse(attempts?: number): OpenRouterAdapterError {
+  return new OpenRouterAdapterError(OPENROUTER_ERROR_CODE.responseInvalid, {
+    attempts
+  });
+}
+
+function embeddedErrorStatus(value: unknown): 429 | 502 | 503 | undefined {
+  if (typeof value === "number") {
+    return value === 429 || value === 502 || value === 503 ? value : undefined;
+  }
+
+  if (typeof value !== "string") {
+    return undefined;
+  }
+
+  const normalized = value.trim().toLowerCase();
+  if (normalized === "429" || normalized.includes("rate_limit")) {
+    return 429;
+  }
+  if (
+    normalized === "502" ||
+    normalized === "provider_unavailable" ||
+    normalized.includes("bad_gateway")
+  ) {
+    return 502;
+  }
+  if (
+    normalized === "503" ||
+    normalized === "provider_overloaded" ||
+    normalized.includes("service_unavailable")
+  ) {
+    return 503;
+  }
+  return undefined;
+}
+
+function embeddedErrorStatusFromBody(
+  body: unknown
+): 429 | 502 | 503 | undefined {
+  if (!isRecord(body)) {
+    return undefined;
+  }
+
+  const errors: unknown[] = [];
+  if (Array.isArray(body.choices)) {
+    const firstChoice = body.choices[0];
+    if (isRecord(firstChoice)) {
+      errors.push(firstChoice.error);
+    }
+  }
+  errors.push(body.error);
+
+  for (const error of errors) {
+    if (!isRecord(error)) {
+      continue;
+    }
+    const metadata = isRecord(error.metadata) ? error.metadata : undefined;
+    const status =
+      embeddedErrorStatus(error.code) ??
+      embeddedErrorStatus(metadata?.error_type);
+    if (status !== undefined) {
+      return status;
+    }
+  }
+  return undefined;
 }
 
 export class OpenRouterChatAdapter {
@@ -84,7 +151,29 @@ export class OpenRouterChatAdapter {
         fetch: options.fetch,
         sleep: options.sleep,
         now: options.now,
-        timeoutMs: options.timeoutMs
+        timeoutMs: options.timeoutMs,
+        retryOnResponse: async (response) => {
+          let body: unknown;
+          try {
+            body = await response.json();
+          } catch {
+            return { retry: false };
+          }
+
+          const upstreamStatus = embeddedErrorStatusFromBody(body);
+          if (upstreamStatus === undefined) {
+            return { retry: false };
+          }
+
+          return {
+            retry: true,
+            upstreamStatus,
+            retryAfterMs: parseRetryAfter(
+              response.headers.get("retry-after"),
+              (options.now ?? (() => new Date()))().getTime()
+            )
+          };
+        }
       });
     }
   }
@@ -134,28 +223,29 @@ export class OpenRouterChatAdapter {
     try {
       body = await response.json();
     } catch {
-      throw invalidResponse();
+      throw invalidResponse(attempts);
     }
 
     const parsed = openRouterChatCompletionResponseSchema.safeParse(body);
     if (!parsed.success) {
-      throw invalidResponse();
+      throw invalidResponse(attempts);
     }
 
     const choice = parsed.data.choices[0];
-    const content = choice?.message.content;
-    if (typeof content !== "string" || content.trim().length === 0) {
-      throw invalidResponse();
+    if (choice?.error !== undefined || choice?.finish_reason === "error") {
+      throw invalidResponse(attempts);
     }
-    if (choice.finish_reason === "error") {
-      throw invalidResponse();
+
+    const content = choice?.message?.content;
+    if (typeof content !== "string" || content.trim().length === 0) {
+      throw invalidResponse(attempts);
     }
 
     let candidate: unknown;
     try {
       candidate = JSON.parse(content);
     } catch {
-      throw invalidResponse();
+      throw invalidResponse(attempts);
     }
 
     return {

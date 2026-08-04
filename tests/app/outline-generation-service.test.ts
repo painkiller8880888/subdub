@@ -7,6 +7,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { createEmptyVideoProject } from "../../src/app/projects/empty-video-project.js";
 import { OutlineGenerationService } from "../../src/app/projects/outline-generation-service.js";
 import { ProjectRepository } from "../../src/app/projects/project-repository.js";
+import { OpenRouterAdapterError } from "../../src/openrouter/errors.js";
+import { OpenRouterChatAdapter } from "../../src/openrouter/chat-adapter.js";
 import { aiRunLogSchema } from "../../src/schema/index.js";
 
 const NOW = new Date("2026-08-04T02:00:00.000Z");
@@ -241,6 +243,281 @@ describe("OutlineGenerationService", () => {
     });
   });
 
+  it("writes a running log before chat and finalizes it after a successful save", async () => {
+    const { workspaceRoot, repository, project } = await setupProject();
+    roots.push(workspaceRoot);
+    const chat = {
+      complete: vi.fn(async () => {
+        const running = aiRunLogSchema.parse(
+          JSON.parse(
+            await fs.readFile(
+              path.join(
+                workspaceRoot,
+                "projects",
+                project.metadata.id,
+                "runs",
+                "run-outline-running.json"
+              ),
+              "utf8"
+            )
+          )
+        );
+        expect(running.status).toBe("running");
+        expect(running.completedAt).toBeNull();
+        return {
+          candidate: candidate(),
+          responseModel: "provider/model",
+          provider: "Provider",
+          usage: {
+            promptTokens: null,
+            completionTokens: null,
+            totalTokens: null
+          },
+          attempts: 1
+        };
+      })
+    };
+    const service = new OutlineGenerationService({
+      repository,
+      modelService: {
+        listModels: async () => ({
+          models: [model()],
+          fetchedAt: NOW.toISOString(),
+          cached: false
+        })
+      },
+      chatAdapter: chat,
+      now: () => NOW,
+      createId: () => "run-outline-running"
+    });
+
+    await service.generate(project.metadata.id, {
+      expectedRevision: project.revision
+    });
+    const final = aiRunLogSchema.parse(
+      JSON.parse(
+        await fs.readFile(
+          path.join(
+            workspaceRoot,
+            "projects",
+            project.metadata.id,
+            "runs",
+            "run-outline-running.json"
+          ),
+          "utf8"
+        )
+      )
+    );
+    expect(final.status).toBe("succeeded");
+    expect(final.completedAt).toBe(NOW.toISOString());
+  });
+
+  it("records retry attempts when the OpenRouter call fails", async () => {
+    const { workspaceRoot, repository, project } = await setupProject();
+    roots.push(workspaceRoot);
+    const service = new OutlineGenerationService({
+      repository,
+      modelService: {
+        listModels: async () => ({
+          models: [model()],
+          fetchedAt: NOW.toISOString(),
+          cached: false
+        })
+      },
+      chatAdapter: {
+        complete: async () => {
+          throw new OpenRouterAdapterError("OPENROUTER_UNAVAILABLE", {
+            upstreamStatus: 503,
+            attempts: 3
+          });
+        }
+      },
+      now: () => NOW,
+      createId: () => "run-outline-retries"
+    });
+
+    await expect(
+      service.generate(project.metadata.id, {
+        expectedRevision: project.revision
+      })
+    ).rejects.toMatchObject({ attempts: 3 });
+    const runLog = aiRunLogSchema.parse(
+      JSON.parse(
+        await fs.readFile(
+          path.join(
+            workspaceRoot,
+            "projects",
+            project.metadata.id,
+            "runs",
+            "run-outline-retries.json"
+          ),
+          "utf8"
+        )
+      )
+    );
+    expect(runLog).toMatchObject({
+      status: "failed",
+      errorCode: "OPENROUTER_UNAVAILABLE",
+      httpAttemptCount: 3
+    });
+  });
+
+  it("does not save partial content from an embedded provider error", async () => {
+    const { workspaceRoot, repository, project } = await setupProject();
+    roots.push(workspaceRoot);
+    const before = await fs.readFile(
+      path.join(workspaceRoot, "projects", project.metadata.id, "project.json")
+    );
+    const chatAdapter = new OpenRouterChatAdapter({
+      apiKey: "fixture-key",
+      fetch: vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              model: "provider/model",
+              choices: [
+                {
+                  finish_reason: "error",
+                  message: { content: '{"sections":[]}' },
+                  error: {
+                    code: 502,
+                    metadata: { error_type: "provider_unavailable" }
+                  }
+                }
+              ]
+            }),
+            { status: 200 }
+          )
+      ) as unknown as typeof globalThis.fetch,
+      sleep: async () => undefined
+    });
+    const service = new OutlineGenerationService({
+      repository,
+      modelService: {
+        listModels: async () => ({
+          models: [model()],
+          fetchedAt: NOW.toISOString(),
+          cached: false
+        })
+      },
+      chatAdapter,
+      now: () => NOW,
+      createId: () => "run-outline-partial-error"
+    });
+
+    await expect(
+      service.generate(project.metadata.id, {
+        expectedRevision: project.revision
+      })
+    ).rejects.toMatchObject({
+      code: "OPENROUTER_UNAVAILABLE",
+      upstreamStatus: 502,
+      attempts: 3
+    });
+    expect(
+      await fs.readFile(
+        path.join(
+          workspaceRoot,
+          "projects",
+          project.metadata.id,
+          "project.json"
+        )
+      )
+    ).toEqual(before);
+  });
+
+  it("keeps the running log when finalization fails after project save", async () => {
+    const { workspaceRoot, repository, project } = await setupProject();
+    roots.push(workspaceRoot);
+    const originalWriteRunLog = repository.writeRunLog.bind(repository);
+    let writeCount = 0;
+    vi.spyOn(repository, "writeRunLog").mockImplementation(
+      async (projectId, runId, runLog) => {
+        writeCount += 1;
+        if (writeCount === 2) {
+          throw new Error("injected finalization failure");
+        }
+        await originalWriteRunLog(projectId, runId, runLog);
+      }
+    );
+    const service = new OutlineGenerationService({
+      repository,
+      modelService: {
+        listModels: async () => ({
+          models: [model()],
+          fetchedAt: NOW.toISOString(),
+          cached: false
+        })
+      },
+      chatAdapter: fakeChat(candidate()),
+      now: () => NOW,
+      createId: () => "run-outline-finalization-failure"
+    });
+
+    const saved = await service.generate(project.metadata.id, {
+      expectedRevision: project.revision
+    });
+    expect(saved.revision).toBe(project.revision + 1);
+    const runLog = aiRunLogSchema.parse(
+      JSON.parse(
+        await fs.readFile(
+          path.join(
+            workspaceRoot,
+            "projects",
+            project.metadata.id,
+            "runs",
+            "run-outline-finalization-failure.json"
+          ),
+          "utf8"
+        )
+      )
+    );
+    expect(runLog).toMatchObject({
+      status: "running",
+      completedAt: null,
+      schemaValidation: "not_run"
+    });
+  });
+
+  it("rejects generation when an existing outline could be overwritten", async () => {
+    const { workspaceRoot, repository, project } = await setupProject();
+    roots.push(workspaceRoot);
+    const chat = fakeChat(candidate());
+    const createId = vi
+      .fn()
+      .mockReturnValueOnce("run-outline-first")
+      .mockReturnValueOnce("run-outline-second");
+    const service = new OutlineGenerationService({
+      repository,
+      modelService: {
+        listModels: async () => ({
+          models: [model()],
+          fetchedAt: NOW.toISOString(),
+          cached: false
+        })
+      },
+      chatAdapter: chat,
+      now: () => NOW,
+      createId
+    });
+
+    const first = await service.generate(project.metadata.id, {
+      expectedRevision: project.revision
+    });
+    await expect(
+      service.generate(project.metadata.id, {
+        expectedRevision: first.revision
+      })
+    ).rejects.toMatchObject({
+      code: "OUTLINE_ALREADY_EXISTS",
+      status: 409
+    });
+    expect(chat.complete).toHaveBeenCalledTimes(1);
+    const unchanged = await repository.read(project.metadata.id);
+    expect(unchanged.revision).toBe(first.revision);
+    expect(unchanged.outline.generationRunId).toBe("run-outline-first");
+  });
+
   it("rejects context overflow before chat and revision conflict before model resolution", async () => {
     const first = await setupProject();
     roots.push(first.workspaceRoot);
@@ -324,39 +601,43 @@ describe("OutlineGenerationService", () => {
     );
     expect(taskResult.revision).toBe(withTaskOverride.revision + 1);
 
+    const runSetup = await setupProject();
+    roots.push(runSetup.workspaceRoot);
     const runService = new OutlineGenerationService({
-      repository,
+      repository: runSetup.repository,
       modelService: models,
       chatAdapter: fakeChat(candidate()),
       now: () => NOW,
       createId: () => "run-run-override"
     });
-    const runResult = await runService.generate(taskResult.metadata.id, {
-      expectedRevision: taskResult.revision,
+    const runResult = await runService.generate(runSetup.project.metadata.id, {
+      expectedRevision: runSetup.project.revision,
       modelId: "run/model"
     });
-    expect(runResult.revision).toBe(taskResult.revision + 1);
+    expect(runResult.revision).toBe(runSetup.project.revision + 1);
 
-    const readLog = async (runId: string) =>
+    const readLog = async (root: string, projectId: string, runId: string) =>
       aiRunLogSchema.parse(
         JSON.parse(
           await fs.readFile(
-            path.join(
-              workspaceRoot,
-              "projects",
-              project.metadata.id,
-              "runs",
-              `${runId}.json`
-            ),
+            path.join(root, "projects", projectId, "runs", `${runId}.json`),
             "utf8"
           )
         )
       );
-    expect(await readLog("run-task-override")).toMatchObject({
+    expect(
+      await readLog(workspaceRoot, project.metadata.id, "run-task-override")
+    ).toMatchObject({
       modelId: "task/model",
       modelSelectionSource: "task_override"
     });
-    expect(await readLog("run-run-override")).toMatchObject({
+    expect(
+      await readLog(
+        runSetup.workspaceRoot,
+        runSetup.project.metadata.id,
+        "run-run-override"
+      )
+    ).toMatchObject({
       modelId: "run/model",
       modelSelectionSource: "run_override"
     });
@@ -420,8 +701,11 @@ describe("OutlineGenerationService", () => {
       workspaceRoot,
       now: () => NOW,
       fileSystem: {
-        rename: async () => {
-          throw new Error("injected rename failure");
+        rename: async (sourcePath, destinationPath) => {
+          if (path.basename(destinationPath) === "project.json") {
+            throw new Error("injected rename failure");
+          }
+          await fs.rename(sourcePath, destinationPath);
         }
       }
     });

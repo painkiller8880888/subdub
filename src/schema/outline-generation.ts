@@ -1,31 +1,31 @@
 import { z } from "zod";
 
 import { sectionRoleSchema } from "./common.js";
-import { positiveIntegerSchema } from "./primitives.js";
+import { positiveIntegerSchema, strictObject } from "./primitives.js";
 
 // This is intentionally separate from Outline. The model must not be able to
 // choose project IDs, revisions, hashes, statuses, or run IDs.
-export const outlineGenerationSourceRefSchema = z.object({
-  headingPath: z.array(z.string().min(1))
+export const outlineGenerationSourceRefSchema = strictObject({
+  headingPath: z.array(z.string().min(1)).min(1)
 });
 
-export const outlineGenerationQuestionSchema = z.object({
+export const outlineGenerationQuestionSchema = strictObject({
   question: z.string().min(1)
 });
 
-export const outlineGenerationSectionSchema = z.object({
+export const outlineGenerationSectionSchema = strictObject({
   role: sectionRoleSchema,
   title: z.string().min(1),
   overview: z.string(),
   keyPoints: z.array(z.string()),
   targetDurationSec: positiveIntegerSchema,
-  sourceRefs: z.array(outlineGenerationSourceRefSchema),
+  sourceRefs: z.array(outlineGenerationSourceRefSchema).min(1),
   openQuestions: z.array(outlineGenerationQuestionSchema)
 });
 
-export const outlineGenerationCandidateSchema = z.object({
+export const outlineGenerationCandidateSchema = strictObject({
   openQuestions: z.array(outlineGenerationQuestionSchema),
-  sections: z.array(outlineGenerationSectionSchema)
+  sections: z.array(outlineGenerationSectionSchema).min(3)
 });
 
 export type OutlineGenerationCandidate = z.infer<
@@ -71,6 +71,7 @@ export const outlineGenerationJsonSchema = {
           targetDurationSec: { type: "integer", exclusiveMinimum: 0 },
           sourceRefs: {
             type: "array",
+            minItems: 1,
             items: {
               type: "object",
               additionalProperties: false,
@@ -78,6 +79,7 @@ export const outlineGenerationJsonSchema = {
               properties: {
                 headingPath: {
                   type: "array",
+                  minItems: 1,
                   items: { type: "string", minLength: 1 }
                 }
               }

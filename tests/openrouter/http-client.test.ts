@@ -105,6 +105,27 @@ describe("OpenRouterHttpClient", () => {
     });
   });
 
+  it("passes a 60-second Retry-After through without the exponential backoff cap", async () => {
+    const sleeps: number[] = [];
+    const fixture = client(
+      [
+        new Response("rate", {
+          status: 429,
+          headers: { "retry-after": "60" }
+        }),
+        new Response("ok", { status: 200 })
+      ],
+      sleeps
+    );
+
+    await expect(
+      fixture.client.request("/chat/completions")
+    ).resolves.toMatchObject({
+      attempts: 2
+    });
+    expect(sleeps).toEqual([60_000]);
+  });
+
   it("creates a fresh timeout signal for each attempt", async () => {
     const signals: AbortSignal[] = [];
     const fetch = vi.fn(async (_input: string | URL, init?: RequestInit) => {

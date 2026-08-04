@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { mapApiError } from "../../src/api/errors/api-error.js";
+import { OutlineGenerationError } from "../../src/app/projects/outline-generation-errors.js";
 import { OpenRouterAdapterError } from "../../src/openrouter/errors.js";
 
 describe("outline generation OpenRouter error mapping", () => {
@@ -40,5 +41,17 @@ describe("outline generation OpenRouter error mapping", () => {
         })
       )
     ).toMatchObject({ code: "OPENROUTER_UNAVAILABLE", status: 503 });
+  });
+
+  it("maps an existing outline rejection to a conflict", () => {
+    expect(
+      mapApiError(
+        new OutlineGenerationError(
+          "OUTLINE_ALREADY_EXISTS",
+          409,
+          "An existing outline must be explicitly cleared before generation."
+        )
+      )
+    ).toMatchObject({ code: "OUTLINE_ALREADY_EXISTS", status: 409 });
   });
 });

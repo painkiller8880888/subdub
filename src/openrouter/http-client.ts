@@ -7,8 +7,19 @@ import {
 export const MAX_OPENROUTER_HTTP_ATTEMPTS = 3;
 export const OPENROUTER_RETRY_BASE_DELAY_MS = 100;
 export const OPENROUTER_RETRY_MAX_DELAY_MS = 1000;
+export const OPENROUTER_RETRY_AFTER_MAX_DELAY_MS = 60_000;
 
 export type Sleep = (milliseconds: number) => Promise<void>;
+
+export type OpenRouterResponseRetryDecision = {
+  readonly retry: boolean;
+  readonly upstreamStatus?: 429 | 502 | 503;
+  readonly retryAfterMs?: number;
+};
+
+export type OpenRouterResponseRetryDecider = (
+  response: Response
+) => OpenRouterResponseRetryDecision | Promise<OpenRouterResponseRetryDecision>;
 
 export type OpenRouterHttpClientOptions = {
   readonly apiKey: string;
@@ -20,6 +31,8 @@ export type OpenRouterHttpClientOptions = {
   readonly maxAttempts?: number;
   readonly retryBaseDelayMs?: number;
   readonly retryMaxDelayMs?: number;
+  readonly retryAfterMaxDelayMs?: number;
+  readonly retryOnResponse?: OpenRouterResponseRetryDecider;
 };
 
 export type OpenRouterHttpResponse = {
@@ -75,6 +88,20 @@ function boundedExponentialDelay(
   return Math.min(maxDelayMs, baseDelayMs * 2 ** (attempt - 1));
 }
 
+function retryDelay(
+  retryAfterMs: number | undefined,
+  attempt: number,
+  baseDelayMs: number,
+  maxDelayMs: number,
+  retryAfterMaxDelayMs: number
+): number {
+  if (retryAfterMs !== undefined) {
+    return Math.min(retryAfterMaxDelayMs, retryAfterMs);
+  }
+
+  return boundedExponentialDelay(attempt, baseDelayMs, maxDelayMs);
+}
+
 export class OpenRouterHttpClient {
   private readonly apiKey: string;
   private readonly baseUrl: string;
@@ -85,6 +112,8 @@ export class OpenRouterHttpClient {
   private readonly maxAttempts: number;
   private readonly retryBaseDelayMs: number;
   private readonly retryMaxDelayMs: number;
+  private readonly retryAfterMaxDelayMs: number;
+  private readonly retryOnResponse: OpenRouterResponseRetryDecider | undefined;
 
   constructor(options: OpenRouterHttpClientOptions) {
     this.apiKey = options.apiKey;
@@ -105,6 +134,11 @@ export class OpenRouterHttpClient {
       this.retryBaseDelayMs,
       options.retryMaxDelayMs ?? OPENROUTER_RETRY_MAX_DELAY_MS
     );
+    this.retryAfterMaxDelayMs = Math.max(
+      0,
+      options.retryAfterMaxDelayMs ?? OPENROUTER_RETRY_AFTER_MAX_DELAY_MS
+    );
+    this.retryOnResponse = options.retryOnResponse;
   }
 
   async request(
@@ -137,6 +171,37 @@ export class OpenRouterHttpClient {
       }
 
       if (response.ok) {
+        let retryDecision: OpenRouterResponseRetryDecision | undefined;
+        if (this.retryOnResponse !== undefined) {
+          try {
+            retryDecision = await this.retryOnResponse(response.clone());
+          } catch {
+            retryDecision = undefined;
+          }
+        }
+
+        if (retryDecision?.retry === true) {
+          const upstreamStatus = retryDecision.upstreamStatus ?? 503;
+          if (attempt >= this.maxAttempts) {
+            throw new OpenRouterAdapterError(retryErrorCode(upstreamStatus), {
+              upstreamStatus,
+              retryAfterMs: retryDecision.retryAfterMs,
+              attempts: attempt
+            });
+          }
+
+          await this.sleep(
+            retryDelay(
+              retryDecision.retryAfterMs,
+              attempt,
+              this.retryBaseDelayMs,
+              this.retryMaxDelayMs,
+              this.retryAfterMaxDelayMs
+            )
+          );
+          continue;
+        }
+
         return { response, attempts: attempt };
       }
 
@@ -168,14 +233,12 @@ export class OpenRouterHttpClient {
           attempts: attempt
         });
       }
-      const delayMs = Math.min(
+      const delayMs = retryDelay(
+        retryAfterMs,
+        attempt,
+        this.retryBaseDelayMs,
         this.retryMaxDelayMs,
-        retryAfterMs ??
-          boundedExponentialDelay(
-            attempt,
-            this.retryBaseDelayMs,
-            this.retryMaxDelayMs
-          )
+        this.retryAfterMaxDelayMs
       );
       await this.sleep(delayMs);
     }

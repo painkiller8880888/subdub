@@ -12,8 +12,8 @@ export const aiRunLogSchema = strictObject({
   sourceHash: sha256Schema,
   inputHash: sha256Schema,
   startedAt: isoUtcDateTimeSchema,
-  completedAt: isoUtcDateTimeSchema,
-  status: z.enum(["succeeded", "failed"]),
+  completedAt: isoUtcDateTimeSchema.nullable(),
+  status: z.enum(["running", "succeeded", "failed"]),
   modelId: z.string().min(1).nullable(),
   modelSelectionSource: z
     .enum(["run_override", "task_override", "default"])

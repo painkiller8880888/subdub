@@ -8,6 +8,7 @@ export const OUTLINE_GENERATION_ERROR_CODE = {
   modelExpired: "MODEL_EXPIRED",
   modelZdrUnavailable: "MODEL_ZDR_ENDPOINT_UNAVAILABLE",
   contextLengthExceeded: "OPENROUTER_CONTEXT_LENGTH_EXCEEDED",
+  alreadyExists: "OUTLINE_ALREADY_EXISTS",
   schemaInvalid: "OUTLINE_GENERATION_SCHEMA_INVALID",
   orderInvalid: "OUTLINE_GENERATION_ORDER_INVALID",
   sourceReferenceInvalid: "OUTLINE_GENERATION_SOURCE_REFERENCE_INVALID"
@@ -18,12 +19,12 @@ export type OutlineGenerationErrorCode =
 
 export class OutlineGenerationError extends Error {
   readonly code: OutlineGenerationErrorCode;
-  readonly status: 422 | 502;
+  readonly status: 409 | 422 | 502;
   readonly details: readonly ApiErrorDetail[];
 
   constructor(
     code: OutlineGenerationErrorCode,
-    status: 422 | 502,
+    status: 409 | 422 | 502,
     message: string,
     details: readonly ApiErrorDetail[] = []
   ) {

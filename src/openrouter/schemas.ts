@@ -71,6 +71,8 @@ export const openRouterChatCompletionResponseSchema = z
                 content: z.unknown()
               })
               .passthrough()
+              .optional(),
+            error: z.unknown().optional()
           })
           .passthrough()
       )

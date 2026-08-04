@@ -104,6 +104,22 @@ function errorCode(error: unknown): string {
   return "INTERNAL_SERVER_ERROR";
 }
 
+function hasExistingOutline(project: VideoProject): boolean {
+  return (
+    project.outline.sections.length > 0 ||
+    project.outline.openQuestions.length > 0 ||
+    project.outline.generationRunId !== null ||
+    project.outline.status !== "draft"
+  );
+}
+
+function errorDetails(error: unknown): Partial<RunState> {
+  if (error instanceof OpenRouterAdapterError && error.attempts !== undefined) {
+    return { httpAttemptCount: error.attempts };
+  }
+  return {};
+}
+
 function markdownHeadingPaths(markdown: string): ReadonlySet<string> {
   const paths = new Set<string>();
   const stack: string[] = [];
@@ -292,17 +308,26 @@ export class OutlineGenerationService {
       outputChecksum: null
     };
 
-    if (snapshot.project.revision !== request.expectedRevision) {
-      const conflict = new ProjectRepositoryError(
-        "PROJECT_REVISION_CONFLICT",
-        409,
-        "The project revision does not match the expected revision."
-      );
-      await this.writeFailedRunLog(snapshot.project, run, conflict);
-      throw conflict;
-    }
-
+    let runStarted = false;
     try {
+      await this.writeStartedRunLog(snapshot.project, run);
+      runStarted = true;
+
+      if (snapshot.project.revision !== request.expectedRevision) {
+        throw new ProjectRepositoryError(
+          "PROJECT_REVISION_CONFLICT",
+          409,
+          "The project revision does not match the expected revision."
+        );
+      }
+      if (hasExistingOutline(snapshot.project)) {
+        throw new OutlineGenerationError(
+          OUTLINE_GENERATION_ERROR_CODE.alreadyExists,
+          409,
+          "An existing outline must be explicitly cleared before generation."
+        );
+      }
+
       const models = await this.modelService.listModels();
       const resolution = resolveModel({
         settings: snapshot.project.aiSettings,
@@ -409,33 +434,46 @@ export class OutlineGenerationService {
         outline,
         request.expectedRevision
       );
-      await this.writeSucceededRunLog(saved, run);
+      await this.tryFinalizeRunLog(saved, run, "succeeded", null);
       return saved;
     } catch (error) {
+      Object.assign(run, errorDetails(error));
       if (run.responseTimeMs === null) {
         run.responseTimeMs = Math.max(
           0,
           this.now().getTime() - startedAtDate.getTime()
         );
       }
-      await this.writeFailedRunLog(snapshot.project, run, error);
+      if (runStarted) {
+        await this.tryFinalizeRunLog(
+          snapshot.project,
+          run,
+          "failed",
+          errorCode(error)
+        );
+      }
       throw error;
     }
   }
 
-  private async writeSucceededRunLog(
+  private async writeStartedRunLog(
     project: VideoProject,
     run: RunState
   ): Promise<void> {
-    await this.writeRunLog(project, run, "succeeded", null);
+    await this.writeRunLog(project, run, "running", null);
   }
 
-  private async writeFailedRunLog(
+  private async tryFinalizeRunLog(
     project: VideoProject,
     run: RunState,
-    error: unknown
+    status: "succeeded" | "failed",
+    failureCode: string | null
   ): Promise<void> {
-    await this.writeRunLog(project, run, "failed", errorCode(error));
+    try {
+      await this.writeRunLog(project, run, status, failureCode);
+    } catch {
+      // The running log remains as a diagnostic record when finalization fails.
+    }
   }
 
   private async writeRunLog(
@@ -454,7 +492,7 @@ export class OutlineGenerationService {
       sourceHash: run.sourceHash,
       inputHash: run.inputHash,
       startedAt: run.startedAt,
-      completedAt,
+      completedAt: status === "running" ? null : completedAt,
       status,
       modelId: run.modelId,
       modelSelectionSource: run.modelSelectionSource,
@@ -474,13 +512,6 @@ export class OutlineGenerationService {
       imageInput: false,
       tools: false
     };
-
-    // Logging failure must never turn a safe project mutation into an unsafe
-    // rollback attempt. The operation result remains authoritative.
-    try {
-      await this.repository.writeRunLog(project.metadata.id, run.runId, runLog);
-    } catch {
-      // Deliberately best effort; the decision is covered by tests and report.
-    }
+    await this.repository.writeRunLog(project.metadata.id, run.runId, runLog);
   }
 }

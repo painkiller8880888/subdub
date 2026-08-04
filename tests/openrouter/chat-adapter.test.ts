@@ -35,6 +35,22 @@ function successResponse() {
   );
 }
 
+function embeddedErrorResponse(error: unknown, content = "partial JSON") {
+  return new Response(
+    JSON.stringify({
+      model: "provider/model",
+      choices: [
+        {
+          finish_reason: "error",
+          message: { content },
+          error
+        }
+      ]
+    }),
+    { status: 200, headers: { "content-type": "application/json" } }
+  );
+}
+
 describe("OpenRouterChatAdapter", () => {
   it("sends strict non-streaming JSON Schema and provider privacy settings", async () => {
     let body: Record<string, unknown> | undefined;
@@ -117,5 +133,65 @@ describe("OpenRouterChatAdapter", () => {
     await expect(unauthorized.complete(request)).rejects.toBeInstanceOf(
       OpenRouterAdapterError
     );
+  });
+
+  it.each([
+    ["embedded 502", { code: 502 }, 502],
+    [
+      "embedded 503",
+      { code: 500, metadata: { error_type: "provider_overloaded" } },
+      503
+    ],
+    [
+      "embedded 429",
+      { code: 500, metadata: { error_type: "rate_limit_exceeded" } },
+      429
+    ]
+  ])(
+    "retries %s returned inside an HTTP 200 response",
+    async (_name, error, status) => {
+      const sleeps: number[] = [];
+      const fetch = vi.fn(async () => embeddedErrorResponse(error));
+      const adapter = new OpenRouterChatAdapter({
+        apiKey: "fixture-key",
+        fetch: fetch as unknown as typeof globalThis.fetch,
+        sleep: async (milliseconds) => {
+          sleeps.push(milliseconds);
+        }
+      });
+
+      await expect(adapter.complete(request)).rejects.toMatchObject({
+        code: "OPENROUTER_UNAVAILABLE",
+        upstreamStatus: status,
+        attempts: 3
+      });
+      expect(fetch).toHaveBeenCalledTimes(3);
+      expect(sleeps).toEqual([100, 200]);
+    }
+  );
+
+  it("does not accept partial content after three embedded provider errors", async () => {
+    const sleeps: number[] = [];
+    const fetch = vi.fn(async () =>
+      embeddedErrorResponse({
+        code: 502,
+        metadata: { error_type: "provider_unavailable" }
+      })
+    );
+    const adapter = new OpenRouterChatAdapter({
+      apiKey: "fixture-key",
+      fetch: fetch as unknown as typeof globalThis.fetch,
+      sleep: async (milliseconds) => {
+        sleeps.push(milliseconds);
+      }
+    });
+
+    await expect(adapter.complete(request)).rejects.toMatchObject({
+      code: "OPENROUTER_UNAVAILABLE",
+      upstreamStatus: 502,
+      attempts: 3
+    });
+    expect(fetch).toHaveBeenCalledTimes(3);
+    expect(sleeps).toEqual([100, 200]);
   });
 });
