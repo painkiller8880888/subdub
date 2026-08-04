@@ -2,6 +2,7 @@ import { type ZodType } from "zod";
 
 import {
   apiErrorResponseSchema,
+  modelsResponseSchema,
   projectBriefSaveRequestSchema,
   projectCreateRequestSchema,
   projectCreateResponseSchema,
@@ -13,6 +14,7 @@ import {
   type ApiErrorDetail,
   type ProjectBriefSaveRequest,
   type ProjectCreateRequest,
+  type ModelsResponse,
   type ProjectSourceContent,
   type ProjectSourceSaveRequest,
   type ProjectSummary
@@ -108,6 +110,14 @@ export async function fetchApi<T>(
 
 export async function fetchProjects(): Promise<ProjectSummary[]> {
   const response = await fetchApi("/api/projects", projectListResponseSchema);
+  return response.data;
+}
+
+export async function fetchModels(
+  options: { refresh?: boolean } = {}
+): Promise<ModelsResponse["data"]> {
+  const query = options.refresh === true ? "?refresh=true" : "";
+  const response = await fetchApi(`/api/models${query}`, modelsResponseSchema);
   return response.data;
 }
 

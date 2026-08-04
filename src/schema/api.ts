@@ -137,6 +137,40 @@ export const projectMutationResponseSchema = z
   })
   .strict();
 
+export const modelsQuerySchema = z
+  .object({
+    refresh: z.enum(["true", "false"]).optional()
+  })
+  .strict()
+  .transform((query) => ({ refresh: query.refresh === "true" }));
+
+export const modelSummarySchema = z
+  .object({
+    id: z.string().min(1),
+    displayName: z.string().min(1),
+    contextLength: z.number().int().positive(),
+    inputPrice: z.string().min(1),
+    outputPrice: z.string().min(1),
+    outputModalities: z.array(z.string()),
+    supportedParameters: z.array(z.string()),
+    expirationDate: z.string().min(1).nullable(),
+    structuredOutputs: z.boolean(),
+    zdrAvailable: z.boolean()
+  })
+  .strict();
+
+export const modelsResponseSchema = z
+  .object({
+    data: z
+      .object({
+        models: z.array(modelSummarySchema),
+        fetchedAt: isoUtcDateTimeSchema,
+        cached: z.boolean()
+      })
+      .strict()
+  })
+  .strict();
+
 export type ApiErrorDetail = z.infer<typeof apiErrorDetailSchema>;
 export type ApiSuccessResponse<T> = {
   data: T;
@@ -166,6 +200,9 @@ export type ProjectBriefSaveRequest = z.infer<
 export type ProjectMutationResponse = z.infer<
   typeof projectMutationResponseSchema
 >;
+export type ModelsQuery = z.infer<typeof modelsQuerySchema>;
+export type ModelSummary = z.infer<typeof modelSummarySchema>;
+export type ModelsResponse = z.infer<typeof modelsResponseSchema>;
 
 export function createApiSuccessResponse<T>(
   data: T

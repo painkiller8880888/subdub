@@ -5,6 +5,7 @@ import {
   ApiClientError,
   ApiClientProtocolError,
   createProject,
+  fetchModels,
   fetchProject,
   fetchProjects,
   fetchApi
@@ -96,6 +97,13 @@ describe("web API client", () => {
         status: "ok"
       }
     });
+  });
+
+  it("uses a protocol error when a model success response is malformed", async () => {
+    globalThis.fetch = async () =>
+      jsonResponse({ data: { models: [], cached: false } }, 200);
+
+    await expect(fetchModels()).rejects.toBeInstanceOf(ApiClientProtocolError);
   });
 
   it("uses a protocol error when an error response is not the common shape", async () => {

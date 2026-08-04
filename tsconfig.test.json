@@ -13,6 +13,7 @@
     "src/api/**/*.ts",
     "src/app/**/*.ts",
     "src/db/**/*.ts",
+    "src/openrouter/**/*.ts",
     "src/schema/**/*.ts",
     "src/timeline/**/*.ts"
   ]
