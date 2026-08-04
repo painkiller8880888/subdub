@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { promises as fs } from "node:fs";
 import { tmpdir } from "node:os";
 import * as path from "node:path";
@@ -73,6 +74,9 @@ describe("project API", () => {
     expect(created.data.metadata.title).toBe("申請手順の基本");
     expect(created.data.metadata.department).toBe("総務部");
     expect(created.data.metadata.manualVersion).toBe("2026.08");
+    expect(
+      created.data.characters.map((character) => character.lipSyncPeriodFrames)
+    ).toEqual([4, 4]);
 
     const projectFile = path.join(
       workspaceRoot,
@@ -80,7 +84,18 @@ describe("project API", () => {
       created.data.metadata.id,
       "project.json"
     );
+    const sourceFile = path.join(
+      workspaceRoot,
+      "projects",
+      created.data.metadata.id,
+      "source",
+      "source.md"
+    );
     await expect(fs.access(projectFile)).resolves.toBeUndefined();
+    await expect(fs.readFile(sourceFile, "utf8")).resolves.toBe("");
+    expect(created.data.source.sha256).toBe(
+      createHash("sha256").update("").digest("hex")
+    );
     const savedProject = JSON.parse(await fs.readFile(projectFile, "utf8"));
     expect(savedProject).toEqual(created.data);
 
@@ -107,6 +122,25 @@ describe("project API", () => {
     });
     const detail = projectDetailResponseSchema.parse(detailResponse.json());
     expect(detail).toEqual({ data: created.data });
+  });
+
+  it("treats blank optional metadata as omitted when creating a project", async () => {
+    const response = await server.app.inject({
+      method: "POST",
+      url: "/api/projects",
+      payload: {
+        title: "空欄テスト",
+        department: "",
+        manualVersion: ""
+      }
+    });
+    const created = projectCreateResponseSchema.parse(response.json());
+
+    expect(response.statusCode).toBe(200);
+    expect(created.data.metadata.department).toBe("General");
+    expect(created.data.metadata.manualVersion).toBe("");
+    expect(created.data.thumbnail.departmentOrSystem).toBe("General");
+    expect(created.data.thumbnail.manualVersion).toBeNull();
   });
 
   it("rejects unknown and invalid create input with the common error shape", async () => {
@@ -218,6 +252,62 @@ describe("project API", () => {
       "same-time-alpha",
       "same-time-zeta"
     ]);
+  });
+
+  it("ignores unrelated files and directories without project.json", async () => {
+    const repository = new ProjectRepository(workspaceRoot);
+    await repository.create(
+      createEmptyVideoProject({
+        projectId: "listed-project",
+        title: "一覧対象",
+        createdAt: "2026-08-04T00:00:00.000Z"
+      })
+    );
+
+    const projectsPath = path.join(workspaceRoot, "projects");
+    await fs.writeFile(
+      path.join(projectsPath, "desktop.ini"),
+      "ignored",
+      "utf8"
+    );
+    await fs.writeFile(path.join(projectsPath, ".DS_Store"), "ignored", "utf8");
+    await fs.writeFile(path.join(projectsPath, "README.md"), "ignored", "utf8");
+    await fs.mkdir(path.join(projectsPath, "backup"));
+
+    const response = await server.app.inject({
+      method: "GET",
+      url: "/api/projects"
+    });
+    const listed = projectListResponseSchema.parse(response.json());
+
+    expect(response.statusCode).toBe(200);
+    expect(listed.data.map((project) => project.id)).toEqual([
+      "listed-project"
+    ]);
+  });
+
+  it("identifies the broken project when listing cannot load project.json", async () => {
+    const brokenProjectId = "broken-list-project";
+    const brokenProjectDirectory = path.join(
+      workspaceRoot,
+      "projects",
+      brokenProjectId
+    );
+    await fs.mkdir(brokenProjectDirectory, { recursive: true });
+    await fs.writeFile(
+      path.join(brokenProjectDirectory, "project.json"),
+      '{"schemaVersion":',
+      "utf8"
+    );
+
+    const response = await server.app.inject({
+      method: "GET",
+      url: "/api/projects"
+    });
+    const error = expectApiError(response, 422);
+
+    expect(error.code).toBe("PROJECT_JSON_PARSE_FAILED");
+    expect(error.message).toContain(brokenProjectId);
   });
 
   it("rejects a project symlink that escapes the workspace during listing", async () => {

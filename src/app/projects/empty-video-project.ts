@@ -4,6 +4,8 @@ import {
 } from "../../schema/index.js";
 
 const EMPTY_SHA256 = "0".repeat(64);
+const EMPTY_SOURCE_SHA256 =
+  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
 
 export type EmptyVideoProjectOptions = {
   projectId: string;
@@ -41,7 +43,7 @@ function makeCharacter(
       prePhonemeLength: 0,
       postPhonemeLength: 0
     },
-    lipSyncPeriodFrames: 1,
+    lipSyncPeriodFrames: 4,
     visualAssets: {
       neutral: {
         closed: `${assetPrefix}/neutral-closed.png`,
@@ -96,7 +98,7 @@ export function createEmptyVideoProject(
     source: {
       id: "source-main",
       path: "source/source.md",
-      sha256: EMPTY_SHA256
+      sha256: EMPTY_SOURCE_SHA256
     },
     brief: {
       audience: "",

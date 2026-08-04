@@ -364,7 +364,7 @@ export function mapApiError(error: unknown): MappedApiError {
     return {
       code: error.code,
       status,
-      message: projectRepositoryMessages[error.code],
+      message: error.publicMessage ?? projectRepositoryMessages[error.code],
       details: mapProjectValidationDetails(error.code, error.issues),
       shouldLog: status >= 500
     };

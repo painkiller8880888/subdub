@@ -96,6 +96,9 @@ describe("ProjectService", () => {
     expect(project.metadata.manualVersion).toBe("");
     expect(project.thumbnail.departmentOrSystem).toBe("General");
     expect(project.thumbnail.manualVersion).toBeNull();
+    expect(
+      project.characters.map((character) => character.lipSyncPeriodFrames)
+    ).toEqual([4, 4]);
   });
 
   it("retries an ID collision without changing the existing project", async () => {

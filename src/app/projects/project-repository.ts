@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { promises as fs } from "node:fs";
+import { promises as fs, type Dirent } from "node:fs";
 import * as path from "node:path";
 
 import {
@@ -35,12 +35,14 @@ export class ProjectRepositoryError extends Error {
   readonly code: ProjectRepositoryErrorCode;
   readonly status: number;
   readonly issues: readonly ProjectValidationIssue[];
+  readonly publicMessage: string | undefined;
 
   constructor(
     code: ProjectRepositoryErrorCode,
     status: number,
     message: string,
-    issues: readonly ProjectValidationIssue[] = []
+    issues: readonly ProjectValidationIssue[] = [],
+    publicMessage?: string
   ) {
     super(message);
     this.name = "ProjectRepositoryError";
@@ -48,6 +50,7 @@ export class ProjectRepositoryError extends Error {
     this.code = code;
     this.status = status;
     this.issues = issues;
+    this.publicMessage = publicMessage;
   }
 
   toJSON(): {
@@ -76,7 +79,7 @@ export interface ProjectRepositoryFileSystem {
     directoryPath: string,
     options?: { recursive?: boolean }
   ): Promise<void>;
-  readdir(directoryPath: string): Promise<string[]>;
+  readdir(directoryPath: string): Promise<Dirent[]>;
   rmdir(directoryPath: string): Promise<void>;
   readFile(filePath: string): Promise<string>;
   writeFile(filePath: string, contents: string): Promise<void>;
@@ -105,7 +108,8 @@ const defaultFileSystem: ProjectRepositoryFileSystem = {
   mkdir: async (directoryPath, options) => {
     await fs.mkdir(directoryPath, options);
   },
-  readdir: (directoryPath) => fs.readdir(directoryPath),
+  readdir: (directoryPath) =>
+    fs.readdir(directoryPath, { withFileTypes: true }),
   rmdir: (directoryPath) => fs.rmdir(directoryPath),
   readFile: (filePath) => fs.readFile(filePath, { encoding: "utf8" }),
   writeFile: (filePath, contents) =>
@@ -298,6 +302,19 @@ function isProjectTemporaryDirectoryName(entryName: string): boolean {
   );
 }
 
+function projectListEntryError(
+  projectId: string,
+  error: ProjectRepositoryError
+): ProjectRepositoryError {
+  return new ProjectRepositoryError(
+    error.code,
+    error.status,
+    `Project '${projectId}' could not be loaded: ${error.message}`,
+    error.issues,
+    `プロジェクト「${projectId}」を読み込めませんでした。`
+  );
+}
+
 export class ProjectRepository {
   private readonly workspaceRoot: string;
   private readonly fileSystem: ProjectRepositoryFileSystem;
@@ -343,9 +360,9 @@ export class ProjectRepository {
       resolvedProjectsPath
     );
 
-    let entryNames: string[];
+    let entries: Dirent[];
     try {
-      entryNames = await this.fileSystem.readdir(projectsPath);
+      entries = await this.fileSystem.readdir(projectsPath);
     } catch (error) {
       if (isMissingPathError(error)) {
         return [];
@@ -354,37 +371,76 @@ export class ProjectRepository {
     }
 
     const projects: VideoProject[] = [];
-    for (const entryName of [...entryNames].sort()) {
+    for (const entry of [...entries].sort((first, second) =>
+      first.name.localeCompare(second.name)
+    )) {
+      const entryName = entry.name;
       if (isProjectTemporaryDirectoryName(entryName)) {
         continue;
       }
 
-      const projectId = this.validateProjectId(entryName);
-      const projectDirectoryPath = path.resolve(projectsPath, projectId);
-      if (!isPathInside(this.workspaceRoot, projectDirectoryPath)) {
-        throw invalidProjectPathError();
-      }
-
-      const resolvedProjectDirectoryPath = await this.resolveExistingPath(
-        projectDirectoryPath
-      );
-      if (resolvedProjectDirectoryPath === null) {
+      if (!entry.isDirectory() && !entry.isSymbolicLink()) {
         continue;
       }
-      this.assertInsideManagementRoot(
-        managementRootPath,
-        resolvedProjectDirectoryPath
-      );
-      if (!isPathInside(resolvedProjectsPath, resolvedProjectDirectoryPath)) {
-        throw invalidProjectPathError();
-      }
 
-      projects.push(
-        await this.readProjectWithExpectedId(projectId, {
-          projectDirectoryPath,
-          projectFilePath: path.join(projectDirectoryPath, "project.json")
-        })
-      );
+      const projectIdResult = idSchema.safeParse(entryName);
+      if (!projectIdResult.success) {
+        continue;
+      }
+      const projectId = projectIdResult.data;
+
+      try {
+        const projectDirectoryPath = path.resolve(projectsPath, projectId);
+        if (!isPathInside(this.workspaceRoot, projectDirectoryPath)) {
+          throw invalidProjectPathError();
+        }
+
+        const resolvedProjectDirectoryPath = await this.resolveExistingPath(
+          projectDirectoryPath
+        );
+        if (resolvedProjectDirectoryPath === null) {
+          continue;
+        }
+        this.assertInsideManagementRoot(
+          managementRootPath,
+          resolvedProjectDirectoryPath
+        );
+        if (!isPathInside(resolvedProjectsPath, resolvedProjectDirectoryPath)) {
+          throw invalidProjectPathError();
+        }
+
+        const projectFilePath = path.join(projectDirectoryPath, "project.json");
+        const resolvedProjectFilePath = await this.resolveExistingPath(
+          projectFilePath
+        );
+        if (resolvedProjectFilePath === null) {
+          continue;
+        }
+        this.assertInsideManagementRoot(
+          managementRootPath,
+          resolvedProjectFilePath
+        );
+        if (
+          !isPathInside(resolvedProjectDirectoryPath, resolvedProjectFilePath)
+        ) {
+          throw invalidProjectPathError();
+        }
+
+        projects.push(
+          await this.readProjectWithExpectedId(projectId, {
+            projectDirectoryPath,
+            projectFilePath
+          })
+        );
+      } catch (error) {
+        if (error instanceof ProjectRepositoryError) {
+          if (error.code === "PROJECT_NOT_FOUND") {
+            continue;
+          }
+          throw projectListEntryError(projectId, error);
+        }
+        throw error;
+      }
     }
 
     return projects;
@@ -517,6 +573,14 @@ export class ProjectRepository {
       paths.temporaryDirectoryPath,
       "project.json"
     );
+    const temporarySourceDirectoryPath = path.join(
+      paths.temporaryDirectoryPath,
+      "source"
+    );
+    const temporarySourceFilePath = path.join(
+      temporarySourceDirectoryPath,
+      "source.md"
+    );
     let temporaryDirectoryCreated = false;
 
     try {
@@ -528,6 +592,14 @@ export class ProjectRepository {
         throw writeFailedError();
       }
       temporaryDirectoryCreated = true;
+
+      try {
+        await this.fileSystem.mkdir(temporarySourceDirectoryPath, {
+          recursive: false
+        });
+      } catch {
+        throw writeFailedError();
+      }
 
       let resolvedTemporaryDirectoryPath: string;
       try {
@@ -541,6 +613,12 @@ export class ProjectRepository {
         paths.managementRootPath,
         resolvedTemporaryDirectoryPath
       );
+
+      try {
+        await this.fileSystem.writeFile(temporarySourceFilePath, "");
+      } catch {
+        throw writeFailedError();
+      }
 
       try {
         await this.fileSystem.writeFile(temporaryFilePath, serializedProject);
@@ -568,7 +646,9 @@ export class ProjectRepository {
       if (temporaryDirectoryCreated) {
         await this.removeTemporaryDirectory(
           paths.temporaryDirectoryPath,
-          temporaryFilePath
+          temporaryFilePath,
+          temporarySourceDirectoryPath,
+          temporarySourceFilePath
         );
       }
     }
@@ -831,9 +911,17 @@ export class ProjectRepository {
 
   private async removeTemporaryDirectory(
     directoryPath: string,
-    filePath: string
+    filePath: string,
+    sourceDirectoryPath: string,
+    sourceFilePath: string
   ): Promise<void> {
     await this.removeTemporaryFile(filePath);
+    await this.removeTemporaryFile(sourceFilePath);
+    try {
+      await this.fileSystem.rmdir(sourceDirectoryPath);
+    } catch {
+      // The source directory may already be absent.
+    }
     try {
       await this.fileSystem.rmdir(directoryPath);
     } catch {

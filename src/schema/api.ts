@@ -52,8 +52,16 @@ export const healthResponseSchema = z
 export const projectCreateRequestSchema = z
   .object({
     title: z.string().trim().min(1),
-    department: z.string().optional(),
-    manualVersion: z.string().optional()
+    department: z
+      .string()
+      .trim()
+      .transform((value) => (value.length === 0 ? undefined : value))
+      .optional(),
+    manualVersion: z
+      .string()
+      .trim()
+      .transform((value) => (value.length === 0 ? undefined : value))
+      .optional()
   })
   .strict();
 
