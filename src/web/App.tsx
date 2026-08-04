@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { type FormEvent, useState } from "react";
+import { type FormEvent, useEffect, useRef, useState } from "react";
 import {
   Link,
   Navigate,
@@ -16,12 +16,24 @@ import {
   type ProjectSummary
 } from "../schema/api.js";
 import {
+  projectBriefSchema,
+  type ProjectBrief,
+  type VideoProject
+} from "../schema/index.js";
+import {
   ApiClientError,
   ApiClientProtocolError,
   createProject,
   fetchProject,
-  fetchProjects
+  fetchProjectSource,
+  fetchProjects,
+  saveProjectBrief,
+  saveProjectSource
 } from "./api/client";
+import {
+  AutosaveCoordinator,
+  type AutosaveState
+} from "./brief-autosave";
 
 function projectBriefPath(projectId: string): string {
   return `/projects/${encodeURIComponent(projectId)}/brief`;
@@ -253,84 +265,553 @@ function NewProjectPage() {
   );
 }
 
+type BriefDraft = Omit<ProjectBrief, "targetDurationSec"> & {
+  targetDurationSec: string;
+  markdown: string;
+};
+
+type ProjectSaveRequest =
+  | {
+      kind: "source";
+      projectId: string;
+      markdown: string;
+      expectedRevision: number;
+    }
+  | {
+      kind: "brief";
+      projectId: string;
+      brief: ProjectBrief;
+      expectedRevision: number;
+    };
+
+function projectToBriefDraft(
+  project: VideoProject,
+  markdown: string
+): BriefDraft {
+  return {
+    markdown,
+    audience: project.brief.audience,
+    postViewingGoal: project.brief.postViewingGoal,
+    prerequisites: [...project.brief.prerequisites],
+    targetDurationSec: String(project.brief.targetDurationSec),
+    requiredItems: [...project.brief.requiredItems],
+    prohibitedItems: [...project.brief.prohibitedItems],
+    globalDirectives: [...project.brief.globalDirectives]
+  };
+}
+
+function splitItems(value: string): string[] {
+  return value
+    .split(/\r?\n/)
+    .map((item) => item.trim())
+    .filter((item) => item.length > 0);
+}
+
+function itemsToText(items: string[]): string {
+  return items.join("\n");
+}
+
+function sameBriefDraft(
+  first: Pick<BriefDraft, keyof ProjectBrief>,
+  second: Pick<BriefDraft, keyof ProjectBrief>
+): boolean {
+  return JSON.stringify(first) === JSON.stringify(second);
+}
+
+function projectSummaryFromProject(project: VideoProject): ProjectSummary {
+  return {
+    id: project.metadata.id,
+    title: project.metadata.title,
+    department: project.metadata.department,
+    manualVersion: project.metadata.manualVersion,
+    revision: project.revision,
+    createdAt: project.metadata.createdAt,
+    updatedAt: project.metadata.updatedAt
+  };
+}
+
 function ProjectBriefPage() {
   const { projectId } = useParams<{ projectId: string }>();
+  const queryClient = useQueryClient();
   const projectQuery = useQuery({
     queryKey: ["projects", projectId],
     queryFn: () => fetchProject(projectId ?? ""),
     enabled: projectId !== undefined,
     retry: false
   });
+  const sourceQuery = useQuery({
+    queryKey: ["projects", projectId, "source"],
+    queryFn: () => fetchProjectSource(projectId ?? ""),
+    enabled: projectId !== undefined,
+    retry: false
+  });
+  const [draft, setDraft] = useState<BriefDraft | null>(null);
+  const [autosaveState, setAutosaveState] = useState<AutosaveState>({
+    status: "idle",
+    error: undefined
+  });
+  const projectIdRef = useRef(projectId ?? "");
+  const revisionRef = useRef(0);
+  const draftRef = useRef<BriefDraft | null>(null);
+  const lastSavedRef = useRef<BriefDraft | null>(null);
+  const initializedForProjectRef = useRef<string | null>(null);
+  const saveMutation = useMutation({
+    mutationFn: async (request: ProjectSaveRequest): Promise<VideoProject> => {
+      if (request.kind === "source") {
+        return saveProjectSource(request.projectId, {
+          markdown: request.markdown,
+          expectedRevision: request.expectedRevision
+        });
+      }
+      return saveProjectBrief(request.projectId, {
+        brief: request.brief,
+        expectedRevision: request.expectedRevision
+      });
+    },
+    retry: false
+  });
+  const saveMutationRef = useRef(saveMutation);
+  saveMutationRef.current = saveMutation;
+  projectIdRef.current = projectId ?? "";
+
+  function updateMutationCaches(
+    project: VideoProject,
+    request: ProjectSaveRequest
+  ): void {
+    queryClient.setQueryData(["projects", request.projectId], project);
+    queryClient.setQueryData<ProjectSummary[]>(
+      ["projects"],
+      (summaries) =>
+        summaries?.map((summary) =>
+          summary.id === project.metadata.id
+            ? projectSummaryFromProject(project)
+            : summary
+        )
+    );
+    queryClient.setQueryData<
+      Awaited<ReturnType<typeof fetchProjectSource>> | undefined
+    >(["projects", request.projectId, "source"], (source) => {
+      if (source === undefined) {
+        return source;
+      }
+      return {
+        ...source,
+        revision: project.revision,
+        sha256: project.source.sha256,
+        ...(request.kind === "source"
+          ? { markdown: request.markdown }
+          : {})
+      };
+    });
+  }
+
+  async function saveDraft(nextDraft: BriefDraft): Promise<void> {
+    const lastSaved = lastSavedRef.current;
+    if (lastSaved === null) {
+      return;
+    }
+
+    const sourceChanged = nextDraft.markdown !== lastSaved.markdown;
+    const briefChanged = !sameBriefDraft(nextDraft, lastSaved);
+    if (!sourceChanged && !briefChanged) {
+      return;
+    }
+
+    const saveProjectId = projectIdRef.current;
+
+    if (sourceChanged) {
+      const request = {
+        kind: "source" as const,
+        projectId: saveProjectId,
+        markdown: nextDraft.markdown,
+        expectedRevision: revisionRef.current
+      };
+      const project = await saveMutationRef.current.mutateAsync(request);
+      revisionRef.current = project.revision;
+      updateMutationCaches(project, request);
+      const savedAfterSource = lastSavedRef.current;
+      if (savedAfterSource === null) {
+        return;
+      }
+      lastSavedRef.current = {
+        ...savedAfterSource,
+        markdown: nextDraft.markdown
+      };
+    }
+
+    const currentDraft = draftRef.current;
+    if (
+      briefChanged &&
+      currentDraft !== null &&
+      sameBriefDraft(currentDraft, nextDraft)
+    ) {
+      const brief = projectBriefSchema.parse({
+        audience: nextDraft.audience,
+        postViewingGoal: nextDraft.postViewingGoal,
+        prerequisites: nextDraft.prerequisites,
+        targetDurationSec: Number(nextDraft.targetDurationSec),
+        requiredItems: nextDraft.requiredItems,
+        prohibitedItems: nextDraft.prohibitedItems,
+        globalDirectives: nextDraft.globalDirectives
+      });
+      const request = {
+        kind: "brief" as const,
+        projectId: saveProjectId,
+        brief,
+        expectedRevision: revisionRef.current
+      };
+      const project = await saveMutationRef.current.mutateAsync(request);
+      revisionRef.current = project.revision;
+      updateMutationCaches(project, request);
+      const savedAfterBrief = lastSavedRef.current;
+      if (savedAfterBrief === null) {
+        return;
+      }
+      lastSavedRef.current = {
+        ...savedAfterBrief,
+        ...nextDraft
+      };
+    }
+  }
+
+  const coordinatorRef = useRef<AutosaveCoordinator<BriefDraft> | null>(null);
+  if (coordinatorRef.current === null) {
+    coordinatorRef.current = new AutosaveCoordinator({
+      debounceMs: 350,
+      save: saveDraft,
+      isConflict: (error) =>
+        error instanceof ApiClientError &&
+        error.status === 409 &&
+        error.code === "PROJECT_REVISION_CONFLICT",
+      onStateChange: setAutosaveState
+    });
+  }
+  const coordinator = coordinatorRef.current;
+
+  useEffect(() => {
+    initializedForProjectRef.current = null;
+    revisionRef.current = 0;
+    draftRef.current = null;
+    lastSavedRef.current = null;
+    setDraft(null);
+    coordinator.reset();
+  }, [coordinator, projectId]);
+
+  useEffect(() => {
+    return () => {
+      coordinator.dispose();
+    };
+  }, [coordinator]);
+
+  useEffect(() => {
+    if (
+      projectId === undefined ||
+      initializedForProjectRef.current === projectId ||
+      projectQuery.data === undefined ||
+      sourceQuery.data === undefined
+    ) {
+      return;
+    }
+
+    const nextDraft = projectToBriefDraft(
+      projectQuery.data,
+      sourceQuery.data.markdown
+    );
+    initializedForProjectRef.current = projectIdRef.current;
+    revisionRef.current = projectQuery.data.revision;
+    draftRef.current = nextDraft;
+    lastSavedRef.current = nextDraft;
+    setDraft(nextDraft);
+    coordinator.reset();
+  }, [coordinator, projectId, projectQuery.data, sourceQuery.data]);
 
   if (projectId === undefined) {
     return <Navigate replace to="/projects" />;
   }
 
+  function updateDraft(nextDraft: BriefDraft): void {
+    draftRef.current = nextDraft;
+    setDraft(nextDraft);
+    coordinator.update(nextDraft);
+  }
+
+  function updateTextField(
+    field:
+      | "markdown"
+      | "audience"
+      | "postViewingGoal"
+      | "targetDurationSec",
+    value: string
+  ): void {
+    if (draft === null) {
+      return;
+    }
+    updateDraft({ ...draft, [field]: value } as BriefDraft);
+  }
+
+  function updateItemsField(
+    field:
+      | "prerequisites"
+      | "requiredItems"
+      | "prohibitedItems"
+      | "globalDirectives",
+    value: string
+  ): void {
+    if (draft === null) {
+      return;
+    }
+    updateDraft({ ...draft, [field]: splitItems(value) });
+  }
+
+  async function reloadLatest(): Promise<void> {
+    const [projectResult, sourceResult] = await Promise.all([
+      projectQuery.refetch(),
+      sourceQuery.refetch()
+    ]);
+    if (projectResult.data === undefined || sourceResult.data === undefined) {
+      return;
+    }
+
+    const nextDraft = projectToBriefDraft(
+      projectResult.data,
+      sourceResult.data.markdown
+    );
+    initializedForProjectRef.current = projectIdRef.current;
+    revisionRef.current = projectResult.data.revision;
+    draftRef.current = nextDraft;
+    lastSavedRef.current = nextDraft;
+    setDraft(nextDraft);
+    coordinator.reset();
+  }
+
+  if (projectQuery.isPending || sourceQuery.isPending || draft === null) {
+    return (
+      <main className="page-shell narrow-shell">
+        <p className="back-link">
+          <Link to="/projects">Back to projects</Link>
+        </p>
+        <p className="status-message" role="status" aria-live="polite">
+          Loading project editor...
+        </p>
+      </main>
+    );
+  }
+
+  if (projectQuery.isError || sourceQuery.isError) {
+    const error = projectQuery.error ?? sourceQuery.error;
+    return (
+      <main className="page-shell narrow-shell">
+        <p className="back-link">
+          <Link to="/projects">Back to projects</Link>
+        </p>
+        <section className="message-panel message-panel-error" role="alert">
+          <h1>Could not load project</h1>
+          <p>{getErrorMessage(error, "The project could not be loaded.")}</p>
+          <button
+            className="button"
+            type="button"
+            onClick={() => {
+              void reloadLatest();
+            }}
+          >
+            Retry
+          </button>
+        </section>
+      </main>
+    );
+  }
+
+  const autosaveMessage =
+    autosaveState.status === "saving"
+      ? "Saving..."
+      : autosaveState.status === "saved"
+        ? "Saved"
+        : autosaveState.status === "error"
+          ? "Save failed"
+          : autosaveState.status === "conflict"
+            ? "Conflict"
+            : autosaveState.status === "pending"
+              ? "Waiting to save..."
+              : "No changes";
+
   return (
     <main className="page-shell narrow-shell">
       <p className="back-link">
-        <Link to="/projects">← プロジェクト一覧へ戻る</Link>
+        <Link to="/projects">Back to projects</Link>
       </p>
-      {projectQuery.isPending ? (
-        <p className="status-message" role="status">
-          プロジェクトを読み込んでいます…
-        </p>
-      ) : projectQuery.isError ? (
+      <header className="page-header page-header-stacked">
+        <p className="eyebrow">Project brief</p>
+        <h1>{projectQuery.data.metadata.title}</h1>
+        <p>Changes are saved automatically shortly after editing.</p>
+      </header>
+
+      <div className="autosave-status" role="status" aria-live="polite">
+        <strong>{autosaveMessage}</strong>
+        <span>revision {projectQuery.data.revision}</span>
+      </div>
+
+      {autosaveState.status === "error" ? (
         <section className="message-panel message-panel-error" role="alert">
-          <h1>プロジェクトを読み込めませんでした</h1>
+          <h2>Save failed</h2>
           <p>
             {getErrorMessage(
-              projectQuery.error,
-              "プロジェクト詳細の取得に失敗しました。"
+              autosaveState.error,
+              "The draft is still in the form. Retry when ready."
             )}
           </p>
           <button
             className="button"
             type="button"
             onClick={() => {
-              void projectQuery.refetch();
+              coordinator.retry();
             }}
           >
-            再試行
+            Retry
           </button>
         </section>
-      ) : (
-        <>
-          <header className="page-header page-header-stacked">
-            <p className="eyebrow">プロジェクト詳細</p>
-            <h1>{projectQuery.data.metadata.title}</h1>
-            <p>現在のプロジェクト情報を確認できます。</p>
-          </header>
-          <dl className="detail-list">
-            <div>
-              <dt>ID</dt>
-              <dd>{projectQuery.data.metadata.id}</dd>
-            </div>
-            <div>
-              <dt>revision</dt>
-              <dd>{projectQuery.data.revision}</dd>
-            </div>
-            <div>
-              <dt>部門</dt>
-              <dd>{projectQuery.data.metadata.department || "未設定"}</dd>
-            </div>
-            <div>
-              <dt>版数</dt>
-              <dd>{projectQuery.data.metadata.manualVersion || "未設定"}</dd>
-            </div>
-            <div>
-              <dt>更新日時</dt>
-              <dd>{formatDate(projectQuery.data.metadata.updatedAt)}</dd>
-            </div>
-          </dl>
-          <p className="scope-note">
-            この画面では読み込み確認のみを行います。企画編集や自動保存は次の工程で追加します。
+      ) : null}
+
+      {autosaveState.status === "conflict" ? (
+        <section className="message-panel message-panel-error" role="alert">
+          <h2>Conflict</h2>
+          <p>
+            Another screen or tab updated this project. Automatic saving is
+            stopped and the current draft was kept. Reload the latest data to
+            continue.
           </p>
-        </>
-      )}
+          <button
+            className="button"
+            type="button"
+            onClick={() => {
+              void reloadLatest();
+            }}
+          >
+            Reload latest data
+          </button>
+        </section>
+      ) : null}
+
+      <form
+        className="project-form"
+        noValidate
+        onSubmit={(event) => {
+          event.preventDefault();
+        }}
+      >
+        <div className="form-field">
+          <label htmlFor="project-source-markdown">Markdown source</label>
+          <textarea
+            id="project-source-markdown"
+            name="markdown"
+            rows={14}
+            value={draft.markdown}
+            onChange={(event) => {
+              updateTextField("markdown", event.target.value);
+            }}
+          />
+        </div>
+
+        <div className="form-field">
+          <label htmlFor="project-audience">Audience</label>
+          <textarea
+            id="project-audience"
+            name="audience"
+            rows={3}
+            value={draft.audience}
+            onChange={(event) => {
+              updateTextField("audience", event.target.value);
+            }}
+          />
+        </div>
+
+        <div className="form-field">
+          <label htmlFor="project-post-viewing-goal">Post-viewing goal</label>
+          <textarea
+            id="project-post-viewing-goal"
+            name="postViewingGoal"
+            rows={3}
+            value={draft.postViewingGoal}
+            onChange={(event) => {
+              updateTextField("postViewingGoal", event.target.value);
+            }}
+          />
+        </div>
+
+        <div className="form-field">
+          <label htmlFor="project-prerequisites">Prerequisites</label>
+          <textarea
+            id="project-prerequisites"
+            name="prerequisites"
+            rows={4}
+            value={itemsToText(draft.prerequisites)}
+            onChange={(event) => {
+              updateItemsField("prerequisites", event.target.value);
+            }}
+          />
+          <small>One item per line.</small>
+        </div>
+
+        <div className="form-field">
+          <label htmlFor="project-target-duration">Target duration (seconds)</label>
+          <input
+            id="project-target-duration"
+            name="targetDurationSec"
+            type="number"
+            min={1}
+            step={1}
+            value={draft.targetDurationSec}
+            onChange={(event) => {
+              updateTextField("targetDurationSec", event.target.value);
+            }}
+          />
+        </div>
+
+        <div className="form-field">
+          <label htmlFor="project-required-items">Required items</label>
+          <textarea
+            id="project-required-items"
+            name="requiredItems"
+            rows={4}
+            value={itemsToText(draft.requiredItems)}
+            onChange={(event) => {
+              updateItemsField("requiredItems", event.target.value);
+            }}
+          />
+          <small>One item per line.</small>
+        </div>
+
+        <div className="form-field">
+          <label htmlFor="project-prohibited-items">Prohibited items</label>
+          <textarea
+            id="project-prohibited-items"
+            name="prohibitedItems"
+            rows={4}
+            value={itemsToText(draft.prohibitedItems)}
+            onChange={(event) => {
+              updateItemsField("prohibitedItems", event.target.value);
+            }}
+          />
+          <small>One item per line.</small>
+        </div>
+
+        <div className="form-field">
+          <label htmlFor="project-global-directives">Global constraints</label>
+          <textarea
+            id="project-global-directives"
+            name="globalDirectives"
+            rows={4}
+            value={itemsToText(draft.globalDirectives)}
+            onChange={(event) => {
+              updateItemsField("globalDirectives", event.target.value);
+            }}
+          />
+          <small>One item per line.</small>
+        </div>
+      </form>
     </main>
   );
 }
+
 
 function NotFoundPage() {
   return (
