@@ -58,5 +58,37 @@ export const openRouterZdrEndpointsResponseSchema = z
   })
   .passthrough();
 
+export const openRouterChatCompletionResponseSchema = z
+  .object({
+    model: z.string().min(1).optional(),
+    choices: z
+      .array(
+        z
+          .object({
+            finish_reason: z.string().nullable().optional(),
+            message: z
+              .object({
+                content: z.unknown()
+              })
+              .passthrough()
+          })
+          .passthrough()
+      )
+      .min(1),
+    usage: z
+      .object({
+        prompt_tokens: z.number().int().nonnegative().optional(),
+        completion_tokens: z.number().int().nonnegative().optional(),
+        total_tokens: z.number().int().nonnegative().optional()
+      })
+      .passthrough()
+      .optional(),
+    openrouter_metadata: z.unknown().optional()
+  })
+  .passthrough();
+
 export type OpenRouterModelResponse = z.infer<typeof openRouterModelSchema>;
 export type OpenRouterZdrEndpoint = z.infer<typeof openRouterZdrEndpointSchema>;
+export type OpenRouterChatCompletionResponse = z.infer<
+  typeof openRouterChatCompletionResponseSchema
+>;

@@ -9,6 +9,9 @@ import {
   ProjectRepository
 } from "../app/projects/project-repository.js";
 import { ProjectService } from "../app/projects/project-service.js";
+import { OutlineGenerationService } from "../app/projects/outline-generation-service.js";
+import { createOpenRouterChatAdapter } from "../openrouter/chat-adapter.js";
+import { createOpenRouterModelService } from "../openrouter/model-service.js";
 import type { BackupDatabase } from "../db/backup.js";
 import {
   initializeWorkspaceDatabase,
@@ -64,14 +67,26 @@ export async function initializeServer(
   });
 
   try {
+    const resolvedProjectRepository =
+      projectRepository ?? new ProjectRepository({ workspaceRoot });
+    const resolvedModelService =
+      appOptions.modelService ?? createOpenRouterModelService();
     const resolvedProjectService =
       suppliedProjectService ??
       new ProjectService({
-        repository:
-          projectRepository ?? new ProjectRepository({ workspaceRoot })
+        repository: resolvedProjectRepository
+      });
+    const resolvedOutlineGenerationService =
+      appOptions.outlineGenerationService ??
+      new OutlineGenerationService({
+        repository: resolvedProjectRepository,
+        modelService: resolvedModelService,
+        chatAdapter: createOpenRouterChatAdapter()
       });
     const app = buildApp({
       ...appOptions,
+      modelService: resolvedModelService,
+      outlineGenerationService: resolvedOutlineGenerationService,
       projectService: resolvedProjectService
     });
     app.addHook("onClose", async () => {
