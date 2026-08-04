@@ -191,6 +191,23 @@ input:focus-visible {
   margin: 0;
 }
 
+.autosave-status {
+  align-items: center;
+  background: #eef3fa;
+  border: 1px solid #d7deea;
+  border-radius: 0.6rem;
+  display: flex;
+  gap: 0.8rem;
+  justify-content: space-between;
+  margin-bottom: 1rem;
+  padding: 0.8rem 1rem;
+}
+
+.autosave-status span {
+  color: #59647b;
+  font-size: 0.9rem;
+}
+
 .project-form {
   background: #fff;
   border: 1px solid #d7deea;

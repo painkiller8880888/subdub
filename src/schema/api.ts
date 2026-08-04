@@ -3,9 +3,13 @@ import { z } from "zod";
 import {
   idSchema,
   isoUtcDateTimeSchema,
-  nonNegativeIntegerSchema
+  nonNegativeIntegerSchema,
+  sha256Schema
 } from "./primitives.js";
-import { videoProjectSchema } from "./video-project.js";
+import {
+  projectBriefSchema,
+  videoProjectSchema
+} from "./video-project.js";
 
 const apiErrorPathSegmentSchema = z.union([z.string(), z.number().int()]);
 
@@ -98,6 +102,41 @@ export const projectDetailResponseSchema = z
   })
   .strict();
 
+export const projectSourceContentSchema = z
+  .object({
+    markdown: z.string(),
+    sha256: sha256Schema
+  })
+  .strict();
+
+export const projectSourceReadResponseSchema = z
+  .object({
+    data: projectSourceContentSchema,
+    revision: nonNegativeIntegerSchema
+  })
+  .strict();
+
+export const projectSourceSaveRequestSchema = z
+  .object({
+    markdown: z.string(),
+    expectedRevision: nonNegativeIntegerSchema
+  })
+  .strict();
+
+export const projectBriefSaveRequestSchema = z
+  .object({
+    brief: projectBriefSchema,
+    expectedRevision: nonNegativeIntegerSchema
+  })
+  .strict();
+
+export const projectMutationResponseSchema = z
+  .object({
+    data: videoProjectSchema,
+    revision: nonNegativeIntegerSchema
+  })
+  .strict();
+
 export type ApiErrorDetail = z.infer<typeof apiErrorDetailSchema>;
 export type ApiSuccessResponse<T> = {
   data: T;
@@ -113,6 +152,19 @@ export type ProjectCreateResponse = z.infer<
 >;
 export type ProjectDetailResponse = z.infer<
   typeof projectDetailResponseSchema
+>;
+export type ProjectSourceContent = z.infer<typeof projectSourceContentSchema>;
+export type ProjectSourceReadResponse = z.infer<
+  typeof projectSourceReadResponseSchema
+>;
+export type ProjectSourceSaveRequest = z.infer<
+  typeof projectSourceSaveRequestSchema
+>;
+export type ProjectBriefSaveRequest = z.infer<
+  typeof projectBriefSaveRequestSchema
+>;
+export type ProjectMutationResponse = z.infer<
+  typeof projectMutationResponseSchema
 >;
 
 export function createApiSuccessResponse<T>(
