@@ -13,7 +13,9 @@ body {
 }
 
 button,
-input {
+input,
+select,
+textarea {
   font: inherit;
 }
 
@@ -179,6 +181,11 @@ input:focus-visible {
   border-color: #b85b5b;
 }
 
+.message-panel-warning {
+  background: #fff8ed;
+  border-color: #d79a45;
+}
+
 .message-panel-error h1,
 .message-panel-error h2,
 .form-error {
@@ -226,16 +233,34 @@ input:focus-visible {
   font-weight: 700;
 }
 
-.form-field input {
+.form-field input,
+.form-field select,
+.form-field textarea,
+.outline-question textarea,
+.outline-question select {
   background: #fff;
   border: 1px solid #aeb8ca;
   border-radius: 0.45rem;
+  box-sizing: border-box;
   color: #172033;
-  min-height: 2.75rem;
   padding: 0.55rem 0.7rem;
+  width: 100%;
 }
 
-.form-field input:disabled {
+.form-field input,
+.form-field select,
+.outline-question select {
+  min-height: 2.75rem;
+}
+
+.form-field textarea,
+.outline-question textarea {
+  resize: vertical;
+}
+
+.form-field input:disabled,
+.form-field select:disabled,
+.form-field textarea:disabled {
   background: #eef2f8;
 }
 
@@ -294,6 +319,96 @@ input:focus-visible {
   padding: 0.8rem 1rem;
 }
 
+.field-hint {
+  color: #59647b;
+  margin: 0;
+}
+
+.button-small {
+  min-height: 2.25rem;
+  padding: 0.45rem 0.7rem;
+}
+
+.outline-summary-panel {
+  background: #fff;
+  border: 1px solid #d7deea;
+  border-radius: 0.8rem;
+  display: grid;
+  gap: 0.7rem;
+  grid-template-columns: repeat(3, 1fr);
+  padding: 1rem 1.1rem;
+}
+
+.outline-summary-panel > div {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.outline-summary-panel span {
+  color: #59647b;
+}
+
+.outline-form {
+  gap: 1.2rem;
+}
+
+.outline-section-card {
+  border: 1px solid #d7deea;
+  border-radius: 0.65rem;
+  overflow: hidden;
+}
+
+.outline-section-card summary {
+  background: #f8faff;
+  cursor: pointer;
+  font-weight: 700;
+  list-style-position: inside;
+  padding: 0.9rem 1rem;
+}
+
+.outline-section-body {
+  display: grid;
+  gap: 0.9rem;
+  padding: 1rem;
+}
+
+.outline-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.outline-field-grid {
+  display: grid;
+  gap: 0.8rem;
+  grid-template-columns: 1fr 1fr;
+}
+
+.outline-question-list {
+  border: 1px solid #d7deea;
+  border-radius: 0.55rem;
+  display: grid;
+  gap: 0.7rem;
+  margin: 0;
+  padding: 0.8rem;
+}
+
+.outline-question-list legend {
+  font-weight: 700;
+  padding: 0 0.3rem;
+}
+
+.outline-question {
+  border-top: 1px solid #e4e8f0;
+  display: grid;
+  gap: 0.4rem;
+  padding-top: 0.8rem;
+}
+
+.outline-actions {
+  justify-content: flex-start;
+}
+
 @media (max-width: 640px) {
   .page-shell {
     padding: 2rem 1rem 3rem;
@@ -306,5 +421,10 @@ input:focus-visible {
 
   .page-header > .button {
     width: 100%;
+  }
+
+  .outline-summary-panel,
+  .outline-field-grid {
+    grid-template-columns: 1fr;
   }
 }

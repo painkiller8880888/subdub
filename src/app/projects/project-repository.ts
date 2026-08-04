@@ -11,6 +11,7 @@ import {
   videoProjectSchema,
   type VideoProject
 } from "../../schema/index.js";
+import { invalidateForUpstreamChange } from "./project-invalidation.js";
 
 export type ProjectRepositoryErrorCode =
   | "PROJECT_ID_INVALID"
@@ -694,8 +695,13 @@ export class ProjectRepository {
     }
     await this.readValidatedSource(paths, currentProject);
 
+    const briefChanged =
+      JSON.stringify(currentProject.brief) !== JSON.stringify(briefResult.data);
+    const baseProject = briefChanged
+      ? invalidateForUpstreamChange(currentProject)
+      : currentProject;
     const updatedProjectResult = videoProjectSchema.safeParse({
-      ...currentProject,
+      ...baseProject,
       revision: currentProject.revision + 1,
       brief: briefResult.data,
       metadata: {
@@ -735,7 +741,6 @@ export class ProjectRepository {
       throw revisionConflictError();
     }
     await this.readValidatedSource(paths, currentProject);
-
     const updatedProjectResult = videoProjectSchema.safeParse({
       ...currentProject,
       revision: currentProject.revision + 1,
@@ -779,12 +784,16 @@ export class ProjectRepository {
       throw revisionConflictError();
     }
 
-    await this.readValidatedSource(paths, currentProject);
+    const currentMarkdown = await this.readValidatedSource(paths, currentProject);
+    const baseProject =
+      currentMarkdown === markdown
+        ? currentProject
+        : invalidateForUpstreamChange(currentProject);
     const updatedProjectResult = videoProjectSchema.safeParse({
-      ...currentProject,
+      ...baseProject,
       revision: currentProject.revision + 1,
       source: {
-        ...currentProject.source,
+        ...baseProject.source,
         sha256: sha256(markdown)
       },
       metadata: {

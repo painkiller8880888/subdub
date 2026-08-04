@@ -2,6 +2,9 @@ import { type ZodType } from "zod";
 
 import {
   apiErrorResponseSchema,
+  outlineApproveRequestSchema,
+  outlineGenerateRequestSchema,
+  outlineSaveRequestSchema,
   modelsResponseSchema,
   projectBriefSaveRequestSchema,
   projectCreateRequestSchema,
@@ -12,6 +15,9 @@ import {
   projectSourceReadResponseSchema,
   projectSourceSaveRequestSchema,
   type ApiErrorDetail,
+  type OutlineApproveRequest,
+  type OutlineGenerateRequest,
+  type OutlineSaveRequest,
   type ProjectBriefSaveRequest,
   type ProjectCreateRequest,
   type ModelsResponse,
@@ -186,6 +192,63 @@ export async function saveProjectBrief(
     projectMutationResponseSchema,
     {
       method: "PUT",
+      headers: {
+        "content-type": "application/json"
+      },
+      body: JSON.stringify(validatedInput)
+    }
+  );
+  return response.data;
+}
+
+export async function generateProjectOutline(
+  projectId: string,
+  input: OutlineGenerateRequest
+): Promise<VideoProject> {
+  const validatedInput = outlineGenerateRequestSchema.parse(input);
+  const response = await fetchApi(
+    `/api/projects/${encodeURIComponent(projectId)}/outline/generate`,
+    projectMutationResponseSchema,
+    {
+      method: "POST",
+      headers: {
+        "content-type": "application/json"
+      },
+      body: JSON.stringify(validatedInput)
+    }
+  );
+  return response.data;
+}
+
+export async function saveProjectOutline(
+  projectId: string,
+  input: OutlineSaveRequest
+): Promise<VideoProject> {
+  const validatedInput = outlineSaveRequestSchema.parse(input);
+  const response = await fetchApi(
+    `/api/projects/${encodeURIComponent(projectId)}/outline`,
+    projectMutationResponseSchema,
+    {
+      method: "PUT",
+      headers: {
+        "content-type": "application/json"
+      },
+      body: JSON.stringify(validatedInput)
+    }
+  );
+  return response.data;
+}
+
+export async function approveProjectOutline(
+  projectId: string,
+  input: OutlineApproveRequest
+): Promise<VideoProject> {
+  const validatedInput = outlineApproveRequestSchema.parse(input);
+  const response = await fetchApi(
+    `/api/projects/${encodeURIComponent(projectId)}/outline/approve`,
+    projectMutationResponseSchema,
+    {
+      method: "POST",
       headers: {
         "content-type": "application/json"
       },

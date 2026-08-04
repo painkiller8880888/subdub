@@ -1,6 +1,8 @@
 import { randomUUID } from "node:crypto";
 
 import {
+  outlineApproveRequestSchema,
+  outlineSaveRequestSchema,
   projectBriefSaveRequestSchema,
   projectCreateRequestSchema,
   projectSourceSaveRequestSchema,
@@ -13,6 +15,8 @@ import {
   ProjectRepositoryError
 } from "./project-repository.js";
 import { createEmptyVideoProject } from "./empty-video-project.js";
+import { validateOutlineForApproval } from "./outline-approval.js";
+import { applyEditedOutline } from "./project-invalidation.js";
 
 export type ProjectServiceOptions = {
   repository: ProjectRepository;
@@ -131,6 +135,32 @@ export class ProjectService {
     return this.repository.saveBrief(
       projectId,
       request.brief,
+      request.expectedRevision
+    );
+  }
+
+  async saveOutline(projectId: unknown, input: unknown): Promise<VideoProject> {
+    const request = outlineSaveRequestSchema.parse(input);
+    const currentProject = await this.repository.read(projectId);
+    const { project } = applyEditedOutline(currentProject, request.outline);
+    return this.repository.save(projectId, project, request.expectedRevision);
+  }
+
+  async approveOutline(projectId: unknown, input: unknown): Promise<VideoProject> {
+    const request = outlineApproveRequestSchema.parse(input);
+    const snapshot = await this.repository.readGenerationSnapshot(projectId);
+    if (snapshot.project.revision !== request.expectedRevision) {
+      throw new ProjectRepositoryError(
+        "PROJECT_REVISION_CONFLICT",
+        409,
+        "The project revision does not match the expected revision."
+      );
+    }
+
+    validateOutlineForApproval(snapshot.project, snapshot.sourceHash);
+    return this.repository.saveOutline(
+      projectId,
+      { ...snapshot.project.outline, status: "approved" },
       request.expectedRevision
     );
   }

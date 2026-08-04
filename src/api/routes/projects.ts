@@ -2,6 +2,8 @@ import type { FastifyInstance } from "fastify";
 
 import {
   createApiSuccessResponse,
+  outlineApproveRequestSchema,
+  outlineSaveRequestSchema,
   projectBriefSaveRequestSchema,
   projectCreateRequestSchema,
   projectCreateResponseSchema,
@@ -72,6 +74,34 @@ export function registerProjectRoutes(
     async (request) => {
       const input = projectBriefSaveRequestSchema.parse(request.body);
       const project = await projectService.saveBrief(
+        request.params.projectId,
+        input
+      );
+      return projectMutationResponseSchema.parse(
+        createApiSuccessResponse(project, project.revision)
+      );
+    }
+  );
+
+  app.put<{ Params: { projectId: string } }>(
+    "/api/projects/:projectId/outline",
+    async (request) => {
+      const input = outlineSaveRequestSchema.parse(request.body);
+      const project = await projectService.saveOutline(
+        request.params.projectId,
+        input
+      );
+      return projectMutationResponseSchema.parse(
+        createApiSuccessResponse(project, project.revision)
+      );
+    }
+  );
+
+  app.post<{ Params: { projectId: string } }>(
+    "/api/projects/:projectId/outline/approve",
+    async (request) => {
+      const input = outlineApproveRequestSchema.parse(request.body);
+      const project = await projectService.approveOutline(
         request.params.projectId,
         input
       );
