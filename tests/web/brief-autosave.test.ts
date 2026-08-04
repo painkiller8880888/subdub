@@ -44,6 +44,47 @@ describe("AutosaveCoordinator", () => {
     coordinator.dispose();
   });
 
+  it("flushes a pending draft immediately", async () => {
+    vi.useFakeTimers();
+    const save = vi.fn(async () => undefined);
+    const { coordinator, states } = setup(save);
+
+    coordinator.update("before navigation");
+    await expect(coordinator.flush()).resolves.toBe(true);
+    expect(save).toHaveBeenCalledWith("before navigation");
+    expect(states.at(-1)?.status).toBe("saved");
+    await vi.runAllTimersAsync();
+    expect(save).toHaveBeenCalledTimes(1);
+    coordinator.dispose();
+  });
+
+  it("flushes the newest draft after an in-flight save", async () => {
+    let resolveFirst: (() => void) | undefined;
+    const save = vi.fn(
+      (draft: string) =>
+        new Promise<void>((resolve) => {
+          if (draft === "first") {
+            resolveFirst = resolve;
+          } else {
+            resolve();
+          }
+        })
+    );
+    const { coordinator } = setup(save);
+
+    coordinator.update("first");
+    const flushPromise = coordinator.flush();
+    coordinator.update("second");
+    resolveFirst?.();
+
+    await expect(flushPromise).resolves.toBe(true);
+    expect(save.mock.calls.map(([draft]) => draft)).toEqual([
+      "first",
+      "second"
+    ]);
+    coordinator.dispose();
+  });
+
   it("serializes saves and schedules the newest draft after an in-flight save", async () => {
     vi.useFakeTimers();
     let resolveFirst: (() => void) | undefined;
@@ -126,5 +167,21 @@ describe("AutosaveCoordinator", () => {
     coordinator.dispose();
     await vi.runAllTimersAsync();
     expect(save).not.toHaveBeenCalled();
+  });
+
+  it("supports StrictMode-style cleanup followed by a fresh coordinator", async () => {
+    const first = setup(async () => undefined);
+    first.coordinator.dispose();
+
+    const second = setup(async () => undefined);
+    second.coordinator.update("fresh coordinator");
+    await expect(second.coordinator.flush()).resolves.toBe(true);
+
+    expect(second.states.map((state) => state.status)).toEqual([
+      "pending",
+      "saving",
+      "saved"
+    ]);
+    second.coordinator.dispose();
   });
 });

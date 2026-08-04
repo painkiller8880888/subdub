@@ -1,5 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { type FormEvent, useEffect, useRef, useState } from "react";
+import {
+  type FormEvent,
+  type MouseEvent,
+  useEffect,
+  useRef,
+  useState
+} from "react";
 import {
   Link,
   Navigate,
@@ -34,6 +40,7 @@ import {
   AutosaveCoordinator,
   type AutosaveState
 } from "./brief-autosave";
+import { sameBriefDraft, type BriefDraft } from "./brief-draft";
 
 function projectBriefPath(projectId: string): string {
   return `/projects/${encodeURIComponent(projectId)}/brief`;
@@ -265,11 +272,6 @@ function NewProjectPage() {
   );
 }
 
-type BriefDraft = Omit<ProjectBrief, "targetDurationSec"> & {
-  targetDurationSec: string;
-  markdown: string;
-};
-
 type ProjectSaveRequest =
   | {
       kind: "source";
@@ -311,13 +313,6 @@ function itemsToText(items: string[]): string {
   return items.join("\n");
 }
 
-function sameBriefDraft(
-  first: Pick<BriefDraft, keyof ProjectBrief>,
-  second: Pick<BriefDraft, keyof ProjectBrief>
-): boolean {
-  return JSON.stringify(first) === JSON.stringify(second);
-}
-
 function projectSummaryFromProject(project: VideoProject): ProjectSummary {
   return {
     id: project.metadata.id,
@@ -332,6 +327,7 @@ function projectSummaryFromProject(project: VideoProject): ProjectSummary {
 
 function ProjectBriefPage() {
   const { projectId } = useParams<{ projectId: string }>();
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const projectQuery = useQuery({
     queryKey: ["projects", projectId],
@@ -474,45 +470,82 @@ function ProjectBriefPage() {
     }
   }
 
-  const coordinatorRef = useRef<AutosaveCoordinator<BriefDraft> | null>(null);
-  if (coordinatorRef.current === null) {
-    coordinatorRef.current = new AutosaveCoordinator({
+  const saveDraftRef = useRef<(nextDraft: BriefDraft) => Promise<void>>(
+    async () => undefined
+  );
+  saveDraftRef.current = saveDraft;
+  const [coordinator, setCoordinator] =
+    useState<AutosaveCoordinator<BriefDraft> | null>(null);
+  const [pendingNavigation, setPendingNavigation] = useState(false);
+  const [snapshotMismatch, setSnapshotMismatch] = useState(false);
+  const snapshotRefetchingRef = useRef(false);
+  const snapshotRefetchSignatureRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    const nextCoordinator = new AutosaveCoordinator<BriefDraft>({
       debounceMs: 350,
-      save: saveDraft,
+      save: (nextDraft) => saveDraftRef.current(nextDraft),
       isConflict: (error) =>
         error instanceof ApiClientError &&
         error.status === 409 &&
         error.code === "PROJECT_REVISION_CONFLICT",
       onStateChange: setAutosaveState
     });
-  }
-  const coordinator = coordinatorRef.current;
+    setCoordinator(nextCoordinator);
+    return () => {
+      nextCoordinator.dispose();
+    };
+  }, []);
 
   useEffect(() => {
+    if (coordinator === null) {
+      return;
+    }
     initializedForProjectRef.current = null;
     revisionRef.current = 0;
     draftRef.current = null;
     lastSavedRef.current = null;
+    snapshotRefetchSignatureRef.current = null;
+    snapshotRefetchingRef.current = false;
+    setSnapshotMismatch(false);
+    setPendingNavigation(false);
     setDraft(null);
     coordinator.reset();
   }, [coordinator, projectId]);
 
   useEffect(() => {
-    return () => {
-      coordinator.dispose();
-    };
-  }, [coordinator]);
-
-  useEffect(() => {
     if (
       projectId === undefined ||
+      coordinator === null ||
       initializedForProjectRef.current === projectId ||
       projectQuery.data === undefined ||
-      sourceQuery.data === undefined
+      sourceQuery.data === undefined ||
+      projectQuery.isError ||
+      sourceQuery.isError
     ) {
       return;
     }
 
+    if (projectQuery.data.revision !== sourceQuery.data.revision) {
+      setSnapshotMismatch(true);
+      const signature = `${projectQuery.data.revision}:${sourceQuery.data.revision}`;
+      if (
+        !snapshotRefetchingRef.current &&
+        snapshotRefetchSignatureRef.current !== signature
+      ) {
+        snapshotRefetchSignatureRef.current = signature;
+        snapshotRefetchingRef.current = true;
+        void Promise.all([projectQuery.refetch(), sourceQuery.refetch()]).finally(
+          () => {
+            snapshotRefetchingRef.current = false;
+          }
+        );
+      }
+      return;
+    }
+
+    setSnapshotMismatch(false);
+    snapshotRefetchSignatureRef.current = null;
     const nextDraft = projectToBriefDraft(
       projectQuery.data,
       sourceQuery.data.markdown
@@ -523,13 +556,23 @@ function ProjectBriefPage() {
     lastSavedRef.current = nextDraft;
     setDraft(nextDraft);
     coordinator.reset();
-  }, [coordinator, projectId, projectQuery.data, sourceQuery.data]);
+  }, [
+    coordinator,
+    projectId,
+    projectQuery.data,
+    projectQuery.isError,
+    sourceQuery.data,
+    sourceQuery.isError
+  ]);
 
   if (projectId === undefined) {
     return <Navigate replace to="/projects" />;
   }
 
   function updateDraft(nextDraft: BriefDraft): void {
+    if (coordinator === null) {
+      return;
+    }
     draftRef.current = nextDraft;
     setDraft(nextDraft);
     coordinator.update(nextDraft);
@@ -564,37 +607,61 @@ function ProjectBriefPage() {
   }
 
   async function reloadLatest(): Promise<void> {
-    const [projectResult, sourceResult] = await Promise.all([
-      projectQuery.refetch(),
-      sourceQuery.refetch()
-    ]);
-    if (projectResult.data === undefined || sourceResult.data === undefined) {
+    if (coordinator === null) {
       return;
     }
 
-    const nextDraft = projectToBriefDraft(
-      projectResult.data,
-      sourceResult.data.markdown
-    );
-    initializedForProjectRef.current = projectIdRef.current;
-    revisionRef.current = projectResult.data.revision;
-    draftRef.current = nextDraft;
-    lastSavedRef.current = nextDraft;
-    setDraft(nextDraft);
-    coordinator.reset();
+    setSnapshotMismatch(false);
+    snapshotRefetchSignatureRef.current = null;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const [projectResult, sourceResult] = await Promise.all([
+        projectQuery.refetch(),
+        sourceQuery.refetch()
+      ]);
+      if (
+        projectResult.isSuccess &&
+        sourceResult.isSuccess &&
+        projectResult.data !== undefined &&
+        sourceResult.data !== undefined &&
+        projectResult.data.revision === sourceResult.data.revision
+      ) {
+        const nextDraft = projectToBriefDraft(
+          projectResult.data,
+          sourceResult.data.markdown
+        );
+        initializedForProjectRef.current = projectIdRef.current;
+        revisionRef.current = projectResult.data.revision;
+        draftRef.current = nextDraft;
+        lastSavedRef.current = nextDraft;
+        setDraft(nextDraft);
+        coordinator.reset();
+        return;
+      }
+    }
+    setSnapshotMismatch(true);
   }
 
-  if (projectQuery.isPending || sourceQuery.isPending || draft === null) {
-    return (
-      <main className="page-shell narrow-shell">
-        <p className="back-link">
-          <Link to="/projects">Back to projects</Link>
-        </p>
-        <p className="status-message" role="status" aria-live="polite">
-          Loading project editor...
-        </p>
-      </main>
-    );
+  async function navigateAway(event: MouseEvent<HTMLAnchorElement>): Promise<void> {
+    if (
+      event.button !== 0 ||
+      event.metaKey ||
+      event.altKey ||
+      event.ctrlKey ||
+      event.shiftKey
+    ) {
+      return;
+    }
+    event.preventDefault();
+    if (pendingNavigation) {
+      return;
+    }
+    setPendingNavigation(true);
+    const flushed = coordinator === null ? true : await coordinator.flush();
+    if (flushed) {
+      navigate("/projects");
+    } else {
+      setPendingNavigation(false);
+    }
   }
 
   if (projectQuery.isError || sourceQuery.isError) {
@@ -602,7 +669,9 @@ function ProjectBriefPage() {
     return (
       <main className="page-shell narrow-shell">
         <p className="back-link">
-          <Link to="/projects">Back to projects</Link>
+          <Link to="/projects" onClick={navigateAway}>
+            Back to projects
+          </Link>
         </p>
         <section className="message-panel message-panel-error" role="alert">
           <h1>Could not load project</h1>
@@ -621,8 +690,57 @@ function ProjectBriefPage() {
     );
   }
 
-  const autosaveMessage =
-    autosaveState.status === "saving"
+  if (snapshotMismatch) {
+    return (
+      <main className="page-shell narrow-shell">
+        <p className="back-link">
+          <Link to="/projects" onClick={navigateAway}>
+            Back to projects
+          </Link>
+        </p>
+        <section className="message-panel message-panel-error" role="alert">
+          <h1>Project data changed while loading</h1>
+          <p>
+            The project and Markdown revisions did not match. The editor was
+            not initialized to avoid combining different snapshots.
+          </p>
+          <button
+            className="button"
+            type="button"
+            onClick={() => {
+              void reloadLatest();
+            }}
+          >
+            Reload latest data
+          </button>
+        </section>
+      </main>
+    );
+  }
+
+  if (
+    coordinator === null ||
+    projectQuery.isPending ||
+    sourceQuery.isPending ||
+    draft === null
+  ) {
+    return (
+      <main className="page-shell narrow-shell">
+        <p className="back-link">
+          <Link to="/projects" onClick={navigateAway}>
+            Back to projects
+          </Link>
+        </p>
+        <p className="status-message" role="status" aria-live="polite">
+          Loading project editor...
+        </p>
+      </main>
+    );
+  }
+
+  const autosaveMessage = pendingNavigation
+    ? "Saving before leaving..."
+    : autosaveState.status === "saving"
       ? "Saving..."
       : autosaveState.status === "saved"
         ? "Saved"
@@ -637,7 +755,9 @@ function ProjectBriefPage() {
   return (
     <main className="page-shell narrow-shell">
       <p className="back-link">
-        <Link to="/projects">Back to projects</Link>
+        <Link to="/projects" onClick={navigateAway}>
+          Back to projects
+        </Link>
       </p>
       <header className="page-header page-header-stacked">
         <p className="eyebrow">Project brief</p>

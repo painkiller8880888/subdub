@@ -25,6 +25,8 @@ export class AutosaveCoordinator<T> {
   private blocked = false;
   private disposed = false;
   private generation = 0;
+  private savedVersion = 0;
+  private activeFlush: Promise<boolean> | undefined;
 
   constructor(options: AutosaveCoordinatorOptions<T>) {
     this.debounceMs = Math.max(0, options.debounceMs);
@@ -50,7 +52,12 @@ export class AutosaveCoordinator<T> {
   }
 
   retry(): void {
-    if (this.disposed || this.blocked || this.draft === undefined) {
+    if (
+      this.disposed ||
+      this.blocked ||
+      this.draft === undefined ||
+      this.version === this.savedVersion
+    ) {
       return;
     }
 
@@ -63,6 +70,7 @@ export class AutosaveCoordinator<T> {
     this.generation += 1;
     this.draft = undefined;
     this.version += 1;
+    this.savedVersion = this.version;
     this.blocked = false;
     if (!this.disposed) {
       this.emit({ status: "idle", error: undefined });
@@ -75,6 +83,32 @@ export class AutosaveCoordinator<T> {
     this.disposed = true;
     this.draft = undefined;
     this.version += 1;
+    this.savedVersion = this.version;
+  }
+
+  async flush(): Promise<boolean> {
+    if (this.disposed || this.blocked) {
+      return false;
+    }
+
+    this.clearTimer();
+    if (this.draft === undefined || this.version === this.savedVersion) {
+      return true;
+    }
+
+    if (this.activeFlush !== undefined) {
+      return this.activeFlush;
+    }
+
+    const operation = this.flushAll();
+    this.activeFlush = operation;
+    try {
+      return await operation;
+    } finally {
+      if (this.activeFlush === operation) {
+        this.activeFlush = undefined;
+      }
+    }
   }
 
   private schedule(delayMs: number): void {
@@ -85,14 +119,31 @@ export class AutosaveCoordinator<T> {
     }, delayMs);
   }
 
-  private async flush(): Promise<void> {
+  private async flushAll(): Promise<boolean> {
+    while (
+      !this.disposed &&
+      !this.blocked &&
+      this.draft !== undefined &&
+      this.version !== this.savedVersion
+    ) {
+      const succeeded = await this.flushOne();
+      if (!succeeded) {
+        return false;
+      }
+    }
+
+    return !this.blocked;
+  }
+
+  private async flushOne(): Promise<boolean> {
     if (
       this.disposed ||
       this.saving ||
       this.blocked ||
-      this.draft === undefined
+      this.draft === undefined ||
+      this.version === this.savedVersion
     ) {
-      return;
+      return true;
     }
 
     const draft = this.draft;
@@ -104,23 +155,18 @@ export class AutosaveCoordinator<T> {
     try {
       await this.save(draft);
       if (saveGeneration !== this.generation) {
-        if (!this.disposed && !this.blocked && this.draft !== undefined) {
-          this.schedule(this.debounceMs);
-        }
-        return;
+        return true;
       }
       if (this.version === saveVersion) {
+        this.savedVersion = saveVersion;
         this.emit({ status: "saved", error: undefined });
       } else if (!this.blocked) {
         this.emit({ status: "pending", error: undefined });
-        this.schedule(this.debounceMs);
       }
+      return true;
     } catch (error) {
       if (saveGeneration !== this.generation) {
-        if (!this.disposed && !this.blocked && this.draft !== undefined) {
-          this.schedule(this.debounceMs);
-        }
-        return;
+        return true;
       }
       if (this.isConflict(error)) {
         this.blocked = true;
@@ -128,6 +174,7 @@ export class AutosaveCoordinator<T> {
       } else {
         this.emit({ status: "error", error });
       }
+      return false;
     } finally {
       this.saving = false;
     }
