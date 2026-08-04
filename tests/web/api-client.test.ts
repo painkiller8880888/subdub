@@ -1,11 +1,18 @@
 import { afterEach, describe, expect, it } from "vitest";
 
+import { createEmptyVideoProject } from "../../src/app/projects/empty-video-project.js";
 import {
   ApiClientError,
   ApiClientProtocolError,
+  createProject,
+  fetchProject,
+  fetchProjects,
   fetchApi
 } from "../../src/web/api/client.js";
-import { healthResponseSchema } from "../../src/schema/api.js";
+import {
+  healthResponseSchema,
+  projectListResponseSchema
+} from "../../src/schema/api.js";
 
 function jsonResponse(body: unknown, status: number): Response {
   return new Response(JSON.stringify(body), {
@@ -110,5 +117,56 @@ describe("web API client", () => {
     }
 
     expect(caught).toBeInstanceOf(ApiClientProtocolError);
+  });
+
+  it("uses the shared project response schemas for list, create, and detail", async () => {
+    const project = createEmptyVideoProject({
+      projectId: "client-project",
+      title: "クライアントテスト",
+      createdAt: "2026-08-04T00:00:00.000Z"
+    });
+    const calls: Array<{ input: string; init: RequestInit | undefined }> = [];
+    globalThis.fetch = async (input, init) => {
+      calls.push({ input: String(input), init });
+      if (String(input) === "/api/projects") {
+        if (init?.method === "POST") {
+          return jsonResponse({ data: project, revision: 0 }, 200);
+        }
+        return jsonResponse(
+          {
+            data: [
+              {
+                id: project.metadata.id,
+                title: project.metadata.title,
+                department: project.metadata.department,
+                manualVersion: project.metadata.manualVersion,
+                revision: project.revision,
+                createdAt: project.metadata.createdAt,
+                updatedAt: project.metadata.updatedAt
+              }
+            ]
+          },
+          200
+        );
+      }
+
+      return jsonResponse({ data: project }, 200);
+    };
+
+    await expect(fetchProjects()).resolves.toHaveLength(1);
+    await expect(
+      createProject({ title: "クライアントテスト" })
+    ).resolves.toEqual(project);
+    await expect(fetchProject(project.metadata.id)).resolves.toEqual(project);
+    expect(calls[1]?.init?.method).toBe("POST");
+    expect(calls[1]?.init?.headers).toEqual({
+      "content-type": "application/json"
+    });
+    expect(JSON.parse(String(calls[1]?.init?.body))).toEqual({
+      title: "クライアントテスト"
+    });
+    expect(projectListResponseSchema.safeParse({ data: [] }).success).toBe(
+      true
+    );
   });
 });

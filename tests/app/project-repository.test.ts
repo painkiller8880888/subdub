@@ -460,8 +460,12 @@ describe("ProjectRepository", () => {
     );
 
     expectSafeExternalError(error);
-    expect(temporaryFiles).toHaveLength(1);
-    await expect(fs.access(temporaryFiles[0])).rejects.toBeDefined();
+    expect(temporaryFiles).toHaveLength(2);
+    await Promise.all(
+      temporaryFiles.map((temporaryFile) =>
+        expect(fs.access(temporaryFile)).rejects.toBeDefined()
+      )
+    );
     await expect(fs.stat(projectDirectory)).rejects.toBeDefined();
     expect(await fs.readdir(path.join(workspaceRoot, "projects"))).toEqual([]);
 

@@ -5,11 +5,14 @@ import Fastify, {
 } from "fastify";
 
 import { createApiSuccessResponse } from "../schema/api.js";
+import { ProjectService } from "../app/projects/project-service.js";
 import { registerApiErrorHandler } from "./middleware/error-handler.js";
 import { registerNotFoundHandler } from "./middleware/not-found-handler.js";
+import { registerProjectRoutes } from "./routes/projects.js";
 
 export type AppOptions = {
   logger?: FastifyServerOptions["logger"];
+  projectService?: ProjectService;
   staticRoot?: string;
 };
 
@@ -20,6 +23,10 @@ export function buildApp(options: AppOptions = {}): FastifyInstance {
   app.get("/api/health", async () =>
     createApiSuccessResponse({ status: "ok" })
   );
+
+  if (options.projectService !== undefined) {
+    registerProjectRoutes(app, options.projectService);
+  }
 
   if (options.staticRoot !== undefined) {
     app.register(fastifyStatic, {
