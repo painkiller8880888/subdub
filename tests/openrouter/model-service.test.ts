@@ -52,7 +52,7 @@ describe("OpenRouter model service", () => {
 
     const result = await service.listModels();
 
-    expect(result.models).toHaveLength(6);
+    expect(result.models).toHaveLength(7);
     expect(
       result.models.find((model) => model.id === "eligible/model")
     ).toEqual({
@@ -80,6 +80,12 @@ describe("OpenRouter model service", () => {
     ).toMatchObject({
       inputPrice: "0.000003",
       outputPrice: "0.000012"
+    });
+    expect(
+      result.models.find((model) => model.id === "scientific-pricing/model")
+    ).toMatchObject({
+      inputPrice: "1e-7",
+      outputPrice: "2.5E-8"
     });
     expect(calls).toHaveLength(2);
     expect(calls[0]?.init?.headers).toEqual({
@@ -299,6 +305,27 @@ describe("OpenRouter model service", () => {
         fetch: invalidShapeFetch as unknown as typeof globalThis.fetch
       }).listModels()
     ).rejects.toBeInstanceOf(OpenRouterAdapterError);
+
+    const invalidPriceFetch = vi.fn(async (input: string | URL) =>
+      String(input).endsWith("/models/user")
+        ? response({
+            data: [
+              {
+                ...openRouterModelsFixture.data[0],
+                pricing: { prompt: 0, completion: "0.2" }
+              }
+            ]
+          })
+        : response(openRouterZdrFixture)
+    );
+    await expect(
+      new OpenRouterModelService({
+        apiKey: "secret-key",
+        fetch: invalidPriceFetch as unknown as typeof globalThis.fetch
+      }).listModels()
+    ).rejects.toMatchObject({
+      code: OPENROUTER_ERROR_CODE.responseInvalid
+    });
 
     const invalidZdrShapeFetch = vi.fn(async (input: string | URL) =>
       String(input).endsWith("/models/user")

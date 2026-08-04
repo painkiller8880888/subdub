@@ -67,6 +67,15 @@ export const openRouterModelsFixture = {
       expiration_date: null
     },
     {
+      id: "scientific-pricing/model",
+      name: "Scientific Pricing Model",
+      context_length: 4096,
+      pricing: { prompt: "1e-7", completion: "2.5E-8" },
+      architecture: { output_modalities: ["text"] },
+      supported_parameters: ["structured_outputs"],
+      expiration_date: null
+    },
+    {
       id: "expired/model",
       name: "Expired Model",
       context_length: 8192,
