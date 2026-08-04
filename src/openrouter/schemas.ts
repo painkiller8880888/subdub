@@ -2,12 +2,17 @@ import { z } from "zod";
 
 const decimalStringSchema = z.string().regex(/^[0-9]+(?:\.[0-9]+)?$/);
 
-const openRouterPricingSchema = z
+const openRouterPricingTierSchema = z
   .object({
     prompt: decimalStringSchema,
     completion: decimalStringSchema
   })
   .passthrough();
+
+const openRouterPricingSchema = z.union([
+  openRouterPricingTierSchema,
+  z.array(openRouterPricingTierSchema).min(1)
+]);
 
 const openRouterArchitectureSchema = z
   .object({

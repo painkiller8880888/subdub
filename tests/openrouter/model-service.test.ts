@@ -52,7 +52,7 @@ describe("OpenRouter model service", () => {
 
     const result = await service.listModels();
 
-    expect(result.models).toHaveLength(5);
+    expect(result.models).toHaveLength(6);
     expect(
       result.models.find((model) => model.id === "eligible/model")
     ).toEqual({
@@ -74,6 +74,12 @@ describe("OpenRouter model service", () => {
     ).toMatchObject({
       structuredOutputs: true,
       zdrAvailable: false
+    });
+    expect(
+      result.models.find((model) => model.id === "tiered-pricing/model")
+    ).toMatchObject({
+      inputPrice: "0.000003",
+      outputPrice: "0.000012"
     });
     expect(calls).toHaveLength(2);
     expect(calls[0]?.init?.headers).toEqual({

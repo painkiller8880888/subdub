@@ -47,6 +47,26 @@ export const openRouterModelsFixture = {
       expiration_date: null
     },
     {
+      id: "tiered-pricing/model",
+      name: "Tiered Pricing Model",
+      context_length: 32768,
+      pricing: [
+        {
+          prompt: "0.000003",
+          completion: "0.000012",
+          min_context: 0
+        },
+        {
+          prompt: "0.000004",
+          completion: "0.000018",
+          min_context: 200000
+        }
+      ],
+      architecture: { output_modalities: ["text"] },
+      supported_parameters: ["max_tokens", "structured_outputs"],
+      expiration_date: null
+    },
+    {
       id: "expired/model",
       name: "Expired Model",
       context_length: 8192,

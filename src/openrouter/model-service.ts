@@ -82,12 +82,20 @@ function toCapabilities(
   model: OpenRouterModelResponse,
   zdrStructuredOutputModelIds: ReadonlySet<string>
 ): OpenRouterModelCapabilities {
+  const pricing = Array.isArray(model.pricing)
+    ? model.pricing[0]
+    : model.pricing;
+
+  if (pricing === undefined) {
+    throw new OpenRouterAdapterError(OPENROUTER_ERROR_CODE.responseInvalid);
+  }
+
   return {
     id: model.id,
     displayName: model.name,
     contextLength: model.context_length,
-    inputPrice: model.pricing.prompt,
-    outputPrice: model.pricing.completion,
+    inputPrice: pricing.prompt,
+    outputPrice: pricing.completion,
     outputModalities: [...model.architecture.output_modalities],
     supportedParameters: [...model.supported_parameters],
     expirationDate: model.expiration_date,
