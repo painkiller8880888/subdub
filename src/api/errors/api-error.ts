@@ -4,6 +4,11 @@ import {
   ProjectRepositoryError,
   type ProjectRepositoryErrorCode
 } from "../../app/projects/project-repository.js";
+import {
+  OpenRouterAdapterError,
+  OPENROUTER_ERROR_CODE,
+  type OpenRouterErrorCode
+} from "../../openrouter/errors.js";
 import type { ApiErrorDetail } from "../../schema/api.js";
 
 export const API_ERROR_CODE = {
@@ -11,10 +16,23 @@ export const API_ERROR_CODE = {
   apiNotFound: "API_NOT_FOUND",
   requestBodyTooLarge: "REQUEST_BODY_TOO_LARGE",
   unsupportedMediaType: "UNSUPPORTED_MEDIA_TYPE",
-  internalServerError: "INTERNAL_SERVER_ERROR"
+  internalServerError: "INTERNAL_SERVER_ERROR",
+  openRouterNotConfigured: OPENROUTER_ERROR_CODE.notConfigured,
+  openRouterAuthFailed: OPENROUTER_ERROR_CODE.authFailed,
+  openRouterUnavailable: OPENROUTER_ERROR_CODE.unavailable,
+  openRouterResponseInvalid: OPENROUTER_ERROR_CODE.responseInvalid
 };
 
-export type ApiErrorStatus = 400 | 404 | 409 | 413 | 415 | 422 | 500;
+export type ApiErrorStatus =
+  | 400
+  | 404
+  | 409
+  | 413
+  | 415
+  | 422
+  | 500
+  | 502
+  | 503;
 
 export type MappedApiError = {
   readonly code: string;
@@ -49,6 +67,26 @@ type FastifyRequestErrorMapping = {
 
 const genericValidationMessage = "リクエストの入力内容が不正です。";
 const genericInternalMessage = "サーバーで予期しないエラーが発生しました。";
+const openRouterMessages: Readonly<
+  Record<OpenRouterErrorCode, { status: 502 | 503; message: string }>
+> = {
+  [OPENROUTER_ERROR_CODE.notConfigured]: {
+    status: 503,
+    message: "OpenRouter is not configured."
+  },
+  [OPENROUTER_ERROR_CODE.authFailed]: {
+    status: 502,
+    message: "OpenRouter authentication failed."
+  },
+  [OPENROUTER_ERROR_CODE.unavailable]: {
+    status: 503,
+    message: "OpenRouter is temporarily unavailable."
+  },
+  [OPENROUTER_ERROR_CODE.responseInvalid]: {
+    status: 502,
+    message: "OpenRouter returned an invalid response."
+  }
+};
 const redactedPathSegment = "[redacted]";
 const safeFieldPathSegmentPattern = /^[a-z][A-Za-z0-9_]{0,63}$/;
 
@@ -120,7 +158,9 @@ function isSupportedStatus(value: unknown): value is ApiErrorStatus {
     value === 413 ||
     value === 415 ||
     value === 422 ||
-    value === 500
+    value === 500 ||
+    value === 502 ||
+    value === 503
   );
 }
 
@@ -359,6 +399,17 @@ function mapFastifyValidationDetails(
 }
 
 export function mapApiError(error: unknown): MappedApiError {
+  if (error instanceof OpenRouterAdapterError) {
+    const mapped = openRouterMessages[error.code];
+    return {
+      code: error.code,
+      status: mapped.status,
+      message: mapped.message,
+      details: [],
+      shouldLog: error.code !== OPENROUTER_ERROR_CODE.notConfigured
+    };
+  }
+
   if (error instanceof ProjectRepositoryError) {
     const status = isSupportedStatus(error.status) ? error.status : 500;
     return {
