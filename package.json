@@ -11,7 +11,7 @@
   "scripts": {
     "dev": "node scripts/dev.mjs",
     "dev:web": "vite --host 127.0.0.1 --port 5173",
-    "dev:api": "tsx watch src/api/dev.ts",
+    "dev:api": "node --env-file-if-exists=.env node_modules/tsx/dist/cli.mjs watch src/api/dev.ts",
     "lint": "eslint .",
     "format:check": "prettier --check .",
     "typecheck": "node scripts/typecheck.mjs",
@@ -19,7 +19,7 @@
     "test:watch": "vitest",
     "build": "node scripts/build.mjs",
     "verify:build": "node scripts/verify-build.mjs",
-    "start": "node dist/api/production.js",
+    "start": "node --env-file-if-exists=.env dist/api/production.js",
     "verify": "node scripts/verify.mjs"
   },
   "dependencies": {
