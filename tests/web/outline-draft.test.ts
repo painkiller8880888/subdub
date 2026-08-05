@@ -4,6 +4,7 @@ import {
   cloneOutline,
   countOpenQuestions,
   hasStaleSource,
+  mergeSavedOutlineIds,
   normalizeOutlineOrders,
   outlineOrderErrors
 } from "../../src/web/outline-draft.js";
@@ -105,5 +106,37 @@ describe("outline draft helpers", () => {
     const invalid = cloneOutline(outline);
     invalid.sections[1]!.role = "outro";
     expect(outlineOrderErrors(invalid).length).toBeGreaterThan(0);
+  });
+
+  it("keeps formal IDs when edits are made while a save is in flight", () => {
+    const submitted = cloneOutline(outline);
+    submitted.sections[1]!.id = "tmp-section";
+    submitted.sections[1]!.openQuestions[0]!.id = "tmp-question";
+    submitted.openQuestions[0]!.id = "tmp-global-question";
+
+    const saved = cloneOutline(submitted);
+    saved.sections[1]!.id = "outline-section-formal";
+    saved.sections[1]!.openQuestions[0]!.id = "outline-question-formal";
+    saved.openQuestions[0]!.id = "outline-global-question-formal";
+
+    const current = cloneOutline(submitted);
+    current.sections[1]!.title = "edited while saving";
+    current.sections[1]!.openQuestions.push({
+      id: "tmp-new-question",
+      question: "new question",
+      resolution: null,
+      status: "open"
+    });
+
+    const reconciled = mergeSavedOutlineIds(submitted, saved, current);
+
+    expect(reconciled.sections[1]!.id).toBe("outline-section-formal");
+    expect(
+      reconciled.sections[1]!.openQuestions.map((question) => question.id)
+    ).toEqual(["outline-question-formal", "tmp-new-question"]);
+    expect(reconciled.openQuestions[0]!.id).toBe(
+      "outline-global-question-formal"
+    );
+    expect(reconciled.sections[1]!.title).toBe("edited while saving");
   });
 });

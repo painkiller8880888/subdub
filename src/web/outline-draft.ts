@@ -27,6 +27,63 @@ export function cloneOutline(outline: Outline): Outline {
   };
 }
 
+function addOutlineIdMappings(
+  draftItems: ReadonlyArray<{ readonly id: string }>,
+  savedItems: ReadonlyArray<{ readonly id: string }>,
+  mappings: Map<string, string>
+): void {
+  for (const [index, draftItem] of draftItems.entries()) {
+    const savedItem = savedItems[index];
+    if (savedItem !== undefined && !mappings.has(draftItem.id)) {
+      mappings.set(draftItem.id, savedItem.id);
+    }
+  }
+}
+
+export function mergeSavedOutlineIds(
+  savedDraftInput: Outline,
+  savedOutline: Outline,
+  currentDraft: Outline
+): Outline {
+  const mappings = new Map<string, string>();
+  addOutlineIdMappings(
+    savedDraftInput.openQuestions,
+    savedOutline.openQuestions,
+    mappings
+  );
+  addOutlineIdMappings(
+    savedDraftInput.sections,
+    savedOutline.sections,
+    mappings
+  );
+  for (const [index, draftSection] of savedDraftInput.sections.entries()) {
+    const savedSection = savedOutline.sections[index];
+    if (savedSection !== undefined) {
+      addOutlineIdMappings(
+        draftSection.openQuestions,
+        savedSection.openQuestions,
+        mappings
+      );
+    }
+  }
+
+  return {
+    ...currentDraft,
+    openQuestions: currentDraft.openQuestions.map((question) => ({
+      ...question,
+      id: mappings.get(question.id) ?? question.id
+    })),
+    sections: currentDraft.sections.map((section) => ({
+      ...section,
+      id: mappings.get(section.id) ?? section.id,
+      openQuestions: section.openQuestions.map((question) => ({
+        ...question,
+        id: mappings.get(question.id) ?? question.id
+      }))
+    }))
+  };
+}
+
 export function normalizeOutlineOrders(outline: Outline): Outline {
   return {
     ...outline,

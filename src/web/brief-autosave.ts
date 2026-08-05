@@ -51,6 +51,14 @@ export class AutosaveCoordinator<T> {
     this.schedule(this.debounceMs);
   }
 
+  replaceDraft(draft: T): void {
+    if (this.disposed) {
+      return;
+    }
+
+    this.draft = draft;
+  }
+
   retry(): void {
     if (
       this.disposed ||

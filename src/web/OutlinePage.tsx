@@ -28,6 +28,7 @@ import {
   itemsToText,
   makeQuestion,
   makeSection,
+  mergeSavedOutlineIds,
   normalizeOutlineOrders,
   outlineOrderErrors,
   sourceRefsToText,
@@ -478,15 +479,20 @@ export function OutlinePage() {
         });
         revisionRef.current = saved.revision;
         queryClient.setQueryData(["projects", projectId], saved);
-        lastSavedRef.current = cloneOutline(saved.outline);
-        if (
-          draftRef.current !== null &&
-          JSON.stringify(draftRef.current) === JSON.stringify(nextDraft)
-        ) {
-          const serverDraft = cloneOutline(saved.outline);
-          draftRef.current = serverDraft;
-          setDraft(serverDraft);
+        const serverDraft = cloneOutline(saved.outline);
+        lastSavedRef.current = serverDraft;
+        const currentDraft = draftRef.current;
+        if (currentDraft === null) {
+          return;
         }
+        const reconciledDraft = mergeSavedOutlineIds(
+          nextDraft,
+          serverDraft,
+          currentDraft
+        );
+        draftRef.current = reconciledDraft;
+        setDraft(reconciledDraft);
+        coordinator.replaceDraft(reconciledDraft);
       },
       isConflict: (error) =>
         error instanceof ApiClientError &&
