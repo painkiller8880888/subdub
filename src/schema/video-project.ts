@@ -1,10 +1,6 @@
 import { z } from "zod";
 
 import {
-  characterVisualAssetPaths,
-  type CharacterAssetId
-} from "../assets/character-asset-manifest.js";
-import {
   approvalStatusSchema,
   backgroundDefinitionSchema,
   displaySchema,
@@ -93,42 +89,6 @@ export const mouthPairSchema = strictObject({
   open: relativePosixPathSchema
 });
 
-export const characterVisualAssetsSchema = strictObject({
-  stand: relativePosixPathSchema,
-  speak: strictObject({
-    normal: mouthPairSchema,
-    pointing: mouthPairSchema
-  })
-}).superRefine((assets, ctx) => {
-  const paths = [
-    { path: assets.stand, issuePath: ["stand"] },
-    { path: assets.speak.normal.closed, issuePath: ["speak", "normal", "closed"] },
-    { path: assets.speak.normal.open, issuePath: ["speak", "normal", "open"] },
-    {
-      path: assets.speak.pointing.closed,
-      issuePath: ["speak", "pointing", "closed"]
-    },
-    {
-      path: assets.speak.pointing.open,
-      issuePath: ["speak", "pointing", "open"]
-    }
-  ];
-  const seen = new Map<string, (string | number)[]>();
-
-  for (const entry of paths) {
-    const previousPath = seen.get(entry.path);
-    if (previousPath !== undefined) {
-      ctx.addIssue({
-        code: "custom",
-        path: entry.issuePath,
-        message: `visual asset path is already assigned to ${previousPath.join(".")}`
-      });
-    } else {
-      seen.set(entry.path, entry.issuePath);
-    }
-  }
-});
-
 export const characterSchema = strictObject({
   id: idSchema,
   name: z.string(),
@@ -143,7 +103,12 @@ export const characterSchema = strictObject({
   themeColorToken: z.enum(["character.metan", "character.zundamon"]),
   voice: voiceSchema,
   lipSyncPeriodFrames: positiveIntegerSchema,
-  visualAssets: characterVisualAssetsSchema
+  visualAssets: strictObject({
+    neutral: mouthPairSchema,
+    smile: mouthPairSchema,
+    explain: mouthPairSchema,
+    caution: mouthPairSchema
+  })
 });
 
 export const sourceRefSchema = strictObject({
@@ -304,10 +269,8 @@ export const thumbnailPlanSchema = strictObject({
   layout: z.literal("standard")
 });
 
-export const CURRENT_PROJECT_SCHEMA_VERSION = "1.1.0" as const;
-
 const videoProjectBaseSchema = strictObject({
-  schemaVersion: z.literal(CURRENT_PROJECT_SCHEMA_VERSION),
+  schemaVersion: z.literal("1.0.0"),
   revision: finiteNumberSchema.int().nonnegative(),
   metadata: projectMetadataSchema,
   source: projectSourceSchema,
@@ -363,7 +326,6 @@ export const videoProjectSchema = videoProjectBaseSchema.superRefine(
     const expectedCharacters: ReadonlyMap<
       string,
       {
-        characterId: CharacterAssetId;
         role: "mentor" | "learner";
         speakerName: "四国めたん" | "ずんだもん";
         themeColorToken: "character.metan" | "character.zundamon";
@@ -372,7 +334,6 @@ export const videoProjectSchema = videoProjectBaseSchema.superRefine(
       [
         "character-mentor",
         {
-          characterId: "character-mentor",
           role: "mentor",
           speakerName: "四国めたん",
           themeColorToken: "character.metan"
@@ -381,7 +342,6 @@ export const videoProjectSchema = videoProjectBaseSchema.superRefine(
       [
         "character-learner",
         {
-          characterId: "character-learner",
           role: "learner",
           speakerName: "ずんだもん",
           themeColorToken: "character.zundamon"
@@ -419,20 +379,6 @@ export const videoProjectSchema = videoProjectBaseSchema.superRefine(
           ctx,
           ["characters", index, "themeColorToken"],
           "theme color token does not match the character id"
-        );
-      }
-
-      const expectedVisualAssets = characterVisualAssetPaths(
-        expected.characterId
-      );
-      if (
-        JSON.stringify(character.visualAssets) !==
-        JSON.stringify(expectedVisualAssets)
-      ) {
-        addReferenceIssue(
-          ctx,
-          ["characters", index, "visualAssets"],
-          "visual assets do not match the character id"
         );
       }
     }

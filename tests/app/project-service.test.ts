@@ -48,16 +48,7 @@ describe("ProjectService", () => {
     expect(project.metadata.title).toBe("作成テスト");
     expect(project.metadata.createdAt).toBe("2026-08-04T01:02:03.000Z");
     expect(project.metadata.updatedAt).toBe("2026-08-04T01:02:03.000Z");
-    expect(project.metadata.outputSettings).toEqual({
-      width: 1920,
-      height: 1080,
-      fps: 30,
-      videoCodec: "h264",
-      pixelFormat: "yuv420p",
-      audioCodec: "aac",
-      audioSampleRate: 48000,
-      audioChannels: 2
-    });
+    expect(project.schemaVersion).toBe("1.0.0");
     expect(project.characters).toEqual([
       expect.objectContaining({
         id: "character-mentor",
@@ -70,18 +61,21 @@ describe("ProjectService", () => {
         },
         themeColorToken: "character.metan",
         visualAssets: {
-          stand: "shared-assets/characters/character-mentor/stand/stand.png",
-          speak: {
-            normal: {
-              closed:
-                "shared-assets/characters/character-mentor/speak-normal/closed.png",
-              open: "shared-assets/characters/character-mentor/speak-normal/open.png"
-            },
-            pointing: {
-              closed:
-                "shared-assets/characters/character-mentor/speak-pointing/closed.png",
-              open: "shared-assets/characters/character-mentor/speak-pointing/open.png"
-            }
+          neutral: {
+            closed: "characters/character-mentor/neutral-closed.png",
+            open: "characters/character-mentor/neutral-open.png"
+          },
+          smile: {
+            closed: "characters/character-mentor/smile-closed.png",
+            open: "characters/character-mentor/smile-open.png"
+          },
+          explain: {
+            closed: "characters/character-mentor/explain-closed.png",
+            open: "characters/character-mentor/explain-open.png"
+          },
+          caution: {
+            closed: "characters/character-mentor/caution-closed.png",
+            open: "characters/character-mentor/caution-open.png"
           }
         }
       }),
@@ -96,22 +90,35 @@ describe("ProjectService", () => {
         },
         themeColorToken: "character.zundamon",
         visualAssets: {
-          stand: "shared-assets/characters/character-learner/stand/stand.png",
-          speak: {
-            normal: {
-              closed:
-                "shared-assets/characters/character-learner/speak-normal/closed.png",
-              open: "shared-assets/characters/character-learner/speak-normal/open.png"
-            },
-            pointing: {
-              closed:
-                "shared-assets/characters/character-learner/speak-pointing/closed.png",
-              open: "shared-assets/characters/character-learner/speak-pointing/open.png"
-            }
+          neutral: {
+            closed: "characters/character-learner/neutral-closed.png",
+            open: "characters/character-learner/neutral-open.png"
+          },
+          smile: {
+            closed: "characters/character-learner/smile-closed.png",
+            open: "characters/character-learner/smile-open.png"
+          },
+          explain: {
+            closed: "characters/character-learner/explain-closed.png",
+            open: "characters/character-learner/explain-open.png"
+          },
+          caution: {
+            closed: "characters/character-learner/caution-closed.png",
+            open: "characters/character-learner/caution-open.png"
           }
         }
       })
     ]);
+    expect(project.metadata.outputSettings).toEqual({
+      width: 1920,
+      height: 1080,
+      fps: 30,
+      videoCodec: "h264",
+      pixelFormat: "yuv420p",
+      audioCodec: "aac",
+      audioSampleRate: 48000,
+      audioChannels: 2
+    });
   });
 
   it("rejects unknown create input and keeps the API boundary strict", async () => {

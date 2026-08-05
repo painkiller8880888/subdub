@@ -12,7 +12,6 @@ import {
   type VideoProject
 } from "../../schema/index.js";
 import { invalidateForUpstreamChange } from "./project-invalidation.js";
-import { migratePersistedProject } from "./project-migrations.js";
 
 export type ProjectRepositoryErrorCode =
   | "PROJECT_ID_INVALID"
@@ -1417,9 +1416,7 @@ export class ProjectRepository {
       throw parseFailedError();
     }
 
-    const projectResult = videoProjectSchema.safeParse(
-      migratePersistedProject(parsedJson)
-    );
+    const projectResult = videoProjectSchema.safeParse(parsedJson);
     if (!projectResult.success) {
       throw currentValidationFailedError(validationIssues(projectResult.error));
     }

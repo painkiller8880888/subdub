@@ -11,7 +11,7 @@ import {
 import {
   characterAssetUrl,
   toCharacterAssetViewModels,
-  type CharacterAssetPoseView
+  type CharacterAssetVariantView
 } from "./character-assets-view";
 
 function getErrorMessage(error: unknown): string {
@@ -60,51 +60,65 @@ function AssetImage({
   );
 }
 
-function PosePreview({
-  pose,
+function VariantPreview({
+  variant,
   characterName,
   onError
 }: {
-  readonly pose: CharacterAssetPoseView;
+  readonly variant: CharacterAssetVariantView;
   readonly characterName: string;
   readonly onError: (assetPath: string) => void;
 }) {
-  if (pose.key === "stand") {
-    return (
-      <article className="character-pose-card">
-        <h3>{pose.label}</h3>
-        <AssetImage
-          alt={`${characterName}の${pose.label}`}
-          assetPath={pose.path}
-          onError={onError}
-        />
-        <code>{pose.path}</code>
-      </article>
-    );
-  }
+  const fileSlots =
+    variant.renderType === "single-image"
+      ? [{ key: "single", label: "素材" }]
+      : [
+          { key: "closed", label: "口閉じ" },
+          { key: "open", label: "口開き" }
+        ];
 
   return (
     <article className="character-pose-card">
-      <h3>{pose.label}</h3>
-      <div className="character-mouth-grid">
-        <figure>
-          <AssetImage
-            alt={`${characterName}の${pose.label}・口を閉じた状態`}
-            assetPath={pose.closed}
-            onError={onError}
-          />
-          <figcaption>口閉じ</figcaption>
-          <code>{pose.closed}</code>
-        </figure>
-        <figure>
-          <AssetImage
-            alt={`${characterName}の${pose.label}・口を開いた状態`}
-            assetPath={pose.open}
-            onError={onError}
-          />
-          <figcaption>口開き</figcaption>
-          <code>{pose.open}</code>
-        </figure>
+      <div className="character-pose-card-header">
+        <h3>{variant.label}</h3>
+        <code>{variant.variantId}</code>
+      </div>
+      <div
+        className={
+          variant.renderType === "mouth-pair"
+            ? "character-mouth-grid"
+            : undefined
+        }
+      >
+        {fileSlots.map((slot) => {
+          const file = variant.files.find(
+            (candidate) => candidate.key === slot.key
+          );
+          return (
+            <figure key={slot.key}>
+              {file === undefined ? (
+                <div
+                  className="character-asset-error"
+                  role="img"
+                  aria-label={`${characterName}の${variant.label}・${slot.label}が未登録`}
+                >
+                  <strong>素材が未登録です</strong>
+                  <code>
+                    {variant.variantId}/{slot.key}
+                  </code>
+                </div>
+              ) : (
+                <AssetImage
+                  alt={`${characterName}の${variant.label}・${slot.label}`}
+                  assetPath={file.path}
+                  onError={onError}
+                />
+              )}
+              <figcaption>{slot.label}</figcaption>
+              <code>{file?.path ?? "未登録"}</code>
+            </figure>
+          );
+        })}
       </div>
     </article>
   );
@@ -140,14 +154,14 @@ function CharacterCard({
         </div>
       </dl>
       <p className="character-pose-summary">
-        利用可能なポーズ:{" "}
-        {character.availablePoses.map((pose) => pose.label).join("、")}
+        利用可能な素材バリアント:{" "}
+        {character.availableVariants.map((variant) => variant.label).join("、")}
       </p>
       <div className="character-pose-list">
-        {character.availablePoses.map((pose) => (
-          <PosePreview
-            key={pose.key}
-            pose={pose}
+        {character.availableVariants.map((variant) => (
+          <VariantPreview
+            key={variant.variantId}
+            variant={variant}
             characterName={character.name}
             onError={onError}
           />
@@ -215,7 +229,7 @@ export function CharacterAssetsPage() {
         <p className="eyebrow">P2-01</p>
         <h1>キャラクター素材の確認</h1>
         <p>
-          実在するポーズと口差分だけを表示しています。ここではキャラクター設定を編集しません。
+          素材カタログへ登録されたバリアントだけを表示しています。ここではキャラクター設定を編集しません。
         </p>
       </header>
 
@@ -233,7 +247,7 @@ export function CharacterAssetsPage() {
         </section>
       ) : (
         <p className="asset-validation-status" role="status">
-          プロジェクトデータの素材参照を読み込みます。画像の読み込み状態を確認しています。
+          素材カタログの登録内容を表示しています。画像の読み込み状態を確認しています。
         </p>
       )}
 

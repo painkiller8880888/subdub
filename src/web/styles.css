@@ -354,6 +354,20 @@ input:focus-visible {
   margin: 0;
 }
 
+.character-pose-card-header {
+  align-items: start;
+  display: flex;
+  gap: 0.6rem;
+  justify-content: space-between;
+}
+
+.character-pose-card-header code {
+  color: #59647b;
+  font-size: 0.72rem;
+  overflow-wrap: anywhere;
+  text-align: right;
+}
+
 .character-id {
   background: #eef3fa;
   border-radius: 0.35rem;

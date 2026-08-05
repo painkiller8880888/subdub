@@ -1,20 +1,23 @@
+import {
+  characterVariantCatalog,
+  characterVariantsForCharacter,
+  type CharacterVariantCatalog,
+  type CharacterVariantRenderType
+} from "../assets/character-asset-manifest.js";
 import type { Character, VideoProject } from "../schema/index.js";
 
-type CharacterAssetSpeakPoseView = {
-  readonly key: "normal" | "pointing";
-  readonly label: string;
-  readonly closed: string;
-  readonly open: string;
-};
-
-type CharacterAssetStandPoseView = {
-  readonly key: "stand";
-  readonly label: string;
+export type CharacterAssetVariantFileView = {
+  readonly key: string;
   readonly path: string;
 };
 
-export type CharacterAssetPoseView =
-  CharacterAssetSpeakPoseView | CharacterAssetStandPoseView;
+export type CharacterAssetVariantView = {
+  readonly variantId: string;
+  readonly label: string;
+  readonly renderType: CharacterVariantRenderType;
+  readonly tags: readonly string[];
+  readonly files: readonly CharacterAssetVariantFileView[];
+};
 
 export type CharacterAssetViewModel = {
   readonly id: Character["id"];
@@ -22,11 +25,12 @@ export type CharacterAssetViewModel = {
   readonly role: Character["role"];
   readonly speakerName: Character["voicevox"]["speakerName"];
   readonly styleName: Character["voicevox"]["styleName"];
-  readonly availablePoses: readonly CharacterAssetPoseView[];
+  readonly availableVariants: readonly CharacterAssetVariantView[];
 };
 
 export function toCharacterAssetViewModel(
-  character: Character
+  character: Character,
+  catalog: CharacterVariantCatalog = characterVariantCatalog
 ): CharacterAssetViewModel {
   return {
     id: character.id,
@@ -34,32 +38,28 @@ export function toCharacterAssetViewModel(
     role: character.role,
     speakerName: character.voicevox.speakerName,
     styleName: character.voicevox.styleName,
-    availablePoses: [
-      {
-        key: "normal",
-        label: "通常会話",
-        closed: character.visualAssets.speak.normal.closed,
-        open: character.visualAssets.speak.normal.open
-      },
-      {
-        key: "pointing",
-        label: "指差し状態の会話",
-        closed: character.visualAssets.speak.pointing.closed,
-        open: character.visualAssets.speak.pointing.open
-      },
-      {
-        key: "stand",
-        label: "非会話状態",
-        path: character.visualAssets.stand
-      }
-    ]
+    availableVariants: characterVariantsForCharacter(character.id, catalog).map(
+      (variant) => ({
+        variantId: variant.variantId,
+        label: variant.label,
+        renderType: variant.renderType,
+        tags: variant.tags,
+        files: variant.files.map((file) => ({
+          key: file.key,
+          path: file.destinationPath
+        }))
+      })
+    )
   };
 }
 
 export function toCharacterAssetViewModels(
-  project: VideoProject
+  project: VideoProject,
+  catalog: CharacterVariantCatalog = characterVariantCatalog
 ): CharacterAssetViewModel[] {
-  return project.characters.map(toCharacterAssetViewModel);
+  return project.characters.map((character) =>
+    toCharacterAssetViewModel(character, catalog)
+  );
 }
 
 export function characterAssetUrl(assetPath: string): string {

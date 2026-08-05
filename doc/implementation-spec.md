@@ -358,7 +358,7 @@ project-root/
 
 ```ts
 type VideoProject = {
-  schemaVersion: "1.1.0";
+  schemaVersion: "1.0.0";
   revision: number;
   metadata: ProjectMetadata;
   source: ProjectSource;
@@ -374,7 +374,7 @@ type VideoProject = {
 };
 ```
 
-すべてのオブジェクトは既知でないキーを拒否する strict object とする。移行は `schemaVersion` 単位で明示的なマイグレーション関数を実行する。現在の `VideoProject` は `1.1.0` とし、`1.0.0` の旧キャラクター素材構造は読み込み時にキャラクターIDごとの正規素材manifestへ移行する。
+すべてのオブジェクトは既知でないキーを拒否する strict object とする。スキーマを変更する場合は `schemaVersion` 単位で明示的なマイグレーション関数を追加する。P2-01では永続スキーマを変更せず、既存の `1.0.0` を維持する。
 
 ### 7.2 メタデータ
 
@@ -478,11 +478,10 @@ type Character = {
   };
   lipSyncPeriodFrames: number;
   visualAssets: {
-    stand: string;
-    speak: {
-      normal: MouthPair;
-      pointing: MouthPair;
-    };
+    neutral: MouthPair;
+    smile: MouthPair;
+    explain: MouthPair;
+    caution: MouthPair;
   };
 };
 
@@ -502,9 +501,11 @@ type MouthPair = {
 
 - 四国めたん側はメンター・案内役、ずんだもん側は生徒・見習い役を基本とする。
 - P2-01 で確認済みの素材は透過 PNG、600 × 1000 px の同一キャンバスで、非会話状態の単一画像と、通常会話・指差し状態の会話それぞれの `closed` / `open` ペアから成る。身体の基準位置は画像を並べた手動確認で検証し、ポーズによる外形差を理由に alpha bounding box の完全一致は要求しない。
-- 台本上の表情語彙 `neutral`、`smile`、`explain`、`caution` は `ScriptLine.expression` の将来の演出指定として維持する。P2-01 では、これらを今回の2種類の会話ポーズへ推測で対応付けない。
-- 全身と会話ポーズの使い分け、画像キャンバスサイズ、キャラクターの基準位置は `assets` 内のデータを正とし、Remotion 側で画像ごとの補正値を持たせない。
-- 実装用素材は `public/shared-assets/characters/{characterId}/stand/stand.png`、`speak-normal/{mouth}.png`、`speak-pointing/{mouth}.png` へ配置する。元データは `assets` に保持し、不足ファイル、予期しない命名、キャンバス不一致、close/open ペア不一致、透過有無を検証する。
+- 台本上の表情語彙 `neutral`、`smile`、`explain`、`caution` は `ScriptLine.expression` の論理指定として維持する。P2-01では、これらと物理バリアントの対応を決定しない。
+- 実在素材の正本は `characterVariantCatalog` とし、各バリアントに安定した `variantId`、`characterId`、`label`、`renderType`（`single-image` または `mouth-pair`）、自由な `tags`、`files` を持たせる。`stand`、`normal`、`pointing`、`smile`、`caution` などのポーズ・表情名を永続スキーマの固定 enum にはしない。
+- `VideoProject.characters[].visualAssets` は既存の `1.0.0` 構造を維持し、P2-01の物理バリアントを埋め込まない。確認画面と検証処理はカタログを走査し、配列順で表示・検証する。
+- 実装用素材は `public/shared-assets/characters/` へ配置し、元データは `assets` に保持する。カタログへ登録された各ファイルについて、不足、予期しない命名、PNG構造・CRC、キャンバス不一致、mouth-pairの `closed` / `open` 欠落、透過有無、source/publicのバイト一致を検証する。
+- 将来はプロジェクトが `variantId` とカタログのバージョンを参照し、`RenderManifest` が実行時にパスとchecksumを解決する。P2-01ではSQLite登録UI、`ScriptLine` からのvariantId参照、Remotion描画は実装しない。
 - 制服の差し色、字幕の話者色、WebUI の speaker chip は `character.metan` と `character.zundamon` のデザイントークンから取得する。
 - テーマ色の具体値は `assets` のキャラクターデータに合わせてデザイントークンへ登録し、字幕背景とのコントラストを検証する。
 - 話者の区別を色だけに依存させず、キャラクター名、話者チップ、左右配置でも区別する。

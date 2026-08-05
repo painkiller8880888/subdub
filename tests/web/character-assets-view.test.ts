@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
 
+import {
+  characterVariantCatalog,
+  type CharacterVariant
+} from "../../src/assets/character-asset-manifest.js";
 import { createEmptyVideoProject } from "../../src/app/projects/empty-video-project.js";
 import {
   characterAssetUrl,
@@ -7,7 +11,7 @@ import {
 } from "../../src/web/character-assets-view.js";
 
 describe("character asset view model", () => {
-  it("exposes both speakers and only the real poses and mouth pairs", () => {
+  it("lists catalog variants by character without using VideoProject visualAssets", () => {
     const project = createEmptyVideoProject({
       projectId: "character-view-project",
       createdAt: "2026-08-05T00:00:00.000Z"
@@ -24,48 +28,80 @@ describe("character asset view model", () => {
     ]);
     expect(
       characters.map((character) =>
-        character.availablePoses.map((pose) => pose.label)
+        character.availableVariants.map((variant) => variant.label)
       )
     ).toEqual([
-      ["通常会話", "指差し状態の会話", "非会話状態"],
-      ["通常会話", "指差し状態の会話", "非会話状態"]
+      ["非会話状態", "通常会話", "指差し状態の会話"],
+      ["非会話状態", "通常会話", "指差し状態の会話"]
     ]);
 
     const mentor = characters[0];
     if (mentor === undefined) {
       throw new Error("mentor view model is missing");
     }
-    const normal = mentor.availablePoses[0];
-    const pointing = mentor.availablePoses[1];
-    const stand = mentor.availablePoses[2];
-    expect(normal).toMatchObject({
-      closed:
-        "shared-assets/characters/character-mentor/speak-normal/closed.png",
-      open: "shared-assets/characters/character-mentor/speak-normal/open.png"
+    expect(mentor.availableVariants[0]).toMatchObject({
+      variantId: "character-mentor-stand-v1",
+      renderType: "single-image",
+      files: [
+        {
+          key: "single",
+          path: "shared-assets/characters/character-mentor/stand/stand.png"
+        }
+      ]
     });
-    expect(pointing).toMatchObject({
-      closed:
-        "shared-assets/characters/character-mentor/speak-pointing/closed.png",
-      open: "shared-assets/characters/character-mentor/speak-pointing/open.png"
+    expect(mentor.availableVariants[1]).toMatchObject({
+      variantId: "character-mentor-speak-normal-v1",
+      renderType: "mouth-pair",
+      files: [
+        {
+          key: "closed",
+          path: "shared-assets/characters/character-mentor/speak-normal/closed.png"
+        },
+        {
+          key: "open",
+          path: "shared-assets/characters/character-mentor/speak-normal/open.png"
+        }
+      ]
     });
-    expect(stand).toEqual({
-      key: "stand",
-      label: "非会話状態",
-      path: "shared-assets/characters/character-mentor/stand/stand.png"
-    });
-    if (stand.key !== "stand") {
-      throw new Error("stand view model is not a stand pose");
-    }
-    expect(
-      characters.flatMap((character) => character.availablePoses)
-    ).not.toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ label: "smile" }),
-        expect.objectContaining({ label: "caution" })
-      ])
-    );
-    expect(characterAssetUrl(stand.path)).toBe(
+    expect(characterAssetUrl(mentor.availableVariants[0].files[0].path)).toBe(
       "/shared-assets/characters/character-mentor/stand/stand.png"
     );
+  });
+
+  it("reflects a catalog variant addition in the character view", () => {
+    const project = createEmptyVideoProject({
+      projectId: "character-view-project",
+      createdAt: "2026-08-05T00:00:00.000Z"
+    });
+    const extraVariant: CharacterVariant = {
+      variantId: "character-learner-extra-v1",
+      characterId: "character-learner",
+      label: "追加バリアント",
+      renderType: "single-image",
+      tags: ["additional"],
+      files: [
+        {
+          key: "single",
+          sourceFile: "char04_extra.png",
+          destinationPath:
+            "shared-assets/characters/character-learner/extra/image.png"
+        }
+      ]
+    };
+    const characters = toCharacterAssetViewModels(project, [
+      ...characterVariantCatalog,
+      extraVariant
+    ]);
+    const learner = characters.find(
+      (character) => character.id === "character-learner"
+    );
+
+    expect(learner?.availableVariants.at(-1)).toEqual({
+      variantId: extraVariant.variantId,
+      label: extraVariant.label,
+      renderType: extraVariant.renderType,
+      tags: extraVariant.tags,
+      files: [{ key: "single", path: extraVariant.files[0].destinationPath }]
+    });
   });
 });

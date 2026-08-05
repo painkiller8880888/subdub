@@ -12,7 +12,7 @@ const AUDIO_CHECKSUM =
   "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee";
 
 export const videoProjectFixture = {
-  schemaVersion: "1.1.0",
+  schemaVersion: "1.0.0",
   revision: 0,
   metadata: {
     id: "manual-video-project",
@@ -77,20 +77,21 @@ export const videoProjectFixture = {
       },
       lipSyncPeriodFrames: 3,
       visualAssets: {
-        stand: "shared-assets/characters/character-mentor/stand/stand.png",
-        speak: {
-          normal: {
-            closed:
-              "shared-assets/characters/character-mentor/speak-normal/closed.png",
-            open:
-              "shared-assets/characters/character-mentor/speak-normal/open.png"
-          },
-          pointing: {
-            closed:
-              "shared-assets/characters/character-mentor/speak-pointing/closed.png",
-            open:
-              "shared-assets/characters/character-mentor/speak-pointing/open.png"
-          }
+        neutral: {
+          closed: "characters/character-mentor/neutral/closed.png",
+          open: "characters/character-mentor/neutral/open.png"
+        },
+        smile: {
+          closed: "characters/character-mentor/smile/closed.png",
+          open: "characters/character-mentor/smile/open.png"
+        },
+        explain: {
+          closed: "characters/character-mentor/explain/closed.png",
+          open: "characters/character-mentor/explain/open.png"
+        },
+        caution: {
+          closed: "characters/character-mentor/caution/closed.png",
+          open: "characters/character-mentor/caution/open.png"
         }
       }
     },
@@ -116,20 +117,21 @@ export const videoProjectFixture = {
       },
       lipSyncPeriodFrames: 3,
       visualAssets: {
-        stand: "shared-assets/characters/character-learner/stand/stand.png",
-        speak: {
-          normal: {
-            closed:
-              "shared-assets/characters/character-learner/speak-normal/closed.png",
-            open:
-              "shared-assets/characters/character-learner/speak-normal/open.png"
-          },
-          pointing: {
-            closed:
-              "shared-assets/characters/character-learner/speak-pointing/closed.png",
-            open:
-              "shared-assets/characters/character-learner/speak-pointing/open.png"
-          }
+        neutral: {
+          closed: "characters/character-learner/neutral/closed.png",
+          open: "characters/character-learner/neutral/open.png"
+        },
+        smile: {
+          closed: "characters/character-learner/smile/closed.png",
+          open: "characters/character-learner/smile/open.png"
+        },
+        explain: {
+          closed: "characters/character-learner/explain/closed.png",
+          open: "characters/character-learner/explain/open.png"
+        },
+        caution: {
+          closed: "characters/character-learner/caution/closed.png",
+          open: "characters/character-learner/caution/open.png"
         }
       }
     }

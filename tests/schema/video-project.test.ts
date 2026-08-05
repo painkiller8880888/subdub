@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 
-import { characterVisualAssetPaths } from "../../src/assets/character-asset-manifest.js";
 import {
   videoProjectSchema,
   type VideoProject
@@ -44,7 +43,7 @@ describe("videoProjectSchema", () => {
     expectInvalid(rootUnknown);
 
     const deepUnknown = clone(videoProjectFixture);
-    Object.assign(deepUnknown.characters[0].visualAssets.speak.normal, {
+    Object.assign(deepUnknown.characters[0].visualAssets.neutral, {
       unexpected: true
     });
     expectInvalid(deepUnknown);
@@ -296,36 +295,6 @@ describe("videoProjectSchema", () => {
     const invalidTheme = clone(videoProjectFixture);
     invalidTheme.characters[1].themeColorToken = "character.metan";
     expectInvalid(invalidTheme, ["characters", 1, "themeColorToken"]);
-  });
-
-  it("rejects assigning one visual asset path to multiple meanings", () => {
-    const invalid = clone(videoProjectFixture);
-    invalid.characters[0].visualAssets.speak.pointing.open =
-      invalid.characters[0].visualAssets.speak.normal.open;
-    expectInvalid(invalid, [
-      "characters",
-      0,
-      "visualAssets",
-      "speak",
-      "pointing",
-      "open"
-    ]);
-  });
-
-  it("requires each character to use its canonical visual asset paths", () => {
-    expect(videoProjectFixture.characters[0]?.visualAssets).toEqual(
-      characterVisualAssetPaths("character-mentor")
-    );
-    expect(videoProjectFixture.characters[1]?.visualAssets).toEqual(
-      characterVisualAssetPaths("character-learner")
-    );
-
-    const swapped = clone(videoProjectFixture);
-    swapped.characters[0].visualAssets =
-      clone(videoProjectFixture.characters[1].visualAssets);
-    swapped.characters[1].visualAssets =
-      clone(videoProjectFixture.characters[0].visualAssets);
-    expectInvalid(swapped, ["characters", 0, "visualAssets"]);
   });
 
   it("rejects broken references", () => {
