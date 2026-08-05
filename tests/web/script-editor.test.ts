@@ -1,11 +1,13 @@
 import { describe, expect, it } from "vitest";
 
 import { createEmptyVideoProject } from "../../src/app/projects/empty-video-project.js";
+import type { Script } from "../../src/schema/index.js";
 import {
   appendScriptLines,
   createDefaultScriptLine,
   deleteScriptLine,
   duplicateScriptLine,
+  isScriptSaveContextCurrent,
   moveScriptLine,
   parseBulkScript,
   reconcileScriptLineIds,
@@ -189,5 +191,63 @@ describe("script editor helpers", () => {
     expect(secondSaved.sections[0]?.lines[0]?.id).toBe(
       firstSaved.sections[0]?.lines[0]?.id
     );
+  });
+
+  it("ignores a delayed save response after switching projects", async () => {
+    let resolveSave: (() => void) | undefined;
+    const saveCompleted = new Promise<void>((resolve) => {
+      resolveSave = resolve;
+    });
+    const savingProjectId = "project-a";
+    const savingGeneration = 1;
+    const current: {
+      projectId: string;
+      generation: number;
+      revision: number;
+      draft: Script;
+    } = {
+      projectId: "project-a",
+      generation: 1,
+      revision: 4,
+      draft: script
+    };
+    const savedRevision = 5;
+    const savedDraft = updateScriptLine(script, 0, 0, {
+      id: "script-line-project-a"
+    });
+
+    const delayedSave = (async () => {
+      await saveCompleted;
+      if (
+        !isScriptSaveContextCurrent(
+          current.projectId,
+          current.generation,
+          savingProjectId,
+          savingGeneration
+        )
+      ) {
+        return;
+      }
+      current.revision = savedRevision;
+      current.draft = savedDraft;
+    })();
+
+    current.projectId = "project-b";
+    current.generation = 2;
+    current.revision = 9;
+    current.draft = updateScriptLine(script, 0, 0, {
+      id: "script-line-project-b",
+      spokenText: "project B draft"
+    });
+    resolveSave?.();
+    await delayedSave;
+
+    expect(current.projectId).toBe("project-b");
+    expect(current.generation).toBe(2);
+    expect(current.revision).toBe(9);
+    expect(current.draft.sections[0]?.lines[0]).toMatchObject({
+      id: "script-line-project-b",
+      spokenText: "project B draft"
+    });
   });
 });

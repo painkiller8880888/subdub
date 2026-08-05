@@ -152,6 +152,18 @@ export function reconcileScriptLineIds(
   return reconciled;
 }
 
+export function isScriptSaveContextCurrent(
+  currentProjectId: string,
+  currentGeneration: number,
+  savingProjectId: string,
+  savingGeneration: number
+): boolean {
+  return (
+    currentProjectId === savingProjectId &&
+    currentGeneration === savingGeneration
+  );
+}
+
 export function appendScriptLines(
   script: Script,
   sectionIndex: number,

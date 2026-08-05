@@ -35,6 +35,7 @@ import {
   deleteScriptLine,
   duplicateScriptLine,
   isScriptInitializationAllowed,
+  isScriptSaveContextCurrent,
   moveScriptLine,
   parseBulkScript,
   reconcileScriptLineIds,
@@ -292,6 +293,7 @@ export function ScriptPage() {
   const [pendingNavigation, setPendingNavigation] = useState(false);
   const [initializationError, setInitializationError] = useState<unknown>(null);
   const projectIdRef = useRef(projectId ?? "");
+  const projectGenerationRef = useRef(0);
   const revisionRef = useRef(0);
   const draftRef = useRef<Script | null>(null);
   const lastSavedRef = useRef<Script | null>(null);
@@ -302,12 +304,14 @@ export function ScriptPage() {
 
   const saveMutation = useMutation({
     mutationFn: ({
+      projectId,
       script,
       expectedRevision
     }: {
+      projectId: string;
       script: Script;
       expectedRevision: number;
-    }) => saveProjectScript(projectIdRef.current, { script, expectedRevision }),
+    }) => saveProjectScript(projectId, { script, expectedRevision }),
     retry: false
   });
   const saveMutationRef = useRef(saveMutation);
@@ -349,12 +353,25 @@ export function ScriptPage() {
     ) {
       return;
     }
+    const savingProjectId = projectIdRef.current;
+    const savingGeneration = projectGenerationRef.current;
     const project = await saveMutationRef.current.mutateAsync({
+      projectId: savingProjectId,
       script: nextDraft,
       expectedRevision: revisionRef.current
     });
-    revisionRef.current = project.revision;
     updateMutationCaches(project);
+    if (
+      !isScriptSaveContextCurrent(
+        projectIdRef.current,
+        projectGenerationRef.current,
+        savingProjectId,
+        savingGeneration
+      )
+    ) {
+      return;
+    }
+    revisionRef.current = project.revision;
     const latestDraft = draftRef.current ?? nextDraft;
     const reconciledDraft = reconcileScriptLineIds(
       nextDraft,
@@ -393,6 +410,7 @@ export function ScriptPage() {
     if (coordinator === null || projectId === undefined) {
       return;
     }
+    projectGenerationRef.current += 1;
     initializedForProjectRef.current = null;
     draftRef.current = null;
     lastSavedRef.current = null;
