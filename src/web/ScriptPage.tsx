@@ -37,6 +37,7 @@ import {
   isScriptInitializationAllowed,
   moveScriptLine,
   parseBulkScript,
+  reconcileScriptLineIds,
   updateScriptLine,
   validateScriptDraft,
   type BulkPasteError,
@@ -354,11 +355,16 @@ export function ScriptPage() {
     });
     revisionRef.current = project.revision;
     updateMutationCaches(project);
-    if (JSON.stringify(draftRef.current) === JSON.stringify(nextDraft)) {
-      const savedDraft = cloneScript(nextDraft);
-      lastSavedRef.current = savedDraft;
-      draftRef.current = savedDraft;
-    }
+    const latestDraft = draftRef.current ?? nextDraft;
+    const reconciledDraft = reconcileScriptLineIds(
+      nextDraft,
+      project.script,
+      latestDraft
+    );
+    lastSavedRef.current = cloneScript(project.script);
+    draftRef.current = reconciledDraft;
+    coordinatorRef.current?.replaceDraft(reconciledDraft);
+    setDraft(reconciledDraft);
   }
 
   useEffect(() => {

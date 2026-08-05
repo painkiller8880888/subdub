@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { initializeServer } from "../../src/api/server.js";
 import { computeOutlineHash } from "../../src/app/projects/script-domain.js";
+import { reconcileScriptLineIds } from "../../src/web/script-editor.js";
 import {
   apiErrorResponseSchema,
   projectCreateResponseSchema,
@@ -344,6 +345,80 @@ describe("script editing API", () => {
         ).json()
       ).data
     ).toEqual(initialized);
+  });
+
+  it("keeps a backend-issued line ID stable across an edited second save", async () => {
+    const { server, project } = await setup();
+    const initialized = await initialize(server, project);
+
+    const firstDraft: Script = {
+      ...initialized.script,
+      sections: initialized.script.sections.map((section, index) =>
+        index === 0
+          ? {
+              ...section,
+              lines: [
+                {
+                  id: "draft-line-1",
+                  speakerId: "character-mentor",
+                  spokenText: "first saved text",
+                  subtitleText: "first saved text",
+                  expression: "neutral",
+                  pauseBeforeMs: 0,
+                  pauseAfterMs: 250,
+                  voiceOverrides: {},
+                  pronunciation: {
+                    mode: "dictionary",
+                    excludedTermIds: []
+                  }
+                }
+              ]
+            }
+          : section
+      )
+    };
+    const firstResponse = await server.app.inject({
+      method: "PUT",
+      url: `/api/projects/${project.metadata.id}/script`,
+      payload: { script: firstDraft, expectedRevision: initialized.revision }
+    });
+    const firstSaved = projectMutationResponseSchema.parse(
+      firstResponse.json()
+    ).data;
+    const firstSavedLine = firstSaved.script.sections[0]?.lines[0];
+    expect(firstSavedLine?.id).toMatch(/^script-line-/);
+
+    const editedDraft: Script = {
+      ...firstDraft,
+      sections: firstDraft.sections.map((section, index) =>
+        index === 0
+          ? {
+              ...section,
+              lines: section.lines.map((line) => ({
+                ...line,
+                spokenText: "保存中に追加した編集"
+              }))
+            }
+          : section
+      )
+    };
+    const secondDraft = reconcileScriptLineIds(
+      firstDraft,
+      firstSaved.script,
+      editedDraft
+    );
+    const secondResponse = await server.app.inject({
+      method: "PUT",
+      url: `/api/projects/${project.metadata.id}/script`,
+      payload: { script: secondDraft, expectedRevision: firstSaved.revision }
+    });
+    const secondSaved = projectMutationResponseSchema.parse(
+      secondResponse.json()
+    ).data;
+    const secondSavedLine = secondSaved.script.sections[0]?.lines[0];
+
+    expect(secondSavedLine?.id).toBe(firstSavedLine?.id);
+    expect(secondSavedLine?.spokenText).toBe("保存中に追加した編集");
   });
 
   it("rejects unknown fields in script requests", async () => {

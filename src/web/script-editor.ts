@@ -116,6 +116,42 @@ export function cloneScript(script: Script): Script {
   };
 }
 
+export function reconcileScriptLineIds(
+  submitted: Script,
+  saved: Script,
+  latest: Script
+): Script {
+  const submittedToSaved = new Map<string, string>();
+
+  for (const [sectionIndex, submittedSection] of submitted.sections.entries()) {
+    const savedSection = saved.sections[sectionIndex];
+    if (
+      savedSection === undefined ||
+      savedSection.outlineSectionId !== submittedSection.outlineSectionId
+    ) {
+      continue;
+    }
+
+    for (const [lineIndex, submittedLine] of submittedSection.lines.entries()) {
+      const savedLine = savedSection.lines[lineIndex];
+      if (savedLine !== undefined) {
+        submittedToSaved.set(submittedLine.id, savedLine.id);
+      }
+    }
+  }
+
+  const reconciled = cloneScript(latest);
+  for (const section of reconciled.sections) {
+    for (const line of section.lines) {
+      const savedId = submittedToSaved.get(line.id);
+      if (savedId !== undefined) {
+        line.id = savedId;
+      }
+    }
+  }
+  return reconciled;
+}
+
 export function appendScriptLines(
   script: Script,
   sectionIndex: number,

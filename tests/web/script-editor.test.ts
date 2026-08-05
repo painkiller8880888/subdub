@@ -8,6 +8,7 @@ import {
   duplicateScriptLine,
   moveScriptLine,
   parseBulkScript,
+  reconcileScriptLineIds,
   updateScriptLine,
   validateScriptDraft
 } from "../../src/web/script-editor.js";
@@ -142,5 +143,51 @@ describe("script editor helpers", () => {
       ])
     );
     expect(invalid.sections[0]?.lines[0]?.spokenText).toBe(" ");
+  });
+
+  it("applies formal IDs to the latest draft without losing in-flight edits", () => {
+    const submitted = updateScriptLine(script, 0, 0, {
+      id: "draft-line-1",
+      spokenText: "保存時の本文"
+    });
+    const saved = updateScriptLine(submitted, 0, 0, {
+      id: "script-line-formal",
+      spokenText: "保存時の本文"
+    });
+    const latest = updateScriptLine(submitted, 0, 0, {
+      spokenText: "保存中に追加した編集"
+    });
+
+    const reconciled = reconcileScriptLineIds(submitted, saved, latest);
+
+    expect(reconciled.sections[0]?.lines[0]).toMatchObject({
+      id: "script-line-formal",
+      spokenText: "保存中に追加した編集"
+    });
+  });
+
+  it("keeps the formal ID stable across a second save", () => {
+    const submitted = updateScriptLine(script, 0, 0, {
+      id: "draft-line-1"
+    });
+    const firstSaved = updateScriptLine(submitted, 0, 0, {
+      id: "script-line-formal"
+    });
+    const secondDraft = updateScriptLine(submitted, 0, 0, {
+      spokenText: "二回目の編集"
+    });
+    const secondRequest = reconcileScriptLineIds(
+      submitted,
+      firstSaved,
+      secondDraft
+    );
+    const secondSaved = updateScriptLine(secondRequest, 0, 0, {
+      id: "script-line-formal"
+    });
+
+    expect(secondRequest.sections[0]?.lines[0]?.id).toBe("script-line-formal");
+    expect(secondSaved.sections[0]?.lines[0]?.id).toBe(
+      firstSaved.sections[0]?.lines[0]?.id
+    );
   });
 });
