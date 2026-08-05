@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   AutosaveCoordinator,
+  navigateAfterAutosave,
   type AutosaveState
 } from "../../src/web/brief-autosave.js";
 
@@ -55,6 +56,36 @@ describe("AutosaveCoordinator", () => {
     expect(states.at(-1)?.status).toBe("saved");
     await vi.runAllTimersAsync();
     expect(save).toHaveBeenCalledTimes(1);
+    coordinator.dispose();
+  });
+
+  it("saves an edit made immediately before navigating", async () => {
+    const save = vi.fn(async () => undefined);
+    const navigate = vi.fn();
+    const { coordinator } = setup(save);
+
+    coordinator.update("edited immediately before navigation");
+    await expect(
+      navigateAfterAutosave(coordinator, "/projects/project/script", navigate)
+    ).resolves.toBe(true);
+
+    expect(save).toHaveBeenCalledWith("edited immediately before navigation");
+    expect(navigate).toHaveBeenCalledWith("/projects/project/script");
+    coordinator.dispose();
+  });
+
+  it("does not navigate when saving before navigation fails", async () => {
+    const save = vi.fn().mockRejectedValue(new Error("save failed"));
+    const navigate = vi.fn();
+    const { coordinator } = setup(save);
+
+    coordinator.update("keep this draft");
+    await expect(
+      navigateAfterAutosave(coordinator, "/projects/project/script", navigate)
+    ).resolves.toBe(false);
+
+    expect(save).toHaveBeenCalledWith("keep this draft");
+    expect(navigate).not.toHaveBeenCalled();
     coordinator.dispose();
   });
 

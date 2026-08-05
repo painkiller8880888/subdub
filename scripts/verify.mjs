@@ -6,7 +6,8 @@ for (const command of [
   "typecheck",
   "test",
   "build",
-  "verify:build"
+  "verify:build",
+  "verify:character-assets"
 ]) {
   const exitCode = await runPnpm([command]);
   if (exitCode !== 0) {

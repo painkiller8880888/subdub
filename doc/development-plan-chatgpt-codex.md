@@ -359,15 +359,19 @@ MVPではAIに台本初稿を書かせる機能は対象外である。AI関連�
 
 #### P2-01 2キャラクター初期設定と素材確認
 
-`assets`に用意された2人分のキャラクターデータを調査し、`character-mentor`と`character-learner`へ対応付ける。4表情、口閉じ・口開き、同一キャンバス、固定位置、透過PNGを検証する。
+`doc/assets` に用意された 2 人分のキャラクターデータを調査し、`character-mentor` と `character-learner` へ対応付ける。初期キャラクター設定、TypeScript で管理する `characterVariantCatalog`、専用 PNG 検証、読み取り専用の素材確認画面を実装する。カタログは `variantId`、`characterId`、`label`、`renderType`、`tags`、`files` を物理素材の正本として持ち、`renderType` は `single-image` と `mouth-pair` だけを固定する。
+
+実在素材は各キャラクターについて、非会話状態の `single-image` 1 variant、通常会話の `mouth-pair` 1 variant、指差し状態の会話の `mouth-pair` 1 variant、合計 5 ファイルである。キャンバスは 600 × 1000 とし、2 キャラクターで 10 ファイルを検証する。
+
+`ScriptLine.expression` の `neutral`、`smile`、`explain`、`caution` は台本上の論理表情であり、物理ポーズ、PNG、`variantId` ではない。P2-01 では論理表情から物理 variant への mapping を行わず、`VideoProject.schemaVersion` と既存 `Character.visualAssets` の `1.0.0` 互換構造も変更しない。
 
 不足がある場合は推測で画像を作り直さず、不足ファイルと期待する命名を報告する。
 
-完了条件は、2キャラクターの初期データがZodを通り、画面で話者名と表情候補を表示できることである。
+完了条件は、2キャラクターの初期データが既存の `VideoProject` Zodスキーマを通り、永続スキーマを変更せず、画面で話者名とカタログに登録された実在素材バリアントを表示できることである。
 
 #### P2-02 台本編集と一括貼付け
 
-セクション、セリフカード、話者、表情、`spokenText`、`subtitleText`、前後の無音時間を編集できる画面を作る。話者付きテキストの一括貼付けを機械的にカードへ分割する。
+セクション、セリフカード、話者、`ScriptLine.expression` の論理表情、`spokenText`、`subtitleText`、前後の無音時間を編集できる画面を作る。話者付きテキストの一括貼付けを機械的にカードへ分割する。ここでの表情編集は論理表情の編集であり、物理 variant の選択や mapping を含めない。物理 variant 選択も必要と判断する場合は、既存計画へ暗黙に混ぜず、別の設計判断または後続タスクとして追加する。
 
 検証では、IDの一意性、空セリフ、話者参照、並べ替え、複製、削除、自動保存競合を確認する。
 
@@ -622,19 +626,21 @@ Phase 5では、承認済み台本、音声、ビジュアル、背景、BGM、�
 
 #### P5-02 RenderManifestコンパイラ
 
-検証済み`VideoProject`、audio index、素材メタデータを読み、`RenderManifest`を生成する。失敗時は新しいマニフェストを保存せず、複数のエラーをline IDやassignment IDへ関連付けて返す。
+検証済み `VideoProject`、audio index、素材メタデータ、`characterVariantCatalog` を読み、`RenderManifest` を生成する。現行 `RenderManifest 1.0.0` の `RenderLine.expression` は論理表情であり、P5-02 / P5-04 着手前に、論理表情から物理 variant へ解決する決定論的な規則または人間の選択方法を確定する。安定した `variantId` とカタログ版を参照し、解決済みの character ID、renderType、ファイルパス、checksum、`mouth-pair` の `closed` / `open` を manifest へ固定する。具体的な保存フィールドと manifestVersion 互換性は設計ゲートで決定する。
+
+mapping 不能、variant 欠落、mouth slot 欠落、ファイルまたは checksum の不一致時は自動代替せず、複数のエラーを line ID や assignment ID へ関連付けて返す。Remotion や WebUI の描画処理からカタログまたは SQLite を直接検索しない。
 
 完了条件は、入力ハッシュまたは素材checksumが変わると古いキャッシュを使わないことである。
 
 #### P5-03 基本Remotion composition
 
-背景、キャラクター、字幕、写真・動画・帳票を`RenderManifest`だけから描画する。RemotionコンポーネントからDB検索、ファイル探索、音声長測定を行わない。
+背景、キャラクター、字幕、写真・動画・帳票を解決済みの `RenderManifest` だけから描画する。Remotion コンポーネントから `characterVariantCatalog`、SQLite、DB 検索、ファイル探索、音声長測定を行わない。
 
 完了条件は、fixture manifestだけで代表フレームを描画できることである。
 
 #### P5-04 キャラクター・字幕・定周期口パク
 
-2キャラクターの4表情と口差分を表示し、`lipSyncPeriodFrames`による定周期口パクを実装する。話者は色だけでなく名前と配置でも区別する。
+P5-02 の設計ゲートで決定した mapping または人間の選択に従い、論理表情から安定した `variantId` を決定して `RenderManifest` へ解決する。解決済み `mouth-pair` variant の `closed` / `open` だけを `lipSyncPeriodFrames` で定周期切り替えする。`single-image` に存在しない口差分を自動補完しない。Remotion はカタログまたは SQLite を直接参照せず、manifest の解決済み情報だけを使用する。話者は色だけでなく名前と配置でも区別する。
 
 検証では、画像切替時に位置が揺れないこと、字幕が画面外へ出ないことを確認する。
 
@@ -693,6 +699,13 @@ fixture projectを使い、プロジェクト作成から短いMP4とサムネ�
 9. durationInFramesを計算する。
 10. hashとchecksumを付け、Zod検証する。
 11. 一時ファイルからrender-manifest.jsonへ置換する。
+
+キャラクター素材を扱う場合の追加条件:
+- `RenderLine.expression` は論理表情として扱い、PNG や物理 variant と直接対応させない。
+- P5-02 / P5-04 の設計ゲートで確定した mapping または人間の選択から `variantId` を決定し、`characterVariantCatalog` からファイルスロットを解決する。
+- 解決済みのファイルパス、checksum、`mouth-pair` の `closed` / `open` を manifest に固定する。具体的なフィールドは TBD とする。
+- mapping 不能、variant 欠落、mouth slot 欠落時は自動代替せずエラーにする。
+- Remotion からカタログや SQLite を直接検索しない。
 
 重要条件:
 - 時間範囲は半開区間を使う。

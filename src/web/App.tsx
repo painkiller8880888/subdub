@@ -38,9 +38,11 @@ import {
 } from "./api/client";
 import {
   AutosaveCoordinator,
+  navigateAfterAutosave,
   type AutosaveState
 } from "./brief-autosave";
 import { sameBriefDraft, type BriefDraft } from "./brief-draft";
+import { CharacterAssetsPage } from "./CharacterAssetsPage";
 import { OutlinePage } from "./OutlinePage";
 
 function projectBriefPath(projectId: string): string {
@@ -49,6 +51,10 @@ function projectBriefPath(projectId: string): string {
 
 function projectOutlinePath(projectId: string): string {
   return `/projects/${encodeURIComponent(projectId)}/outline`;
+}
+
+function projectCharacterAssetsPath(projectId: string): string {
+  return `/projects/${encodeURIComponent(projectId)}/script`;
 }
 
 function formatDate(value: string): string {
@@ -664,12 +670,15 @@ function ProjectBriefPage() {
       return;
     }
     setPendingNavigation(true);
-    const flushed = coordinator === null ? true : await coordinator.flush();
+    const flushed = await navigateAfterAutosave(
+      coordinator,
+      destination,
+      navigate
+    );
     if (flushed) {
-      navigate(destination);
-    } else {
-      setPendingNavigation(false);
+      return;
     }
+    setPendingNavigation(false);
   }
 
   if (projectQuery.isError || sourceQuery.isError) {
@@ -771,15 +780,26 @@ function ProjectBriefPage() {
         <p className="eyebrow">Project brief</p>
         <h1>{projectQuery.data.metadata.title}</h1>
         <p>Changes are saved automatically shortly after editing.</p>
-        <Link
-          className="button"
-          to={projectOutlinePath(projectId)}
-          onClick={(event) => {
-            void navigateAway(event, projectOutlinePath(projectId));
-          }}
-        >
-          構成案を開く
-        </Link>
+        <div className="page-header-actions">
+          <Link
+            className="button"
+            to={projectOutlinePath(projectId)}
+            onClick={(event) => {
+              void navigateAway(event, projectOutlinePath(projectId));
+            }}
+          >
+            構成案を開く
+          </Link>
+          <Link
+            className="button button-primary"
+            to={projectCharacterAssetsPath(projectId)}
+            onClick={(event) => {
+              void navigateAway(event, projectCharacterAssetsPath(projectId));
+            }}
+          >
+            キャラクターを確認
+          </Link>
+        </div>
       </header>
 
       <div className="autosave-status" role="status" aria-live="polite">
@@ -970,6 +990,10 @@ export function App() {
       <Route element={<NewProjectPage />} path="/projects/new" />
       <Route element={<ProjectBriefPage />} path="/projects/:projectId/brief" />
       <Route element={<OutlinePage />} path="/projects/:projectId/outline" />
+      <Route
+        element={<CharacterAssetsPage />}
+        path="/projects/:projectId/script"
+      />
       <Route element={<NotFoundPage />} path="*" />
     </Routes>
   );

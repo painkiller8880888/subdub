@@ -25,7 +25,7 @@ function makeCharacter(
   const assetPrefix = `characters/${id}`;
   return {
     id,
-    name: id,
+    name: speakerName,
     role,
     personality: "",
     speakingStyle: "",

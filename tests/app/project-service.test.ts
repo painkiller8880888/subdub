@@ -48,6 +48,67 @@ describe("ProjectService", () => {
     expect(project.metadata.title).toBe("作成テスト");
     expect(project.metadata.createdAt).toBe("2026-08-04T01:02:03.000Z");
     expect(project.metadata.updatedAt).toBe("2026-08-04T01:02:03.000Z");
+    expect(project.schemaVersion).toBe("1.0.0");
+    expect(project.characters).toEqual([
+      expect.objectContaining({
+        id: "character-mentor",
+        name: "四国めたん",
+        role: "mentor",
+        voicevox: {
+          speakerName: "四国めたん",
+          speakerUuid: null,
+          styleName: "ノーマル"
+        },
+        themeColorToken: "character.metan",
+        visualAssets: {
+          neutral: {
+            closed: "characters/character-mentor/neutral-closed.png",
+            open: "characters/character-mentor/neutral-open.png"
+          },
+          smile: {
+            closed: "characters/character-mentor/smile-closed.png",
+            open: "characters/character-mentor/smile-open.png"
+          },
+          explain: {
+            closed: "characters/character-mentor/explain-closed.png",
+            open: "characters/character-mentor/explain-open.png"
+          },
+          caution: {
+            closed: "characters/character-mentor/caution-closed.png",
+            open: "characters/character-mentor/caution-open.png"
+          }
+        }
+      }),
+      expect.objectContaining({
+        id: "character-learner",
+        name: "ずんだもん",
+        role: "learner",
+        voicevox: {
+          speakerName: "ずんだもん",
+          speakerUuid: null,
+          styleName: "ノーマル"
+        },
+        themeColorToken: "character.zundamon",
+        visualAssets: {
+          neutral: {
+            closed: "characters/character-learner/neutral-closed.png",
+            open: "characters/character-learner/neutral-open.png"
+          },
+          smile: {
+            closed: "characters/character-learner/smile-closed.png",
+            open: "characters/character-learner/smile-open.png"
+          },
+          explain: {
+            closed: "characters/character-learner/explain-closed.png",
+            open: "characters/character-learner/explain-open.png"
+          },
+          caution: {
+            closed: "characters/character-learner/caution-closed.png",
+            open: "characters/character-learner/caution-open.png"
+          }
+        }
+      })
+    ]);
     expect(project.metadata.outputSettings).toEqual({
       width: 1920,
       height: 1080,
