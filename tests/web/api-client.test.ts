@@ -4,11 +4,15 @@ import { createEmptyVideoProject } from "../../src/app/projects/empty-video-proj
 import {
   ApiClientError,
   ApiClientProtocolError,
+  approveProjectOutline,
   createProject,
   fetchModels,
   fetchProject,
   fetchProjects,
-  fetchApi
+  fetchApi,
+  generateProjectOutline,
+  reviewProjectOutline,
+  saveProjectOutline
 } from "../../src/web/api/client.js";
 import {
   healthResponseSchema,
@@ -176,5 +180,53 @@ describe("web API client", () => {
     expect(projectListResponseSchema.safeParse({ data: [] }).success).toBe(
       true
     );
+  });
+
+  it("uses the shared mutation contract for outline mutations", async () => {
+    const project = createEmptyVideoProject({
+      projectId: "outline-client-project",
+      createdAt: "2026-08-04T00:00:00.000Z"
+    });
+    const calls: Array<{ input: string; init: RequestInit | undefined }> = [];
+    globalThis.fetch = async (input, init) => {
+      calls.push({ input: String(input), init });
+      return jsonResponse({ data: project, revision: project.revision }, 200);
+    };
+
+    await expect(
+      saveProjectOutline(project.metadata.id, {
+        outline: project.outline,
+        expectedRevision: project.revision
+      })
+    ).resolves.toEqual(project);
+    await expect(
+      generateProjectOutline(project.metadata.id, {
+        expectedRevision: project.revision
+      })
+    ).resolves.toEqual(project);
+    await expect(
+      approveProjectOutline(project.metadata.id, {
+        expectedRevision: project.revision
+      })
+    ).resolves.toEqual(project);
+    await expect(
+      reviewProjectOutline(project.metadata.id, {
+        expectedRevision: project.revision
+      })
+    ).resolves.toEqual(project);
+
+    expect(calls.map((call) => call.input)).toEqual([
+      "/api/projects/outline-client-project/outline",
+      "/api/projects/outline-client-project/outline/generate",
+      "/api/projects/outline-client-project/outline/approve",
+      "/api/projects/outline-client-project/outline/review"
+    ]);
+    expect(JSON.parse(String(calls[0]?.init?.body))).toEqual({
+      outline: project.outline,
+      expectedRevision: project.revision
+    });
+    expect(JSON.parse(String(calls[2]?.init?.body))).toEqual({
+      expectedRevision: project.revision
+    });
   });
 });

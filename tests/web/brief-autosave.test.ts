@@ -115,6 +115,34 @@ describe("AutosaveCoordinator", () => {
     coordinator.dispose();
   });
 
+  it("reconciles the newest draft with a server result during an in-flight save", async () => {
+    let resolveFirst: (() => void) | undefined;
+    const save = vi.fn(
+      (draft: string) =>
+        new Promise<void>((resolve) => {
+          if (draft === "temporary") {
+            resolveFirst = resolve;
+          } else {
+            resolve();
+          }
+        })
+    );
+    const { coordinator } = setup(save);
+
+    coordinator.update("temporary");
+    const flushPromise = coordinator.flush();
+    coordinator.update("temporary plus edit");
+    coordinator.replaceDraft("formal plus edit");
+    resolveFirst?.();
+
+    await expect(flushPromise).resolves.toBe(true);
+    expect(save.mock.calls.map(([draft]) => draft)).toEqual([
+      "temporary",
+      "formal plus edit"
+    ]);
+    coordinator.dispose();
+  });
+
   it("keeps a failed draft for an explicit retry", async () => {
     vi.useFakeTimers();
     const save = vi

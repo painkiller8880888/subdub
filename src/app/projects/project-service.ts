@@ -1,18 +1,26 @@
 import { randomUUID } from "node:crypto";
 
 import {
+  outlineApproveRequestSchema,
+  outlineReviewRequestSchema,
+  outlineSaveRequestSchema,
   projectBriefSaveRequestSchema,
   projectCreateRequestSchema,
   projectSourceSaveRequestSchema,
   projectSummarySchema,
   type ProjectSummary
 } from "../../schema/api.js";
-import { idSchema, type VideoProject } from "../../schema/index.js";
+import { idSchema, type Outline, type VideoProject } from "../../schema/index.js";
 import {
   ProjectRepository,
   ProjectRepositoryError
 } from "./project-repository.js";
 import { createEmptyVideoProject } from "./empty-video-project.js";
+import { validateOutlineForApproval } from "./outline-approval.js";
+import {
+  applyEditedOutline,
+  hasMeaningfulOutline
+} from "./project-invalidation.js";
 
 export type ProjectServiceOptions = {
   repository: ProjectRepository;
@@ -50,6 +58,57 @@ function compareProjectSummaries(
     return 1;
   }
   return 0;
+}
+
+function outlineIds(outline: Outline): Set<string> {
+  return new Set([
+    ...outline.sections.flatMap((section) => [
+      section.id,
+      ...section.openQuestions.map((question) => question.id)
+    ]),
+    ...outline.openQuestions.map((question) => question.id)
+  ]);
+}
+
+function normalizeOutlineIds(
+  current: Outline,
+  candidate: Outline,
+  createId: () => string
+): Outline {
+  const currentIds = outlineIds(current);
+  const usedIds = new Set<string>();
+  const allocateId = (prefix: string, requestedId: string): string => {
+    if (currentIds.has(requestedId) && !usedIds.has(requestedId)) {
+      usedIds.add(requestedId);
+      return requestedId;
+    }
+
+    const seed = createId();
+    let generatedId = `${prefix}-${seed}`;
+    let suffix = 2;
+    while (currentIds.has(generatedId) || usedIds.has(generatedId)) {
+      generatedId = `${prefix}-${seed}-${suffix}`;
+      suffix += 1;
+    }
+    usedIds.add(generatedId);
+    return idSchema.parse(generatedId);
+  };
+
+  return {
+    ...candidate,
+    openQuestions: candidate.openQuestions.map((question) => ({
+      ...question,
+      id: allocateId("outline-question", question.id)
+    })),
+    sections: candidate.sections.map((section) => ({
+      ...section,
+      id: allocateId("outline-section", section.id),
+      openQuestions: section.openQuestions.map((question) => ({
+        ...question,
+        id: allocateId("outline-question", question.id)
+      }))
+    }))
+  };
 }
 
 export class ProjectService {
@@ -131,6 +190,61 @@ export class ProjectService {
     return this.repository.saveBrief(
       projectId,
       request.brief,
+      request.expectedRevision
+    );
+  }
+
+  async saveOutline(projectId: unknown, input: unknown): Promise<VideoProject> {
+    const request = outlineSaveRequestSchema.parse(input);
+    const currentProject = await this.repository.read(projectId);
+    const normalizedOutline = normalizeOutlineIds(
+      currentProject.outline,
+      request.outline,
+      this.createId
+    );
+    const { project } = applyEditedOutline(currentProject, normalizedOutline);
+    return this.repository.save(projectId, project, request.expectedRevision);
+  }
+
+  async approveOutline(projectId: unknown, input: unknown): Promise<VideoProject> {
+    const request = outlineApproveRequestSchema.parse(input);
+    const snapshot = await this.repository.readGenerationSnapshot(projectId);
+    if (snapshot.project.revision !== request.expectedRevision) {
+      throw new ProjectRepositoryError(
+        "PROJECT_REVISION_CONFLICT",
+        409,
+        "The project revision does not match the expected revision."
+      );
+    }
+
+    validateOutlineForApproval(snapshot.project, snapshot.sourceHash);
+    return this.repository.saveOutline(
+      projectId,
+      { ...snapshot.project.outline, status: "approved" },
+      request.expectedRevision
+    );
+  }
+
+  async reviewOutline(projectId: unknown, input: unknown): Promise<VideoProject> {
+    const request = outlineReviewRequestSchema.parse(input);
+    const snapshot = await this.repository.readGenerationSnapshot(projectId);
+    if (snapshot.project.revision !== request.expectedRevision) {
+      throw new ProjectRepositoryError(
+        "PROJECT_REVISION_CONFLICT",
+        409,
+        "The project revision does not match the expected revision."
+      );
+    }
+
+    const currentOutline = snapshot.project.outline;
+    const reviewedOutline = {
+      ...currentOutline,
+      sourceHash: snapshot.sourceHash,
+      status: hasMeaningfulOutline(currentOutline) ? "needs_review" : "draft"
+    } as const;
+    return this.repository.saveOutline(
+      projectId,
+      reviewedOutline,
       request.expectedRevision
     );
   }

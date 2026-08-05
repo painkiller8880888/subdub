@@ -41,9 +41,14 @@ import {
   type AutosaveState
 } from "./brief-autosave";
 import { sameBriefDraft, type BriefDraft } from "./brief-draft";
+import { OutlinePage } from "./OutlinePage";
 
 function projectBriefPath(projectId: string): string {
   return `/projects/${encodeURIComponent(projectId)}/brief`;
+}
+
+function projectOutlinePath(projectId: string): string {
+  return `/projects/${encodeURIComponent(projectId)}/outline`;
 }
 
 function formatDate(value: string): string {
@@ -641,7 +646,10 @@ function ProjectBriefPage() {
     setSnapshotMismatch(true);
   }
 
-  async function navigateAway(event: MouseEvent<HTMLAnchorElement>): Promise<void> {
+  async function navigateAway(
+    event: MouseEvent<HTMLAnchorElement>,
+    destination = "/projects"
+  ): Promise<void> {
     if (
       event.button !== 0 ||
       event.metaKey ||
@@ -658,7 +666,7 @@ function ProjectBriefPage() {
     setPendingNavigation(true);
     const flushed = coordinator === null ? true : await coordinator.flush();
     if (flushed) {
-      navigate("/projects");
+      navigate(destination);
     } else {
       setPendingNavigation(false);
     }
@@ -763,6 +771,15 @@ function ProjectBriefPage() {
         <p className="eyebrow">Project brief</p>
         <h1>{projectQuery.data.metadata.title}</h1>
         <p>Changes are saved automatically shortly after editing.</p>
+        <Link
+          className="button"
+          to={projectOutlinePath(projectId)}
+          onClick={(event) => {
+            void navigateAway(event, projectOutlinePath(projectId));
+          }}
+        >
+          構成案を開く
+        </Link>
       </header>
 
       <div className="autosave-status" role="status" aria-live="polite">
@@ -952,6 +969,7 @@ export function App() {
       <Route element={<ProjectsPage />} path="/projects" />
       <Route element={<NewProjectPage />} path="/projects/new" />
       <Route element={<ProjectBriefPage />} path="/projects/:projectId/brief" />
+      <Route element={<OutlinePage />} path="/projects/:projectId/outline" />
       <Route element={<NotFoundPage />} path="*" />
     </Routes>
   );

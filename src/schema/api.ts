@@ -7,6 +7,7 @@ import {
   sha256Schema
 } from "./primitives.js";
 import {
+  outlineSchema,
   projectBriefSchema,
   videoProjectSchema
 } from "./video-project.js";
@@ -144,6 +145,25 @@ export const outlineGenerateRequestSchema = z
   })
   .strict();
 
+export const outlineSaveRequestSchema = z
+  .object({
+    outline: outlineSchema,
+    expectedRevision: nonNegativeIntegerSchema
+  })
+  .strict();
+
+export const outlineApproveRequestSchema = z
+  .object({
+    expectedRevision: nonNegativeIntegerSchema
+  })
+  .strict();
+
+export const outlineReviewRequestSchema = z
+  .object({
+    expectedRevision: nonNegativeIntegerSchema
+  })
+  .strict();
+
 export const modelsQuerySchema = z
   .object({
     refresh: z.enum(["true", "false"]).optional()
@@ -210,6 +230,9 @@ export type ProjectMutationResponse = z.infer<
 export type OutlineGenerateRequest = z.infer<
   typeof outlineGenerateRequestSchema
 >;
+export type OutlineSaveRequest = z.infer<typeof outlineSaveRequestSchema>;
+export type OutlineApproveRequest = z.infer<typeof outlineApproveRequestSchema>;
+export type OutlineReviewRequest = z.infer<typeof outlineReviewRequestSchema>;
 export type ModelsQuery = z.infer<typeof modelsQuerySchema>;
 export type ModelSummary = z.infer<typeof modelSummarySchema>;
 export type ModelsResponse = z.infer<typeof modelsResponseSchema>;
