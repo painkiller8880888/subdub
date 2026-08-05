@@ -26,6 +26,13 @@ try {
   assert.equal(projectsPage.statusCode, 200);
   assert.match(projectsPage.headers["content-type"], /^text\/html/);
 
+  const characterAsset = await first.app.inject({
+    method: "GET",
+    url: "/shared-assets/characters/character-mentor/stand/stand.png"
+  });
+  assert.equal(characterAsset.statusCode, 200);
+  assert.match(characterAsset.headers["content-type"], /^image\/png/);
+
   const createResponse = await first.app.inject({
     method: "POST",
     url: "/api/projects",

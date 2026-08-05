@@ -18,6 +18,9 @@ library/media/
 library/thumbnails/
 projects/
 public/shared-assets/
+!public/shared-assets/
+!public/shared-assets/characters/
+!public/shared-assets/characters/**
 
 # テストツールの出力
 playwright-report/

@@ -994,18 +994,21 @@ WebUI は Vite + React SPA、画面ルーティングは React Router、サー�
 **推奨案**
 
 ```text
-public/shared-assets/characters/{characterId}/{expression}/{mouth}.png
+public/shared-assets/characters/{characterId}/
+  stand/stand.png
+  speak-normal/{mouth}.png
+  speak-pointing/{mouth}.png
 ```
 
 - 透過 PNG を使用する。
 - 全差分でキャンバスサイズ、キャラクターの位置、基準点を統一する。
-- 基準解像度は 1024 × 1024 px とし、Remotion 側で縮小表示する。
-- 表情は最初から増やしすぎず、次の 4 種類で開始する。
+- 今回確認済みの基準キャンバスは 600 × 1000 px とし、Remotion 側で縮小表示する。
+- 台本上の表情指定は最初から増やしすぎず、次の 4 種類を維持する。
   - `neutral`
   - `smile`
   - `explain`
   - `caution`
-- 口は `closed` と `open` の 2 差分から開始する。
+- P2-01 の実在素材は、表情への推測マッピングを行わず、通常会話・指差し状態の会話の2ポーズと、非会話状態の単一画像を使用する。会話ポーズには `closed` と `open` の2差分がある。
 - デザイン方向は [`character_concept01.png`](./assets/character_concept01.png) と [`character_concept02.png`](./assets/character_concept02.png) のワシ型キャラクターを基礎とする。
 - `character_concept01.png` 側をメンター・案内役として四国めたんへ、`character_concept02.png` 側を生徒・見習い役としてずんだもんへ対応させる。
 - コンセプト画像内の名前、ロゴ、現在の配色は最終仕様にせず、実装用素材では制服の差し色、字幕色、話者 UI を四国めたん／ずんだもんのテーマ色へ変更する。

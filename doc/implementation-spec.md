@@ -478,10 +478,11 @@ type Character = {
   };
   lipSyncPeriodFrames: number;
   visualAssets: {
-    neutral: MouthPair;
-    smile: MouthPair;
-    explain: MouthPair;
-    caution: MouthPair;
+    stand: string;
+    speak: {
+      normal: MouthPair;
+      pointing: MouthPair;
+    };
   };
 };
 
@@ -500,10 +501,10 @@ type MouthPair = {
 | `character-learner` | `learner` | ずんだもん／`ノーマル` | [`assets`](./assets/) 内のずんだもん側データ | `character.zundamon` |
 
 - 四国めたん側はメンター・案内役、ずんだもん側は生徒・見習い役を基本とする。
-- MVP 素材は透過 PNG とし、全差分で同一キャンバス、身体の基準位置、表情位置、口位置を揃える。
-- MVP の表情は `neutral`、`smile`、`explain`、`caution` の 4 種類とし、それぞれ `closed` と `open` の口差分を用意する。
-- 全身とバストアップの使い分け、画像キャンバスサイズ、キャラクターの基準位置は `assets` 内のデータを正とし、Remotion 側で画像ごとの補正値を持たせない。
-- 実装用素材は scaffold または素材同期処理で `public/shared-assets/characters/{characterId}/{expression}/{mouth}.png` へ配置する。元データは `assets` に保持し、同期時に不足ファイル、キャンバス不一致、透過有無を検証する。
+- P2-01 で確認済みの素材は透過 PNG、600 × 1000 px の同一キャンバスで、非会話状態の単一画像と、通常会話・指差し状態の会話それぞれの `closed` / `open` ペアから成る。身体の基準位置は画像を並べた手動確認で検証し、ポーズによる外形差を理由に alpha bounding box の完全一致は要求しない。
+- 台本上の表情語彙 `neutral`、`smile`、`explain`、`caution` は `ScriptLine.expression` の将来の演出指定として維持する。P2-01 では、これらを今回の2種類の会話ポーズへ推測で対応付けない。
+- 全身と会話ポーズの使い分け、画像キャンバスサイズ、キャラクターの基準位置は `assets` 内のデータを正とし、Remotion 側で画像ごとの補正値を持たせない。
+- 実装用素材は `public/shared-assets/characters/{characterId}/stand/stand.png`、`speak-normal/{mouth}.png`、`speak-pointing/{mouth}.png` へ配置する。元データは `assets` に保持し、不足ファイル、予期しない命名、キャンバス不一致、close/open ペア不一致、透過有無を検証する。
 - 制服の差し色、字幕の話者色、WebUI の speaker chip は `character.metan` と `character.zundamon` のデザイントークンから取得する。
 - テーマ色の具体値は `assets` のキャラクターデータに合わせてデザイントークンへ登録し、字幕背景とのコントラストを検証する。
 - 話者の区別を色だけに依存させず、キャラクター名、話者チップ、左右配置でも区別する。
