@@ -296,7 +296,7 @@ describe("character asset validation", () => {
       "not png"
     );
     await fs.writeFile(
-      path.join(sourceRoot, "char03_speak03_open.png"),
+      path.join(sourceRoot, "char05_new_pose.png"),
       makePng(600, 1000)
     );
 
@@ -384,5 +384,108 @@ describe("character asset validation", () => {
         issue.message.includes("not an exact copy of the source")
       )
     ).toBe(true);
+  });
+
+  it("rejects a destination outside the variant character namespace", async () => {
+    const sourceVariant = characterVariantCatalog[0];
+    const invalidVariant: CharacterVariant = {
+      ...sourceVariant,
+      variantId: "character-mentor-wrong-namespace-v1",
+      files: [
+        {
+          ...sourceVariant.files[0],
+          destinationPath:
+            "shared-assets/characters/character-learner/stand/wrong.png"
+        }
+      ]
+    };
+    const catalog = characterVariantCatalog.map((variant) =>
+      variant.variantId === sourceVariant.variantId ? invalidVariant : variant
+    );
+    const { sourceRoot, publicRoot } = await copyAllAssets(catalog);
+    const result = await validateCharacterAssets({
+      sourceRoot,
+      publicRoot,
+      catalog
+    });
+
+    expect(result.valid).toBe(false);
+    expect(result.issues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          variantId: invalidVariant.variantId,
+          message:
+            "destination path must be under shared-assets/characters/character-mentor/"
+        })
+      ])
+    );
+  });
+
+  it("rejects a non-PNG canonical destination", async () => {
+    const sourceVariant = characterVariantCatalog[0];
+    const invalidVariant: CharacterVariant = {
+      ...sourceVariant,
+      variantId: "character-mentor-wrong-extension-v1",
+      files: [
+        {
+          ...sourceVariant.files[0],
+          destinationPath:
+            "shared-assets/characters/character-mentor/stand/stand.jpg"
+        }
+      ]
+    };
+    const catalog = characterVariantCatalog.map((variant) =>
+      variant.variantId === sourceVariant.variantId ? invalidVariant : variant
+    );
+    const { sourceRoot, publicRoot } = await copyAllAssets(catalog);
+    const result = await validateCharacterAssets({
+      sourceRoot,
+      publicRoot,
+      catalog
+    });
+
+    expect(result.valid).toBe(false);
+    expect(result.issues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          variantId: invalidVariant.variantId,
+          message: "canonical character asset destination must end with .png"
+        })
+      ])
+    );
+  });
+
+  it("rejects a destination outside the character asset namespace", async () => {
+    const sourceVariant = characterVariantCatalog[0];
+    const invalidVariant: CharacterVariant = {
+      ...sourceVariant,
+      variantId: "character-mentor-outside-namespace-v1",
+      files: [
+        {
+          ...sourceVariant.files[0],
+          destinationPath: "shared-assets/library/stand.png"
+        }
+      ]
+    };
+    const catalog = characterVariantCatalog.map((variant) =>
+      variant.variantId === sourceVariant.variantId ? invalidVariant : variant
+    );
+    const { sourceRoot, publicRoot } = await copyAllAssets(catalog);
+    const result = await validateCharacterAssets({
+      sourceRoot,
+      publicRoot,
+      catalog
+    });
+
+    expect(result.valid).toBe(false);
+    expect(result.issues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          variantId: invalidVariant.variantId,
+          message:
+            "destination path must be under shared-assets/characters/character-mentor/"
+        })
+      ])
+    );
   });
 });

@@ -253,14 +253,16 @@ async function addUnexpectedSourceIssues(
   for (const entry of entries) {
     if (
       entry.isFile() &&
-      /^(char03|char04).*\.png$/u.test(entry.name) &&
+      /^char\d+.*\.png$/u.test(entry.name) &&
       !expected.has(entry.name)
     ) {
       issues.push({
         variantId: "unregistered",
         characterId: entry.name.startsWith("char03")
           ? "character-mentor"
-          : "character-learner",
+          : entry.name.startsWith("char04")
+            ? "character-learner"
+            : "unregistered",
         meaning: "unexpected",
         expectedSourceFile: entry.name,
         expectedDestinationPath: "not assigned",
@@ -321,6 +323,25 @@ function checkCatalog(
       issues.push(issueForVariant(variant, "variantId is not safe"));
     }
     for (const file of variant.files) {
+      const expectedPrefix = `shared-assets/characters/${variant.characterId}/`;
+      if (!file.destinationPath.startsWith(expectedPrefix)) {
+        issues.push(
+          issueForFile(
+            variant,
+            file,
+            `destination path must be under ${expectedPrefix}`
+          )
+        );
+      }
+      if (!file.destinationPath.endsWith(".png")) {
+        issues.push(
+          issueForFile(
+            variant,
+            file,
+            "canonical character asset destination must end with .png"
+          )
+        );
+      }
       if (!isSafePosixRelativePath(file.sourceFile)) {
         issues.push(
           issueForFile(variant, file, "source file path is not safe")
