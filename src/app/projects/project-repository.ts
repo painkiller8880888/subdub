@@ -8,6 +8,7 @@ import {
   nonNegativeIntegerSchema,
   projectBriefSchema,
   outlineSchema,
+  scriptSchema,
   videoProjectSchema,
   type VideoProject
 } from "../../schema/index.js";
@@ -628,6 +629,17 @@ export class ProjectRepository {
     );
   }
 
+  async saveScript(
+    projectId: unknown,
+    script: unknown,
+    expectedRevision: unknown
+  ): Promise<VideoProject> {
+    const safeProjectId = this.validateProjectId(projectId);
+    return this.withSaveLock(safeProjectId, () =>
+      this.saveScriptUnlocked(safeProjectId, script, expectedRevision)
+    );
+  }
+
   async writeRunLog(
     projectId: unknown,
     runId: unknown,
@@ -745,6 +757,49 @@ export class ProjectRepository {
       ...currentProject,
       revision: currentProject.revision + 1,
       outline: outlineResult.data,
+      metadata: {
+        ...currentProject.metadata,
+        updatedAt: this.now().toISOString()
+      }
+    });
+    if (!updatedProjectResult.success) {
+      throw updatedValidationFailedError(
+        validationIssues(updatedProjectResult.error)
+      );
+    }
+
+    return this.writeProjectCandidate(paths, updatedProjectResult.data);
+  }
+
+  private async saveScriptUnlocked(
+    projectId: string,
+    script: unknown,
+    expectedRevision: unknown
+  ): Promise<VideoProject> {
+    const paths = await this.resolveProjectPaths(projectId);
+    const currentProject = await this.readProjectWithExpectedId(
+      projectId,
+      paths
+    );
+    const scriptResult = scriptSchema.safeParse(script);
+    if (!scriptResult.success) {
+      throw candidateValidationFailedError(validationIssues(scriptResult.error));
+    }
+
+    const expectedRevisionResult =
+      nonNegativeIntegerSchema.safeParse(expectedRevision);
+    if (!expectedRevisionResult.success) {
+      throw expectedRevisionInvalidError();
+    }
+    if (expectedRevisionResult.data !== currentProject.revision) {
+      throw revisionConflictError();
+    }
+    await this.readValidatedSource(paths, currentProject);
+
+    const updatedProjectResult = videoProjectSchema.safeParse({
+      ...currentProject,
+      revision: currentProject.revision + 1,
+      script: scriptResult.data,
       metadata: {
         ...currentProject.metadata,
         updatedAt: this.now().toISOString()

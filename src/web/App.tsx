@@ -44,6 +44,7 @@ import {
 import { sameBriefDraft, type BriefDraft } from "./brief-draft";
 import { CharacterAssetsPage } from "./CharacterAssetsPage";
 import { OutlinePage } from "./OutlinePage";
+import { ScriptPage } from "./ScriptPage";
 
 function projectBriefPath(projectId: string): string {
   return `/projects/${encodeURIComponent(projectId)}/brief`;
@@ -53,7 +54,7 @@ function projectOutlinePath(projectId: string): string {
   return `/projects/${encodeURIComponent(projectId)}/outline`;
 }
 
-function projectCharacterAssetsPath(projectId: string): string {
+function projectScriptPath(projectId: string): string {
   return `/projects/${encodeURIComponent(projectId)}/script`;
 }
 
@@ -792,12 +793,12 @@ function ProjectBriefPage() {
           </Link>
           <Link
             className="button button-primary"
-            to={projectCharacterAssetsPath(projectId)}
+            to={projectScriptPath(projectId)}
             onClick={(event) => {
-              void navigateAway(event, projectCharacterAssetsPath(projectId));
+              void navigateAway(event, projectScriptPath(projectId));
             }}
           >
-            キャラクターを確認
+            台本を編集
           </Link>
         </div>
       </header>
@@ -991,8 +992,12 @@ export function App() {
       <Route element={<ProjectBriefPage />} path="/projects/:projectId/brief" />
       <Route element={<OutlinePage />} path="/projects/:projectId/outline" />
       <Route
-        element={<CharacterAssetsPage />}
+        element={<ScriptPage />}
         path="/projects/:projectId/script"
+      />
+      <Route
+        element={<CharacterAssetsPage />}
+        path="/projects/:projectId/characters"
       />
       <Route element={<NotFoundPage />} path="*" />
     </Routes>

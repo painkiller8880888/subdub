@@ -12,7 +12,9 @@ import {
   projectListResponseSchema,
   projectMutationResponseSchema,
   projectSourceReadResponseSchema,
-  projectSourceSaveRequestSchema
+  projectSourceSaveRequestSchema,
+  scriptInitializeRequestSchema,
+  scriptSaveRequestSchema
 } from "../../schema/api.js";
 import { ProjectService } from "../../app/projects/project-service.js";
 
@@ -89,6 +91,34 @@ export function registerProjectRoutes(
     async (request) => {
       const input = outlineSaveRequestSchema.parse(request.body);
       const project = await projectService.saveOutline(
+        request.params.projectId,
+        input
+      );
+      return projectMutationResponseSchema.parse(
+        createApiSuccessResponse(project, project.revision)
+      );
+    }
+  );
+
+  app.post<{ Params: { projectId: string } }>(
+    "/api/projects/:projectId/script/initialize",
+    async (request) => {
+      const input = scriptInitializeRequestSchema.parse(request.body);
+      const project = await projectService.initializeScript(
+        request.params.projectId,
+        input
+      );
+      return projectMutationResponseSchema.parse(
+        createApiSuccessResponse(project, project.revision)
+      );
+    }
+  );
+
+  app.put<{ Params: { projectId: string } }>(
+    "/api/projects/:projectId/script",
+    async (request) => {
+      const input = scriptSaveRequestSchema.parse(request.body);
+      const project = await projectService.saveScript(
         request.params.projectId,
         input
       );

@@ -15,6 +15,8 @@ import {
   projectMutationResponseSchema,
   projectSourceReadResponseSchema,
   projectSourceSaveRequestSchema,
+  scriptInitializeRequestSchema,
+  scriptSaveRequestSchema,
   type ApiErrorDetail,
   type OutlineApproveRequest,
   type OutlineGenerateRequest,
@@ -25,6 +27,8 @@ import {
   type ModelsResponse,
   type ProjectSourceContent,
   type ProjectSourceSaveRequest,
+  type ScriptInitializeRequest,
+  type ScriptSaveRequest,
   type ProjectSummary
 } from "../../schema/api.js";
 import type { VideoProject } from "../../schema/video-project.js";
@@ -270,6 +274,44 @@ export async function reviewProjectOutline(
     projectMutationResponseSchema,
     {
       method: "POST",
+      headers: {
+        "content-type": "application/json"
+      },
+      body: JSON.stringify(validatedInput)
+    }
+  );
+  return response.data;
+}
+
+export async function initializeProjectScript(
+  projectId: string,
+  input: ScriptInitializeRequest
+): Promise<VideoProject> {
+  const validatedInput = scriptInitializeRequestSchema.parse(input);
+  const response = await fetchApi(
+    `/api/projects/${encodeURIComponent(projectId)}/script/initialize`,
+    projectMutationResponseSchema,
+    {
+      method: "POST",
+      headers: {
+        "content-type": "application/json"
+      },
+      body: JSON.stringify(validatedInput)
+    }
+  );
+  return response.data;
+}
+
+export async function saveProjectScript(
+  projectId: string,
+  input: ScriptSaveRequest
+): Promise<VideoProject> {
+  const validatedInput = scriptSaveRequestSchema.parse(input);
+  const response = await fetchApi(
+    `/api/projects/${encodeURIComponent(projectId)}/script`,
+    projectMutationResponseSchema,
+    {
+      method: "PUT",
       headers: {
         "content-type": "application/json"
       },

@@ -9,6 +9,7 @@ import {
 import {
   outlineSchema,
   projectBriefSchema,
+  scriptSchema,
   videoProjectSchema
 } from "./video-project.js";
 
@@ -164,6 +165,28 @@ export const outlineReviewRequestSchema = z
   })
   .strict();
 
+export const scriptInitializeRequestSchema = z
+  .object({
+    expectedRevision: nonNegativeIntegerSchema
+  })
+  .strict();
+
+export const scriptSaveRequestSchema = z
+  .object({
+    script: scriptSchema,
+    expectedRevision: nonNegativeIntegerSchema
+  })
+  .strict()
+  .superRefine((request, ctx) => {
+    if (request.script.status === "approved") {
+      ctx.addIssue({
+        code: "custom",
+        path: ["script", "status"],
+        message: "script approval is only available through the approval workflow"
+      });
+    }
+  });
+
 export const modelsQuerySchema = z
   .object({
     refresh: z.enum(["true", "false"]).optional()
@@ -233,6 +256,10 @@ export type OutlineGenerateRequest = z.infer<
 export type OutlineSaveRequest = z.infer<typeof outlineSaveRequestSchema>;
 export type OutlineApproveRequest = z.infer<typeof outlineApproveRequestSchema>;
 export type OutlineReviewRequest = z.infer<typeof outlineReviewRequestSchema>;
+export type ScriptInitializeRequest = z.infer<
+  typeof scriptInitializeRequestSchema
+>;
+export type ScriptSaveRequest = z.infer<typeof scriptSaveRequestSchema>;
 export type ModelsQuery = z.infer<typeof modelsQuerySchema>;
 export type ModelSummary = z.infer<typeof modelSummarySchema>;
 export type ModelsResponse = z.infer<typeof modelsResponseSchema>;
