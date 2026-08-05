@@ -17,7 +17,6 @@ import {
   fetchModels,
   fetchProject,
   generateProjectOutline,
-  regenerateProjectOutline,
   reviewProjectOutline,
   saveProjectOutline
 } from "./api/client";
@@ -41,8 +40,8 @@ type OutlineSaveDraft = {
   readonly expectedRevision: number;
 };
 
-function newId(prefix: string): string {
-  return `${prefix}-${crypto.randomUUID()}`;
+function temporaryId(prefix: string): string {
+  return `tmp-${prefix}-${crypto.randomUUID()}`;
 }
 
 function getErrorMessage(error: unknown, fallback: string): string {
@@ -169,7 +168,10 @@ function QuestionList({
         className="button button-small"
         type="button"
         onClick={() => {
-          onChange([...questions, makeQuestion(newId(`${idPrefix}-question`))]);
+          onChange([
+            ...questions,
+            makeQuestion(temporaryId(`${idPrefix}-question`))
+          ]);
         }}
       >
         質問を追加
@@ -424,9 +426,7 @@ export function OutlinePage() {
     queryFn: () => fetchModels(),
     enabled:
       projectQuery.data !== undefined &&
-      (projectQuery.data.outline.sections.length === 0 ||
-        projectQuery.data.outline.sourceHash !==
-          projectQuery.data.source.sha256),
+      projectQuery.data.outline.sections.length === 0,
     retry: false
   });
   const [draft, setDraft] = useState<Outline | null>(null);
@@ -437,8 +437,6 @@ export function OutlinePage() {
   });
   const [pendingNavigation, setPendingNavigation] = useState(false);
   const [approvalError, setApprovalError] = useState<unknown>(null);
-  const [regenerateError, setRegenerateError] = useState<unknown>(null);
-  const [isRegenerating, setIsRegenerating] = useState(false);
   const revisionRef = useRef(0);
   const draftRef = useRef<Outline | null>(null);
   const lastSavedRef = useRef<Outline | null>(null);
@@ -459,11 +457,6 @@ export function OutlinePage() {
   const reviewMutation = useMutation({
     mutationFn: (expectedRevision: number) =>
       reviewProjectOutline(projectId ?? "", { expectedRevision }),
-    retry: false
-  });
-  const regenerateMutation = useMutation({
-    mutationFn: (input: { expectedRevision: number; modelId: string }) =>
-      regenerateProjectOutline(projectId ?? "", input),
     retry: false
   });
   const generateMutation = useMutation({
@@ -575,10 +568,10 @@ export function OutlinePage() {
     }
     const duplicated: OutlineSection = {
       ...original,
-      id: newId("outline-section"),
+      id: temporaryId("outline-section"),
       openQuestions: original.openQuestions.map((question) => ({
         ...question,
-        id: newId("outline-question")
+        id: temporaryId("outline-question")
       }))
     };
     updateSections([
@@ -611,7 +604,10 @@ export function OutlinePage() {
     if (draft === null) {
       return;
     }
-    updateSections([...draft.sections, makeSection(newId("outline-section"))]);
+    updateSections([
+      ...draft.sections,
+      makeSection(temporaryId("outline-section"))
+    ]);
   }
 
   function removeSection(index: number): void {
@@ -635,7 +631,6 @@ export function OutlinePage() {
       setDraft(nextDraft);
       coordinatorRef.current?.reset();
       setApprovalError(null);
-      setRegenerateError(null);
     });
   }
 
@@ -713,45 +708,6 @@ export function OutlinePage() {
       applyProjectResult(await reviewMutation.mutateAsync(revisionRef.current));
     } catch (error) {
       setApprovalError(error);
-    }
-  }
-
-  async function regenerateStaleOutline(): Promise<void> {
-    const currentDraft = draftRef.current;
-    if (
-      !stale ||
-      currentDraft === null ||
-      project.script.sections.length > 0 ||
-      project.visuals.assignments.length > 0 ||
-      selectedModelId === null ||
-      coordinatorRef.current === null
-    ) {
-      return;
-    }
-    if (
-      !window.confirm(
-        "現在の構成案を保持したまま、最新資料でAI再生成します。旧構成案は生成失敗時も保持されます。続行しますか？"
-      )
-    ) {
-      return;
-    }
-    setRegenerateError(null);
-    setIsRegenerating(true);
-    const flushed = await coordinatorRef.current.flush();
-    if (!flushed) {
-      setIsRegenerating(false);
-      return;
-    }
-    try {
-      const generated = await regenerateMutation.mutateAsync({
-        expectedRevision: revisionRef.current,
-        modelId: selectedModelId
-      });
-      applyProjectResult(generated);
-    } catch (error) {
-      setRegenerateError(error);
-    } finally {
-      setIsRegenerating(false);
     }
   }
 
@@ -876,32 +832,11 @@ export function OutlinePage() {
             disabled={
               isEmpty ||
               reviewMutation.isPending ||
-              regenerateMutation.isPending ||
               autosaveState.status === "conflict"
             }
           >
             最新資料への見直し完了
           </button>
-          {project.script.sections.length === 0 &&
-          project.visuals.assignments.length === 0 ? (
-            <button
-              className="button"
-              type="button"
-              onClick={() => void regenerateStaleOutline()}
-              disabled={
-                generateMutation.isPending ||
-                isRegenerating ||
-                regenerateMutation.isPending ||
-                selectedModelId === null
-              }
-            >
-              stale構成案を再生成
-            </button>
-          ) : (
-            <p className="field-hint">
-              台本またはビジュアルが存在するため、再生成ではなく見直し完了を利用してください。
-            </p>
-          )}
         </section>
       ) : null}
 
@@ -934,21 +869,6 @@ export function OutlinePage() {
           </button>
         </section>
       ) : null}
-      {regenerateError !== null ? (
-        <section className="message-panel message-panel-error" role="alert">
-          <h2>再生成に失敗しました</h2>
-          <p>
-            {getErrorMessage(
-              regenerateError,
-              "構成案を再生成できませんでした。"
-            )}
-          </p>
-          <p>
-            生成前のstale構成案は保持されています。内容を確認して再生成を再試行できます。
-          </p>
-        </section>
-      ) : null}
-
       {isEmpty ? (
         <section
           className="message-panel"

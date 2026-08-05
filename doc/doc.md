@@ -869,7 +869,6 @@ POST /api/outline/regenerate-section
 PUT  /api/projects/{projectId}/source
 PUT  /api/projects/{projectId}/outline
 POST /api/projects/{projectId}/outline/review
-POST /api/projects/{projectId}/outline/regenerate
 POST /api/projects/{projectId}/outline/approve
 POST /api/assets
 GET  /api/assets

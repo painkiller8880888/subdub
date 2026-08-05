@@ -11,7 +11,6 @@ import {
   fetchProjects,
   fetchApi,
   generateProjectOutline,
-  regenerateProjectOutline,
   reviewProjectOutline,
   saveProjectOutline
 } from "../../src/web/api/client.js";
@@ -215,19 +214,12 @@ describe("web API client", () => {
         expectedRevision: project.revision
       })
     ).resolves.toEqual(project);
-    await expect(
-      regenerateProjectOutline(project.metadata.id, {
-        expectedRevision: project.revision,
-        modelId: "fixture/model"
-      })
-    ).resolves.toEqual(project);
 
     expect(calls.map((call) => call.input)).toEqual([
       "/api/projects/outline-client-project/outline",
       "/api/projects/outline-client-project/outline/generate",
       "/api/projects/outline-client-project/outline/approve",
-      "/api/projects/outline-client-project/outline/review",
-      "/api/projects/outline-client-project/outline/regenerate"
+      "/api/projects/outline-client-project/outline/review"
     ]);
     expect(JSON.parse(String(calls[0]?.init?.body))).toEqual({
       outline: project.outline,
@@ -235,10 +227,6 @@ describe("web API client", () => {
     });
     expect(JSON.parse(String(calls[2]?.init?.body))).toEqual({
       expectedRevision: project.revision
-    });
-    expect(JSON.parse(String(calls[4]?.init?.body))).toEqual({
-      expectedRevision: project.revision,
-      modelId: "fixture/model"
     });
   });
 });

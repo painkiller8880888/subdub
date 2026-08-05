@@ -164,13 +164,6 @@ export const outlineReviewRequestSchema = z
   })
   .strict();
 
-export const outlineRegenerateRequestSchema = z
-  .object({
-    expectedRevision: nonNegativeIntegerSchema,
-    modelId: z.string().min(1).optional()
-  })
-  .strict();
-
 export const modelsQuerySchema = z
   .object({
     refresh: z.enum(["true", "false"]).optional()
@@ -240,9 +233,6 @@ export type OutlineGenerateRequest = z.infer<
 export type OutlineSaveRequest = z.infer<typeof outlineSaveRequestSchema>;
 export type OutlineApproveRequest = z.infer<typeof outlineApproveRequestSchema>;
 export type OutlineReviewRequest = z.infer<typeof outlineReviewRequestSchema>;
-export type OutlineRegenerateRequest = z.infer<
-  typeof outlineRegenerateRequestSchema
->;
 export type ModelsQuery = z.infer<typeof modelsQuerySchema>;
 export type ModelSummary = z.infer<typeof modelSummarySchema>;
 export type ModelsResponse = z.infer<typeof modelsResponseSchema>;

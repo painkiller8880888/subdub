@@ -144,7 +144,8 @@ describe("outline editing and approval APIs", () => {
     expect(edited.outline.status).toBe("needs_review");
     expect(edited.outline.sourceHash).toBe(project.source.sha256);
     expect(edited.outline.generationRunId).toBeNull();
-    expect(edited.outline.sections[1]?.id).toBe("outline-main");
+    expect(edited.outline.sections[1]?.id).toMatch(/^outline-section-/);
+    expect(edited.outline.sections[1]?.id).not.toBe("outline-main");
 
     const approvedResponse = await server.app.inject({
       method: "POST",
@@ -321,6 +322,34 @@ describe("outline editing and approval APIs", () => {
     ).toBe(true);
   });
 
+  it("assigns backend IDs to temporary questions and preserves them on later edits", async () => {
+    const { server, project } = await setup();
+    const saved = await saveOutline(server, project, {
+      ...outlineFor(project),
+      openQuestions: [
+        {
+          id: "tmp-outline-question",
+          question: "確認事項",
+          resolution: "確認済み",
+          status: "resolved"
+        }
+      ]
+    });
+    const questionId = saved.outline.openQuestions[0]?.id;
+    expect(questionId).toMatch(/^outline-question-/);
+    expect(questionId).not.toBe("tmp-outline-question");
+
+    const edited = await saveOutline(server, saved, {
+      ...saved.outline,
+      sections: saved.outline.sections.map((section) =>
+        section.id === saved.outline.sections[1]?.id
+          ? { ...section, title: "edited" }
+          : section
+      )
+    });
+    expect(edited.outline.openQuestions[0]?.id).toBe(questionId);
+  });
+
   it("keeps old outline content and sourceHash when Markdown changes", async () => {
     const { server, project } = await setup();
     const saved = await saveOutline(server, project, outlineFor(project));
@@ -401,7 +430,7 @@ describe("outline editing and approval APIs", () => {
           sections: [
             {
               id: "script-main",
-              outlineSectionId: "outline-main",
+              outlineSectionId: saved.outline.sections[1]?.id ?? "",
               name: "main",
               background: { kind: "solid", colorToken: "background" },
               lines: [

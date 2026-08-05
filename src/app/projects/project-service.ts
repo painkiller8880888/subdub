@@ -10,7 +10,7 @@ import {
   projectSummarySchema,
   type ProjectSummary
 } from "../../schema/api.js";
-import { idSchema, type VideoProject } from "../../schema/index.js";
+import { idSchema, type Outline, type VideoProject } from "../../schema/index.js";
 import {
   ProjectRepository,
   ProjectRepositoryError
@@ -58,6 +58,57 @@ function compareProjectSummaries(
     return 1;
   }
   return 0;
+}
+
+function outlineIds(outline: Outline): Set<string> {
+  return new Set([
+    ...outline.sections.flatMap((section) => [
+      section.id,
+      ...section.openQuestions.map((question) => question.id)
+    ]),
+    ...outline.openQuestions.map((question) => question.id)
+  ]);
+}
+
+function normalizeOutlineIds(
+  current: Outline,
+  candidate: Outline,
+  createId: () => string
+): Outline {
+  const currentIds = outlineIds(current);
+  const usedIds = new Set<string>();
+  const allocateId = (prefix: string, requestedId: string): string => {
+    if (currentIds.has(requestedId) && !usedIds.has(requestedId)) {
+      usedIds.add(requestedId);
+      return requestedId;
+    }
+
+    const seed = createId();
+    let generatedId = `${prefix}-${seed}`;
+    let suffix = 2;
+    while (currentIds.has(generatedId) || usedIds.has(generatedId)) {
+      generatedId = `${prefix}-${seed}-${suffix}`;
+      suffix += 1;
+    }
+    usedIds.add(generatedId);
+    return idSchema.parse(generatedId);
+  };
+
+  return {
+    ...candidate,
+    openQuestions: candidate.openQuestions.map((question) => ({
+      ...question,
+      id: allocateId("outline-question", question.id)
+    })),
+    sections: candidate.sections.map((section) => ({
+      ...section,
+      id: allocateId("outline-section", section.id),
+      openQuestions: section.openQuestions.map((question) => ({
+        ...question,
+        id: allocateId("outline-question", question.id)
+      }))
+    }))
+  };
 }
 
 export class ProjectService {
@@ -146,7 +197,12 @@ export class ProjectService {
   async saveOutline(projectId: unknown, input: unknown): Promise<VideoProject> {
     const request = outlineSaveRequestSchema.parse(input);
     const currentProject = await this.repository.read(projectId);
-    const { project } = applyEditedOutline(currentProject, request.outline);
+    const normalizedOutline = normalizeOutlineIds(
+      currentProject.outline,
+      request.outline,
+      this.createId
+    );
+    const { project } = applyEditedOutline(currentProject, normalizedOutline);
     return this.repository.save(projectId, project, request.expectedRevision);
   }
 

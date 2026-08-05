@@ -274,18 +274,6 @@ export class OutlineGenerationService {
   }
 
   async generate(projectId: unknown, input: unknown): Promise<VideoProject> {
-    return this.generateInternal(projectId, input, false);
-  }
-
-  async regenerate(projectId: unknown, input: unknown): Promise<VideoProject> {
-    return this.generateInternal(projectId, input, true);
-  }
-
-  private async generateInternal(
-    projectId: unknown,
-    input: unknown,
-    allowExistingOutline: boolean
-  ): Promise<VideoProject> {
     const request = outlineGenerateRequestSchema.parse(input);
     const snapshot = await this.repository.readGenerationSnapshot(projectId);
     const runId = this.createId();
@@ -332,7 +320,7 @@ export class OutlineGenerationService {
           "The project revision does not match the expected revision."
         );
       }
-      if (!allowExistingOutline && hasExistingOutline(snapshot.project)) {
+      if (hasExistingOutline(snapshot.project)) {
         throw new OutlineGenerationError(
           OUTLINE_GENERATION_ERROR_CODE.alreadyExists,
           409,

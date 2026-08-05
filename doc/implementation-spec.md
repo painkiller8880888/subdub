@@ -1119,7 +1119,6 @@ POST   /api/projects/{projectId}/outline/generate
 POST   /api/projects/{projectId}/outline/regenerate-section
 PUT    /api/projects/{projectId}/outline
 POST   /api/projects/{projectId}/outline/review
-POST   /api/projects/{projectId}/outline/regenerate
 POST   /api/projects/{projectId}/outline/approve
 PUT    /api/projects/{projectId}/script
 POST   /api/projects/{projectId}/script/approve

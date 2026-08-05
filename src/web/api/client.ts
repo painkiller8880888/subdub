@@ -4,7 +4,6 @@ import {
   apiErrorResponseSchema,
   outlineApproveRequestSchema,
   outlineGenerateRequestSchema,
-  outlineRegenerateRequestSchema,
   outlineReviewRequestSchema,
   outlineSaveRequestSchema,
   modelsResponseSchema,
@@ -19,7 +18,6 @@ import {
   type ApiErrorDetail,
   type OutlineApproveRequest,
   type OutlineGenerateRequest,
-  type OutlineRegenerateRequest,
   type OutlineReviewRequest,
   type OutlineSaveRequest,
   type ProjectBriefSaveRequest,
@@ -269,25 +267,6 @@ export async function reviewProjectOutline(
   const validatedInput = outlineReviewRequestSchema.parse(input);
   const response = await fetchApi(
     `/api/projects/${encodeURIComponent(projectId)}/outline/review`,
-    projectMutationResponseSchema,
-    {
-      method: "POST",
-      headers: {
-        "content-type": "application/json"
-      },
-      body: JSON.stringify(validatedInput)
-    }
-  );
-  return response.data;
-}
-
-export async function regenerateProjectOutline(
-  projectId: string,
-  input: OutlineRegenerateRequest
-): Promise<VideoProject> {
-  const validatedInput = outlineRegenerateRequestSchema.parse(input);
-  const response = await fetchApi(
-    `/api/projects/${encodeURIComponent(projectId)}/outline/regenerate`,
     projectMutationResponseSchema,
     {
       method: "POST",
