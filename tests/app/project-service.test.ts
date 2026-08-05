@@ -58,6 +58,60 @@ describe("ProjectService", () => {
       audioSampleRate: 48000,
       audioChannels: 2
     });
+    expect(project.characters).toEqual([
+      expect.objectContaining({
+        id: "character-mentor",
+        name: "四国めたん",
+        role: "mentor",
+        voicevox: {
+          speakerName: "四国めたん",
+          speakerUuid: null,
+          styleName: "ノーマル"
+        },
+        themeColorToken: "character.metan",
+        visualAssets: {
+          stand: "shared-assets/characters/character-mentor/stand/stand.png",
+          speak: {
+            normal: {
+              closed:
+                "shared-assets/characters/character-mentor/speak-normal/closed.png",
+              open: "shared-assets/characters/character-mentor/speak-normal/open.png"
+            },
+            pointing: {
+              closed:
+                "shared-assets/characters/character-mentor/speak-pointing/closed.png",
+              open: "shared-assets/characters/character-mentor/speak-pointing/open.png"
+            }
+          }
+        }
+      }),
+      expect.objectContaining({
+        id: "character-learner",
+        name: "ずんだもん",
+        role: "learner",
+        voicevox: {
+          speakerName: "ずんだもん",
+          speakerUuid: null,
+          styleName: "ノーマル"
+        },
+        themeColorToken: "character.zundamon",
+        visualAssets: {
+          stand: "shared-assets/characters/character-learner/stand/stand.png",
+          speak: {
+            normal: {
+              closed:
+                "shared-assets/characters/character-learner/speak-normal/closed.png",
+              open: "shared-assets/characters/character-learner/speak-normal/open.png"
+            },
+            pointing: {
+              closed:
+                "shared-assets/characters/character-learner/speak-pointing/closed.png",
+              open: "shared-assets/characters/character-learner/speak-pointing/open.png"
+            }
+          }
+        }
+      })
+    ]);
   });
 
   it("rejects unknown create input and keeps the API boundary strict", async () => {

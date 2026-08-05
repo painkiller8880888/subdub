@@ -43,7 +43,7 @@ describe("videoProjectSchema", () => {
     expectInvalid(rootUnknown);
 
     const deepUnknown = clone(videoProjectFixture);
-    Object.assign(deepUnknown.characters[0].visualAssets.neutral, {
+    Object.assign(deepUnknown.characters[0].visualAssets.speak.normal, {
       unexpected: true
     });
     expectInvalid(deepUnknown);
@@ -295,6 +295,20 @@ describe("videoProjectSchema", () => {
     const invalidTheme = clone(videoProjectFixture);
     invalidTheme.characters[1].themeColorToken = "character.metan";
     expectInvalid(invalidTheme, ["characters", 1, "themeColorToken"]);
+  });
+
+  it("rejects assigning one visual asset path to multiple meanings", () => {
+    const invalid = clone(videoProjectFixture);
+    invalid.characters[0].visualAssets.speak.pointing.open =
+      invalid.characters[0].visualAssets.speak.normal.open;
+    expectInvalid(invalid, [
+      "characters",
+      0,
+      "visualAssets",
+      "speak",
+      "pointing",
+      "open"
+    ]);
   });
 
   it("rejects broken references", () => {

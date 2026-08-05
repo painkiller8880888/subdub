@@ -2,6 +2,10 @@ import {
   videoProjectSchema,
   type VideoProject
 } from "../../schema/index.js";
+import {
+  characterVisualAssetPaths,
+  type CharacterAssetId
+} from "../../assets/character-asset-manifest.js";
 
 const EMPTY_SHA256 = "0".repeat(64);
 const EMPTY_SOURCE_SHA256 =
@@ -17,15 +21,14 @@ export type EmptyVideoProjectOptions = {
 };
 
 function makeCharacter(
-  id: "character-mentor" | "character-learner",
+  id: CharacterAssetId,
   role: "mentor" | "learner",
   speakerName: "四国めたん" | "ずんだもん",
   themeColorToken: "character.metan" | "character.zundamon"
 ): VideoProject["characters"][number] {
-  const assetPrefix = `characters/${id}`;
   return {
     id,
-    name: id,
+    name: speakerName,
     role,
     personality: "",
     speakingStyle: "",
@@ -44,24 +47,7 @@ function makeCharacter(
       postPhonemeLength: 0
     },
     lipSyncPeriodFrames: 4,
-    visualAssets: {
-      neutral: {
-        closed: `${assetPrefix}/neutral-closed.png`,
-        open: `${assetPrefix}/neutral-open.png`
-      },
-      smile: {
-        closed: `${assetPrefix}/smile-closed.png`,
-        open: `${assetPrefix}/smile-open.png`
-      },
-      explain: {
-        closed: `${assetPrefix}/explain-closed.png`,
-        open: `${assetPrefix}/explain-open.png`
-      },
-      caution: {
-        closed: `${assetPrefix}/caution-closed.png`,
-        open: `${assetPrefix}/caution-open.png`
-      }
-    }
+    visualAssets: characterVisualAssetPaths(id)
   };
 }
 

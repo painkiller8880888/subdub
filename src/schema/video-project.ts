@@ -89,6 +89,42 @@ export const mouthPairSchema = strictObject({
   open: relativePosixPathSchema
 });
 
+export const characterVisualAssetsSchema = strictObject({
+  stand: relativePosixPathSchema,
+  speak: strictObject({
+    normal: mouthPairSchema,
+    pointing: mouthPairSchema
+  })
+}).superRefine((assets, ctx) => {
+  const paths = [
+    { path: assets.stand, issuePath: ["stand"] },
+    { path: assets.speak.normal.closed, issuePath: ["speak", "normal", "closed"] },
+    { path: assets.speak.normal.open, issuePath: ["speak", "normal", "open"] },
+    {
+      path: assets.speak.pointing.closed,
+      issuePath: ["speak", "pointing", "closed"]
+    },
+    {
+      path: assets.speak.pointing.open,
+      issuePath: ["speak", "pointing", "open"]
+    }
+  ];
+  const seen = new Map<string, (string | number)[]>();
+
+  for (const entry of paths) {
+    const previousPath = seen.get(entry.path);
+    if (previousPath !== undefined) {
+      ctx.addIssue({
+        code: "custom",
+        path: entry.issuePath,
+        message: `visual asset path is already assigned to ${previousPath.join(".")}`
+      });
+    } else {
+      seen.set(entry.path, entry.issuePath);
+    }
+  }
+});
+
 export const characterSchema = strictObject({
   id: idSchema,
   name: z.string(),
@@ -103,12 +139,7 @@ export const characterSchema = strictObject({
   themeColorToken: z.enum(["character.metan", "character.zundamon"]),
   voice: voiceSchema,
   lipSyncPeriodFrames: positiveIntegerSchema,
-  visualAssets: strictObject({
-    neutral: mouthPairSchema,
-    smile: mouthPairSchema,
-    explain: mouthPairSchema,
-    caution: mouthPairSchema
-  })
+  visualAssets: characterVisualAssetsSchema
 });
 
 export const sourceRefSchema = strictObject({
