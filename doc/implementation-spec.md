@@ -75,6 +75,20 @@
 
 `doc.md` の「推奨案」は、本書で明示的に変更した事項と競合しない限り採用する。
 
+### 2.7 キャラクター素材の責務分離
+
+キャラクター素材に関するデータは、次の 3 層を混同しない。
+
+| データ | 正本または性質 | P2-01 時点の扱い |
+|---|---|---|
+| `projects/{projectId}/project.json` | 人間が編集・承認する動画制作データの正本 | `VideoProject 1.0.0` を維持する |
+| `characterVariantCatalog` | 登録済み利用可能物理素材とメタデータの正本 | TypeScript の静的カタログとして実装する。SQLite ではない |
+| `RenderManifest` | 特定レンダリングへ使う解決済み派生データ | 現行 `1.0.0` は論理表情を持つ。物理 variant の解決情報は後続設計 |
+
+PNG はカタログから参照されるファイル実体であり、PNG 自体、`project.json`、または `RenderManifest` がカタログの代わりにメタデータの正本になることはない。Remotion は `VideoProject` や `characterVariantCatalog` を直接検索せず、将来も解決済み `RenderManifest` だけを描画入力とする。
+
+`ScriptLine.expression` と `RenderLine.expression` は論理表情であり、PNG、物理ポーズ、`variantId`、口差分を直接指定する値ではない。論理表情から物理 variant への mapping は、P5-02 / P5-04 の前に決定論的な規則または人間による選択として設計する。
+
 ## 3. MVP のスコープ
 
 ### 3.1 MVP に含める
@@ -84,15 +98,16 @@
 3. Markdown と企画条件の編集、自動保存
 4. OpenRouter による構成案生成、編集、承認
 5. 2 キャラクター形式の人力台本編集、承認
-6. 固有名詞・社内用語の登録、検索、読み上げへの適用
-7. 素材ライブラリへの動画、写真、帳票スキャン、効果音の登録
-8. タグ検索および AI による検索意図の生成
-9. 台本範囲へのビジュアル割り当て
-10. VOICEVOX によるセリフ単位の WAV 生成、セクション BGM、任意の効果音設定
-11. `RenderManifest` の生成
-12. Remotion による同一マニフェストのプレビューと MP4 出力
-13. サムネイルのプレビューと画像出力
-14. 機械検証、承認ゲート、意味のある操作のログ
+6. P2-01 の初期 2 キャラクター設定、物理素材カタログ、PNG 検証、読み取り専用確認画面
+7. 固有名詞・社内用語の登録、検索、読み上げへの適用
+8. 素材ライブラリへの動画、写真、帳票スキャン、効果音の登録
+9. タグ検索および AI による検索意図の生成
+10. 台本範囲へのビジュアル割り当て
+11. VOICEVOX によるセリフ単位の WAV 生成、セクション BGM、任意の効果音設定
+12. `RenderManifest` の生成
+13. Remotion による同一マニフェストのプレビューと MP4 出力
+14. サムネイルのプレビューと画像出力
+15. 機械検証、承認ゲート、意味のある操作のログ
 
 ### 3.2 初期対象外
 
@@ -121,6 +136,8 @@ Local Backend API
   ├─ Terminology Service ─ SQLite
   ├─ OpenRouter Adapter ── OpenRouter API
   ├─ VOICEVOX Adapter ──── Local VOICEVOX ENGINE
+  ├─ Character Asset Catalog ─ TypeScript static catalog
+  ├─ Character Asset Validation
   ├─ Timeline Compiler ─── RenderManifest
   ├─ Validation Service
   └─ Render Service ────── Remotion / FFmpeg
@@ -134,6 +151,8 @@ WebUI はファイル、SQLite、外部 API を直接操作しない。ファイ
 - API ハンドラーはアプリケーションサービスへ処理を委譲する。
 - アプリケーションサービスはドメインスキーマ、リポジトリ、外部アダプターへ依存する。
 - ドメインスキーマとタイムライン計算は React、Web フレームワーク、SQLite ドライバーへ依存させない。
+- `characterVariantCatalog` は P2-01 時点では TypeScript の静的データであり、素材ライブラリ用 SQLite の登録テーブルや SQLite サービスではない。
+- キャラクター素材検証はカタログを入力として source/public の PNG を検査する専用処理とし、汎用素材 DB やアップロード基盤とは分離する。
 - Remotion コンポーネントは `RenderManifest` だけを描画入力とし、SQLite 検索、ファイル探索、音声長計測を行わない。
 
 ### 4.3 採用ランタイム
@@ -491,27 +510,79 @@ type MouthPair = {
 };
 ```
 
+この `visualAssets.neutral` / `smile` / `explain` / `caution` は現行 `VideoProject 1.0.0` の既存プロジェクト互換性のために残すフィールドである。P2-01 の実在物理素材カタログとは別であり、確認画面と素材検証はこのフィールドを物理素材の正本として使用しない。物理 variant をこの 4 キーへ推測で重複割り当てない。将来の variant 参照への置き換えまたは migration の方法は後続設計で決定する。
+
 - キャラクターは MVP では正確に 2 件とし、[`assets`](./assets/) に用意された四国めたん側とずんだもん側のキャラクターデータだけを使用する。MVP 中に追加キャラクターを制作または登録する機能は実装しない。
 - 初期キャラクター設定は次の対応とする。
 
-| 安定 ID | 役割 | VOICEVOX | MVP 素材 | 色トークン |
+| 安定 ID | 役割 | VOICEVOX | P2-01 物理素材 | 色トークン |
 |---|---|---|---|---|
-| `character-mentor` | `mentor` | 四国めたん／`ノーマル` | [`assets`](./assets/) 内の四国めたん側データ | `character.metan` |
-| `character-learner` | `learner` | ずんだもん／`ノーマル` | [`assets`](./assets/) 内のずんだもん側データ | `character.zundamon` |
+| `character-mentor` | `mentor` | 四国めたん／`ノーマル` | `characterVariantCatalog` の四国めたん側 3 variant / 5 ファイル | `character.metan` |
+| `character-learner` | `learner` | ずんだもん／`ノーマル` | `characterVariantCatalog` のずんだもん側 3 variant / 5 ファイル | `character.zundamon` |
 
 - 四国めたん側はメンター・案内役、ずんだもん側は生徒・見習い役を基本とする。
 - P2-01 で確認済みの素材は透過 PNG、600 × 1000 px の同一キャンバスで、非会話状態の単一画像と、通常会話・指差し状態の会話それぞれの `closed` / `open` ペアから成る。身体の基準位置は画像を並べた手動確認で検証し、ポーズによる外形差を理由に alpha bounding box の完全一致は要求しない。
 - 台本上の表情語彙 `neutral`、`smile`、`explain`、`caution` は `ScriptLine.expression` の論理指定として維持する。P2-01では、これらと物理バリアントの対応を決定しない。
 - 実在素材の正本は `characterVariantCatalog` とし、各バリアントに安定した `variantId`、`characterId`、`label`、`renderType`（`single-image` または `mouth-pair`）、自由な `tags`、`files` を持たせる。`stand`、`normal`、`pointing`、`smile`、`caution` などのポーズ・表情名を永続スキーマの固定 enum にはしない。
 - `VideoProject.characters[].visualAssets` は既存の `1.0.0` 構造を維持し、P2-01の物理バリアントを埋め込まない。確認画面と検証処理はカタログを走査し、配列順で表示・検証する。
-- 実装用素材は `public/shared-assets/characters/` へ配置し、元データは `assets` に保持する。カタログへ登録された各ファイルについて、不足、予期しない命名、PNG構造・CRC、キャンバス不一致、mouth-pairの `closed` / `open` 欠落、透過有無、source/publicのバイト一致を検証する。
+- 実装用素材は `public/shared-assets/characters/` へ配置し、元データは `doc/assets` に保持する。カタログへ登録された各ファイルについて、不足、予期しない命名、PNG構造・CRC、キャンバス不一致、mouth-pairの `closed` / `open` 欠落、透過有無、source/publicのバイト一致を検証する。
 - 将来はプロジェクトが `variantId` とカタログのバージョンを参照し、`RenderManifest` が実行時にパスとchecksumを解決する。P2-01ではSQLite登録UI、`ScriptLine` からのvariantId参照、Remotion描画は実装しない。
 - 制服の差し色、字幕の話者色、WebUI の speaker chip は `character.metan` と `character.zundamon` のデザイントークンから取得する。
-- テーマ色の具体値は `assets` のキャラクターデータに合わせてデザイントークンへ登録し、字幕背景とのコントラストを検証する。
+- テーマ色の具体値は `doc/assets` のキャラクターデータに合わせてデザイントークンへ登録し、字幕背景とのコントラストを検証する。
 - 話者の区別を色だけに依存させず、キャラクター名、話者チップ、左右配置でも区別する。
 - `speakerUuid` は初回接続時または設定更新時に `/speakers` から取得して保存する。初期 JSON やソースコードへ UUID と style ID を埋め込まない。
 - 音声生成前に、`speakerUuid` または `speakerName` と `styleName` から style ID を一意に解決できることを検証する。
 - 各 voice 設定の許容範囲は接続中の VOICEVOX ENGINE の仕様に合わせてアダプター層で検証する。
+
+### 7.5.1 キャラクター素材カタログ型
+
+P2-01 のカタログ型は現在のコードと同じく、次の最小構造だけを持つ。
+
+```ts
+type CharacterVariantRenderType = "single-image" | "mouth-pair";
+
+type CharacterVariantFile = {
+  key: string;
+  sourceFile: string;
+  destinationPath: string;
+};
+
+type CharacterVariant = {
+  variantId: string;
+  characterId: string;
+  label: string;
+  renderType: CharacterVariantRenderType;
+  tags: readonly string[];
+  files: readonly CharacterVariantFile[];
+};
+
+type CharacterVariantCatalog = readonly CharacterVariant[];
+```
+
+現在の型には `version`、`checksum`、`status`、`sortOrder`、DB の主キーはない。これらは将来候補であり、現行型へ追加済みとは扱わない。
+
+現在のカタログには各キャラクター 3 variant、5 ファイル、2 キャラクター合計 6 variant、10 ファイルが登録されている。非会話状態は `single-image` の `single`、通常会話と指差し状態の会話はそれぞれ `mouth-pair` の `closed` / `open` を持つ。
+
+### 7.5.2 キャラクター素材検証
+
+検証処理は、注入された source root、public root、カタログを走査する。P2-01 で検証する項目は次のとおりである。
+
+- `variantId` の重複
+- `sourceFile` の重複
+- `destinationPath` の重複
+- `sourceFile`、`destinationPath`、`variantId` の unsafe relative path
+- `destinationPath` が `shared-assets/characters/{characterId}/` namespace 配下であること
+- 正規配置先が `.png` であること
+- `single-image` が `single` ファイルを 1 件持つこと
+- `mouth-pair` が `closed` と `open` を 1 件ずつ持つこと
+- source root 直下の未登録 `char\d+.*\.png`
+- source/public の存在とバイト一致
+- PNG signature、chunk 構造、CRC、IHDR、IDAT、IEND
+- 全画像の 600 × 1000 キャンバス
+- alpha channel または `tRNS`
+- `mouth-pair` の `closed` / `open` キャンバス一致
+
+不足時の診断には、variant ID、character ID、意味、期待元ファイル、期待配置先を含める。PNG の完全デコードによる透明ピクセル量や alpha bounding box の数値解析は行わない。身体の基準位置は、同じキャンバスの代表画像を並べた手動確認で扱い、根拠のない alpha bounding box 許容値は導入しない。
 
 ### 7.6 構成案
 
@@ -913,6 +984,19 @@ type RenderInsert = {
 };
 ```
 
+現行 `RenderManifest 1.0.0` の `RenderLine.expression` は `ScriptLine["expression"]`、つまり `neutral` / `smile` / `explain` / `caution` の論理表情である。これは物理ファイルパスや `variantId` を意味しない。現行型には、解決済みキャラクター variant の専用フィールドはまだない。
+
+P5-02 / P5-04 では、タイムラインコンパイラが論理表情とキャラクター情報を入力にして、明示的な mapping または人間の選択から物理 variant を決定する必要がある。カタログの版を確認したうえで、少なくとも次の解決済み情報を manifest へ固定する方針とする。
+
+- `variantId`
+- `characterId`
+- `renderType`
+- 使用するファイルの相対パス
+- 使用するファイルの checksum（概念上の値。具体的な保存フィールドは TBD）
+- `mouth-pair` の `closed` / `open` 対応
+
+上記を現行の確定型として追加しない。プロジェクト JSON へ保存する参照フィールド、カタログ version の表現、variant version、manifestVersion の互換性は後続設計で決定する。Remotion は解決不能、variant 欠落、mouth slot 欠落を自動代替せずエラーとした解決済み manifest だけを入力とする。
+
 - フレーム範囲は半開区間 `[from, from + durationInFrames)` とする。
 - ミリ秒からフレームへの変換は `Math.ceil((ms / 1000) * fps)` とする。
 - 30 fps の MVP では各 2000 ms プレースホルダーを正確に 60 フレームとして扱う。
@@ -1269,6 +1353,8 @@ POST   /api/projects/{projectId}/thumbnail/render
 
 ルーティング表現は採用フレームワークに合わせて変更してよいが、画面責務は維持する。
 
+P2-01 時点の `/projects/{projectId}/script` は、台本編集画面ではなく、`GET /api/projects/{projectId}` と `fetchProject()` で取得した `VideoProject` のキャラクター情報に、`characterVariantCatalog` の登録済み variant を組み合わせて表示する読み取り専用のキャラクター素材確認画面である。画像読込失敗時は対象パスを表示し、カタログに登録されていない物理素材を表示しない。
+
 ### 14.2 制作ステップ
 
 ```text
@@ -1285,6 +1371,8 @@ POST   /api/projects/{projectId}/thumbnail/render
 後工程の画面は閲覧可能にしてよいが、前提条件を満たさない実行操作は無効化し、理由と修正先へのリンクを表示する。
 
 ### 14.3 台本画面
+
+以下は P2-02 以降に拡張する台本編集画面の目標であり、P2-01 で実装済みとは扱わない。P2-02 では `ScriptLine.expression` の論理表情を編集対象とする。物理 variant の選択や mapping を P2-02 に暗黙に含めず、必要になった場合は別の設計判断または後続タスクとして扱う。
 
 - 上部: 同一 `RenderManifest` を使う Remotion プレビュー
 - 中央: セクションとセリフカード
@@ -1341,6 +1429,12 @@ POST   /api/projects/{projectId}/thumbnail/render
 - ID の形式、重複、不正参照
 - 数値範囲
 - 相対パスの安全性
+- P2-01 カタログの `variantId`、`sourceFile`、`destinationPath` の重複
+- P2-01 `destinationPath` の character namespace と PNG 拡張子
+- P2-01 `single-image` の `single`、`mouth-pair` の `closed` / `open` スロット
+- P2-01 未登録 `char\d+.*\.png` source、source/public の存在とバイト一致
+- P2-01 PNG signature、chunk 構造、CRC、IHDR、IDAT/IEND、600 × 1000、alpha / `tRNS`
+- P2-01 `mouth-pair` の close/open キャンバス一致
 - セクションとセリフの順序
 - セクション BGM の重複、参照先、フェード長
 - 効果音の素材種別、参照先、チェックサム、カテゴリ、オフセット、音量
@@ -1368,6 +1462,8 @@ POST   /api/projects/{projectId}/thumbnail/render
 
 - 最新 `RenderManifest`
 - 全素材と音声の存在、チェックサム
+- 現行 `RenderManifest 1.0.0` の `RenderLine.expression` は論理表情であり、物理ファイルパスとして解釈しない。
+- P5-02 / P5-04 以降は、解決済み `variantId`、character ID、renderType、ファイルパス、checksum、mouth slot が manifest に固定されていることを確認する。具体的なフィールドは TBD。
 - 正の duration
 - フレーム範囲の境界
 - 字幕のはみ出し
@@ -1414,6 +1510,10 @@ SQLite にはキー入力単位ではなく、保存、承認、レビュー判�
 ### 19.1 単体テスト
 
 - 全 Zod スキーマの正常・異常系
+- `characterVariantCatalog` へ variant を追加すると検証と確認画面の view model へ反映されること
+- `single-image` と `mouth-pair` の正常系、`closed` / `open` スロット不足
+- character namespace 違反、非 PNG 配置先、未登録 source、source/public 不一致
+- duplicate `variantId`、duplicate `sourceFile`、duplicate `destinationPath`
 - 用語の正規化、最長一致、優先度、除外
 - ミリ秒からフレームへの変換
 - セリフ累積と半開区間
@@ -1534,7 +1634,7 @@ SQLite にはキー入力単位ではなく、保存、承認、レビュー判�
    四国めたんとずんだもんはいずれも標準スタイルの `ノーマル` を使用する。数値の style ID は `/speakers` から実行時に解決し、ソースコードまたは初期データへハードコードしない。
 
 6. **キャラクター素材とテーマ**  
-   [`assets`](./assets/) に用意された 2 人分のキャラクターデータだけで MVP を進める。透過 PNG、同一キャンバス、固定位置、4 表情と口差分、デザイントークン、字幕コントラスト、色以外の話者識別は推奨案を採用する。
+   初期 2 キャラクターの設定と、TypeScript で管理する `characterVariantCatalog`、専用 PNG 検証、読み取り専用確認画面で MVP を進める。実在素材は透過 PNG、600 × 1000 の同一キャンバス、非会話状態の `single-image` 1 variant、通常会話と指差し状態の会話の `mouth-pair` 2 variant、各キャラクター 5 ファイルである。`ScriptLine.expression` の論理表情と物理 variant の mapping は P2-01 では決定しない。`VideoProject 1.0.0` の互換 `visualAssets` は維持するが、物理素材の正本とはしない。
 
 7. **効果音の採用範囲**  
    効果音は任意とし、`confirm`、`attention`、`warning` の 3 用途だけを採用する。セリフ開始からの相対時間で 1 セリフへ複数設定でき、素材ライブラリから選択する。初期音量は `0.2`、3 音以上の同時再生とナレーションより大きく聞こえる場合は警告するが、保存は原則として禁止しない。
@@ -1553,7 +1653,17 @@ SQLite にはキー入力単位ではなく、保存、承認、レビュー判�
 
 ### 21.2 MVP の該当機能を実装する前の未決事項
 
-現時点ではない。VOICEVOX の数値 style ID は実装前に人間が決定する値ではなく、Phase 4 で接続中 ENGINE から解決する。キャラクター素材は `assets` の 2 人分を使用し、効果音とサムネイルは上記の初期仕様で実装する。
+VOICEVOX の数値 style ID は実装前に人間が決定する値ではなく、Phase 4 で接続中 ENGINE から解決する。キャラクター素材については、次の事項を P5-02 / P5-04 着手前の設計ゲートとして残す。
+
+- 論理表情から物理 variant への既定 mapping
+- 人間によるセリフ単位の物理 variant 上書き
+- 安定した `variantId` とカタログ version を project JSON へ保存する正確なフィールド
+- カタログ version と variant version の表現
+- `RenderManifest` へ解決済みファイルパス、checksum、mouth slot を追加する型と manifestVersion 互換性
+- `1.0.0` の互換 `visualAssets` から将来の variant 参照へ移行する方法
+- SQLite 素材カタログへ移行する時期とテーブル構造
+
+P2-01 では静的カタログと検証を実装するが、これらの未決事項を実装済み仕様として確定しない。
 
 ### 21.3 MVP 後に利用実績を見て判断する事項
 

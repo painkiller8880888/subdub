@@ -26,7 +26,11 @@
 
 ### 2.2 中核方針
 
-- 動画の Single Source of Truth は、動画ごとに管理する 1 つの JSON とする。
+- 動画ごとの人間が編集・承認する制作データの Single Source of Truth は、`project.json` とする。
+- 利用可能なキャラクター物理素材とメタデータの正本は、動画ごとの JSON ではなく `characterVariantCatalog` とする。P2-01 時点では TypeScript で管理する静的カタログであり、素材ライブラリ用 SQLite とは別の責務である。
+- `RenderManifest` は、`project.json` とカタログ、音声などから生成する特定レンダリング向けの解決済み派生データであり、制作データや素材カタログの正本にはしない。
+- PNG ファイルはカタログから参照される実体であり、ファイル単体を素材のメタデータや割り当ての正本にはしない。
+- 台本の `ScriptLine.expression` は演出意図を表す論理表情であり、PNG のファイル名、物理ポーズ名、`variantId` ではない。P2-01 では論理表情から物理バリアントへの対応を決定しない。
 - 動画編集ソフトは使用しない。
 - 動画生成 AI に完成映像を生成させない。
 - 映像はコード、React コンポーネント、既定のレイアウト部品、および登録済み素材から構築する。
@@ -46,7 +50,7 @@
 - セクション
 - セリフ
 - 話者
-- 発話時の表情・感情
+- 発話時の論理表情（`ScriptLine.expression`）
 - 画面表示用の字幕テキスト
 - セリフまたは連続する複数セリフに対応するビジュアル割り当て
 - 素材DBの素材 ID、プロジェクトへ取り込んだファイルの相対パス、動画の再生範囲、画像・帳票の表示範囲
@@ -59,9 +63,9 @@
 
 ### 3.2 補助入力
 
-- キャラクター画像
-  - 表情差分
-  - 口の開閉差分
+- キャラクター物理素材（`characterVariantCatalog` が参照する PNG）
+  - カタログのバリアントメタデータ
+  - 描画方式に応じたファイルスロット（`single` または `closed` / `open`）
 - VOICEVOX で生成したセリフ音声
 - BGM・効果音ファイル
 - オープニング、エンディング、アイキャッチ等の動画素材
@@ -176,7 +180,7 @@ VideoProject
 │  ├─ name
 │  ├─ voicevoxSpeakerId
 │  ├─ personality
-│  └─ visualAssets
+│  └─ visualAssets (1.0.0 互換フィールド)
 ├─ sections[]
 │  ├─ id
 │  ├─ name
@@ -186,7 +190,7 @@ VideoProject
 │     ├─ speaker
 │     ├─ spokenText
 │     ├─ subtitleText
-│     ├─ expression
+│     ├─ expression (論理表情)
 │     └─ timing
 ├─ visuals
 │  ├─ status
@@ -223,7 +227,24 @@ VideoProject
    └─ layout
 ```
 
-`VideoProject` は人間と WebUI が編集する正本であり、音声長、開始フレーム、終了フレームなど、素材と設定から再計算できる値は含めない。レンダリング前にタイムラインコンパイラが `VideoProject` を読み込み、素材メタデータと合わせて、Remotion へ渡す派生データ `RenderManifest` を生成する。
+`VideoProject` は人間と WebUI が編集・承認する制作データの正本であり、音声長、開始フレーム、終了フレームなど、素材と設定から再計算できる値は含めない。`characters[].visualAssets` は現行 `1.0.0` の既存プロジェクトを読み込むための互換フィールドであり、P2-01 の物理素材カタログとは独立している。確認画面と素材検証はこのフィールドを物理素材の正本として使用しない。
+
+利用可能なキャラクター物理素材は、プロジェクト JSON の外部にある `characterVariantCatalog` が正本である。
+
+```text
+characterVariantCatalog[]
+├─ variantId
+├─ characterId
+├─ label
+├─ renderType: single-image | mouth-pair
+├─ tags[]
+└─ files[]
+   ├─ key
+   ├─ sourceFile
+   └─ destinationPath
+```
+
+レンダリング前には、タイムラインコンパイラが `VideoProject` の論理表情、キャラクター情報、音声、`characterVariantCatalog` を入力として、Remotion へ渡す派生データ `RenderManifest` を生成する。P2-01 では論理表情から物理バリアントへの解決は行わず、将来の P5-02 / P5-04 で明示的なマッピングまたは人間の選択を経て解決する。
 
 ```text
 RenderManifest
@@ -243,7 +264,7 @@ RenderManifest
 │  ├─ audioPath
 │  ├─ subtitleText
 │  ├─ speaker
-│  └─ expression
+│  └─ expression (現行 1.0.0 では論理表情)
 ├─ visuals[]
 │  ├─ id
 │  ├─ from
@@ -259,6 +280,26 @@ RenderManifest
 ```
 
 `RenderManifest` は生成キャッシュであり、制作データの正本にはしない。正本 JSON、参照素材、出力設定のいずれかが変わった場合は再生成する。
+
+将来のキャラクター素材解決では、次の情報を `RenderManifest` へ固定する。これは P2-01 では未実装の後続設計であり、現行 `RenderManifest 1.0.0` の型へ追加済みとは扱わない。
+
+```text
+ScriptLine.expression (論理表情)
+  ↓
+キャラクター別の明示的なマッピングまたは人間による選択
+  ↓
+安定した variantId とカタログの版
+  ↓
+characterVariantCatalog
+  ↓
+解決済みファイルパス、renderType、checksum、mouth-pair の closed/open
+  ↓
+RenderManifest
+  ↓
+Remotion
+```
+
+カタログの版の表現、プロジェクト JSON に保存する参照フィールド、variant 単位の版管理、`1.0.0` からの migration は TBD とする。解決不能、variant 欠落、ファイルスロット欠落時は、将来も自動代替せずエラーにする。
 
 ### 5.2 セリフ
 
@@ -472,18 +513,19 @@ MVP では自動ダッキング、音量キーフレーム、1 セクション�
 処理の責務は次のとおりとする。
 
 1. Zod で正本 JSON を検証する。
-2. 参照している音声とビジュアル素材の存在、チェックサム、有効範囲を検証する。
-3. 各音声ファイルの再生時間を取得し、セリフ ID と対応付ける。
-4. `pauseBeforeMs`、音声長、`pauseAfterMs` を fps に基づいてフレームへ変換する。
-5. セリフを表示順に累積し、各セリフの `from`、`durationInFrames`、`speechFrom`、`speechDurationInFrames` を確定する。
-6. `startLineId` と `endLineId` で指定されたビジュアル割り当てを、`from` と `durationInFrames` へ解決する。
-7. 各セクションの最初と最後のセリフから、背景の表示範囲を確定する。
-8. 先頭へ 2 秒の opening、選択されたセクション境界へ 2 秒の eye catch を挿入し、後続要素をシフトする。
-9. セクションごとの BGM を、プレースホルダー挿入後の各セクション範囲へ割り当てる。
-10. 効果音をセリフ基準の位置へ割り当てる。
-11. 末尾へ 2 秒の ending を追加する。
-12. 動画全体の `durationInFrames` を計算し、`RenderManifest` を生成する。
-13. `sourceProjectHash` と参照素材のチェックサムを記録し、入力が同一の場合だけ生成済みキャッシュを再利用する。
+2. 参照している音声とビジュアル素材の存在、チェックサム、有効範囲を検証する。P2-01 の `characterVariantCatalog` については、登録済みファイル、PNG 構造、キャンバス、透過情報、source/public の一致を専用検証で確認する。
+3. P2-01 では `ScriptLine.expression` を物理バリアントへ自動変換しない。将来は、明示的なマッピングまたは人間の選択を検証したうえで、安定した `variantId` とカタログの版へ解決する。
+4. 各音声ファイルの再生時間を取得し、セリフ ID と対応付ける。
+5. `pauseBeforeMs`、音声長、`pauseAfterMs` を fps に基づいてフレームへ変換する。
+6. セリフを表示順に累積し、各セリフの `from`、`durationInFrames`、`speechFrom`、`speechDurationInFrames` を確定する。
+7. `startLineId` と `endLineId` で指定されたビジュアル割り当てを、`from` と `durationInFrames` へ解決する。
+8. 各セクションの最初と最後のセリフから、背景の表示範囲を確定する。
+9. 先頭へ 2 秒の opening、選択されたセクション境界へ 2 秒の eye catch を挿入し、後続要素をシフトする。
+10. セクションごとの BGM を、プレースホルダー挿入後の各セクション範囲へ割り当てる。
+11. 効果音をセリフ基準の位置へ割り当てる。
+12. 末尾へ 2 秒の ending を追加する。
+13. 動画全体の `durationInFrames` を計算し、`RenderManifest` を生成する。
+14. `sourceProjectHash` と参照素材のチェックサムを記録し、入力が同一の場合だけ生成済みキャッシュを再利用する。
 
 ミリ秒からフレームへの変換は、要素が途中で欠けないように次を基本とする。
 
@@ -514,14 +556,15 @@ const msToFrames = (ms: number, fps: number): number =>
 
 - 2 人のキャラクターを使用する。
 - 各キャラクターは画面下部の左右へ配置する。
-- 表情差分と口の開閉画像を切り替える。
-- 発話中のキャラクターだけ口を動かす。
-- 台本で指定された感情に合わせて表情を切り替える。
+- `RenderManifest.lines[].expression` は台本の論理表情であり、PNG、物理ポーズ、`variantId` を直接指定する値ではない。
+- 将来、解決済みの物理バリアントを切り替える場合は、明示的なマッピングまたは人間の選択を経て `RenderManifest` に固定する。`neutral`、`smile`、`explain`、`caution` から `stand`、`normal`、`pointing` などへ自動的に割り当てる仕様は現時点では存在しない。
+- 発話中のキャラクターだけ、解決済み `mouth-pair` variant の `closed` / `open` を切り替える。
+- `single-image` variant に存在しない `open` 画像を推測、複製、加工して口パクに使用しない。単一画像を発話中にどう表示するかは TBD とする。
 - 発話中は小さく上下に動かし、話者を視覚的に明示する。
-- キャラクターの話者、表情、口パク、発話中演出は台本とタイムラインから自動決定し、ユーザーがビジュアル編集ペインで個別設定する項目にはしない。
+- キャラクターの話者、論理表情、口パク、発話中演出は、P5-02 / P5-04 で確定した決定論的な解決処理とタイムラインから決定する。P2-01 では物理 variant の mapping を行わず、ユーザーが物理ファイルを直接編集する機能も持たない。
 - ビジュアル素材を大きく表示する場面では、ビジュアル割り当ての「ビジュアルを優先」トグルによりキャラクターを縮小または非表示にできる。
-- 話者、表情、発話区間は `RenderManifest.lines[]` から取得する。
-- MVP の口パクは発話区間内の相対フレームから計算し、設定された周期で `closed` と `open` を切り替える。無言区間と発話終了後は必ず `closed` とする。
+- 話者、論理表情、発話区間は `RenderManifest.lines[]` から取得し、物理素材のパスは解決済みのキャラクター素材情報から取得する。
+- MVP の将来口パクは、解決済み `mouth-pair` variant の発話区間内で相対フレームから計算し、設定された周期で `closed` と `open` を切り替える。無言区間と発話終了後は必ず `closed` とする。
 - 上下動、拡大縮小、フェードなどは現在フレームから決定する純粋な計算とし、実時間に依存する状態を持たない。
 
 MVP の配置スキーマは固定とする。通常時は 2 人を画面下部の左右へ表示し、`visuals.assignments[].display.prioritizeVisual` が `true` の区間だけ、素材種別と表示領域に応じた既定規則で両者を縮小または非表示にする。ユーザーがキャラクターごとの座標、表情、アニメーションを直接編集する機能は持たせない。将来、複数の表示スキーマが必要になった場合は、座標値を各割り当てへ追加するのではなく、互換性を保った `layoutPreset` の切り替えとして拡張する。
@@ -816,7 +859,7 @@ AI が生成する内容と人間が入力する指示を視覚的にもデー�
 
 #### 台本編集画面
 
-6.3 の台本編集画面では、構成案のセクションごとにセリフを作成・編集する。UI 上では「コンテナ」ではなく「セリフ」または「セリフカード」と表記する。
+これは P2-02 以降の目標画面である。P2-01 時点の `/projects/{projectId}/script` は、カタログの登録済み物理バリアントを確認する読み取り専用画面であり、台本編集はまだ実装しない。P2-02 の表情編集は `ScriptLine.expression` の論理表情編集を指し、物理 variant 選択や mapping は別の設計判断とする。UI 上では「コンテナ」ではなく「セリフ」または「セリフカード」と表記する。
 
 画面は次のペインで構成する。
 
@@ -824,7 +867,7 @@ AI が生成する内容と人間が入力する指示を視覚的にもデー�
 - 中央の台本ペイン: セクションとセリフカードを編集し、現在の編集対象を選択する。
 - ビジュアルペイン: 選択範囲への素材割り当て、素材の表示設定、適用範囲を編集する。
 - 背景ペイン: 選択中のセクションに適用する背景を選択・確認する。
-- キャラクターペイン: 現在の固定配置を確認し、選択中のビジュアル割り当てに対する「ビジュアルを優先」トグルだけを編集する。話者、表情、口パク、発話中演出は台本から自動決定されるため編集項目にはしない。
+- キャラクターペイン: 現在の固定配置を確認し、選択中のビジュアル割り当てに対する「ビジュアルを優先」トグルだけを編集する。話者、論理表情、口パク、発話中演出は、将来の決定論的な解決処理とタイムラインから決定するため、物理ファイルを直接編集する項目にはしない。
 
 中央の台本ペインと右側の各設定ペインは選択中のセリフまたはセクションを共有し、変更を上部プレビューへ反映する。ペインの切り替えは表示対象だけを変えるものとし、ビジュアル、キャラクター、背景のデータを別ファイルや別の正本へ分離しない。
 
@@ -832,7 +875,7 @@ AI が生成する内容と人間が入力する指示を視覚的にもデー�
 
 - セリフ ID
 - 話者
-- 台本から決定された表情または感情タイプの表示
+- 台本から決定された論理表情の表示
 - 字幕テキスト
 - VOICEVOX 読み上げテキスト
 - 実際の字幕コンポーネントを使用した字幕プレビュー
@@ -991,56 +1034,98 @@ WebUI は Vite + React SPA、画面ルーティングは React Router、サー�
 
 ### 17.8 キャラクター素材
 
-**推奨案**
+この節では、台本の論理表情、登録済み物理素材、レンダリング時の解決済み情報を分けて扱う。
 
-```text
-characterVariantCatalog[]
-  variantId
-  characterId
-  label
-  renderType: single-image | mouth-pair
-  tags[]
-  files[]
-    sourceFile
-    destinationPath
+#### 論理表情
 
-public/shared-assets/characters/{characterId}/...png
-```
+`ScriptLine.expression` が保持する次の値は、台本上の意味・演出意図を表す論理表情である。
 
-- 透過 PNG を使用する。
-- 全差分でキャンバスサイズ、キャラクターの位置、基準点を統一する。
-- 今回確認済みの基準キャンバスは 600 × 1000 px とし、Remotion 側で縮小表示する。
-- 台本上の表情指定は次の 4 種類を論理表情として維持する。
-  - `neutral`
-  - `smile`
-  - `explain`
-  - `caution`
-- P2-01 の実在素材は、表情への推測マッピングを行わず、カタログへバリアントとして登録する。現時点では通常会話・指差し状態の会話の2ポーズと、非会話状態の単一画像があり、会話バリアントには `closed` と `open` の2差分がある。
-- `stand`、`normal`、`pointing`、`smile`、`caution` などの名称は物理バリアントの固定enumにしない。新しい素材はカタログへ新しい `variantId` とメタデータを追加して認識する。
-- `VideoProject` の永続スキーマはP2-01では変更しない。将来はプロジェクトが安定した `variantId` とカタログのversionを参照し、`RenderManifest` へパスとchecksumを解決する。`ScriptLine.expression` と物理バリアントの対応は未決定とする。
-- デザイン方向は [`character_concept01.png`](./assets/character_concept01.png) と [`character_concept02.png`](./assets/character_concept02.png) のワシ型キャラクターを基礎とする。
-- `character_concept01.png` 側をメンター・案内役として四国めたんへ、`character_concept02.png` 側を生徒・見習い役としてずんだもんへ対応させる。
-- コンセプト画像内の名前、ロゴ、現在の配色は最終仕様にせず、実装用素材では制服の差し色、字幕色、話者 UI を四国めたん／ずんだもんのテーマ色へ変更する。
-- コンセプト画像は複数ポーズと説明文を含むため直接描画せず、透過背景、共通キャンバスの表情・口差分へ書き出した素材を使用する。
+- `neutral`
+- `smile`
+- `explain`
+- `caution`
+
+これらは PNG ファイル名、物理ポーズ名、`variantId` ではない。P2-01 では論理表情から物理バリアントへの対応を決定しない。`caution` から `pointing` へ自動的に割り当てるなどの既定 mapping も存在しない。
+
+#### 物理バリアントと描画方式
+
+実在する利用可能なキャラクター物理素材の正本は、TypeScript で管理された `characterVariantCatalog` である。カタログの各エントリは次の情報を持つ。
+
+- `variantId`: 安定したバリアント識別子
+- `characterId`: `character-mentor` または `character-learner`
+- `label`: 人間が確認する表示名
+- `renderType`: `single-image` または `mouth-pair`
+- `tags`: 検索・分類用の自由なタグ
+- `files`: 描画方式に対応するファイルスロットと元／正規配置パス
+
+`renderType` だけを固定 enum とする。`stand`、`normal`、`pointing`、`smile`、`caution` などの表情・ポーズ名は固定 enum にしない。新しい素材は表情スキーマへ値を追加せず、カタログへ新しい variant とメタデータを登録する。
+
+ファイルスロットは描画方式ごとに異なる。
+
+- `single-image`: `single` を 1 件持つ。口差分を持たない。
+- `mouth-pair`: `closed` と `open` を 1 件ずつ持つ。口パクの対象にできる。
+
+#### P2-01 で確認済みのカタログ
+
+各キャラクターについて、次の 3 variant、合計 5 ファイルを登録している。
+
+- 非会話状態の `single-image`: 1 variant / 1 ファイル
+- 通常会話の `mouth-pair`: 1 variant / `closed` と `open` の 2 ファイル
+- 指差し状態の会話の `mouth-pair`: 1 variant / `closed` と `open` の 2 ファイル
+
+キャンバスは全ファイル 600 × 1000 px であり、2 キャラクター合計で 10 ファイルである。確認済みの元素材と正規配置先は次のとおりである。
+
+| キャラクター | 元素材 | カタログ上の物理バリアント | 正規配置先の例 |
+|---|---|---|---|
+| 四国めたん | `char03_stand01.png` | 非会話状態 | `shared-assets/characters/character-mentor/stand/stand.png` |
+| 四国めたん | `char03_speak01_close/open.png` | 通常会話 | `shared-assets/characters/character-mentor/speak-normal/closed/open.png` |
+| 四国めたん | `char03_speak02_close/open.png` | 指差し状態の会話 | `shared-assets/characters/character-mentor/speak-pointing/closed/open.png` |
+| ずんだもん | `char04_stand01.png` | 非会話状態 | `shared-assets/characters/character-learner/stand/stand.png` |
+| ずんだもん | `char04_speak01_close/open.png` | 通常会話 | `shared-assets/characters/character-learner/speak-normal/closed/open.png` |
+| ずんだもん | `char04_speak02_close/open.png` | 指差し状態の会話 | `shared-assets/characters/character-learner/speak-pointing/closed/open.png` |
+
+PNG は `public/shared-assets/characters/` から配信する。元素材は `doc/assets` に保持し、カタログに登録した source と public のバイト一致を検証する。
+
+#### 現在の永続スキーマとの関係
+
+PR #24 では `VideoProject.schemaVersion` を `1.0.0` のまま維持する。既存 `project.json` の `Character.visualAssets` にある `neutral`、`smile`、`explain`、`caution` の固定 `MouthPair` は、既存プロジェクト互換性のために残る独立した互換フィールドである。
+
+このフィールドは P2-01 の実在物理素材カタログの正本ではない。既存の 4 キーへ同じ画像を重複割り当てたり、物理 variant を推測して保存したりしない。将来この互換フィールドを置き換えるか、どの `schemaVersion` でどの migration を行うかは後続設計で決定する。
+
+#### 解決処理、version、再現性
+
+将来は `ScriptLine.expression` から、キャラクター別の明示的な mapping または人間の選択を経て、安定した `variantId` とカタログの版を解決する。カタログから renderType、ファイルパス、checksum、`mouth-pair` の `closed` / `open` を固定したうえで `RenderManifest` へ渡し、Remotion は解決済み `RenderManifest` だけを入力とする。
+
+次の事項は未決定であり、TBD とする。
+
+- プロジェクト JSON に保存する variant 参照フィールド
+- カタログ version の表現方法
+- variant 単位の version を持つかどうか
+- SQLite へ移行する時期とテーブル構造
+- 論理表情ごとの既定 mapping
+- セリフ単位の物理 variant 上書き
+- `1.0.0` からの migration 方法
+
+解決不能、variant 欠落、mouth slot 欠落時は自動代替せずエラーにする。P2-01 の範囲は初期 2 キャラクター設定、静的カタログ、PNG 検証、読み取り専用確認画面までであり、mapping、SQLite 登録 UI、Remotion 描画は含まない。
 
 ### 17.9 口パク
 
-**推奨案**
+口パクの対象は、`closed` と `open` を持つ `mouth-pair` variant だけである。
 
-- MVP では、発話区間中に 4 フレームごとに口の開閉を交互に切り替える。
-- セリフ開始時は閉じた状態から始め、終了時は必ず閉じる。
-- 無音区間では口を閉じる。
-- 切り替え周期はキャラクター設定で変更可能にする。
-- より自然な動きが必要になった段階で、音声の音量解析に基づく開閉へ差し替える。
+- `single-image` variant に存在しない `open` 画像を推測、複製、加工して使用しない。
+- `single-image` を発話中に表示する方法（静止表示、別の解決済み variant への切り替えなど）は TBD とする。
+- P5-04 では、解決済み `mouth-pair` の発話区間中に `closed` / `open` を定周期で切り替える。
+- セリフ開始時は閉じた状態から始め、終了時と無音区間は閉じた状態とする。
+- 音量解析に基づく口パクへの変更は MVP 後の判断事項である。
 
 ### 17.10 表情
 
-**推奨案**
+ここでいう表情は、台本が保持する論理表情である。物理バリアントや PNG のファイル名と直接同一視しない。
 
-- 表情はセリフ単位で明示指定する。
-- 指定がない場合は `neutral` とする。
-- `caution` は注意事項、禁止事項、失敗時の対応に使用する。
-- セリフ途中の表情変更は初期実装の対象外とする。
+- セリフ単位で `neutral`、`smile`、`explain`、`caution` を指定する。
+- 指定がない場合は論理表情として `neutral` とする。
+- `caution` は注意事項、禁止事項、失敗時の対応を表す意味付けであり、物理 `pointing` などへの自動 mapping ではない。
+- 論理表情から物理 variant を選ぶ規則、セリフ単位で上書きする UI、セリフ途中の表情変更は後続設計で決定する。
 
 ### 17.11 無言区間
 
@@ -1212,7 +1297,7 @@ BGM と挿入プレースホルダー:
 5. VOICEVOX でセリフごとの WAV 音声を生成する。
 6. 音声長と明示的な無音時間から、セリフ、ビジュアル、背景のフレーム範囲を持つ `RenderManifest` を自動生成する。
 7. 同じ `RenderManifest` を使用して WebUI でプレビューする。
-8. Remotion へ `RenderManifest` を props として渡し、字幕、口パク、表情、キャラクター動作、背景、現場動画、写真、帳票スキャンを同期描画する。
+8. Remotion へ解決済みの `RenderManifest` を props として渡し、字幕、論理表情に基づき解決された物理 variant、口パク、キャラクター動作、背景、現場動画、写真、帳票スキャンを同期描画する。
 9. 正本 JSON と `RenderManifest` のスキーマ、素材参照、チェックサム、タイムライン境界、字幕、レイアウトの検証を通す。
 10. 1920 × 1080、30 fps の MP4 を出力する。
 11. 共通テンプレートから 1280 × 720 のサムネイルを出力する。
