@@ -127,6 +127,12 @@ PNG はカタログから参照されるファイル実体であり、PNG 自体
 ### 4.1 コンポーネント
 
 ```text
+Shared TypeScript Modules
+  └─ Character Asset Catalog ─ characterVariantCatalog
+       ├─ WebUI character asset view model
+       ├─ Character Asset Validation (Node / CI)
+       └─ Future Timeline Compiler
+
 WebUI
   │
   ▼
@@ -136,14 +142,17 @@ Local Backend API
   ├─ Terminology Service ─ SQLite
   ├─ OpenRouter Adapter ── OpenRouter API
   ├─ VOICEVOX Adapter ──── Local VOICEVOX ENGINE
-  ├─ Character Asset Catalog ─ TypeScript static catalog
-  ├─ Character Asset Validation
   ├─ Timeline Compiler ─── RenderManifest
   ├─ Validation Service
   └─ Render Service ────── Remotion / FFmpeg
+
+Build / CI
+  └─ Character Asset Validation (Node)
 ```
 
-WebUI はファイル、SQLite、外部 API を直接操作しない。ファイルパスと API キーはバックエンドだけが扱う。
+`characterVariantCatalog` はバックエンドサービスではなく、WebUI と Node 側の検証処理から共有する TypeScript の静的モジュールである。WebUI はビルド時にカタログのメタデータを取り込み、`fetchProject()` で取得したプロジェクト情報と組み合わせて確認画面を生成する。WebUI は PNG のローカルファイルシステムを直接走査せず、source/public の存在・バイト一致・PNG 構造を検査するのは Node スクリプトおよび CI の責務である。
+
+WebUI はプロジェクト保存、SQLite、PNG のローカルファイルシステム、外部 API を直接操作しない。ただし、共有 TypeScript モジュールである `characterVariantCatalog` のメタデータは直接参照できる。カタログは `Asset Service ─ SQLite` の素材ライブラリとは別の責務であり、カタログ取得 API や PNG 検証のバックエンド実行時サービスを追加することを意味しない。
 
 ### 4.2 依存方向
 
