@@ -7,7 +7,7 @@ import {
   createDefaultScriptLine,
   deleteScriptLine,
   duplicateScriptLine,
-  isScriptSaveContextCurrent,
+  isProjectContextCurrent,
   moveScriptLine,
   parseBulkScript,
   reconcileScriptLineIds,
@@ -37,6 +37,16 @@ const script = {
     }
   ]
 };
+
+function deferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((promiseResolve, promiseReject) => {
+    resolve = promiseResolve;
+    reject = promiseReject;
+  });
+  return { promise, resolve, reject };
+}
 
 describe("script editor helpers", () => {
   it("parses half-width and full-width colons, CRLF, and surrounding whitespace", () => {
@@ -219,7 +229,7 @@ describe("script editor helpers", () => {
     const delayedSave = (async () => {
       await saveCompleted;
       if (
-        !isScriptSaveContextCurrent(
+        !isProjectContextCurrent(
           current.projectId,
           current.generation,
           savingProjectId,
@@ -249,5 +259,137 @@ describe("script editor helpers", () => {
       id: "script-line-project-b",
       spokenText: "project B draft"
     });
+  });
+
+  it("ignores a delayed initialization success after switching projects", async () => {
+    const response = deferred<{ revision: number; draft: Script }>();
+    const current: {
+      projectId: string;
+      generation: number;
+      revision: number;
+      draft: Script;
+    } = {
+      projectId: "project-a",
+      generation: 1,
+      revision: 4,
+      draft: script
+    };
+    const initialization = (async () => {
+      const result = await response.promise;
+      if (
+        !isProjectContextCurrent(
+          current.projectId,
+          current.generation,
+          "project-a",
+          1
+        )
+      ) {
+        return;
+      }
+      current.revision = result.revision;
+      current.draft = result.draft;
+    })();
+
+    current.projectId = "project-b";
+    current.generation = 2;
+    current.revision = 9;
+    current.draft = updateScriptLine(script, 0, 0, {
+      id: "script-line-project-b",
+      spokenText: "project B draft"
+    });
+    response.resolve({
+      revision: 5,
+      draft: updateScriptLine(script, 0, 0, {
+        id: "script-line-project-a"
+      })
+    });
+    await initialization;
+
+    expect(current.revision).toBe(9);
+    expect(current.draft.sections[0]?.lines[0]?.id).toBe(
+      "script-line-project-b"
+    );
+  });
+
+  it("does not show a delayed initialization error after switching projects", async () => {
+    const response = deferred<never>();
+    const current = {
+      projectId: "project-a",
+      generation: 1,
+      error: "project B error"
+    };
+    const initialization = (async () => {
+      try {
+        await response.promise;
+      } catch (error) {
+        if (
+          isProjectContextCurrent(
+            current.projectId,
+            current.generation,
+            "project-a",
+            1
+          )
+        ) {
+          current.error = String(error);
+        }
+      }
+    })();
+
+    current.projectId = "project-b";
+    current.generation = 2;
+    response.reject(new Error("project A initialization failed"));
+    await initialization;
+
+    expect(current.error).toBe("project B error");
+  });
+
+  it("ignores a delayed reload result after switching projects", async () => {
+    const response = deferred<{ revision: number; draft: Script }>();
+    const current: {
+      projectId: string;
+      generation: number;
+      revision: number;
+      draft: Script;
+    } = {
+      projectId: "project-a",
+      generation: 1,
+      revision: 4,
+      draft: script
+    };
+    const reload = (async () => {
+      const result = await response.promise;
+      if (
+        !isProjectContextCurrent(
+          current.projectId,
+          current.generation,
+          "project-a",
+          1
+        )
+      ) {
+        return;
+      }
+      current.revision = result.revision;
+      current.draft = result.draft;
+    })();
+
+    current.projectId = "project-b";
+    current.generation = 2;
+    current.revision = 9;
+    current.draft = updateScriptLine(script, 0, 0, {
+      id: "script-line-project-b",
+      spokenText: "project B draft"
+    });
+    response.resolve({
+      revision: 5,
+      draft: updateScriptLine(script, 0, 0, {
+        id: "script-line-project-a"
+      })
+    });
+    await reload;
+
+    expect(current.revision).toBe(9);
+    expect(current.draft.sections[0]?.lines[0]?.id).toBe(
+      "script-line-project-b"
+    );
   });
 });

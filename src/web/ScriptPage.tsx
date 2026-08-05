@@ -35,7 +35,7 @@ import {
   deleteScriptLine,
   duplicateScriptLine,
   isScriptInitializationAllowed,
-  isScriptSaveContextCurrent,
+  isProjectContextCurrent,
   moveScriptLine,
   parseBulkScript,
   reconcileScriptLineIds,
@@ -362,7 +362,7 @@ export function ScriptPage() {
     });
     updateMutationCaches(project);
     if (
-      !isScriptSaveContextCurrent(
+      !isProjectContextCurrent(
         projectIdRef.current,
         projectGenerationRef.current,
         savingProjectId,
@@ -442,14 +442,41 @@ export function ScriptPage() {
   }, [coordinator, projectId, projectQuery.data, projectQuery.isError]);
 
   const initializeMutation = useMutation({
-    mutationFn: (expectedRevision: number) =>
-      initializeProjectScript(projectId ?? "", { expectedRevision }),
-    onSuccess: (project) => {
-      setInitializationError(null);
+    mutationFn: ({
+      projectId,
+      expectedRevision
+    }: {
+      projectId: string;
+      projectGeneration: number;
+      expectedRevision: number;
+    }) => initializeProjectScript(projectId, { expectedRevision }),
+    onSuccess: (project, variables) => {
       updateMutationCaches(project);
+      if (
+        !isProjectContextCurrent(
+          projectIdRef.current,
+          projectGenerationRef.current,
+          variables.projectId,
+          variables.projectGeneration
+        )
+      ) {
+        return;
+      }
+      setInitializationError(null);
       adoptProject(project);
     },
-    onError: setInitializationError,
+    onError: (error, variables) => {
+      if (
+        isProjectContextCurrent(
+          projectIdRef.current,
+          projectGenerationRef.current,
+          variables.projectId,
+          variables.projectGeneration
+        )
+      ) {
+        setInitializationError(error);
+      }
+    },
     retry: false
   });
 
@@ -458,8 +485,19 @@ export function ScriptPage() {
   }
 
   async function reloadLatest(): Promise<void> {
+    const reloadingProjectId = projectIdRef.current;
+    const reloadingGeneration = projectGenerationRef.current;
     const result = await projectQuery.refetch();
-    if (!result.isSuccess || result.data === undefined) {
+    if (
+      !result.isSuccess ||
+      result.data === undefined ||
+      !isProjectContextCurrent(
+        projectIdRef.current,
+        projectGenerationRef.current,
+        reloadingProjectId,
+        reloadingGeneration
+      )
+    ) {
       return;
     }
     initializedForProjectRef.current = null;
@@ -676,7 +714,13 @@ export function ScriptPage() {
             className="button button-primary"
             type="button"
             disabled={!isReadyToInitialize || isInitializing}
-            onClick={() => initializeMutation.mutate(project.revision)}
+            onClick={() =>
+              initializeMutation.mutate({
+                projectId: projectIdRef.current,
+                projectGeneration: projectGenerationRef.current,
+                expectedRevision: project.revision
+              })
+            }
           >
             {isInitializing ? "初期化中…" : "台本編集を開始"}
           </button>

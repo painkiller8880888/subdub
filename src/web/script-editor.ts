@@ -152,7 +152,7 @@ export function reconcileScriptLineIds(
   return reconciled;
 }
 
-export function isScriptSaveContextCurrent(
+export function isProjectContextCurrent(
   currentProjectId: string,
   currentGeneration: number,
   savingProjectId: string,
