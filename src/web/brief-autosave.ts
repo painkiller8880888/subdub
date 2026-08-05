@@ -201,3 +201,15 @@ export class AutosaveCoordinator<T> {
     }
   }
 }
+
+export async function navigateAfterAutosave<T>(
+  coordinator: AutosaveCoordinator<T> | null,
+  destination: string,
+  navigate: (destination: string) => void
+): Promise<boolean> {
+  const flushed = coordinator === null ? true : await coordinator.flush();
+  if (flushed) {
+    navigate(destination);
+  }
+  return flushed;
+}

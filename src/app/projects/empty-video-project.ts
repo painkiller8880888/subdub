@@ -1,4 +1,5 @@
 import {
+  CURRENT_PROJECT_SCHEMA_VERSION,
   videoProjectSchema,
   type VideoProject
 } from "../../schema/index.js";
@@ -60,7 +61,7 @@ export function createEmptyVideoProject(
   const manualVersion = options.manualVersion ?? "";
 
   const project: VideoProject = {
-    schemaVersion: "1.0.0",
+    schemaVersion: CURRENT_PROJECT_SCHEMA_VERSION,
     revision: 0,
     metadata: {
       id: options.projectId,

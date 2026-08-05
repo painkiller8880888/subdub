@@ -12,7 +12,7 @@ const AUDIO_CHECKSUM =
   "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee";
 
 export const videoProjectFixture = {
-  schemaVersion: "1.0.0",
+  schemaVersion: "1.1.0",
   revision: 0,
   metadata: {
     id: "manual-video-project",

@@ -1,6 +1,10 @@
 import { z } from "zod";
 
 import {
+  characterVisualAssetPaths,
+  type CharacterAssetId
+} from "../assets/character-asset-manifest.js";
+import {
   approvalStatusSchema,
   backgroundDefinitionSchema,
   displaySchema,
@@ -300,8 +304,10 @@ export const thumbnailPlanSchema = strictObject({
   layout: z.literal("standard")
 });
 
+export const CURRENT_PROJECT_SCHEMA_VERSION = "1.1.0" as const;
+
 const videoProjectBaseSchema = strictObject({
-  schemaVersion: z.literal("1.0.0"),
+  schemaVersion: z.literal(CURRENT_PROJECT_SCHEMA_VERSION),
   revision: finiteNumberSchema.int().nonnegative(),
   metadata: projectMetadataSchema,
   source: projectSourceSchema,
@@ -357,6 +363,7 @@ export const videoProjectSchema = videoProjectBaseSchema.superRefine(
     const expectedCharacters: ReadonlyMap<
       string,
       {
+        characterId: CharacterAssetId;
         role: "mentor" | "learner";
         speakerName: "四国めたん" | "ずんだもん";
         themeColorToken: "character.metan" | "character.zundamon";
@@ -365,6 +372,7 @@ export const videoProjectSchema = videoProjectBaseSchema.superRefine(
       [
         "character-mentor",
         {
+          characterId: "character-mentor",
           role: "mentor",
           speakerName: "四国めたん",
           themeColorToken: "character.metan"
@@ -373,6 +381,7 @@ export const videoProjectSchema = videoProjectBaseSchema.superRefine(
       [
         "character-learner",
         {
+          characterId: "character-learner",
           role: "learner",
           speakerName: "ずんだもん",
           themeColorToken: "character.zundamon"
@@ -410,6 +419,20 @@ export const videoProjectSchema = videoProjectBaseSchema.superRefine(
           ctx,
           ["characters", index, "themeColorToken"],
           "theme color token does not match the character id"
+        );
+      }
+
+      const expectedVisualAssets = characterVisualAssetPaths(
+        expected.characterId
+      );
+      if (
+        JSON.stringify(character.visualAssets) !==
+        JSON.stringify(expectedVisualAssets)
+      ) {
+        addReferenceIssue(
+          ctx,
+          ["characters", index, "visualAssets"],
+          "visual assets do not match the character id"
         );
       }
     }

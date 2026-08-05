@@ -38,6 +38,7 @@ import {
 } from "./api/client";
 import {
   AutosaveCoordinator,
+  navigateAfterAutosave,
   type AutosaveState
 } from "./brief-autosave";
 import { sameBriefDraft, type BriefDraft } from "./brief-draft";
@@ -669,12 +670,15 @@ function ProjectBriefPage() {
       return;
     }
     setPendingNavigation(true);
-    const flushed = coordinator === null ? true : await coordinator.flush();
+    const flushed = await navigateAfterAutosave(
+      coordinator,
+      destination,
+      navigate
+    );
     if (flushed) {
-      navigate(destination);
-    } else {
-      setPendingNavigation(false);
+      return;
     }
+    setPendingNavigation(false);
   }
 
   if (projectQuery.isError || sourceQuery.isError) {
@@ -789,6 +793,9 @@ function ProjectBriefPage() {
           <Link
             className="button button-primary"
             to={projectCharacterAssetsPath(projectId)}
+            onClick={(event) => {
+              void navigateAway(event, projectCharacterAssetsPath(projectId));
+            }}
           >
             キャラクターを確認
           </Link>

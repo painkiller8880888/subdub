@@ -358,7 +358,7 @@ project-root/
 
 ```ts
 type VideoProject = {
-  schemaVersion: "1.0.0";
+  schemaVersion: "1.1.0";
   revision: number;
   metadata: ProjectMetadata;
   source: ProjectSource;
@@ -374,7 +374,7 @@ type VideoProject = {
 };
 ```
 
-すべてのオブジェクトは既知でないキーを拒否する strict object とする。移行は `schemaVersion` 単位で明示的なマイグレーション関数を実行する。
+すべてのオブジェクトは既知でないキーを拒否する strict object とする。移行は `schemaVersion` 単位で明示的なマイグレーション関数を実行する。現在の `VideoProject` は `1.1.0` とし、`1.0.0` の旧キャラクター素材構造は読み込み時にキャラクターIDごとの正規素材manifestへ移行する。
 
 ### 7.2 メタデータ
 

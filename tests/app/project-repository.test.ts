@@ -9,7 +9,9 @@ import {
   ProjectRepositoryError,
   type ProjectRepositoryFileSystem
 } from "../../src/app/projects/project-repository.js";
+import { characterVisualAssetPaths } from "../../src/assets/character-asset-manifest.js";
 import {
+  CURRENT_PROJECT_SCHEMA_VERSION,
   videoProjectSchema,
   type VideoProject
 } from "../../src/schema/index.js";
@@ -161,6 +163,37 @@ describe("ProjectRepository", () => {
       { source: writes[0], destination: projectFile }
     ]);
     expect(await listTemporaryFiles()).toEqual([]);
+  });
+
+  it("loads a 1.0.0 project after migrating its legacy visual assets", async () => {
+    const legacy = JSON.parse(JSON.stringify(videoProjectFixture)) as {
+      schemaVersion: string;
+      characters: Array<{
+        id: string;
+        visualAssets: unknown;
+      }>;
+    };
+    legacy.schemaVersion = "1.0.0";
+    legacy.characters = legacy.characters.map((character) => ({
+      ...character,
+      visualAssets: {
+        neutral: { closed: "legacy/neutral/closed.png", open: "legacy/neutral/open.png" },
+        smile: { closed: "legacy/smile/closed.png", open: "legacy/smile/open.png" },
+        explain: { closed: "legacy/explain/closed.png", open: "legacy/explain/open.png" },
+        caution: { closed: "legacy/caution/closed.png", open: "legacy/caution/open.png" }
+      }
+    }));
+    await fs.writeFile(projectFile, `${JSON.stringify(legacy)}\n`, "utf8");
+
+    const project = await new ProjectRepository(workspaceRoot).read(projectId);
+
+    expect(project.schemaVersion).toBe(CURRENT_PROJECT_SCHEMA_VERSION);
+    expect(project.characters[0]?.visualAssets).toEqual(
+      characterVisualAssetPaths("character-mentor")
+    );
+    expect(project.characters[1]?.visualAssets).toEqual(
+      characterVisualAssetPaths("character-learner")
+    );
   });
 
   it("rejects a revision conflict before creating a temporary file", async () => {
