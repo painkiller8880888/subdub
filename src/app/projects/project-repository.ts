@@ -11,7 +11,10 @@ import {
   videoProjectSchema,
   type VideoProject
 } from "../../schema/index.js";
-import { invalidateForUpstreamChange } from "./project-invalidation.js";
+import {
+  invalidateForUpstreamChange,
+  outlineContentChanged
+} from "./project-invalidation.js";
 
 export type ProjectRepositoryErrorCode =
   | "PROJECT_ID_INVALID"
@@ -741,10 +744,19 @@ export class ProjectRepository {
       throw revisionConflictError();
     }
     await this.readValidatedSource(paths, currentProject);
+    const outlineChanged = outlineContentChanged(
+      currentProject.outline,
+      outlineResult.data
+    );
+    const baseProject = outlineChanged
+      ? invalidateForUpstreamChange({
+          ...currentProject,
+          outline: outlineResult.data
+        })
+      : { ...currentProject, outline: outlineResult.data };
     const updatedProjectResult = videoProjectSchema.safeParse({
-      ...currentProject,
+      ...baseProject,
       revision: currentProject.revision + 1,
-      outline: outlineResult.data,
       metadata: {
         ...currentProject.metadata,
         updatedAt: this.now().toISOString()

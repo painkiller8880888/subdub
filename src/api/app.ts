@@ -21,7 +21,10 @@ export type AppOptions = {
     "listModels"
   >;
   projectService?: ProjectService;
-  outlineGenerationService?: Pick<OutlineGenerationService, "generate">;
+  outlineGenerationService?: Pick<
+    OutlineGenerationService,
+    "generate" | "regenerate"
+  >;
   staticRoot?: string;
 };
 

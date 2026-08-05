@@ -87,6 +87,7 @@ describe("outline generation API", () => {
         cached: false
       })
     };
+    let runNumber = 0;
     const outlineService = new OutlineGenerationService({
       repository,
       modelService,
@@ -104,7 +105,7 @@ describe("outline generation API", () => {
         })
       },
       now: () => NOW,
-      createId: () => "run-api-outline"
+      createId: () => `run-api-outline-${++runNumber}`
     });
     const server = await initializeServer({
       workspaceRoot,
@@ -149,10 +150,39 @@ describe("outline generation API", () => {
     expect(saved.revision).toBe(3);
     expect(saved.data.outline.status).toBe("needs_review");
 
+    const changedSource = await server.app.inject({
+      method: "PUT",
+      url: `/api/projects/${created.metadata.id}/source`,
+      payload: {
+        markdown: "# 概要\n\n## 手順\n本文\n\n# 確認\n本文\n\n追記",
+        expectedRevision: saved.revision
+      }
+    });
+    const stale = projectMutationResponseSchema.parse(
+      changedSource.json()
+    ).data;
+    const regeneratedResponse = await server.app.inject({
+      method: "POST",
+      url: `/api/projects/${created.metadata.id}/outline/regenerate`,
+      payload: { expectedRevision: stale.revision }
+    });
+    const regenerated = projectMutationResponseSchema.parse(
+      regeneratedResponse.json()
+    );
+    expect(regeneratedResponse.statusCode).toBe(200);
+    expect(regenerated.revision).toBe(stale.revision + 1);
+    expect(regenerated.data.outline.sourceHash).toBe(
+      regenerated.data.source.sha256
+    );
+    expect(regenerated.data.outline.generationRunId).toBe("run-api-outline-2");
+
     const invalid = await server.app.inject({
       method: "POST",
       url: `/api/projects/${created.metadata.id}/outline/generate`,
-      payload: { expectedRevision: 3, taskKind: "script_generation" }
+      payload: {
+        expectedRevision: regenerated.revision,
+        taskKind: "script_generation"
+      }
     });
     const error = apiErrorResponseSchema.parse(invalid.json()).error;
     expect(invalid.statusCode).toBe(422);

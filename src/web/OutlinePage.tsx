@@ -17,6 +17,8 @@ import {
   fetchModels,
   fetchProject,
   generateProjectOutline,
+  regenerateProjectOutline,
+  reviewProjectOutline,
   saveProjectOutline
 } from "./api/client";
 import { AutosaveCoordinator, type AutosaveState } from "./brief-autosave";
@@ -454,6 +456,16 @@ export function OutlinePage() {
       approveProjectOutline(projectId ?? "", { expectedRevision }),
     retry: false
   });
+  const reviewMutation = useMutation({
+    mutationFn: (expectedRevision: number) =>
+      reviewProjectOutline(projectId ?? "", { expectedRevision }),
+    retry: false
+  });
+  const regenerateMutation = useMutation({
+    mutationFn: (input: { expectedRevision: number; modelId: string }) =>
+      regenerateProjectOutline(projectId ?? "", input),
+    retry: false
+  });
   const generateMutation = useMutation({
     mutationFn: (expectedRevision: number) =>
       generateProjectOutline(projectId ?? "", {
@@ -688,7 +700,23 @@ export function OutlinePage() {
     coordinatorRef.current?.reset();
   }
 
-  async function discardAndRegenerate(): Promise<void> {
+  async function markReviewComplete(): Promise<void> {
+    if (coordinatorRef.current === null) {
+      return;
+    }
+    setApprovalError(null);
+    const flushed = await coordinatorRef.current.flush();
+    if (!flushed) {
+      return;
+    }
+    try {
+      applyProjectResult(await reviewMutation.mutateAsync(revisionRef.current));
+    } catch (error) {
+      setApprovalError(error);
+    }
+  }
+
+  async function regenerateStaleOutline(): Promise<void> {
     const currentDraft = draftRef.current;
     if (
       !stale ||
@@ -702,7 +730,7 @@ export function OutlinePage() {
     }
     if (
       !window.confirm(
-        "現在の構成案を破棄して空のdraftへ戻し、最新資料で再生成します。続行しますか？"
+        "現在の構成案を保持したまま、最新資料でAI再生成します。旧構成案は生成失敗時も保持されます。続行しますか？"
       )
     ) {
       return;
@@ -715,20 +743,8 @@ export function OutlinePage() {
       return;
     }
     try {
-      const emptyOutline: Outline = {
-        status: "draft",
-        sourceHash: currentDraft.sourceHash,
-        generationRunId: null,
-        openQuestions: [],
-        sections: []
-      };
-      const cleared = await saveProjectOutline(projectId ?? "", {
-        outline: emptyOutline,
-        expectedRevision: revisionRef.current
-      });
-      applyProjectResult(cleared);
-      const generated = await generateProjectOutline(projectId ?? "", {
-        expectedRevision: cleared.revision,
+      const generated = await regenerateMutation.mutateAsync({
+        expectedRevision: revisionRef.current,
         modelId: selectedModelId
       });
       applyProjectResult(generated);
@@ -853,23 +869,37 @@ export function OutlinePage() {
           >
             企画画面で資料を確認
           </Link>
+          <button
+            className="button"
+            type="button"
+            onClick={() => void markReviewComplete()}
+            disabled={
+              isEmpty ||
+              reviewMutation.isPending ||
+              regenerateMutation.isPending ||
+              autosaveState.status === "conflict"
+            }
+          >
+            最新資料への見直し完了
+          </button>
           {project.script.sections.length === 0 &&
           project.visuals.assignments.length === 0 ? (
             <button
               className="button"
               type="button"
-              onClick={() => void discardAndRegenerate()}
+              onClick={() => void regenerateStaleOutline()}
               disabled={
                 generateMutation.isPending ||
                 isRegenerating ||
+                regenerateMutation.isPending ||
                 selectedModelId === null
               }
             >
-              stale構成案を破棄して再生成
+              stale構成案を再生成
             </button>
           ) : (
             <p className="field-hint">
-              台本またはビジュアルが存在するため、既存データを保護して自動破棄は無効にしています。
+              台本またはビジュアルが存在するため、再生成ではなく見直し完了を利用してください。
             </p>
           )}
         </section>
@@ -914,7 +944,7 @@ export function OutlinePage() {
             )}
           </p>
           <p>
-            明示的に破棄した後の空draftは保持されています。生成を再試行できます。
+            生成前のstale構成案は保持されています。内容を確認して再生成を再試行できます。
           </p>
         </section>
       ) : null}

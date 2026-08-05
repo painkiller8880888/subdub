@@ -5,6 +5,7 @@ import * as path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { initializeServer } from "../../src/api/server.js";
+import { ProjectRepository } from "../../src/app/projects/project-repository.js";
 import {
   apiErrorResponseSchema,
   projectCreateResponseSchema,
@@ -66,6 +67,7 @@ describe("outline editing and approval APIs", () => {
   async function setup(): Promise<{
     server: (typeof servers)[number];
     project: VideoProject;
+    repository: ProjectRepository;
   }> {
     const workspaceRoot = await fs.mkdtemp(
       path.join(tmpdir(), "subdub-outline-edit-")
@@ -102,7 +104,8 @@ describe("outline editing and approval APIs", () => {
     });
     return {
       server,
-      project: projectMutationResponseSchema.parse(briefResponse.json()).data
+      project: projectMutationResponseSchema.parse(briefResponse.json()).data,
+      repository: new ProjectRepository({ workspaceRoot })
     };
   }
 
@@ -345,6 +348,117 @@ describe("outline editing and approval APIs", () => {
         (detail) => detail.path.join(".") === "outline.sourceHash"
       )
     ).toBe(true);
+  });
+
+  it("allows a stale outline to be reviewed against the current source and approved", async () => {
+    const { server, project } = await setup();
+    const saved = await saveOutline(server, project, outlineFor(project));
+    const changedSource = await server.app.inject({
+      method: "PUT",
+      url: `/api/projects/${project.metadata.id}/source`,
+      payload: { markdown: "# changed", expectedRevision: saved.revision }
+    });
+    const stale = projectMutationResponseSchema.parse(
+      changedSource.json()
+    ).data;
+
+    const reviewedResponse = await server.app.inject({
+      method: "POST",
+      url: `/api/projects/${project.metadata.id}/outline/review`,
+      payload: { expectedRevision: stale.revision }
+    });
+    const reviewed = projectMutationResponseSchema.parse(
+      reviewedResponse.json()
+    ).data;
+    expect(reviewedResponse.statusCode).toBe(200);
+    expect(reviewed.outline.status).toBe("needs_review");
+    expect(reviewed.outline.sourceHash).toBe(reviewed.source.sha256);
+    expect(reviewed.outline.sections).toEqual(stale.outline.sections);
+
+    const approvedResponse = await server.app.inject({
+      method: "POST",
+      url: `/api/projects/${project.metadata.id}/outline/approve`,
+      payload: { expectedRevision: reviewed.revision }
+    });
+    const approved = projectMutationResponseSchema.parse(
+      approvedResponse.json()
+    ).data;
+    expect(approvedResponse.statusCode).toBe(200);
+    expect(approved.outline.status).toBe("approved");
+  });
+
+  it("allows stale review and approval when a script already exists", async () => {
+    const { server, project, repository } = await setup();
+    const saved = await saveOutline(server, project, outlineFor(project));
+    const prepared = await repository.save(
+      project.metadata.id,
+      {
+        ...saved,
+        script: {
+          ...saved.script,
+          status: "approved",
+          outlineHash: saved.outline.sourceHash,
+          sections: [
+            {
+              id: "script-main",
+              outlineSectionId: "outline-main",
+              name: "main",
+              background: { kind: "solid", colorToken: "background" },
+              lines: [
+                {
+                  id: "script-line",
+                  speakerId: "character-mentor",
+                  spokenText: "script",
+                  subtitleText: "script",
+                  expression: "neutral",
+                  pauseBeforeMs: 0,
+                  pauseAfterMs: 0,
+                  voiceOverrides: {},
+                  pronunciation: {
+                    mode: "dictionary",
+                    excludedTermIds: []
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      },
+      saved.revision
+    );
+    const changedSource = await server.app.inject({
+      method: "PUT",
+      url: `/api/projects/${project.metadata.id}/source`,
+      payload: { markdown: "# changed", expectedRevision: prepared.revision }
+    });
+    const stale = projectMutationResponseSchema.parse(
+      changedSource.json()
+    ).data;
+
+    const reviewedResponse = await server.app.inject({
+      method: "POST",
+      url: `/api/projects/${project.metadata.id}/outline/review`,
+      payload: { expectedRevision: stale.revision }
+    });
+    const reviewed = projectMutationResponseSchema.parse(
+      reviewedResponse.json()
+    ).data;
+    const approvedResponse = await server.app.inject({
+      method: "POST",
+      url: `/api/projects/${project.metadata.id}/outline/approve`,
+      payload: { expectedRevision: reviewed.revision }
+    });
+
+    expect(reviewedResponse.statusCode).toBe(200);
+    expect(approvedResponse.statusCode).toBe(200);
+    expect(
+      projectMutationResponseSchema.parse(approvedResponse.json()).data.outline
+        .status
+    ).toBe("approved");
+    expect(
+      projectMutationResponseSchema.parse(approvedResponse.json()).data.script
+        .sections
+    ).toHaveLength(1);
   });
 
   it("rejects revision conflicts and malformed mutation bodies without changing the project", async () => {
