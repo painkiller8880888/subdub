@@ -89,9 +89,73 @@ function addLine(script: Script): Script {
   };
 }
 
+function addTwoLines(script: Script): Script {
+  const base: Script["sections"][number]["lines"][number] = {
+    id: "draft-added-line-1",
+    speakerId: "character-mentor",
+    spokenText: "追加されたセリフ1",
+    subtitleText: "追加された字幕1",
+    expression: "neutral",
+    pauseBeforeMs: 0,
+    pauseAfterMs: 250,
+    voiceOverrides: {},
+    pronunciation: { mode: "dictionary", excludedTermIds: [] }
+  };
+  return {
+    ...script,
+    sections: script.sections.map((section, sectionIndex) =>
+      sectionIndex === 0
+        ? {
+            ...section,
+            lines: [
+              base,
+              {
+                ...base,
+                id: "draft-added-line-2",
+                speakerId: "character-learner",
+                spokenText: "追加されたセリフ2",
+                subtitleText: "追加された字幕2"
+              }
+            ]
+          }
+        : section
+    )
+  };
+}
+
+function removeFirstLine(script: Script): Script {
+  return {
+    ...script,
+    sections: script.sections.map((section, sectionIndex) =>
+      sectionIndex === 0
+        ? { ...section, lines: section.lines.slice(1) }
+        : section
+    )
+  };
+}
+
+function reverseFirstSectionLines(script: Script): Script {
+  return {
+    ...script,
+    sections: script.sections.map((section, sectionIndex) =>
+      sectionIndex === 0
+        ? { ...section, lines: [...section.lines].reverse() }
+        : section
+    )
+  };
+}
+
 function withMeaningfulVisuals(
   project: VideoProject,
   lineId: string
+): VideoProject {
+  return withRangeVisuals(project, lineId, lineId);
+}
+
+function withRangeVisuals(
+  project: VideoProject,
+  startLineId: string,
+  endLineId: string
 ): VideoProject {
   return {
     ...project,
@@ -101,8 +165,8 @@ function withMeaningfulVisuals(
       assignments: [
         {
           id: "visual-assignment-1",
-          startLineId: lineId,
-          endLineId: lineId,
+          startLineId,
+          endLineId,
           assetId: "asset-demo",
           assetChecksum:
             "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
@@ -393,5 +457,90 @@ describe("ProjectService script approval and stale invalidation", () => {
     expect(structured.visuals.assignments).toEqual(
       approved.visuals.assignments
     );
+  });
+
+  it("prunes a visual assignment when an assigned line is deleted", async () => {
+    const { repository, service, project } = await setup();
+    const withLine = await service.saveScript(project.metadata.id, {
+      script: addLine(project.script),
+      expectedRevision: project.revision
+    });
+    const savedLineId = withLine.script.sections[0]?.lines[0]?.id;
+    if (savedLineId === undefined) {
+      throw new Error("saved line is missing");
+    }
+    const withVisuals = await repository.save(
+      project.metadata.id,
+      withMeaningfulVisuals(withLine, savedLineId),
+      withLine.revision
+    );
+    const approved = await service.approveScript(project.metadata.id, {
+      expectedRevision: withVisuals.revision
+    });
+    const candidate: Script = {
+      ...removeFirstLine(approved.script),
+      status: "needs_review"
+    };
+    const deleted = await service.saveScript(project.metadata.id, {
+      script: candidate,
+      expectedRevision: approved.revision
+    });
+
+    expect(deleted.script.status).toBe("needs_review");
+    expect(deleted.visuals.status).toBe("needs_review");
+    expect(deleted.visuals.assignments).toEqual([]);
+  });
+
+  it("prunes a visual assignment whose range breaks after a reorder", async () => {
+    const { repository, service, project } = await setup();
+    const withLines = await service.saveScript(project.metadata.id, {
+      script: addTwoLines(project.script),
+      expectedRevision: project.revision
+    });
+    const lines = withLines.script.sections[0]?.lines ?? [];
+    const startLineId = lines[0]?.id;
+    const endLineId = lines[1]?.id;
+    if (startLineId === undefined || endLineId === undefined) {
+      throw new Error("saved lines are missing");
+    }
+    const withVisuals = await repository.save(
+      project.metadata.id,
+      withRangeVisuals(withLines, startLineId, endLineId),
+      withLines.revision
+    );
+    const approved = await service.approveScript(project.metadata.id, {
+      expectedRevision: withVisuals.revision
+    });
+    const candidate: Script = {
+      ...reverseFirstSectionLines(approved.script),
+      status: "needs_review"
+    };
+    const reordered = await service.saveScript(project.metadata.id, {
+      script: candidate,
+      expectedRevision: approved.revision
+    });
+
+    expect(reordered.script.status).toBe("needs_review");
+    expect(reordered.visuals.status).toBe("needs_review");
+    expect(reordered.visuals.assignments).toEqual([]);
+  });
+
+  it("reports a revision conflict before approval condition errors when both apply", async () => {
+    const { repository, service, project } = await setup();
+    const stale = await repository.saveSource(
+      project.metadata.id,
+      "# changed source",
+      project.revision
+    );
+
+    await expect(
+      service.approveScript(project.metadata.id, {
+        expectedRevision: stale.revision - 1
+      })
+    ).rejects.toMatchObject({
+      code: "PROJECT_REVISION_CONFLICT",
+      status: 409
+    });
+    expect(stale.outline.status).not.toBe("approved");
   });
 });

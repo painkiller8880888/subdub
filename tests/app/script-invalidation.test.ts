@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import {
   applyEditedScript,
-  classifyScriptChange
+  classifyScriptChange,
+  pruneInvalidatedDownstreamReferences
 } from "../../src/app/projects/script-invalidation.js";
 import type { Script, VideoProject } from "../../src/schema/index.js";
 import { videoProjectFixture } from "../fixtures/video-project.js";
@@ -193,5 +194,91 @@ describe("applyEditedScript", () => {
     expect(result.project.thumbnail).toEqual(project.thumbnail);
     expect(result.project.revision).toBe(project.revision);
     expect(result.project.metadata).toEqual(project.metadata);
+  });
+});
+
+describe("pruneInvalidatedDownstreamReferences", () => {
+  it("drops a visual assignment and sound effect whose line was deleted", () => {
+    const project = projectFixture();
+    const candidate = {
+      ...project.script,
+      sections: project.script.sections.map((section, index) =>
+        index === 2 ? { ...section, lines: section.lines.slice(1) } : section
+      )
+    };
+    const result = applyEditedScript(project, candidate);
+
+    expect(result.impact.structuralChanged).toBe(true);
+    expect(
+      result.project.visuals.assignments.some(
+        (assignment) => assignment.id === "visual-outro-document"
+      )
+    ).toBe(false);
+    expect(
+      result.project.audio.soundEffects.some(
+        (effect) => effect.id === "effect-attention"
+      )
+    ).toBe(false);
+    expect(
+      result.project.visuals.assignments.some(
+        (assignment) => assignment.id === "visual-intro-video"
+      )
+    ).toBe(true);
+    expect(
+      result.project.audio.soundEffects.some(
+        (effect) => effect.id === "effect-confirm"
+      )
+    ).toBe(true);
+  });
+
+  it("drops only the visual assignment whose range is reversed by a reorder", () => {
+    const project = projectFixture();
+    const candidate = {
+      ...project.script,
+      sections: project.script.sections.map((section, index) =>
+        index === 0
+          ? { ...section, lines: [...section.lines].reverse() }
+          : section
+      )
+    };
+    const result = applyEditedScript(project, candidate);
+
+    expect(result.impact.structuralChanged).toBe(true);
+    expect(
+      result.project.visuals.assignments.some(
+        (assignment) => assignment.id === "visual-intro-video"
+      )
+    ).toBe(false);
+    expect(
+      result.project.visuals.assignments.some(
+        (assignment) => assignment.id === "visual-main-photo"
+      )
+    ).toBe(true);
+    expect(
+      result.project.visuals.assignments.some(
+        (assignment) => assignment.id === "visual-outro-document"
+      )
+    ).toBe(true);
+  });
+
+  it("keeps assignments that still reference existing lines after an append", () => {
+    const project = projectFixture();
+    const candidate = addFirstLine(project.script);
+    const result = applyEditedScript(project, candidate);
+
+    expect(result.impact.structuralChanged).toBe(true);
+    expect(result.project.visuals.assignments).toEqual(
+      project.visuals.assignments
+    );
+    expect(result.project.audio.soundEffects).toEqual(
+      project.audio.soundEffects
+    );
+  });
+
+  it("is a no-op for a project without script changes", () => {
+    const project = projectFixture();
+    const pruned = pruneInvalidatedDownstreamReferences(project);
+
+    expect(pruned).toEqual(project);
   });
 });

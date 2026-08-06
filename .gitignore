@@ -16,7 +16,7 @@ library/*.sqlite-*
 library/*.sqlite.*
 library/media/
 library/thumbnails/
-projects/
+/projects/
 public/shared-assets/
 !public/shared-assets/
 !public/shared-assets/characters/

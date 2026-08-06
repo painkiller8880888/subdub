@@ -268,6 +268,28 @@ describe("script approval API", () => {
     expect(await readProject(server, initialized)).toEqual(before);
   });
 
+  it("returns a revision conflict before approval condition errors when both apply", async () => {
+    const { server, project } = await setup();
+    const initialized = await initialize(server, project);
+    const changedSource = await server.app.inject({
+      method: "PUT",
+      url: `/api/projects/${project.metadata.id}/source`,
+      payload: { markdown: "# changed", expectedRevision: initialized.revision }
+    });
+    const stale = projectMutationResponseSchema.parse(
+      changedSource.json()
+    ).data;
+    expect(stale.outline.status).not.toBe("approved");
+    const response = await server.app.inject({
+      method: "POST",
+      url: `/api/projects/${project.metadata.id}/script/approve`,
+      payload: { expectedRevision: stale.revision - 1 }
+    });
+
+    expect(response.statusCode).toBe(409);
+    expect(parseError(response).code).toBe("PROJECT_REVISION_CONFLICT");
+  });
+
   it("rejects unknown fields in the approve request", async () => {
     const { server, project } = await setup();
     const initialized = await initialize(server, project);

@@ -311,19 +311,9 @@ export class ProjectService {
       ]);
     }
 
-    const candidateProjectResult = videoProjectSchema.safeParse({
-      ...currentProject,
-      script: request.script
-    });
-    if (!candidateProjectResult.success) {
-      throw new ScriptValidationError(
-        scriptValidationIssues(candidateProjectResult.error.issues)
-      );
-    }
-
     const normalizedScript = normalizeEditedScriptIds(
       currentProject,
-      candidateProjectResult.data.script,
+      request.script,
       this.createId
     );
     const { project } = applyEditedScript(currentProject, normalizedScript);
@@ -344,6 +334,14 @@ export class ProjectService {
   async approveScript(projectId: unknown, input: unknown): Promise<VideoProject> {
     const request = scriptApproveRequestSchema.parse(input);
     const snapshot = await this.repository.readGenerationSnapshot(projectId);
+    if (snapshot.project.revision !== request.expectedRevision) {
+      throw new ProjectRepositoryError(
+        "PROJECT_REVISION_CONFLICT",
+        409,
+        "The project revision does not match the expected revision."
+      );
+    }
+
     assertCanApproveScript(snapshot.project, snapshot.sourceHash);
     const script: Script = {
       ...snapshot.project.script,
