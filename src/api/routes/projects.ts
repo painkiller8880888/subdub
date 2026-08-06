@@ -13,6 +13,7 @@ import {
   projectMutationResponseSchema,
   projectSourceReadResponseSchema,
   projectSourceSaveRequestSchema,
+  scriptApproveRequestSchema,
   scriptInitializeRequestSchema,
   scriptSaveRequestSchema
 } from "../../schema/api.js";
@@ -119,6 +120,20 @@ export function registerProjectRoutes(
     async (request) => {
       const input = scriptSaveRequestSchema.parse(request.body);
       const project = await projectService.saveScript(
+        request.params.projectId,
+        input
+      );
+      return projectMutationResponseSchema.parse(
+        createApiSuccessResponse(project, project.revision)
+      );
+    }
+  );
+
+  app.post<{ Params: { projectId: string } }>(
+    "/api/projects/:projectId/script/approve",
+    async (request) => {
+      const input = scriptApproveRequestSchema.parse(request.body);
+      const project = await projectService.approveScript(
         request.params.projectId,
         input
       );

@@ -1,0 +1,232 @@
+import type {
+  Script,
+  ScriptLine,
+  VideoProject
+} from "../../schema/video-project.js";
+import { hasMeaningfulVisuals } from "./project-invalidation.js";
+import { scriptContentChanged } from "./script-domain.js";
+
+export type ScriptStaleTarget = "visuals" | "audio" | "manifest";
+
+export type ScriptChangeImpact = {
+  contentChanged: boolean;
+  structuralChanged: boolean;
+  staleTargets: readonly ScriptStaleTarget[];
+};
+
+const STALE_TARGET_ORDER: readonly ScriptStaleTarget[] = [
+  "visuals",
+  "audio",
+  "manifest"
+];
+
+function deepEqual(first: unknown, second: unknown): boolean {
+  if (first === second) {
+    return true;
+  }
+  if (first === null || second === null) {
+    return false;
+  }
+  if (Array.isArray(first)) {
+    return (
+      Array.isArray(second) &&
+      first.length === second.length &&
+      first.every((item, index) => deepEqual(item, second[index]))
+    );
+  }
+  if (typeof first === "object" && typeof second === "object") {
+    if (Array.isArray(second)) {
+      return false;
+    }
+    const firstRecord = first as Record<string, unknown>;
+    const secondRecord = second as Record<string, unknown>;
+    const firstKeys = Object.keys(firstRecord).sort();
+    const secondKeys = Object.keys(secondRecord).sort();
+    if (firstKeys.length !== secondKeys.length) {
+      return false;
+    }
+    return firstKeys.every(
+      (key, index) =>
+        secondKeys[index] === key &&
+        deepEqual(firstRecord[key], secondRecord[key])
+    );
+  }
+  return false;
+}
+
+function structureChanged(current: Script, candidate: Script): boolean {
+  if (current.sections.length !== candidate.sections.length) {
+    return true;
+  }
+
+  for (let sectionIndex = 0; sectionIndex < current.sections.length; sectionIndex += 1) {
+    const currentLines = current.sections[sectionIndex]?.lines ?? [];
+    const candidateLines = candidate.sections[sectionIndex]?.lines ?? [];
+    if (currentLines.length !== candidateLines.length) {
+      return true;
+    }
+    for (let lineIndex = 0; lineIndex < currentLines.length; lineIndex += 1) {
+      if (currentLines[lineIndex]?.id !== candidateLines[lineIndex]?.id) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
+function audioFieldsChanged(current: ScriptLine, candidate: ScriptLine): boolean {
+  return (
+    current.spokenText !== candidate.spokenText ||
+    current.speakerId !== candidate.speakerId ||
+    !deepEqual(current.voiceOverrides, candidate.voiceOverrides) ||
+    current.pronunciation.mode !== candidate.pronunciation.mode ||
+    !deepEqual(
+      current.pronunciation.excludedTermIds,
+      candidate.pronunciation.excludedTermIds
+    )
+  );
+}
+
+function manifestFieldsChanged(
+  current: ScriptLine,
+  candidate: ScriptLine
+): boolean {
+  return (
+    current.subtitleText !== candidate.subtitleText ||
+    current.expression !== candidate.expression ||
+    current.pauseBeforeMs !== candidate.pauseBeforeMs ||
+    current.pauseAfterMs !== candidate.pauseAfterMs
+  );
+}
+
+function sectionBackgroundChanged(
+  current: Script,
+  candidate: Script
+): boolean {
+  return current.sections.some((section, sectionIndex) => {
+    const candidateSection = candidate.sections[sectionIndex];
+    return (
+      candidateSection !== undefined &&
+      !deepEqual(section.background, candidateSection.background)
+    );
+  });
+}
+
+function linesById(script: Script): Map<string, ScriptLine> {
+  const linesById = new Map<string, ScriptLine>();
+  for (const section of script.sections) {
+    for (const line of section.lines) {
+      linesById.set(line.id, line);
+    }
+  }
+  return linesById;
+}
+
+export function classifyScriptChange(
+  current: Script,
+  candidate: Script
+): ScriptChangeImpact {
+  const contentChanged = scriptContentChanged(current, candidate);
+  const structuralChanged = structureChanged(current, candidate);
+
+  const staleTargets = new Set<ScriptStaleTarget>();
+  if (structuralChanged) {
+    staleTargets.add("visuals");
+    staleTargets.add("audio");
+    staleTargets.add("manifest");
+  }
+
+  const candidateLines = linesById(candidate);
+  for (const currentLine of linesById(current).values()) {
+    const candidateLine = candidateLines.get(currentLine.id);
+    if (candidateLine === undefined) {
+      continue;
+    }
+    if (audioFieldsChanged(currentLine, candidateLine)) {
+      staleTargets.add("audio");
+      staleTargets.add("manifest");
+    }
+    if (manifestFieldsChanged(currentLine, candidateLine)) {
+      staleTargets.add("manifest");
+    }
+  }
+
+  if (sectionBackgroundChanged(current, candidate)) {
+    staleTargets.add("manifest");
+  }
+
+  return {
+    contentChanged,
+    structuralChanged,
+    staleTargets: STALE_TARGET_ORDER.filter((target) => staleTargets.has(target))
+  };
+}
+
+function linePositions(
+  script: Script
+): Map<string, { sectionId: string; index: number }> {
+  const positions = new Map<string, { sectionId: string; index: number }>();
+  for (const section of script.sections) {
+    for (const [index, line] of section.lines.entries()) {
+      positions.set(line.id, { sectionId: section.id, index });
+    }
+  }
+  return positions;
+}
+
+export function pruneInvalidatedDownstreamReferences(
+  project: VideoProject
+): VideoProject {
+  const positions = linePositions(project.script);
+  const assignments = project.visuals.assignments.filter((assignment) => {
+    const start = positions.get(assignment.startLineId);
+    const end = positions.get(assignment.endLineId);
+    if (start === undefined || end === undefined) {
+      return false;
+    }
+    if (start.sectionId !== end.sectionId) {
+      return false;
+    }
+    return start.index <= end.index;
+  });
+  const soundEffects = project.audio.soundEffects.filter((effect) =>
+    positions.has(effect.lineId)
+  );
+  return {
+    ...project,
+    visuals: { ...project.visuals, assignments },
+    audio: { ...project.audio, soundEffects }
+  };
+}
+
+export function applyEditedScript(
+  currentProject: VideoProject,
+  candidate: Script
+): { project: VideoProject; impact: ScriptChangeImpact } {
+  const impact = classifyScriptChange(currentProject.script, candidate);
+  const status =
+    currentProject.script.status === "approved"
+      ? impact.contentChanged
+        ? "needs_review"
+        : "approved"
+      : candidate.status;
+
+  let project: VideoProject = {
+    ...currentProject,
+    script: { ...candidate, status }
+  };
+
+  if (impact.structuralChanged && hasMeaningfulVisuals(project)) {
+    project = {
+      ...project,
+      visuals: { ...project.visuals, status: "needs_review" }
+    };
+  }
+
+  if (impact.structuralChanged) {
+    project = pruneInvalidatedDownstreamReferences(project);
+  }
+
+  return { project, impact };
+}

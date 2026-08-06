@@ -11,6 +11,7 @@ import {
   moveScriptLine,
   parseBulkScript,
   reconcileScriptLineIds,
+  scriptStatusAfterEdit,
   updateScriptLine,
   validateScriptDraft
 } from "../../src/web/script-editor.js";
@@ -49,6 +50,17 @@ function deferred<T>() {
 }
 
 describe("script editor helpers", () => {
+  it("keeps the server status on load and only edits an approved script into needs_review", () => {
+    expect(scriptStatusAfterEdit("approved", "approved")).toBe("needs_review");
+    expect(scriptStatusAfterEdit("approved", "needs_review")).toBe(
+      "needs_review"
+    );
+    expect(scriptStatusAfterEdit("draft", "draft")).toBe("draft");
+    expect(scriptStatusAfterEdit("needs_review", "needs_review")).toBe(
+      "needs_review"
+    );
+  });
+
   it("parses half-width and full-width colons, CRLF, and surrounding whitespace", () => {
     const result = parseBulkScript(
       " 四国めたん： 最初の本文。\r\n\r\nずんだもん: 二つ目の本文。 ",

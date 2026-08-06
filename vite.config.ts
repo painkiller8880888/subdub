@@ -18,10 +18,7 @@ export default defineConfig({
     port: 5173,
     strictPort: true,
     proxy: {
-      "/api/health": apiProxy,
-      "/api/models": apiProxy,
-      "/api/projects": apiProxy,
-      "/api/terminology": apiProxy
+      "/api": apiProxy
     }
   },
   build: {

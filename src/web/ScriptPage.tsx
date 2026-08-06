@@ -19,10 +19,11 @@ import {
 import {
   ApiClientError,
   ApiClientProtocolError,
+  approveProjectScript,
   fetchProject,
   initializeProjectScript,
   saveProjectScript
-} from "./api/client";
+} from "./lib/api-client";
 import {
   AutosaveCoordinator,
   navigateAfterAutosave,
@@ -39,6 +40,7 @@ import {
   moveScriptLine,
   parseBulkScript,
   reconcileScriptLineIds,
+  scriptStatusAfterEdit,
   updateScriptLine,
   validateScriptDraft,
   type BulkPasteError,
@@ -64,6 +66,17 @@ function getErrorMessage(error: unknown, fallback: string): string {
     return "入力内容を確認してください。";
   }
   return fallback;
+}
+
+function scriptStatusLabel(status: Script["status"]): string {
+  switch (status) {
+    case "approved":
+      return "approved（承認済み）";
+    case "needs_review":
+      return "needs_review（要確認）";
+    default:
+      return "draft（下書き）";
+  }
 }
 
 function errorDetails(error: unknown): string[] {
@@ -292,6 +305,7 @@ export function ScriptPage() {
   const [bulkErrors, setBulkErrors] = useState<BulkPasteError[]>([]);
   const [pendingNavigation, setPendingNavigation] = useState(false);
   const [initializationError, setInitializationError] = useState<unknown>(null);
+  const [approvalError, setApprovalError] = useState<unknown>(null);
   const projectIdRef = useRef(projectId ?? "");
   const projectGenerationRef = useRef(0);
   const revisionRef = useRef(0);
@@ -317,6 +331,17 @@ export function ScriptPage() {
   const saveMutationRef = useRef(saveMutation);
   saveMutationRef.current = saveMutation;
 
+  const approveMutation = useMutation({
+    mutationFn: ({
+      projectId,
+      expectedRevision
+    }: {
+      projectId: string;
+      expectedRevision: number;
+    }) => approveProjectScript(projectId, { expectedRevision }),
+    retry: false
+  });
+
   function updateMutationCaches(project: VideoProject): void {
     queryClient.setQueryData(["projects", project.metadata.id], project);
     queryClient.setQueryData<ProjectSummary[]>(["projects"], (summaries) =>
@@ -329,13 +354,7 @@ export function ScriptPage() {
   }
 
   function adoptProject(project: VideoProject): void {
-    const nextDraft = cloneScript({
-      ...project.script,
-      status:
-        project.script.status === "approved"
-          ? "needs_review"
-          : project.script.status
-    });
+    const nextDraft = cloneScript(project.script);
     revisionRef.current = project.revision;
     draftRef.current = nextDraft;
     lastSavedRef.current = nextDraft;
@@ -373,11 +392,10 @@ export function ScriptPage() {
     }
     revisionRef.current = project.revision;
     const latestDraft = draftRef.current ?? nextDraft;
-    const reconciledDraft = reconcileScriptLineIds(
-      nextDraft,
-      project.script,
-      latestDraft
-    );
+    const reconciledDraft = {
+      ...reconcileScriptLineIds(nextDraft, project.script, latestDraft),
+      status: project.script.status
+    };
     lastSavedRef.current = cloneScript(project.script);
     draftRef.current = reconciledDraft;
     coordinatorRef.current?.replaceDraft(reconciledDraft);
@@ -538,10 +556,57 @@ export function ScriptPage() {
     }
   }
 
+  async function approve(): Promise<void> {
+    if (coordinatorRef.current === null) {
+      return;
+    }
+    setApprovalError(null);
+    const flushed = await coordinatorRef.current.flush();
+    if (!flushed) {
+      return;
+    }
+    const approvingProjectId = projectIdRef.current;
+    const approvingGeneration = projectGenerationRef.current;
+    try {
+      const saved = await approveMutation.mutateAsync({
+        projectId: approvingProjectId,
+        expectedRevision: revisionRef.current
+      });
+      updateMutationCaches(saved);
+      if (
+        !isProjectContextCurrent(
+          projectIdRef.current,
+          projectGenerationRef.current,
+          approvingProjectId,
+          approvingGeneration
+        )
+      ) {
+        return;
+      }
+      adoptProject(saved);
+    } catch (error) {
+      if (
+        isProjectContextCurrent(
+          projectIdRef.current,
+          projectGenerationRef.current,
+          approvingProjectId,
+          approvingGeneration
+        )
+      ) {
+        setApprovalError(error);
+      }
+    }
+  }
+
   function updateDraft(nextDraft: Script): void {
-    draftRef.current = nextDraft;
-    setDraft(nextDraft);
-    coordinatorRef.current?.update(nextDraft);
+    const status = scriptStatusAfterEdit(
+      draftRef.current?.status ?? nextDraft.status,
+      nextDraft.status
+    );
+    const statusDraft = { ...nextDraft, status };
+    draftRef.current = statusDraft;
+    setDraft(statusDraft);
+    coordinatorRef.current?.update(statusDraft);
   }
 
   function updateLine(
@@ -759,6 +824,7 @@ export function ScriptPage() {
       <div className="autosave-status" role="status" aria-live="polite">
         <strong>{autosaveMessage}</strong>
         <span>revision {revisionRef.current}</span>
+        <span>{scriptStatusLabel(draft.status)}</span>
       </div>
 
       {autosaveState.status === "error" ? (
@@ -920,6 +986,38 @@ export function ScriptPage() {
           </section>
         ))}
       </section>
+      {approvalError !== null ? (
+        <section className="message-panel message-panel-error" role="alert">
+          <h2>台本を承認できません</h2>
+          <p>
+            {getErrorMessage(
+              approvalError,
+              "台本の承認条件を満たしていません。"
+            )}
+          </p>
+          {errorDetails(approvalError).length > 0 ? (
+            <ul>
+              {errorDetails(approvalError).map((detail) => (
+                <li key={detail}>{detail}</li>
+              ))}
+            </ul>
+          ) : null}
+        </section>
+      ) : null}
+      <div className="form-actions outline-actions">
+        <button
+          className="button button-primary"
+          type="button"
+          onClick={() => void approve()}
+          disabled={
+            approveMutation.isPending ||
+            autosaveState.status === "conflict" ||
+            autosaveState.status === "error"
+          }
+        >
+          {approveMutation.isPending ? "承認中…" : "台本を承認"}
+        </button>
+      </div>
     </main>
   );
 }

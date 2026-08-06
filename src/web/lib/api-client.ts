@@ -15,6 +15,7 @@ import {
   projectMutationResponseSchema,
   projectSourceReadResponseSchema,
   projectSourceSaveRequestSchema,
+  scriptApproveRequestSchema,
   scriptInitializeRequestSchema,
   scriptSaveRequestSchema,
   terminologyCreateRequestSchema,
@@ -35,6 +36,7 @@ import {
   type ModelsResponse,
   type ProjectSourceContent,
   type ProjectSourceSaveRequest,
+  type ScriptApproveRequest,
   type ScriptInitializeRequest,
   type ScriptSaveRequest,
   type ProjectSummary,
@@ -326,6 +328,25 @@ export async function saveProjectScript(
     projectMutationResponseSchema,
     {
       method: "PUT",
+      headers: {
+        "content-type": "application/json"
+      },
+      body: JSON.stringify(validatedInput)
+    }
+  );
+  return response.data;
+}
+
+export async function approveProjectScript(
+  projectId: string,
+  input: ScriptApproveRequest
+): Promise<VideoProject> {
+  const validatedInput = scriptApproveRequestSchema.parse(input);
+  const response = await fetchApi(
+    `/api/projects/${encodeURIComponent(projectId)}/script/approve`,
+    projectMutationResponseSchema,
+    {
+      method: "POST",
       headers: {
         "content-type": "application/json"
       },

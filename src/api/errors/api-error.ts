@@ -12,6 +12,7 @@ import {
 import { OutlineGenerationError } from "../../app/projects/outline-generation-errors.js";
 import { OutlineApprovalError } from "../../app/projects/outline-approval.js";
 import {
+  ScriptApprovalError,
   ScriptInitializationError,
   ScriptValidationError
 } from "../../app/projects/script-errors.js";
@@ -476,6 +477,7 @@ export function mapApiError(error: unknown): MappedApiError {
 
   if (
     error instanceof ScriptInitializationError ||
+    error instanceof ScriptApprovalError ||
     error instanceof ScriptValidationError
   ) {
     return {

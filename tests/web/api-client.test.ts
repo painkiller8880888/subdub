@@ -5,6 +5,7 @@ import {
   ApiClientError,
   ApiClientProtocolError,
   approveProjectOutline,
+  approveProjectScript,
   createProject,
   fetchModels,
   fetchProject,
@@ -19,7 +20,7 @@ import {
   deactivateTerminology,
   activateTerminology,
   previewTerminology
-} from "../../src/web/api/client.js";
+} from "../../src/web/lib/api-client.js";
 import {
   healthResponseSchema,
   projectListResponseSchema,
@@ -234,6 +235,35 @@ describe("web API client", () => {
       expectedRevision: project.revision
     });
     expect(JSON.parse(String(calls[2]?.init?.body))).toEqual({
+      expectedRevision: project.revision
+    });
+  });
+
+  it("uses the shared mutation contract for script approval", async () => {
+    const project = createEmptyVideoProject({
+      projectId: "script-client-project",
+      createdAt: "2026-08-04T00:00:00.000Z"
+    });
+    const calls: Array<{ input: string; init: RequestInit | undefined }> = [];
+    globalThis.fetch = async (input, init) => {
+      calls.push({ input: String(input), init });
+      return jsonResponse({ data: project, revision: project.revision }, 200);
+    };
+
+    await expect(
+      approveProjectScript(project.metadata.id, {
+        expectedRevision: project.revision
+      })
+    ).resolves.toEqual(project);
+
+    expect(calls.map((call) => call.input)).toEqual([
+      "/api/projects/script-client-project/script/approve"
+    ]);
+    expect(calls[0]?.init?.method).toBe("POST");
+    expect(calls[0]?.init?.headers).toEqual({
+      "content-type": "application/json"
+    });
+    expect(JSON.parse(String(calls[0]?.init?.body))).toEqual({
       expectedRevision: project.revision
     });
   });
