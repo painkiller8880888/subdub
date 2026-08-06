@@ -11,6 +11,7 @@ import {
 import {
   outlineSchema,
   projectBriefSchema,
+  pronunciationSchema,
   scriptSchema,
   videoProjectSchema
 } from "./video-project.js";
@@ -272,6 +273,29 @@ export const terminologyTermResponseSchema = strictObject({
   revision: nonNegativeIntegerSchema.optional()
 });
 
+export const terminologyPreviewRequestSchema = strictObject({
+  spokenText: z.string().refine((value) => value.trim().length > 0, {
+    message: "spokenText must not be blank"
+  }),
+  pronunciation: pronunciationSchema
+});
+
+export const appliedTerminologySchema = strictObject({
+  termId: idSchema,
+  surface: z.string().min(1),
+  reading: z.string().min(1),
+  termUpdatedAt: isoUtcDateTimeSchema
+});
+
+export const terminologyPreviewResultSchema = strictObject({
+  resolvedSpokenText: z.string(),
+  appliedTerms: z.array(appliedTerminologySchema)
+});
+
+export const terminologyPreviewResponseSchema = strictObject({
+  data: terminologyPreviewResultSchema
+});
+
 export type ApiErrorDetail = z.infer<typeof apiErrorDetailSchema>;
 export type ApiSuccessResponse<T> = {
   data: T;
@@ -329,6 +353,16 @@ export type TerminologyListResponse = z.infer<
 >;
 export type TerminologyTermResponse = z.infer<
   typeof terminologyTermResponseSchema
+>;
+export type TerminologyPreviewRequest = z.infer<
+  typeof terminologyPreviewRequestSchema
+>;
+export type AppliedTerminology = z.infer<typeof appliedTerminologySchema>;
+export type TerminologyPreviewResult = z.infer<
+  typeof terminologyPreviewResultSchema
+>;
+export type TerminologyPreviewResponse = z.infer<
+  typeof terminologyPreviewResponseSchema
 >;
 
 export function createApiSuccessResponse<T>(

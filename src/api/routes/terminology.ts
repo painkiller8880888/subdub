@@ -6,6 +6,8 @@ import {
   terminologyCreateRequestSchema,
   terminologyListQuerySchema,
   terminologyListResponseSchema,
+  terminologyPreviewRequestSchema,
+  terminologyPreviewResponseSchema,
   terminologyTermParamsSchema,
   terminologyTermResponseSchema,
   terminologyUpdateRequestSchema
@@ -13,7 +15,7 @@ import {
 
 export type TerminologyServicePort = Pick<
   TerminologyService,
-  "list" | "create" | "get" | "update" | "deactivate" | "activate"
+  "list" | "create" | "get" | "update" | "deactivate" | "activate" | "preview"
 >;
 
 export function registerTerminologyRoutes(
@@ -24,6 +26,13 @@ export function registerTerminologyRoutes(
     const query = terminologyListQuerySchema.parse(request.query);
     return terminologyListResponseSchema.parse(
       createApiSuccessResponse(terminologyService.list(query))
+    );
+  });
+
+  app.post("/api/terminology/preview", async (request) => {
+    const input = terminologyPreviewRequestSchema.parse(request.body);
+    return terminologyPreviewResponseSchema.parse(
+      createApiSuccessResponse(terminologyService.preview(input))
     );
   });
 

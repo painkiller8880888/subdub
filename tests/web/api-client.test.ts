@@ -17,11 +17,13 @@ import {
   createTerminology,
   updateTerminology,
   deactivateTerminology,
-  activateTerminology
+  activateTerminology,
+  previewTerminology
 } from "../../src/web/api/client.js";
 import {
   healthResponseSchema,
   projectListResponseSchema,
+  terminologyPreviewResponseSchema,
   terminologyTermResponseSchema
 } from "../../src/schema/api.js";
 
@@ -305,5 +307,79 @@ describe("web API client", () => {
     await expect(fetchTerminology()).rejects.toBeInstanceOf(
       ApiClientProtocolError
     );
+  });
+
+  it("sends the preview request and validates its response", async () => {
+    const result = {
+      resolvedSpokenText: "READ",
+      appliedTerms: [
+        {
+          termId: "client-term",
+          surface: "A",
+          reading: "READ",
+          termUpdatedAt: "2026-08-06T00:00:00.000Z"
+        }
+      ]
+    };
+    const calls: Array<{ input: string; init: RequestInit | undefined }> = [];
+    globalThis.fetch = async (input, init) => {
+      calls.push({ input: String(input), init });
+      return jsonResponse({ data: result }, 200);
+    };
+
+    await expect(
+      previewTerminology({
+        spokenText: "A",
+        pronunciation: {
+          mode: "literal",
+          excludedTermIds: ["client-term"]
+        }
+      })
+    ).resolves.toEqual(result);
+    expect(calls[0]?.input).toBe("/api/terminology/preview");
+    expect(calls[0]?.init?.method).toBe("POST");
+    expect(JSON.parse(String(calls[0]?.init?.body))).toEqual({
+      spokenText: "A",
+      pronunciation: {
+        mode: "literal",
+        excludedTermIds: ["client-term"]
+      }
+    });
+    expect(
+      terminologyPreviewResponseSchema.safeParse({ data: result }).success
+    ).toBe(true);
+  });
+
+  it("rejects malformed preview responses and preserves ApiClientError", async () => {
+    globalThis.fetch = async () =>
+      jsonResponse({ data: { resolvedSpokenText: "READ" } }, 200);
+    await expect(
+      previewTerminology({
+        spokenText: "A",
+        pronunciation: { mode: "dictionary", excludedTermIds: [] }
+      })
+    ).rejects.toBeInstanceOf(ApiClientProtocolError);
+
+    globalThis.fetch = async () =>
+      jsonResponse(
+        {
+          error: {
+            code: "REQUEST_VALIDATION_FAILED",
+            message: "invalid",
+            details: [],
+            requestId: "preview-error"
+          }
+        },
+        422
+      );
+    await expect(
+      previewTerminology({
+        spokenText: "A",
+        pronunciation: { mode: "dictionary", excludedTermIds: [] }
+      })
+    ).rejects.toMatchObject({
+      code: "REQUEST_VALIDATION_FAILED",
+      requestId: "preview-error"
+    });
   });
 });

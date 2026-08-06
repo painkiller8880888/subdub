@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import {
   terminologyCreateRequestSchema,
   terminologyListQuerySchema,
+  terminologyPreviewRequestSchema,
   terminologyUpdateRequestSchema
 } from "../../schema/api.js";
 import { idSchema, type TerminologyTerm } from "../../schema/index.js";
@@ -16,6 +17,10 @@ import {
   type TerminologyRepositoryInsert,
   type TerminologyRepositoryUpdate
 } from "./terminology-repository.js";
+import {
+  resolveSpokenText,
+  type ResolvedSpokenText
+} from "./spoken-text-resolver.js";
 
 export type TerminologyServiceOptions = {
   repository: TerminologyRepository;
@@ -64,6 +69,16 @@ export class TerminologyService {
   list(input: unknown = {}): TerminologyTerm[] {
     const query = terminologyListQuerySchema.parse(input);
     return this.repository.list(query);
+  }
+
+  preview(input: unknown): ResolvedSpokenText {
+    const request = terminologyPreviewRequestSchema.parse(input);
+    const activeTerms = this.repository.list({ status: "active" });
+    return resolveSpokenText({
+      spokenText: request.spokenText,
+      pronunciation: request.pronunciation,
+      terms: activeTerms
+    });
   }
 
   get(termId: unknown): TerminologyTerm {

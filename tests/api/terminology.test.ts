@@ -8,6 +8,7 @@ import { initializeServer } from "../../src/api/server.js";
 import {
   apiErrorResponseSchema,
   terminologyListResponseSchema,
+  terminologyPreviewResponseSchema,
   terminologyTermResponseSchema
 } from "../../src/schema/api.js";
 
@@ -197,7 +198,127 @@ describe("terminology API", () => {
     expect(apiError(queryErrorResponse).code).toBe("REQUEST_VALIDATION_FAILED");
   });
 
-  it("returns not found and does not expose preview or usage APIs", async () => {
+  it("previews dictionary and literal text without exposing usage APIs", async () => {
+    const create = async (surface: string, readingKatakana: string) => {
+      const response = await server.app.inject({
+        method: "POST",
+        url: "/api/terminology",
+        payload: { surface, readingKatakana, category: "other" }
+      });
+      return terminologyTermResponseSchema.parse(response.json()).data;
+    };
+    const longTerm = await create("AB", "エービー");
+    const shortTerm = await create("A", "エー");
+    const inactiveTerm = await create("C", "シー");
+    await server.app.inject({
+      method: "POST",
+      url: `/api/terminology/${inactiveTerm.termId}/deactivate`
+    });
+
+    const previewResponse = await server.app.inject({
+      method: "POST",
+      url: "/api/terminology/preview",
+      payload: {
+        spokenText: "ABC AB",
+        pronunciation: { mode: "dictionary", excludedTermIds: [] }
+      }
+    });
+    expect(previewResponse.statusCode).toBe(200);
+    const preview = terminologyPreviewResponseSchema.parse(
+      previewResponse.json()
+    );
+    expect(preview).not.toHaveProperty("revision");
+    expect(preview.data).toEqual({
+      resolvedSpokenText: "エービーC エービー",
+      appliedTerms: [
+        {
+          termId: longTerm.termId,
+          surface: "AB",
+          reading: "エービー",
+          termUpdatedAt: longTerm.updatedAt
+        },
+        {
+          termId: longTerm.termId,
+          surface: "AB",
+          reading: "エービー",
+          termUpdatedAt: longTerm.updatedAt
+        }
+      ]
+    });
+    expect(shortTerm.status).toBe("active");
+
+    const excludedResponse = await server.app.inject({
+      method: "POST",
+      url: "/api/terminology/preview",
+      payload: {
+        spokenText: "AB",
+        pronunciation: {
+          mode: "dictionary",
+          excludedTermIds: [longTerm.termId, longTerm.termId, "missing-term"]
+        }
+      }
+    });
+    expect(
+      terminologyPreviewResponseSchema.parse(excludedResponse.json()).data
+    ).toEqual({
+      resolvedSpokenText: "エーB",
+      appliedTerms: [
+        {
+          termId: shortTerm.termId,
+          surface: "A",
+          reading: "エー",
+          termUpdatedAt: shortTerm.updatedAt
+        }
+      ]
+    });
+
+    const literalResponse = await server.app.inject({
+      method: "POST",
+      url: "/api/terminology/preview",
+      payload: {
+        spokenText: "ABC",
+        pronunciation: {
+          mode: "literal",
+          excludedTermIds: [longTerm.termId]
+        }
+      }
+    });
+    expect(
+      terminologyPreviewResponseSchema.parse(literalResponse.json()).data
+    ).toEqual({ resolvedSpokenText: "ABC", appliedTerms: [] });
+
+    for (const payload of [
+      {
+        spokenText: " ",
+        pronunciation: { mode: "dictionary", excludedTermIds: [] }
+      },
+      {
+        spokenText: "A",
+        pronunciation: { mode: "invalid", excludedTermIds: [] }
+      },
+      {
+        spokenText: "A",
+        pronunciation: { mode: "dictionary", excludedTermIds: ["not_valid"] }
+      },
+      {
+        spokenText: "A",
+        pronunciation: { mode: "dictionary", excludedTermIds: "term" }
+      },
+      {
+        spokenText: "A",
+        pronunciation: { mode: "dictionary", excludedTermIds: [] },
+        unknown: true
+      }
+    ]) {
+      const invalidResponse = await server.app.inject({
+        method: "POST",
+        url: "/api/terminology/preview",
+        payload
+      });
+      expect(invalidResponse.statusCode).toBe(422);
+      expect(apiError(invalidResponse).code).toBe("REQUEST_VALIDATION_FAILED");
+    }
+
     const missingResponse = await server.app.inject({
       method: "GET",
       url: "/api/terminology/missing-term"
@@ -205,12 +326,64 @@ describe("terminology API", () => {
     expect(missingResponse.statusCode).toBe(404);
     expect(apiError(missingResponse).code).toBe("TERMINOLOGY_NOT_FOUND");
 
-    const previewResponse = await server.app.inject({
+    const usagesResponse = await server.app.inject({
+      method: "GET",
+      url: "/api/terminology/missing-term/usages"
+    });
+    expect(apiError(usagesResponse).code).toBe("API_NOT_FOUND");
+  });
+
+  it("does not expose preview internals for unexpected errors", async () => {
+    const previewError = new Error(
+      "SQLITE failure at C:\\secret\\workspace\\subdub.db"
+    );
+    const failingApp = (await import("../../src/api/app.js")).buildApp({
+      terminologyService: {
+        list: () => [],
+        create: () => {
+          throw previewError;
+        },
+        get: () => {
+          throw previewError;
+        },
+        update: () => {
+          throw previewError;
+        },
+        deactivate: () => {
+          throw previewError;
+        },
+        activate: () => {
+          throw previewError;
+        },
+        preview: () => {
+          throw previewError;
+        }
+      } as never
+    });
+    const response = await failingApp.inject({
       method: "POST",
       url: "/api/terminology/preview",
-      payload: {}
+      payload: {
+        spokenText: "A",
+        pronunciation: { mode: "dictionary", excludedTermIds: [] }
+      }
     });
-    expect(apiError(previewResponse).code).toBe("API_NOT_FOUND");
+
+    expect(response.statusCode).toBe(500);
+    expect(apiError(response).code).toBe("INTERNAL_SERVER_ERROR");
+    expect(response.body).not.toContain("SQLITE");
+    expect(response.body).not.toContain("C:\\secret");
+    expect(response.body).not.toContain("Error: ");
+    await failingApp.close();
+  });
+
+  it("returns not found for unknown terminology detail", async () => {
+    const missingResponse = await server.app.inject({
+      method: "GET",
+      url: "/api/terminology/missing-term"
+    });
+    expect(missingResponse.statusCode).toBe(404);
+    expect(apiError(missingResponse).code).toBe("TERMINOLOGY_NOT_FOUND");
 
     const usagesResponse = await server.app.inject({
       method: "GET",

@@ -19,6 +19,7 @@ import {
   fetchTerminology,
   updateTerminology
 } from "./api/client";
+import { TerminologyPreview } from "./TerminologyPreview";
 import {
   emptyTerminologyForm,
   terminologyFormToCreateInput,
@@ -172,6 +173,11 @@ export function TerminologyPage() {
   const termsQuery = useQuery({
     queryKey: ["terminology", filters],
     queryFn: () => fetchTerminology(filters),
+    retry: false
+  });
+  const activeTermsQuery = useQuery({
+    queryKey: ["terminology", { status: "active" }],
+    queryFn: () => fetchTerminology({ status: "active" }),
     retry: false
   });
 
@@ -368,6 +374,12 @@ export function TerminologyPage() {
           </div>
         </form>
       </section>
+
+      <TerminologyPreview
+        activeTerms={activeTermsQuery.data ?? []}
+        activeTermsLoading={activeTermsQuery.isPending}
+        activeTermsError={activeTermsQuery.error}
+      />
 
       <section aria-labelledby="terminology-list-title">
         <h2 id="terminology-list-title">登録済み用語</h2>
