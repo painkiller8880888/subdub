@@ -231,6 +231,12 @@ export function CharacterAssetsPage() {
         <p>
           素材カタログへ登録されたバリアントだけを表示しています。ここではキャラクター設定を編集しません。
         </p>
+        <Link
+          className="button"
+          to={`/projects/${encodeURIComponent(projectId)}/script`}
+        >
+          台本へ戻る
+        </Link>
       </header>
 
       {failedAssetPaths.length > 0 ? (

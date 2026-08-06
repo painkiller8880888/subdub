@@ -157,8 +157,12 @@ export const pronunciationSchema = strictObject({
 export const scriptLineSchema = strictObject({
   id: idSchema,
   speakerId: idSchema,
-  spokenText: z.string(),
-  subtitleText: z.string(),
+  spokenText: z.string().refine((value) => value.trim().length > 0, {
+    message: "spokenText must not be blank"
+  }),
+  subtitleText: z.string().refine((value) => value.trim().length > 0, {
+    message: "subtitleText must not be blank"
+  }),
   expression: expressionSchema,
   pauseBeforeMs: finiteNumberSchema.int().nonnegative(),
   pauseAfterMs: finiteNumberSchema.int().nonnegative(),

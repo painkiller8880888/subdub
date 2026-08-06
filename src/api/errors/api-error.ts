@@ -11,6 +11,10 @@ import {
 } from "../../openrouter/errors.js";
 import { OutlineGenerationError } from "../../app/projects/outline-generation-errors.js";
 import { OutlineApprovalError } from "../../app/projects/outline-approval.js";
+import {
+  ScriptInitializationError,
+  ScriptValidationError
+} from "../../app/projects/script-errors.js";
 import type { ApiErrorDetail } from "../../schema/api.js";
 
 export const API_ERROR_CODE = {
@@ -427,6 +431,19 @@ function mapFastifyValidationDetails(
 }
 
 export function mapApiError(error: unknown): MappedApiError {
+  if (
+    error instanceof ScriptInitializationError ||
+    error instanceof ScriptValidationError
+  ) {
+    return {
+      code: error.code,
+      status: error.status,
+      message: error.message,
+      details: error.details,
+      shouldLog: false
+    };
+  }
+
   if (error instanceof OutlineApprovalError) {
     return {
       code: error.code,

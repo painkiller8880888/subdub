@@ -253,6 +253,89 @@ input:focus-visible {
   width: 100%;
 }
 
+.script-editor-page {
+  max-width: 1180px;
+}
+
+.script-section-list,
+.script-line-list {
+  display: grid;
+  gap: 1rem;
+}
+
+.script-section-card,
+.script-line-card,
+.bulk-paste-panel {
+  background: #fff;
+  border: 1px solid #d7deea;
+  border-radius: 0.8rem;
+  display: grid;
+  gap: 1rem;
+  padding: 1.2rem;
+}
+
+.script-section-header,
+.script-line-card-header {
+  align-items: start;
+  display: flex;
+  gap: 1rem;
+  justify-content: space-between;
+}
+
+.script-section-header h2,
+.script-line-card-header p,
+.bulk-paste-panel h2,
+.bulk-paste-panel p {
+  margin: 0;
+}
+
+.script-line-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  justify-content: flex-end;
+}
+
+.script-line-fields {
+  display: grid;
+  gap: 0.9rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.script-line-wide-field {
+  grid-column: 1 / -1;
+}
+
+.script-line-errors,
+.bulk-paste-panel ul {
+  margin: 0;
+  padding-left: 1.25rem;
+}
+
+.bulk-paste-panel > div:first-child {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.bulk-paste-panel > div:first-child p {
+  color: #59647b;
+}
+
+@media (max-width: 700px) {
+  .script-section-header,
+  .script-line-card-header {
+    display: grid;
+  }
+
+  .script-line-actions {
+    justify-content: start;
+  }
+
+  .script-line-fields {
+    grid-template-columns: 1fr;
+  }
+}
+
 .form-field input,
 .form-field select,
 .outline-question select {

@@ -7,10 +7,18 @@ import {
   projectBriefSaveRequestSchema,
   projectCreateRequestSchema,
   projectSourceSaveRequestSchema,
+  scriptInitializeRequestSchema,
+  scriptSaveRequestSchema,
   projectSummarySchema,
   type ProjectSummary
 } from "../../schema/api.js";
-import { idSchema, type Outline, type VideoProject } from "../../schema/index.js";
+import {
+  idSchema,
+  videoProjectSchema,
+  type Outline,
+  type Script,
+  type VideoProject
+} from "../../schema/index.js";
 import {
   ProjectRepository,
   ProjectRepositoryError
@@ -21,6 +29,25 @@ import {
   applyEditedOutline,
   hasMeaningfulOutline
 } from "./project-invalidation.js";
+import {
+  assertCanInitializeScript,
+  createScriptFromApprovedOutline,
+  normalizeEditedScriptIds,
+  scriptContentChanged
+} from "./script-domain.js";
+import { ScriptValidationError } from "./script-errors.js";
+
+function scriptValidationIssues(
+  issues: readonly { path: readonly PropertyKey[]; message: string }[]
+): Array<{ path: Array<string | number>; message: string }> {
+  return issues.map((issue) => ({
+    path: issue.path.filter(
+      (segment): segment is string | number =>
+        typeof segment === "string" || typeof segment === "number"
+    ),
+    message: issue.message
+  }));
+}
 
 export type ProjectServiceOptions = {
   repository: ProjectRepository;
@@ -245,6 +272,79 @@ export class ProjectService {
     return this.repository.saveOutline(
       projectId,
       reviewedOutline,
+      request.expectedRevision
+    );
+  }
+
+  async initializeScript(
+    projectId: unknown,
+    input: unknown
+  ): Promise<VideoProject> {
+    const request = scriptInitializeRequestSchema.parse(input);
+    const snapshot = await this.repository.readGenerationSnapshot(projectId);
+    assertCanInitializeScript(snapshot.project, snapshot.sourceHash);
+    const script = createScriptFromApprovedOutline(
+      snapshot.project.outline,
+      this.createId
+    );
+    return this.repository.saveScript(
+      projectId,
+      script,
+      request.expectedRevision
+    );
+  }
+
+  async saveScript(projectId: unknown, input: unknown): Promise<VideoProject> {
+    const request = scriptSaveRequestSchema.parse(input);
+    const currentProject = await this.repository.read(projectId);
+    if (currentProject.script.sections.length === 0) {
+      throw new ScriptValidationError([
+        {
+          path: ["script", "sections"],
+          message: "script must be initialized from an approved outline first"
+        }
+      ]);
+    }
+
+    const candidateProjectResult = videoProjectSchema.safeParse({
+      ...currentProject,
+      script: request.script
+    });
+    if (!candidateProjectResult.success) {
+      throw new ScriptValidationError(
+        scriptValidationIssues(candidateProjectResult.error.issues)
+      );
+    }
+
+    const normalizedScript = normalizeEditedScriptIds(
+      currentProject,
+      candidateProjectResult.data.script,
+      this.createId
+    );
+    const contentChanged = scriptContentChanged(
+      currentProject.script,
+      normalizedScript
+    );
+    const status =
+      currentProject.script.status === "approved"
+        ? contentChanged
+          ? "needs_review"
+          : "approved"
+        : normalizedScript.status;
+    const script: Script = { ...normalizedScript, status };
+    const updatedProjectResult = videoProjectSchema.safeParse({
+      ...currentProject,
+      script
+    });
+    if (!updatedProjectResult.success) {
+      throw new ScriptValidationError(
+        scriptValidationIssues(updatedProjectResult.error.issues)
+      );
+    }
+
+    return this.repository.saveScript(
+      projectId,
+      updatedProjectResult.data.script,
       request.expectedRevision
     );
   }
