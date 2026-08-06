@@ -13,6 +13,10 @@ import { registerNotFoundHandler } from "./middleware/not-found-handler.js";
 import { registerModelRoutes } from "./routes/models.js";
 import { registerOutlineRoutes } from "./routes/outline.js";
 import { registerProjectRoutes } from "./routes/projects.js";
+import {
+  registerTerminologyRoutes,
+  type TerminologyServicePort
+} from "./routes/terminology.js";
 
 export type AppOptions = {
   logger?: FastifyServerOptions["logger"];
@@ -22,6 +26,7 @@ export type AppOptions = {
   >;
   projectService?: ProjectService;
   outlineGenerationService?: Pick<OutlineGenerationService, "generate">;
+  terminologyService?: TerminologyServicePort;
   staticRoot?: string;
 };
 
@@ -43,6 +48,10 @@ export function buildApp(options: AppOptions = {}): FastifyInstance {
 
   if (options.outlineGenerationService !== undefined) {
     registerOutlineRoutes(app, options.outlineGenerationService);
+  }
+
+  if (options.terminologyService !== undefined) {
+    registerTerminologyRoutes(app, options.terminologyService);
   }
 
   if (options.staticRoot !== undefined) {

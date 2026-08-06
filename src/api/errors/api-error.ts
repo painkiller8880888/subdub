@@ -16,6 +16,10 @@ import {
   ScriptValidationError
 } from "../../app/projects/script-errors.js";
 import type { ApiErrorDetail } from "../../schema/api.js";
+import {
+  TerminologyDuplicateError,
+  TerminologyNotFoundError
+} from "../../app/terminology/terminology-errors.js";
 
 export const API_ERROR_CODE = {
   requestValidationFailed: "REQUEST_VALIDATION_FAILED",
@@ -30,7 +34,9 @@ export const API_ERROR_CODE = {
   openRouterBadGateway: OPENROUTER_ERROR_CODE.badGateway,
   openRouterRequestFailed: OPENROUTER_ERROR_CODE.requestFailed,
   openRouterUnavailable: OPENROUTER_ERROR_CODE.unavailable,
-  openRouterResponseInvalid: OPENROUTER_ERROR_CODE.responseInvalid
+  openRouterResponseInvalid: OPENROUTER_ERROR_CODE.responseInvalid,
+  terminologyNotFound: "TERMINOLOGY_NOT_FOUND",
+  terminologyDuplicate: "TERMINOLOGY_DUPLICATE"
 };
 
 export type ApiErrorStatus =
@@ -431,6 +437,26 @@ function mapFastifyValidationDetails(
 }
 
 export function mapApiError(error: unknown): MappedApiError {
+  if (error instanceof TerminologyNotFoundError) {
+    return {
+      code: error.code,
+      status: error.status,
+      message: "用語が見つかりません。",
+      details: [],
+      shouldLog: false
+    };
+  }
+
+  if (error instanceof TerminologyDuplicateError) {
+    return {
+      code: error.code,
+      status: error.status,
+      message: "同じ表記の用語が既に存在します。",
+      details: [],
+      shouldLog: false
+    };
+  }
+
   if (
     error instanceof ScriptInitializationError ||
     error instanceof ScriptValidationError

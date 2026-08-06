@@ -4,7 +4,9 @@ import {
   idSchema,
   isoUtcDateTimeSchema,
   nonNegativeIntegerSchema,
-  sha256Schema
+  sha256Schema,
+  finiteNumberSchema,
+  strictObject
 } from "./primitives.js";
 import {
   outlineSchema,
@@ -12,6 +14,14 @@ import {
   scriptSchema,
   videoProjectSchema
 } from "./video-project.js";
+import {
+  normalizeTerminologySearchValue,
+  terminologyCategoryInputSchema,
+  terminologyReadingInputSchema,
+  terminologyStatusSchema,
+  terminologySurfaceInputSchema,
+  terminologyTermSchema
+} from "./terminology.js";
 
 const apiErrorPathSegmentSchema = z.union([z.string(), z.number().int()]);
 
@@ -221,6 +231,47 @@ export const modelsResponseSchema = z
   })
   .strict();
 
+export const terminologyCreateRequestSchema = strictObject({
+  surface: terminologySurfaceInputSchema,
+  readingKatakana: terminologyReadingInputSchema,
+  category: terminologyCategoryInputSchema,
+  priority: finiteNumberSchema.int().optional().default(0),
+  notes: z.string().optional().default("")
+});
+
+export const terminologyUpdateRequestSchema = strictObject({
+  surface: terminologySurfaceInputSchema,
+  readingKatakana: terminologyReadingInputSchema,
+  category: terminologyCategoryInputSchema,
+  priority: finiteNumberSchema.int(),
+  notes: z.string()
+});
+
+export const terminologyListQuerySchema = strictObject({
+  surface: z.string().transform(normalizeTerminologySearchValue).optional(),
+  reading: z.string().transform(normalizeTerminologySearchValue).optional(),
+  category: z
+    .string()
+    .transform((value) => value.trim())
+    .transform((value) => (value.length === 0 ? undefined : value))
+    .optional(),
+  status: terminologyStatusSchema.optional()
+});
+
+export const terminologyTermParamsSchema = strictObject({
+  termId: idSchema
+});
+
+export const terminologyListResponseSchema = strictObject({
+  data: z.array(terminologyTermSchema),
+  revision: nonNegativeIntegerSchema.optional()
+});
+
+export const terminologyTermResponseSchema = strictObject({
+  data: terminologyTermSchema,
+  revision: nonNegativeIntegerSchema.optional()
+});
+
 export type ApiErrorDetail = z.infer<typeof apiErrorDetailSchema>;
 export type ApiSuccessResponse<T> = {
   data: T;
@@ -263,6 +314,22 @@ export type ScriptSaveRequest = z.infer<typeof scriptSaveRequestSchema>;
 export type ModelsQuery = z.infer<typeof modelsQuerySchema>;
 export type ModelSummary = z.infer<typeof modelSummarySchema>;
 export type ModelsResponse = z.infer<typeof modelsResponseSchema>;
+export type TerminologyCreateRequest = z.infer<
+  typeof terminologyCreateRequestSchema
+>;
+export type TerminologyUpdateRequest = z.infer<
+  typeof terminologyUpdateRequestSchema
+>;
+export type TerminologyListQuery = z.infer<typeof terminologyListQuerySchema>;
+export type TerminologyTermParams = z.infer<
+  typeof terminologyTermParamsSchema
+>;
+export type TerminologyListResponse = z.infer<
+  typeof terminologyListResponseSchema
+>;
+export type TerminologyTermResponse = z.infer<
+  typeof terminologyTermResponseSchema
+>;
 
 export function createApiSuccessResponse<T>(
   data: T
