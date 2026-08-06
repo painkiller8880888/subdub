@@ -26,6 +26,8 @@ import {
   terminologyToForm,
   type TerminologyFormState
 } from "./terminology-form";
+import { hasTerminologyListFilters } from "./terminology-page-state";
+import { TerminologyStatusError } from "./terminology-status-error";
 
 type FilterFormState = {
   surface: string;
@@ -165,6 +167,7 @@ export function TerminologyPage() {
   const [editingForm, setEditingForm] =
     useState<TerminologyFormState>(emptyTerminologyForm);
   const [editingError, setEditingError] = useState<string | null>(null);
+  const [statusError, setStatusError] = useState<string | null>(null);
 
   const termsQuery = useQuery({
     queryKey: ["terminology", filters],
@@ -216,7 +219,15 @@ export function TerminologyPage() {
       status === "active"
         ? activateTerminology(termId)
         : deactivateTerminology(termId),
-    onSuccess: refreshTermCaches
+    onMutate: () => setStatusError(null),
+    onSuccess: (term) => {
+      refreshTermCaches(term);
+      setStatusError(null);
+    },
+    onError: (error) =>
+      setStatusError(
+        getErrorMessage(error, "用語の状態を変更できませんでした。")
+      )
   });
 
   function submitFilters(event: FormEvent<HTMLFormElement>) {
@@ -360,6 +371,7 @@ export function TerminologyPage() {
 
       <section aria-labelledby="terminology-list-title">
         <h2 id="terminology-list-title">登録済み用語</h2>
+        <TerminologyStatusError message={statusError} />
         {termsQuery.isPending ? (
           <p className="status-message" role="status">
             用語を読み込んでいます…
@@ -383,8 +395,20 @@ export function TerminologyPage() {
           </section>
         ) : termsQuery.data.length === 0 ? (
           <section className="message-panel">
-            <h3>用語はまだありません</h3>
-            <p>上のフォームから最初の用語を登録してください。</p>
+            {hasTerminologyListFilters(filters) ? (
+              <>
+                <h3>条件に一致する用語がありません</h3>
+                <p>検索条件を変更するか、条件をクリアしてください。</p>
+                <button className="button" type="button" onClick={clearFilters}>
+                  条件をクリア
+                </button>
+              </>
+            ) : (
+              <>
+                <h3>用語はまだありません</h3>
+                <p>上のフォームから最初の用語を登録してください。</p>
+              </>
+            )}
           </section>
         ) : (
           <ul className="terminology-list">
