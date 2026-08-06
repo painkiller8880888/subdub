@@ -10,6 +10,8 @@ import {
 } from "../app/projects/project-repository.js";
 import { ProjectService } from "../app/projects/project-service.js";
 import { OutlineGenerationService } from "../app/projects/outline-generation-service.js";
+import { TerminologyRepository } from "../app/terminology/terminology-repository.js";
+import { TerminologyService } from "../app/terminology/terminology-service.js";
 import { createOpenRouterChatAdapter } from "../openrouter/chat-adapter.js";
 import { createOpenRouterModelService } from "../openrouter/model-service.js";
 import type { BackupDatabase } from "../db/backup.js";
@@ -27,6 +29,7 @@ export type ServerOptions = AppOptions & {
   databasePath?: string;
   migrationsFolder?: MigrationFolder;
   projectRepository?: ProjectRepository;
+  terminologyRepository?: TerminologyRepository;
   workspaceRoot?: string;
 };
 
@@ -53,6 +56,8 @@ export async function initializeServer(
     databasePath,
     migrationsFolder,
     projectRepository,
+    terminologyRepository,
+    terminologyService: suppliedTerminologyService,
     projectService: suppliedProjectService,
     workspaceRoot = process.cwd(),
     ...appOptions
@@ -83,11 +88,18 @@ export async function initializeServer(
         modelService: resolvedModelService,
         chatAdapter: createOpenRouterChatAdapter()
       });
+    const resolvedTerminologyService =
+      suppliedTerminologyService ??
+      new TerminologyService({
+        repository:
+          terminologyRepository ?? new TerminologyRepository(database.database)
+      });
     const app = buildApp({
       ...appOptions,
       modelService: resolvedModelService,
       outlineGenerationService: resolvedOutlineGenerationService,
-      projectService: resolvedProjectService
+      projectService: resolvedProjectService,
+      terminologyService: resolvedTerminologyService
     });
     app.addHook("onClose", async () => {
       database.close();

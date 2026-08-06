@@ -17,6 +17,12 @@ import {
   projectSourceSaveRequestSchema,
   scriptInitializeRequestSchema,
   scriptSaveRequestSchema,
+  terminologyCreateRequestSchema,
+  terminologyListQuerySchema,
+  terminologyListResponseSchema,
+  terminologyTermParamsSchema,
+  terminologyTermResponseSchema,
+  terminologyUpdateRequestSchema,
   type ApiErrorDetail,
   type OutlineApproveRequest,
   type OutlineGenerateRequest,
@@ -29,8 +35,12 @@ import {
   type ProjectSourceSaveRequest,
   type ScriptInitializeRequest,
   type ScriptSaveRequest,
-  type ProjectSummary
+  type ProjectSummary,
+  type TerminologyCreateRequest,
+  type TerminologyListQuery,
+  type TerminologyUpdateRequest
 } from "../../schema/api.js";
+import type { TerminologyTerm } from "../../schema/terminology.js";
 import type { VideoProject } from "../../schema/video-project.js";
 
 export type ApiClientErrorData = {
@@ -317,6 +327,101 @@ export async function saveProjectScript(
       },
       body: JSON.stringify(validatedInput)
     }
+  );
+  return response.data;
+}
+
+export async function fetchTerminology(
+  input: TerminologyListQuery = {}
+): Promise<TerminologyTerm[]> {
+  const query = terminologyListQuerySchema.parse(input);
+  const searchParams = new URLSearchParams();
+  if (query.surface !== undefined) {
+    searchParams.set("surface", query.surface);
+  }
+  if (query.reading !== undefined) {
+    searchParams.set("reading", query.reading);
+  }
+  if (query.category !== undefined) {
+    searchParams.set("category", query.category);
+  }
+  if (query.status !== undefined) {
+    searchParams.set("status", query.status);
+  }
+  const queryString = searchParams.toString();
+  const response = await fetchApi(
+    `/api/terminology${queryString.length > 0 ? `?${queryString}` : ""}`,
+    terminologyListResponseSchema
+  );
+  return response.data;
+}
+
+export async function fetchTerminologyTerm(
+  termId: string
+): Promise<TerminologyTerm> {
+  const params = terminologyTermParamsSchema.parse({ termId });
+  const response = await fetchApi(
+    `/api/terminology/${encodeURIComponent(params.termId)}`,
+    terminologyTermResponseSchema
+  );
+  return response.data;
+}
+
+export async function createTerminology(
+  input: TerminologyCreateRequest
+): Promise<TerminologyTerm> {
+  const validatedInput = terminologyCreateRequestSchema.parse(input);
+  const response = await fetchApi(
+    "/api/terminology",
+    terminologyTermResponseSchema,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(validatedInput)
+    }
+  );
+  return response.data;
+}
+
+export async function updateTerminology(
+  termId: string,
+  input: TerminologyUpdateRequest
+): Promise<TerminologyTerm> {
+  const params = terminologyTermParamsSchema.parse({ termId });
+  const validatedInput = terminologyUpdateRequestSchema.parse(input);
+  const response = await fetchApi(
+    `/api/terminology/${encodeURIComponent(params.termId)}`,
+    terminologyTermResponseSchema,
+    {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(validatedInput)
+    }
+  );
+  return response.data;
+}
+
+export async function deactivateTerminology(
+  termId: string
+): Promise<TerminologyTerm> {
+  return changeTerminologyStatus(termId, "deactivate");
+}
+
+export async function activateTerminology(
+  termId: string
+): Promise<TerminologyTerm> {
+  return changeTerminologyStatus(termId, "activate");
+}
+
+async function changeTerminologyStatus(
+  termId: string,
+  action: "activate" | "deactivate"
+): Promise<TerminologyTerm> {
+  const params = terminologyTermParamsSchema.parse({ termId });
+  const response = await fetchApi(
+    `/api/terminology/${encodeURIComponent(params.termId)}/${action}`,
+    terminologyTermResponseSchema,
+    { method: "POST" }
   );
   return response.data;
 }

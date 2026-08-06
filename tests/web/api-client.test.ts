@@ -12,11 +12,17 @@ import {
   fetchApi,
   generateProjectOutline,
   reviewProjectOutline,
-  saveProjectOutline
+  saveProjectOutline,
+  fetchTerminology,
+  createTerminology,
+  updateTerminology,
+  deactivateTerminology,
+  activateTerminology
 } from "../../src/web/api/client.js";
 import {
   healthResponseSchema,
-  projectListResponseSchema
+  projectListResponseSchema,
+  terminologyTermResponseSchema
 } from "../../src/schema/api.js";
 
 function jsonResponse(body: unknown, status: number): Response {
@@ -228,5 +234,76 @@ describe("web API client", () => {
     expect(JSON.parse(String(calls[2]?.init?.body))).toEqual({
       expectedRevision: project.revision
     });
+  });
+
+  it("uses shared terminology schemas and safely encodes search filters", async () => {
+    const term = {
+      termId: "client-term",
+      surface: "A_%",
+      normalizedSurface: "A_%",
+      readingKatakana: "エー・パーセント",
+      category: "other",
+      priority: -2,
+      notes: "client",
+      status: "active" as const,
+      createdAt: "2026-08-06T00:00:00.000Z",
+      updatedAt: "2026-08-06T00:00:00.000Z"
+    };
+    const calls: Array<{ input: string; init: RequestInit | undefined }> = [];
+    globalThis.fetch = async (input, init) => {
+      calls.push({ input: String(input), init });
+      if (String(input).startsWith("/api/terminology?")) {
+        return jsonResponse({ data: [term] }, 200);
+      }
+      return jsonResponse({ data: term }, 200);
+    };
+
+    await expect(
+      fetchTerminology({ surface: "%_", reading: "エー", category: " other " })
+    ).resolves.toEqual([term]);
+    await expect(
+      createTerminology({
+        surface: term.surface,
+        readingKatakana: term.readingKatakana,
+        category: term.category,
+        priority: term.priority,
+        notes: term.notes
+      })
+    ).resolves.toEqual(term);
+    await expect(
+      updateTerminology(term.termId, {
+        surface: term.surface,
+        readingKatakana: term.readingKatakana,
+        category: term.category,
+        priority: term.priority,
+        notes: term.notes
+      })
+    ).resolves.toEqual(term);
+    await expect(deactivateTerminology(term.termId)).resolves.toEqual(term);
+    await expect(activateTerminology(term.termId)).resolves.toEqual(term);
+
+    expect(calls[0]?.input).toBe(
+      "/api/terminology?surface=%25_&reading=%E3%82%A8%E3%83%BC&category=other"
+    );
+    expect(calls[1]?.init?.method).toBe("POST");
+    expect(JSON.parse(String(calls[1]?.init?.body))).toEqual({
+      surface: term.surface,
+      readingKatakana: term.readingKatakana,
+      category: term.category,
+      priority: term.priority,
+      notes: term.notes
+    });
+    expect(
+      terminologyTermResponseSchema.safeParse({ data: term }).success
+    ).toBe(true);
+  });
+
+  it("turns malformed terminology success responses into protocol errors", async () => {
+    globalThis.fetch = async () =>
+      jsonResponse({ data: { termId: "not-valid" } }, 200);
+
+    await expect(fetchTerminology()).rejects.toBeInstanceOf(
+      ApiClientProtocolError
+    );
   });
 });

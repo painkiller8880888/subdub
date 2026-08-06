@@ -45,6 +45,7 @@ import { sameBriefDraft, type BriefDraft } from "./brief-draft";
 import { CharacterAssetsPage } from "./CharacterAssetsPage";
 import { OutlinePage } from "./OutlinePage";
 import { ScriptPage } from "./ScriptPage";
+import { TerminologyPage } from "./TerminologyPage";
 
 function projectBriefPath(projectId: string): string {
   return `/projects/${encodeURIComponent(projectId)}/brief`;
@@ -120,6 +121,9 @@ function ProjectsPage() {
         </div>
         <Link className="button button-primary" to="/projects/new">
           新規プロジェクト
+        </Link>
+        <Link className="button" to="/terminology">
+          用語管理
         </Link>
       </header>
 
@@ -999,6 +1003,7 @@ export function App() {
         element={<CharacterAssetsPage />}
         path="/projects/:projectId/characters"
       />
+      <Route element={<TerminologyPage />} path="/terminology" />
       <Route element={<NotFoundPage />} path="*" />
     </Routes>
   );

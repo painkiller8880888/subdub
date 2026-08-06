@@ -107,7 +107,7 @@ describe("workspace SQLite", () => {
     const first = await initializeWorkspaceDatabase({ workspaceRoot });
     const firstHistory = migrationHistory(first.connection);
     expect(first.migrationResult.applied).toBe(true);
-    expect(firstHistory).toHaveLength(1);
+    expect(firstHistory).toHaveLength(2);
     first.close();
 
     const second = await initializeWorkspaceDatabase({ workspaceRoot });
@@ -118,6 +118,104 @@ describe("workspace SQLite", () => {
     await expect(
       fs.stat(path.join(workspaceRoot, "library", "workspace.sqlite"))
     ).resolves.toBeDefined();
+  });
+
+  it("applies the terminology migration with its table, indexes, and status check", async () => {
+    const workspaceRoot = await makeWorkspace();
+    const initialized = await initializeWorkspaceDatabase({ workspaceRoot });
+    const table = initialized.connection
+      .prepare(
+        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'terminology_terms'"
+      )
+      .get() as { sql: string } | undefined;
+    const indexes = initialized.connection
+      .prepare(
+        "SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'terminology_terms' ORDER BY name"
+      )
+      .all() as Array<{ name: string }>;
+
+    expect(table?.sql).toContain("terminology_terms_status_check");
+    expect(table?.sql).toContain("IN ('active', 'inactive')");
+    expect(
+      indexes
+        .map((index) => index.name)
+        .filter((name) => !name.startsWith("sqlite_autoindex_"))
+    ).toEqual([
+      "terminology_terms_status_idx",
+      "terminology_terms_surface_uq"
+    ]);
+    expect(() =>
+      initialized.connection
+        .prepare(
+          `INSERT INTO terminology_terms
+            (term_id, surface, normalized_surface, reading_katakana, category, priority, notes, status, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        )
+        .run(
+          "invalid-status",
+          "invalid-status",
+          "invalid-status",
+          "イナリッド",
+          "other",
+          0,
+          "",
+          "paused",
+          "2026-08-06T00:00:00.000Z",
+          "2026-08-06T00:00:00.000Z"
+        )
+    ).toThrow();
+    initialized.close();
+  });
+
+  it("applies the new migration to an already-baselined database only once", async () => {
+    const workspaceRoot = await makeWorkspace();
+    const terminologyMigration = await fs.readFile(
+      path.join(
+        process.cwd(),
+        "src",
+        "db",
+        "migrations",
+        "0001_curved_colleen_wing.sql"
+      ),
+      "utf8"
+    );
+    const baseline = {
+      sql: "SELECT 1;",
+      tag: "0000_baseline",
+      when: BASE_MIGRATION_TIME
+    };
+    const baselineFolder = await makeMigrationFolder(workspaceRoot, [baseline]);
+    const first = await initializeWorkspaceDatabase({
+      migrationsFolder: baselineFolder,
+      workspaceRoot
+    });
+    first.close();
+
+    const extendedFolder = await makeMigrationFolder(workspaceRoot, [
+      baseline,
+      {
+        sql: terminologyMigration,
+        tag: "0001_curved_colleen_wing",
+        when: BASE_MIGRATION_TIME + 1
+      }
+    ]);
+    const second = await initializeWorkspaceDatabase({
+      migrationsFolder: extendedFolder,
+      workspaceRoot
+    });
+    expect(second.migrationResult.applied).toBe(true);
+    expect(countRows(second.connection, "terminology_terms")).toBe(0);
+    const history = migrationHistory(second.connection);
+    expect(history).toHaveLength(2);
+    second.close();
+
+    const third = await initializeWorkspaceDatabase({
+      migrationsFolder: extendedFolder,
+      workspaceRoot
+    });
+    expect(third.migrationResult.applied).toBe(false);
+    expect(migrationHistory(third.connection)).toEqual(history);
+    third.close();
   });
 
   it("does not repeat a migration side effect on reinitialization", async () => {
