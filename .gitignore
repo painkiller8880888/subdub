@@ -15,6 +15,7 @@ library/*.sqlite
 library/*.sqlite-*
 library/*.sqlite.*
 library/media/
+library/staging/
 library/thumbnails/
 /projects/
 public/shared-assets/

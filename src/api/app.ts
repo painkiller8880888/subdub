@@ -8,6 +8,7 @@ import { createApiSuccessResponse } from "../schema/api.js";
 import { ProjectService } from "../app/projects/project-service.js";
 import { createOpenRouterModelService } from "../openrouter/model-service.js";
 import { OutlineGenerationService } from "../app/projects/outline-generation-service.js";
+import type { AssetUploadLimits } from "../app/assets/asset-upload-limits.js";
 import { registerApiErrorHandler } from "./middleware/error-handler.js";
 import { registerNotFoundHandler } from "./middleware/not-found-handler.js";
 import { registerModelRoutes } from "./routes/models.js";
@@ -17,6 +18,7 @@ import {
   registerTerminologyRoutes,
   type TerminologyServicePort
 } from "./routes/terminology.js";
+import { registerAssetRoutes, type AssetServicePort } from "./routes/assets.js";
 
 export type AppOptions = {
   logger?: FastifyServerOptions["logger"];
@@ -27,6 +29,8 @@ export type AppOptions = {
   projectService?: ProjectService;
   outlineGenerationService?: Pick<OutlineGenerationService, "generate">;
   terminologyService?: TerminologyServicePort;
+  assetService?: AssetServicePort;
+  assetUploadLimits?: AssetUploadLimits;
   staticRoot?: string;
 };
 
@@ -52,6 +56,12 @@ export function buildApp(options: AppOptions = {}): FastifyInstance {
 
   if (options.terminologyService !== undefined) {
     registerTerminologyRoutes(app, options.terminologyService);
+  }
+
+  if (options.assetService !== undefined) {
+    registerAssetRoutes(app, options.assetService, {
+      limits: options.assetUploadLimits
+    });
   }
 
   if (options.staticRoot !== undefined) {

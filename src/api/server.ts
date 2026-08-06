@@ -12,6 +12,9 @@ import { ProjectService } from "../app/projects/project-service.js";
 import { OutlineGenerationService } from "../app/projects/outline-generation-service.js";
 import { TerminologyRepository } from "../app/terminology/terminology-repository.js";
 import { TerminologyService } from "../app/terminology/terminology-service.js";
+import { AssetRepository } from "../app/assets/asset-repository.js";
+import { AssetService } from "../app/assets/asset-service.js";
+import type { AssetUploadLimits } from "../app/assets/asset-upload-limits.js";
 import { createOpenRouterChatAdapter } from "../openrouter/chat-adapter.js";
 import { createOpenRouterModelService } from "../openrouter/model-service.js";
 import type { BackupDatabase } from "../db/backup.js";
@@ -30,6 +33,8 @@ export type ServerOptions = AppOptions & {
   migrationsFolder?: MigrationFolder;
   projectRepository?: ProjectRepository;
   terminologyRepository?: TerminologyRepository;
+  assetRepository?: AssetRepository;
+  assetUploadLimits?: AssetUploadLimits;
   workspaceRoot?: string;
 };
 
@@ -44,6 +49,12 @@ export async function ensureWorkspaceDirectories(
   const resolvedWorkspaceRoot = path.resolve(workspaceRoot);
   await Promise.all([
     mkdir(path.join(resolvedWorkspaceRoot, "library"), { recursive: true }),
+    mkdir(path.join(resolvedWorkspaceRoot, "library", "media"), {
+      recursive: true
+    }),
+    mkdir(path.join(resolvedWorkspaceRoot, "library", "staging"), {
+      recursive: true
+    }),
     mkdir(path.join(resolvedWorkspaceRoot, "projects"), { recursive: true })
   ]);
 }
@@ -57,6 +68,7 @@ export async function initializeServer(
     migrationsFolder,
     projectRepository,
     terminologyRepository,
+    assetRepository,
     terminologyService: suppliedTerminologyService,
     projectService: suppliedProjectService,
     workspaceRoot = process.cwd(),
@@ -94,12 +106,22 @@ export async function initializeServer(
         repository:
           terminologyRepository ?? new TerminologyRepository(database.database)
       });
+    const resolvedAssetService =
+      appOptions.assetService ??
+      new AssetService({
+        repository:
+          assetRepository ?? new AssetRepository(database.database),
+        managementRoot: path.join(workspaceRoot, "library"),
+        limits: options.assetUploadLimits
+      });
     const app = buildApp({
       ...appOptions,
       modelService: resolvedModelService,
       outlineGenerationService: resolvedOutlineGenerationService,
       projectService: resolvedProjectService,
-      terminologyService: resolvedTerminologyService
+      terminologyService: resolvedTerminologyService,
+      assetService: resolvedAssetService,
+      assetUploadLimits: options.assetUploadLimits
     });
     app.addHook("onClose", async () => {
       database.close();
