@@ -9,7 +9,10 @@ import { z } from "zod";
 
 import { ProjectRepositoryError } from "../../src/app/projects/project-repository.js";
 import { buildApp } from "../../src/api/app.js";
-import { mapApiError } from "../../src/api/errors/api-error.js";
+import {
+  ApiResponseValidationError,
+  mapApiError
+} from "../../src/api/errors/api-error.js";
 import {
   apiErrorResponseSchema,
   createApiSuccessResponse
@@ -38,6 +41,19 @@ describe("common API error handling", () => {
       await app.close();
       app = undefined;
     }
+  });
+
+  it("maps response validation failures to logged internal errors", () => {
+    expect(
+      mapApiError(
+        new ApiResponseValidationError(new Error("private response detail"))
+      )
+    ).toMatchObject({
+      code: "INTERNAL_SERVER_ERROR",
+      status: 500,
+      details: [],
+      shouldLog: true
+    });
   });
 
   it("returns a contract-shaped 404 for an unknown API route", async () => {

@@ -4,7 +4,10 @@ import { describe, expect, it } from "vitest";
 
 import {
   areTerminologyPreviewExclusionsDisabled,
-  buildTerminologyPreviewRequest
+  buildTerminologyPreviewRequest,
+  getTerminologyPreviewActiveTermsKey,
+  getTerminologyPreviewDraftKey,
+  isTerminologyPreviewSnapshotCurrent
 } from "../../src/web/terminology-preview-state.js";
 import { TerminologyPreviewResultView } from "../../src/web/terminology-preview-view.js";
 
@@ -73,5 +76,77 @@ describe("terminology preview UI state", () => {
     });
     expect(areTerminologyPreviewExclusionsDisabled("literal")).toBe(true);
     expect(areTerminologyPreviewExclusionsDisabled("dictionary")).toBe(false);
+  });
+
+  it("invalidates a result when the draft or active terminology changes", () => {
+    const draft = {
+      spokenText: "経費精算",
+      mode: "dictionary" as const,
+      excludedTermIds: []
+    };
+    const activeTerm = {
+      termId: "term-a",
+      surface: "経費精算",
+      normalizedSurface: "経費精算",
+      readingKatakana: "ケイヒセイサン",
+      category: "operation",
+      priority: 0,
+      notes: "",
+      status: "active" as const,
+      createdAt: "2026-08-06T00:00:00.000Z",
+      updatedAt: "2026-08-06T00:00:00.000Z"
+    };
+    const snapshot = {
+      draftKey: getTerminologyPreviewDraftKey(draft),
+      activeTermsKey: getTerminologyPreviewActiveTermsKey([activeTerm])
+    };
+
+    expect(
+      isTerminologyPreviewSnapshotCurrent(
+        snapshot,
+        getTerminologyPreviewDraftKey(draft),
+        getTerminologyPreviewActiveTermsKey([activeTerm])
+      )
+    ).toBe(true);
+
+    expect(
+      isTerminologyPreviewSnapshotCurrent(
+        snapshot,
+        getTerminologyPreviewDraftKey({
+          ...draft,
+          spokenText: "勤怠管理"
+        }),
+        snapshot.activeTermsKey
+      )
+    ).toBe(false);
+    expect(
+      isTerminologyPreviewSnapshotCurrent(
+        snapshot,
+        getTerminologyPreviewDraftKey({
+          ...draft,
+          mode: "literal"
+        }),
+        snapshot.activeTermsKey
+      )
+    ).toBe(false);
+    expect(
+      isTerminologyPreviewSnapshotCurrent(
+        snapshot,
+        getTerminologyPreviewDraftKey({
+          ...draft,
+          excludedTermIds: ["term-a"]
+        }),
+        snapshot.activeTermsKey
+      )
+    ).toBe(false);
+    expect(
+      isTerminologyPreviewSnapshotCurrent(
+        snapshot,
+        snapshot.draftKey,
+        getTerminologyPreviewActiveTermsKey([
+          { ...activeTerm, updatedAt: "2026-08-06T00:01:00.000Z" }
+        ])
+      )
+    ).toBe(false);
   });
 });

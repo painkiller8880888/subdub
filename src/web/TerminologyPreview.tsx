@@ -1,5 +1,5 @@
 import { useMutation } from "@tanstack/react-query";
-import { type FormEvent, useState } from "react";
+import { type FormEvent, useEffect, useState } from "react";
 import { ZodError } from "zod";
 
 import type { TerminologyTerm } from "../schema/terminology.js";
@@ -8,6 +8,10 @@ import { TerminologyPreviewResultView } from "./terminology-preview-view";
 import {
   areTerminologyPreviewExclusionsDisabled,
   buildTerminologyPreviewRequest,
+  getTerminologyPreviewActiveTermsKey,
+  getTerminologyPreviewDraftKey,
+  isTerminologyPreviewSnapshotCurrent,
+  type TerminologyPreviewSnapshot,
   type TerminologyPreviewMode
 } from "./terminology-preview-state";
 
@@ -34,11 +38,32 @@ export function TerminologyPreview({
   const [mode, setMode] = useState<TerminologyPreviewMode>("dictionary");
   const [excludedTermIds, setExcludedTermIds] = useState<string[]>([]);
   const [validationError, setValidationError] = useState<string | null>(null);
+  const [previewSnapshot, setPreviewSnapshot] =
+    useState<TerminologyPreviewSnapshot | null>(null);
   const previewMutation = useMutation({
     mutationFn: previewTerminology
   });
+  const activeTermsKey = getTerminologyPreviewActiveTermsKey(activeTerms);
+  const draftKey = getTerminologyPreviewDraftKey({
+    spokenText,
+    mode,
+    excludedTermIds
+  });
+
+  useEffect(() => {
+    previewMutation.reset();
+    setPreviewSnapshot(null);
+    setValidationError(null);
+  }, [activeTermsKey]);
+
+  function invalidatePreview(): void {
+    previewMutation.reset();
+    setPreviewSnapshot(null);
+    setValidationError(null);
+  }
 
   function toggleExcludedTerm(termId: string, checked: boolean): void {
+    invalidatePreview();
     setExcludedTermIds((current) => {
       if (checked) {
         return current.includes(termId) ? current : [...current, termId];
@@ -51,13 +76,13 @@ export function TerminologyPreview({
     event.preventDefault();
     setValidationError(null);
     try {
-      previewMutation.mutate(
-        buildTerminologyPreviewRequest({
-          spokenText,
-          mode,
-          excludedTermIds
-        })
-      );
+      const request = buildTerminologyPreviewRequest({
+        spokenText,
+        mode,
+        excludedTermIds
+      });
+      setPreviewSnapshot({ draftKey, activeTermsKey });
+      previewMutation.mutate(request);
     } catch (error) {
       setValidationError(getPreviewErrorMessage(error));
     }
@@ -69,6 +94,11 @@ export function TerminologyPreview({
       ? getPreviewErrorMessage(previewMutation.error)
       : null);
   const exclusionsDisabled = areTerminologyPreviewExclusionsDisabled(mode);
+  const isPreviewCurrent = isTerminologyPreviewSnapshotCurrent(
+    previewSnapshot,
+    draftKey,
+    activeTermsKey
+  );
 
   return (
     <section
@@ -85,9 +115,10 @@ export function TerminologyPreview({
             id="terminology-preview-spoken-text"
             rows={4}
             value={spokenText}
+            disabled={previewMutation.isPending}
             onChange={(event) => {
+              invalidatePreview();
               setSpokenText(event.target.value);
-              setValidationError(null);
             }}
           />
         </div>
@@ -96,9 +127,10 @@ export function TerminologyPreview({
           <select
             id="terminology-preview-mode"
             value={mode}
+            disabled={previewMutation.isPending}
             onChange={(event) => {
+              invalidatePreview();
               setMode(event.target.value as TerminologyPreviewMode);
-              setValidationError(null);
             }}
           >
             <option value="dictionary">用語辞書を適用 (dictionary)</option>
@@ -151,9 +183,9 @@ export function TerminologyPreview({
         </div>
       </form>
       <TerminologyPreviewResultView
-        result={previewMutation.data ?? null}
-        isPending={previewMutation.isPending}
-        error={previewError}
+        result={isPreviewCurrent ? (previewMutation.data ?? null) : null}
+        isPending={isPreviewCurrent && previewMutation.isPending}
+        error={isPreviewCurrent ? previewError : null}
       />
     </section>
   );

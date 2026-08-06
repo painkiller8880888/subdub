@@ -377,6 +377,58 @@ describe("terminology API", () => {
     await failingApp.close();
   });
 
+  it("maps invalid preview service results to a safe 500 error", async () => {
+    const invalidResultApp = (await import("../../src/api/app.js")).buildApp({
+      terminologyService: {
+        list: () => [],
+        create: () => {
+          throw new Error("not used");
+        },
+        get: () => {
+          throw new Error("not used");
+        },
+        update: () => {
+          throw new Error("not used");
+        },
+        deactivate: () => {
+          throw new Error("not used");
+        },
+        activate: () => {
+          throw new Error("not used");
+        },
+        preview: () => ({
+          resolvedSpokenText: "A",
+          appliedTerms: [
+            {
+              termId: "term-a",
+              surface: "A",
+              reading: "READ",
+              termUpdatedAt: "not-an-iso-date"
+            }
+          ]
+        })
+      } as never
+    });
+
+    const response = await invalidResultApp.inject({
+      method: "POST",
+      url: "/api/terminology/preview",
+      payload: {
+        spokenText: "A",
+        pronunciation: { mode: "dictionary", excludedTermIds: [] }
+      }
+    });
+
+    expect(response.statusCode).toBe(500);
+    const error = apiError(response);
+    expect(error.code).toBe("INTERNAL_SERVER_ERROR");
+    expect(error.details).toEqual([]);
+    expect(response.body).not.toContain("REQUEST_VALIDATION_FAILED");
+    expect(response.body).not.toContain("not-an-iso-date");
+    expect(response.body).not.toContain("ZodError");
+    await invalidResultApp.close();
+  });
+
   it("returns not found for unknown terminology detail", async () => {
     const missingResponse = await server.app.inject({
       method: "GET",
