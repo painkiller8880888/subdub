@@ -182,6 +182,12 @@ export const scriptInitializeRequestSchema = z
   })
   .strict();
 
+export const scriptApproveRequestSchema = z
+  .object({
+    expectedRevision: nonNegativeIntegerSchema
+  })
+  .strict();
+
 export const scriptSaveRequestSchema = z
   .object({
     script: scriptSchema,
@@ -334,6 +340,7 @@ export type OutlineReviewRequest = z.infer<typeof outlineReviewRequestSchema>;
 export type ScriptInitializeRequest = z.infer<
   typeof scriptInitializeRequestSchema
 >;
+export type ScriptApproveRequest = z.infer<typeof scriptApproveRequestSchema>;
 export type ScriptSaveRequest = z.infer<typeof scriptSaveRequestSchema>;
 export type ModelsQuery = z.infer<typeof modelsQuerySchema>;
 export type ModelSummary = z.infer<typeof modelSummarySchema>;

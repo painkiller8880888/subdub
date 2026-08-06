@@ -7,6 +7,7 @@ import {
   projectBriefSaveRequestSchema,
   projectCreateRequestSchema,
   projectSourceSaveRequestSchema,
+  scriptApproveRequestSchema,
   scriptInitializeRequestSchema,
   scriptSaveRequestSchema,
   projectSummarySchema,
@@ -29,13 +30,17 @@ import {
   applyEditedOutline,
   hasMeaningfulOutline
 } from "./project-invalidation.js";
+import { applyEditedScript } from "./script-invalidation.js";
 import {
+  assertCanApproveScript,
   assertCanInitializeScript,
   createScriptFromApprovedOutline,
-  normalizeEditedScriptIds,
-  scriptContentChanged
+  normalizeEditedScriptIds
 } from "./script-domain.js";
-import { ScriptValidationError } from "./script-errors.js";
+import {
+  ScriptApprovalError,
+  ScriptValidationError
+} from "./script-errors.js";
 
 function scriptValidationIssues(
   issues: readonly { path: readonly PropertyKey[]; message: string }[]
@@ -321,30 +326,42 @@ export class ProjectService {
       candidateProjectResult.data.script,
       this.createId
     );
-    const contentChanged = scriptContentChanged(
-      currentProject.script,
-      normalizedScript
-    );
-    const status =
-      currentProject.script.status === "approved"
-        ? contentChanged
-          ? "needs_review"
-          : "approved"
-        : normalizedScript.status;
-    const script: Script = { ...normalizedScript, status };
-    const updatedProjectResult = videoProjectSchema.safeParse({
-      ...currentProject,
-      script
-    });
+    const { project } = applyEditedScript(currentProject, normalizedScript);
+    const updatedProjectResult = videoProjectSchema.safeParse(project);
     if (!updatedProjectResult.success) {
       throw new ScriptValidationError(
         scriptValidationIssues(updatedProjectResult.error.issues)
       );
     }
 
-    return this.repository.saveScript(
+    return this.repository.save(
       projectId,
-      updatedProjectResult.data.script,
+      updatedProjectResult.data,
+      request.expectedRevision
+    );
+  }
+
+  async approveScript(projectId: unknown, input: unknown): Promise<VideoProject> {
+    const request = scriptApproveRequestSchema.parse(input);
+    const snapshot = await this.repository.readGenerationSnapshot(projectId);
+    assertCanApproveScript(snapshot.project, snapshot.sourceHash);
+    const script: Script = {
+      ...snapshot.project.script,
+      status: "approved"
+    };
+    const updatedProject = {
+      ...snapshot.project,
+      script
+    };
+    const updatedProjectResult = videoProjectSchema.safeParse(updatedProject);
+    if (!updatedProjectResult.success) {
+      throw new ScriptApprovalError(
+        scriptValidationIssues(updatedProjectResult.error.issues)
+      );
+    }
+    return this.repository.save(
+      projectId,
+      updatedProjectResult.data,
       request.expectedRevision
     );
   }

@@ -18,7 +18,7 @@ import {
   deactivateTerminology,
   fetchTerminology,
   updateTerminology
-} from "./api/client";
+} from "./lib/api-client";
 import { TerminologyPreview } from "./TerminologyPreview";
 import {
   emptyTerminologyForm,

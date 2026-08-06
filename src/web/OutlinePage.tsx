@@ -19,7 +19,7 @@ import {
   generateProjectOutline,
   reviewProjectOutline,
   saveProjectOutline
-} from "./api/client";
+} from "./lib/api-client";
 import { AutosaveCoordinator, type AutosaveState } from "./brief-autosave";
 import {
   cloneOutline,

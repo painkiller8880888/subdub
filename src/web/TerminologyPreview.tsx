@@ -3,7 +3,7 @@ import { type FormEvent, useEffect, useState } from "react";
 import { ZodError } from "zod";
 
 import type { TerminologyTerm } from "../schema/terminology.js";
-import { ApiClientError, previewTerminology } from "./api/client";
+import { ApiClientError, previewTerminology } from "./lib/api-client";
 import { TerminologyPreviewResultView } from "./terminology-preview-view";
 import {
   areTerminologyPreviewExclusionsDisabled,

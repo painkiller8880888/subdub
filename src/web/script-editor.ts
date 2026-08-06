@@ -164,6 +164,13 @@ export function isProjectContextCurrent(
   );
 }
 
+export function scriptStatusAfterEdit(
+  previousStatus: Script["status"],
+  candidateStatus: Script["status"]
+): Script["status"] {
+  return previousStatus === "approved" ? "needs_review" : candidateStatus;
+}
+
 export function appendScriptLines(
   script: Script,
   sectionIndex: number,

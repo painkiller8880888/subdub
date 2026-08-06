@@ -1,7 +1,9 @@
 import { createHash } from "node:crypto";
 
+import type { ApiErrorDetail } from "../../schema/api.js";
 import { idSchema, type Outline, type Script, type VideoProject } from "../../schema/index.js";
 import {
+  ScriptApprovalError,
   ScriptInitializationError,
   ScriptValidationError
 } from "./script-errors.js";
@@ -200,5 +202,39 @@ export function assertCanInitializeScript(
   }
   if (details.length > 0) {
     throw new ScriptInitializationError(details);
+  }
+}
+
+export function assertCanApproveScript(
+  project: VideoProject,
+  currentSourceHash: string
+): void {
+  const details: ApiErrorDetail[] = [];
+  if (project.script.sections.length === 0) {
+    details.push({
+      path: ["script", "sections"],
+      message: "台本が初期化されていません。"
+    });
+  }
+  if (project.outline.status !== "approved") {
+    details.push({
+      path: ["outline", "status"],
+      message: "構成案が承認されていません。"
+    });
+  }
+  if (project.outline.sourceHash !== currentSourceHash) {
+    details.push({
+      path: ["outline", "sourceHash"],
+      message: "構成案が stale です。構成案を見直してください。"
+    });
+  }
+  if (computeOutlineHash(project.outline) !== project.script.outlineHash) {
+    details.push({
+      path: ["script", "outlineHash"],
+      message: "台本の元となった構成案が変更されています。"
+    });
+  }
+  if (details.length > 0) {
+    throw new ScriptApprovalError(details);
   }
 }

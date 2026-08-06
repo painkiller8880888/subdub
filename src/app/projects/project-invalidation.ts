@@ -13,7 +13,7 @@ function hasMeaningfulScript(project: VideoProject): boolean {
   return project.script.sections.length > 0 || project.script.status !== "draft";
 }
 
-function hasMeaningfulVisuals(project: VideoProject): boolean {
+export function hasMeaningfulVisuals(project: VideoProject): boolean {
   return (
     project.visuals.assignments.length > 0 ||
     project.visuals.suggestionRunIds.length > 0 ||

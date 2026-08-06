@@ -35,7 +35,7 @@ import {
   fetchProjects,
   saveProjectBrief,
   saveProjectSource
-} from "./api/client";
+} from "./lib/api-client";
 import {
   AutosaveCoordinator,
   navigateAfterAutosave,

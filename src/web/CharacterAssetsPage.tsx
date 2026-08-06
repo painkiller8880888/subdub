@@ -7,7 +7,7 @@ import {
   ApiClientError,
   ApiClientProtocolError,
   fetchProject
-} from "./api/client";
+} from "./lib/api-client";
 import {
   characterAssetUrl,
   toCharacterAssetViewModels,
