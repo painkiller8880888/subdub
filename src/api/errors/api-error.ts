@@ -21,6 +21,13 @@ import {
   TerminologyNotFoundError
 } from "../../app/terminology/terminology-errors.js";
 
+export class ApiResponseValidationError extends Error {
+  constructor(cause: unknown) {
+    super("The server produced an invalid API response.", { cause });
+    this.name = "ApiResponseValidationError";
+  }
+}
+
 export const API_ERROR_CODE = {
   requestValidationFailed: "REQUEST_VALIDATION_FAILED",
   apiNotFound: "API_NOT_FOUND",
@@ -437,6 +444,16 @@ function mapFastifyValidationDetails(
 }
 
 export function mapApiError(error: unknown): MappedApiError {
+  if (error instanceof ApiResponseValidationError) {
+    return {
+      code: API_ERROR_CODE.internalServerError,
+      status: 500,
+      message: genericInternalMessage,
+      details: [],
+      shouldLog: true
+    };
+  }
+
   if (error instanceof TerminologyNotFoundError) {
     return {
       code: error.code,

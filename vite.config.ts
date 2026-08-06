@@ -5,6 +5,9 @@ import react from "@vitejs/plugin-react";
 import { defineConfig } from "vitest/config";
 
 const projectRoot = path.dirname(fileURLToPath(import.meta.url));
+const apiProxy = {
+  target: "http://127.0.0.1:3000"
+};
 
 export default defineConfig({
   root: path.resolve(projectRoot, "src/web"),
@@ -15,9 +18,10 @@ export default defineConfig({
     port: 5173,
     strictPort: true,
     proxy: {
-      "/api": {
-        target: "http://127.0.0.1:3000"
-      }
+      "/api/health": apiProxy,
+      "/api/models": apiProxy,
+      "/api/projects": apiProxy,
+      "/api/terminology": apiProxy
     }
   },
   build: {

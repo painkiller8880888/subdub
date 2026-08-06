@@ -231,4 +231,50 @@ describe("terminology service and repository", () => {
     expect(service.get(created.termId)).toEqual(created);
     database.close();
   });
+
+  it("previews only active terms without changing database rows", async () => {
+    const { database, service } = await makeService({
+      ids: ["term-long", "term-short", "term-inactive"]
+    });
+    const longTerm = service.create({
+      surface: "AB",
+      readingKatakana: "エービー",
+      category: "other"
+    });
+    const shortTerm = service.create({
+      surface: "A",
+      readingKatakana: "エー",
+      category: "other"
+    });
+    const inactiveTerm = service.create({
+      surface: "C",
+      readingKatakana: "シー",
+      category: "other"
+    });
+    service.deactivate(inactiveTerm.termId);
+    const before = service.list();
+
+    const preview = service.preview({
+      spokenText: "ABC",
+      pronunciation: {
+        mode: "dictionary",
+        excludedTermIds: [shortTerm.termId, shortTerm.termId, "missing-term"]
+      }
+    });
+
+    expect(preview).toEqual({
+      resolvedSpokenText: "エービーC",
+      appliedTerms: [
+        {
+          termId: longTerm.termId,
+          surface: "AB",
+          reading: "エービー",
+          termUpdatedAt: longTerm.updatedAt
+        }
+      ]
+    });
+    expect(service.list()).toEqual(before);
+    expect(service.get(inactiveTerm.termId).status).toBe("inactive");
+    database.close();
+  });
 });

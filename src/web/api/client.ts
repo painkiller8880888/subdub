@@ -20,6 +20,8 @@ import {
   terminologyCreateRequestSchema,
   terminologyListQuerySchema,
   terminologyListResponseSchema,
+  terminologyPreviewRequestSchema,
+  terminologyPreviewResponseSchema,
   terminologyTermParamsSchema,
   terminologyTermResponseSchema,
   terminologyUpdateRequestSchema,
@@ -38,6 +40,8 @@ import {
   type ProjectSummary,
   type TerminologyCreateRequest,
   type TerminologyListQuery,
+  type TerminologyPreviewRequest,
+  type TerminologyPreviewResult,
   type TerminologyUpdateRequest
 } from "../../schema/api.js";
 import type { TerminologyTerm } from "../../schema/terminology.js";
@@ -352,6 +356,22 @@ export async function fetchTerminology(
   const response = await fetchApi(
     `/api/terminology${queryString.length > 0 ? `?${queryString}` : ""}`,
     terminologyListResponseSchema
+  );
+  return response.data;
+}
+
+export async function previewTerminology(
+  input: TerminologyPreviewRequest
+): Promise<TerminologyPreviewResult> {
+  const validatedInput = terminologyPreviewRequestSchema.parse(input);
+  const response = await fetchApi(
+    "/api/terminology/preview",
+    terminologyPreviewResponseSchema,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(validatedInput)
+    }
   );
   return response.data;
 }

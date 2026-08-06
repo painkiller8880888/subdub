@@ -1,11 +1,15 @@
 import type { FastifyInstance } from "fastify";
+import { ZodError } from "zod";
 
 import { TerminologyService } from "../../app/terminology/terminology-service.js";
+import { ApiResponseValidationError } from "../errors/api-error.js";
 import {
   createApiSuccessResponse,
   terminologyCreateRequestSchema,
   terminologyListQuerySchema,
   terminologyListResponseSchema,
+  terminologyPreviewRequestSchema,
+  terminologyPreviewResponseSchema,
   terminologyTermParamsSchema,
   terminologyTermResponseSchema,
   terminologyUpdateRequestSchema
@@ -13,8 +17,19 @@ import {
 
 export type TerminologyServicePort = Pick<
   TerminologyService,
-  "list" | "create" | "get" | "update" | "deactivate" | "activate"
+  "list" | "create" | "get" | "update" | "deactivate" | "activate" | "preview"
 >;
+
+function parseTerminologyPreviewResponse(value: unknown) {
+  try {
+    return terminologyPreviewResponseSchema.parse(value);
+  } catch (error) {
+    if (error instanceof ZodError) {
+      throw new ApiResponseValidationError(error);
+    }
+    throw error;
+  }
+}
 
 export function registerTerminologyRoutes(
   app: FastifyInstance,
@@ -24,6 +39,13 @@ export function registerTerminologyRoutes(
     const query = terminologyListQuerySchema.parse(request.query);
     return terminologyListResponseSchema.parse(
       createApiSuccessResponse(terminologyService.list(query))
+    );
+  });
+
+  app.post("/api/terminology/preview", async (request) => {
+    const input = terminologyPreviewRequestSchema.parse(request.body);
+    return parseTerminologyPreviewResponse(
+      createApiSuccessResponse(terminologyService.preview(input))
     );
   });
 
