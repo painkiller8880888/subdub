@@ -1,4 +1,4 @@
-import { createWriteStream } from "node:fs";
+import { constants, createWriteStream } from "node:fs";
 import { copyFile, mkdir, open, rename, rm, stat } from "node:fs/promises";
 import * as path from "node:path";
 import { Readable } from "node:stream";
@@ -103,10 +103,18 @@ export class NodeAssetFileStore implements AssetFileStore {
     const destination = this.resolveSafe(mediaRelativePath);
     try {
       await mkdir(path.dirname(destination), { recursive: true });
+      const destinationExists = await stat(destination)
+        .then(() => true)
+        .catch(() => false);
+      if (destinationExists) {
+        throw new AssetStagingFailedError(
+          new Error("destination file already exists")
+        );
+      }
       try {
         await rename(source, destination);
       } catch {
-        await copyFile(source, destination);
+        await copyFile(source, destination, constants.COPYFILE_EXCL);
         await rm(source, { force: true });
       }
     } catch (error) {

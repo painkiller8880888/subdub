@@ -40,7 +40,6 @@ const allowedFieldNames = new Set([
 ]);
 
 function toDomainError(error: unknown): unknown {
-  console.error("toDomainError INPUT:", (error as Error)?.name, (error as Error)?.code, (error as Error)?.message);
   if (typeof error === "object" && error !== null && "code" in error) {
     const code = error.code;
     if (typeof code === "string") {
@@ -97,68 +96,62 @@ export function registerAssetRoutes(
 ): void {
   const limits = options.limits ?? DEFAULT_ASSET_UPLOAD_LIMITS;
 
-   app.register(fastifyMultipart, {
-     limits: {
-       files: limits.maxFileCount,
-       parts: limits.maxPartCount,
-       fields: 1000, // we enforce our own field count limit
-       fieldNameSize: limits.maxFieldNameLength,
-       fieldSize: limits.maxFieldValueLength,
-       fileSize: limits.maxGlobalFileBytes
-     }
-   });
+  app.register(fastifyMultipart, {
+    limits: {
+      files: limits.maxFileCount,
+      parts: limits.maxPartCount,
+      fields: 1000, // we enforce our own field count limit
+      fieldNameSize: limits.maxFieldNameLength,
+      fieldSize: limits.maxFieldValueLength,
+      fileSize: limits.maxGlobalFileBytes
+    }
+  });
 
-app.post("/api/assets", async (request) => {
-    console.log("HANDLER START");
+  app.post("/api/assets", async (request) => {
+    const fields: Record<string, string | string[]> = {};
+    let staged: StagedUpload | undefined;
+    let fieldCount = 0;
+    let partCount = 0;
+    let fileCount = 0;
+
     try {
-      const fields: Record<string, string | string[]> = {};
-       let staged: StagedUpload | undefined;
-       let fieldCount = 0;
-       let partCount = 0;
-       let fileCount = 0;
-
-      console.log("STARTING PARTS ITERATION");
-      try {
-        for await (const part of request.parts()) {
-           console.log("PART:", part.type, part.fieldname);
-           partCount++;
-           if (partCount > limits.maxPartCount) {
-             throw new AssetTooManyPartsError();
-           }
-         if (part.type === "field") {
-           fieldCount++;
-           console.log(`FIELD COUNT: ${fieldCount}`);
-           if (fieldCount > limits.maxFieldCount) {
-             console.log(`FIELD COUNT EXCEEDED: ${fieldCount} > ${limits.maxFieldCount}`);
-             throw new AssetTooManyFieldsError();
-           }
-           if (!allowedFieldNames.has(part.fieldname)) {
-             throw new AssetInvalidFieldError();
-           }
-           if (part.fieldnameTruncated) {
-             throw new AssetInvalidFieldError();
-           }
-           if (part.valueTruncated) {
-             throw new AssetFieldTooLargeError();
-           }
-           accumulateField(fields, part.fieldname, String(part.value));
-         } else {
-           fileCount++;
-           if (fileCount > limits.maxFileCount) {
-             throw new AssetTooManyFilesError();
-           }
-           if (part.fieldname !== "file") {
-             throw new AssetInvalidFieldError();
-           }
-           if (staged !== undefined) {
-             throw new AssetTooManyFilesError();
-           }
-           staged = await assetService.stageUpload({
-             stream: part.file,
-             mimeType: part.mimetype,
-             filename: part.filename
-           });
-         }
+      for await (const part of request.parts()) {
+        partCount++;
+        if (partCount > limits.maxPartCount) {
+          throw new AssetTooManyPartsError();
+        }
+        if (part.type === "field") {
+          fieldCount++;
+          if (fieldCount > limits.maxFieldCount) {
+            throw new AssetTooManyFieldsError();
+          }
+          if (!allowedFieldNames.has(part.fieldname)) {
+            throw new AssetInvalidFieldError();
+          }
+          if (part.fieldnameTruncated) {
+            throw new AssetInvalidFieldError();
+          }
+          if (part.valueTruncated) {
+            throw new AssetFieldTooLargeError();
+          }
+          accumulateField(fields, part.fieldname, String(part.value));
+        } else {
+          fileCount++;
+          if (fileCount > limits.maxFileCount) {
+            throw new AssetTooManyFilesError();
+          }
+          if (part.fieldname !== "file") {
+            throw new AssetInvalidFieldError();
+          }
+          if (staged !== undefined) {
+            throw new AssetTooManyFilesError();
+          }
+          staged = await assetService.stageUpload({
+            stream: part.file,
+            mimeType: part.mimetype,
+            filename: part.filename
+          });
+        }
       }
 
       if (staged === undefined) {
@@ -168,17 +161,10 @@ app.post("/api/assets", async (request) => {
       const receipt = await assetService.commitUpload(fields, staged);
       return assetUploadResponseSchema.parse(createApiSuccessResponse(receipt));
     } catch (error) {
-      console.error("CATCH ERROR:", (error as Error)?.code, (error as Error)?.message);
       if (staged !== undefined) {
         await assetService.discardStaged(staged);
       }
-       const mappedError = toDomainError(error);
-      console.error("MAPPED ERROR:", (mappedError as Error)?.code);
-      throw mappedError;
+      throw toDomainError(error);
     }
-  } catch (outerError) {
-    console.error("OUTER CATCH:", (outerError as Error)?.code, (outerError as Error)?.message);
-    throw outerError;
-  }
-});
+  });
 }

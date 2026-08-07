@@ -96,6 +96,7 @@ describe("asset upload API", () => {
   it("registers sound_effect, photo, video, and document_scan fixtures", async () => {
     await insertTag("tag-a");
     await insertTag("tag-b");
+    await insertTag("confirm");
 
     const cases: Array<{
       kind: string;
@@ -145,6 +146,7 @@ describe("asset upload API", () => {
         field("confidentiality", "confidential"),
         field("tagIds", "tag-b"),
         field("tagIds", "tag-a"),
+        field("tagIds", "confirm"),
         field("tagIds", "tag-b"),
         file(testCase.data, testCase.mimeType, testCase.filename)
       ]);
@@ -160,7 +162,7 @@ describe("asset upload API", () => {
         department: "部署",
         system: "システム",
         status: "processing",
-        tagIds: ["tag-b", "tag-a"]
+        tagIds: ["tag-b", "tag-a", "confirm"]
       });
       expect(receipt.assetId).toMatch(/^[a-z0-9-]+$/);
       expect(response.body).not.toContain("staging");
@@ -428,5 +430,17 @@ describe("asset upload API", () => {
     const receipt = assetUploadResponseSchema.parse(response.json()).data;
     expect(receipt.title).toBe("後置タイトル");
     expect(receipt.status).toBe("processing");
+  });
+
+  it("returns 400 ASSET_INVALID_FIELD when sound_effect is missing a required usage tag", async () => {
+    await insertTag("tag-a");
+    const response = await upload([
+      field("kind", "sound_effect"),
+      field("title", "効果音"),
+      field("tagIds", "tag-a"),
+      file(wavBytes, "audio/wav", "effect.wav")
+    ]);
+    expect(response.statusCode).toBe(400);
+    expect(apiError(response).code).toBe("ASSET_INVALID_FIELD");
   });
 });

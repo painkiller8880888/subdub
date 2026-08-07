@@ -1,5 +1,5 @@
 import { startServer } from "./server.js";
-startServer().catch((error) => {
+startServer({ logger: true }).catch((error) => {
     console.error("Fastifyの起動に失敗しました。", error);
     process.exitCode = 1;
 });

@@ -72,18 +72,18 @@ export class AssetService {
       new NodeAssetFileStore(resolveManagementRoot(options.managementRoot));
     this.limits = options.limits ?? DEFAULT_ASSET_UPLOAD_LIMITS;
     this.now = options.now ?? (() => new Date());
-       this.createId = options.createId ?? (() => randomUUID().toLowerCase());
+    this.createId = options.createId ?? (() => randomUUID().toLowerCase());
   }
 
-    async stageUpload(file: AssetUploadFile): Promise<StagedUpload> {
-      const uploadId = randomUUID().toLowerCase();
-      const record = await this.fileStore.stageUpload(uploadId, file.stream);
-      return {
-        ...record,
-        mimeType: file.mimeType,
-        filename: file.filename
-      };
-    }
+  async stageUpload(file: AssetUploadFile): Promise<StagedUpload> {
+    const uploadId = randomUUID().toLowerCase();
+    const record = await this.fileStore.stageUpload(uploadId, file.stream);
+    return {
+      ...record,
+      mimeType: file.mimeType,
+      filename: file.filename
+    };
+  }
 
   async discardStaged(staged: StagedUpload): Promise<void> {
     await this.fileStore.removeBestEffort(staged.stagingRelativePath);
@@ -135,9 +135,9 @@ export class AssetService {
         throw new AssetFormatMismatchError();
       }
 
-        const format = ASSET_FORMATS[detection.format];
-        const assetId = idSchema.parse(this.createId());
-        const version = 1;
+      const format = ASSET_FORMATS[detection.format];
+      const assetId = idSchema.parse(this.createId());
+      const version = 1;
       const now = this.now().toISOString();
       const mediaRelativePath = `media/${assetId}/v${version}.${format.extension}`;
 
@@ -148,6 +148,22 @@ export class AssetService {
       const missingTag = tagIds.find((tagId) => !activeTagIdSet.has(tagId));
       if (missingTag !== undefined) {
         throw new AssetTagNotFoundError();
+      }
+
+      if (kind === "sound_effect") {
+        const requiredSoundEffectUsageTags = new Set([
+          "confirm",
+          "attention",
+          "warning"
+        ]);
+        const hasRequiredTag = activeTags.some(
+          (tag) =>
+            requiredSoundEffectUsageTags.has(tag.canonicalName) ||
+            requiredSoundEffectUsageTags.has(tag.tagId)
+        );
+        if (!hasRequiredTag) {
+          throw new AssetInvalidFieldError();
+        }
       }
 
       await this.fileStore.moveToMedia(

@@ -13,6 +13,7 @@ import {
   AssetFileTooLargeError,
   AssetFormatMismatchError,
   AssetInvalidFieldError,
+  AssetStagingFailedError,
   AssetTagNotFoundError,
   AssetUnsupportedFormatError
 } from "../../src/app/assets/asset-errors.js";
@@ -108,11 +109,7 @@ describe("asset service", () => {
       repository,
       managementRoot: path.join(workspaceRoot, "library"),
       now: () => new Date("2026-08-06T00:00:00.000Z"),
-       createId: options.createId ?? ((() => {
-           const id = `asset-test-${++nextId}`;
-           console.log(`CREATE_ID CALLED: ${id}`);
-           return id;
-       })),
+      createId: options.createId ?? (() => `asset-test-${++nextId}`),
       limits: options.limits
     });
   }
@@ -172,45 +169,46 @@ describe("asset service", () => {
     await createService();
     await insertTag("tag-a");
     await insertTag("tag-b", "system");
+    await insertTag("confirm", "action");
 
-     for (const [index, fixture] of fixtures.entries()) {
-        const receipt = await register(
-          {
-            kind: fixture.kind,
-             title: "テストタイトル",
-             description: "テスト説明",
-             department: "テスト部署",
-             system: "テストシステム",
-            confidentiality: " confidential ",
-            tagIds: ["tag-b", "tag-a", "tag-b"]
-          },
-          fixture.bytes,
-          fixture.mimeType,
-          fixture.filename
-        );
+    for (const [index, fixture] of fixtures.entries()) {
+      const receipt = await register(
+        {
+          kind: fixture.kind,
+          title: "テストタイトル",
+          description: "テスト説明",
+          department: "テスト部署",
+          system: "テストシステム",
+          confidentiality: " confidential ",
+          tagIds: ["tag-b", "tag-a", "confirm", "tag-b"]
+        },
+        fixture.bytes,
+        fixture.mimeType,
+        fixture.filename
+      );
 
-         expect(receipt).toMatchObject({
-           assetId: `asset-test-${index + 1}`,
-           version: 1,
-           kind: fixture.kind,
-           title: "テストタイトル",
-           description: "テスト説明",
-           mimeType: fixture.mimeType,
-           confidentiality: "confidential",
-           department: "テスト部署",
-           system: "テストシステム",
-           status: "processing",
-           tagIds: ["tag-b", "tag-a"]
-         });
-       expect(receipt.createdAt).toBe("2026-08-06T00:00:00.000Z");
+      expect(receipt).toMatchObject({
+        assetId: `asset-test-${index + 1}`,
+        version: 1,
+        kind: fixture.kind,
+        title: "テストタイトル",
+        description: "テスト説明",
+        mimeType: fixture.mimeType,
+        confidentiality: "confidential",
+        department: "テスト部署",
+        system: "テストシステム",
+        status: "processing",
+        tagIds: ["tag-b", "tag-a", "confirm"]
+      });
+      expect(receipt.createdAt).toBe("2026-08-06T00:00:00.000Z");
 
       const asset = repository.findAsset(receipt.assetId);
-       expect(asset).toMatchObject({
-         assetId: receipt.assetId,
-         kind: fixture.kind,
-         title: "テストタイトル",
-         status: "processing"
-       });
+      expect(asset).toMatchObject({
+        assetId: receipt.assetId,
+        kind: fixture.kind,
+        title: "テストタイトル",
+        status: "processing"
+      });
 
       const version = repository.findAssetVersion(receipt.assetId, 1);
       expect(version).toMatchObject({
@@ -224,6 +222,7 @@ describe("asset service", () => {
       expect(version?.durationMs).toBeNull();
 
       expect(repository.findAssetTagIds(receipt.assetId)).toEqual([
+        "confirm",
         "tag-a",
         "tag-b"
       ]);
@@ -354,36 +353,36 @@ describe("asset service", () => {
   });
 
   it("does not trust client filenames for storage paths", async () => {
-     await createService();
-      const maliciousFilenames = [
-        "../../../etc/passwd.png",
-        "C:\\Windows\\system32\\pwn.png",
-        "a/../b.png",
-        "..\\..\\..\\evil.png",
-        "社内 � 資料.png"
-      ];
-     for (let i = 0; i < maliciousFilenames.length; i++) {
-       const filename = maliciousFilenames[i];
-        const receipt = await register(
-          { kind: "photo", title: "t" },
-          pngBytes,
-          "image/png",
-          filename
-        );
-       expect(receipt.assetId).toBe(`asset-test-${i + 1}`);
-       expect(
-         repository.findAssetVersion(receipt.assetId, 1)?.libraryMediaPath
-       ).toBe(`media/${receipt.assetId}/v1.png`);
-     }
+    await createService();
+    const maliciousFilenames = [
+      "../../../etc/passwd.png",
+      "C:\\Windows\\system32\\pwn.png",
+      "a/../b.png",
+      "..\\..\\..\\evil.png",
+      "社内 � 資料.png"
+    ];
+    for (let i = 0; i < maliciousFilenames.length; i++) {
+      const filename = maliciousFilenames[i];
+      const receipt = await register(
+        { kind: "photo", title: "t" },
+        pngBytes,
+        "image/png",
+        filename
+      );
+      expect(receipt.assetId).toBe(`asset-test-${i + 1}`);
+      expect(
+        repository.findAssetVersion(receipt.assetId, 1)?.libraryMediaPath
+      ).toBe(`media/${receipt.assetId}/v1.png`);
+    }
 
-     await expect(
-       register(
-         { kind: "photo", title: "t" },
-         pngBytes,
-         "image/png",
-         "x".repeat(256) + ".png"
-       )
-     ).rejects.toBeInstanceOf(AssetInvalidFieldError);
+    await expect(
+      register(
+        { kind: "photo", title: "t" },
+        pngBytes,
+        "image/png",
+        "x".repeat(256) + ".png"
+      )
+    ).rejects.toBeInstanceOf(AssetInvalidFieldError);
   });
 
   it("enforces per-kind file size limits", async () => {
@@ -531,5 +530,75 @@ describe("asset service", () => {
     } finally {
       reopened.close();
     }
+  });
+
+  it("fails sound_effect upload if required usage tag (confirm/attention/warning) is missing", async () => {
+    await createService();
+    await insertTag("tag-department", "department");
+
+    await expect(
+      register(
+        {
+          kind: "sound_effect",
+          title: "se",
+          tagIds: ["tag-department"]
+        },
+        wavBytes,
+        "audio/wav",
+        "effect.wav"
+      )
+    ).rejects.toBeInstanceOf(AssetInvalidFieldError);
+  });
+
+  it("succeeds sound_effect upload when confirm, attention, or warning tag is present", async () => {
+    await createService();
+    await insertTag("confirm", "action");
+
+    const receipt = await register(
+      {
+        kind: "sound_effect",
+        title: "se",
+        tagIds: ["confirm"]
+      },
+      wavBytes,
+      "audio/wav",
+      "effect.wav"
+    );
+    expect(receipt.kind).toBe("sound_effect");
+    expect(receipt.tagIds).toEqual(["confirm"]);
+  });
+
+  it("fails and preserves pre-existing media file when destination media path already exists", async () => {
+    await createService({
+      createId: () => "collision-asset"
+    });
+    const preExistingDir = path.join(
+      workspaceRoot,
+      "library",
+      "media",
+      "collision-asset"
+    );
+    await fs.mkdir(preExistingDir, { recursive: true });
+    const preExistingFile = path.join(preExistingDir, "v1.png");
+    const preExistingContent = Buffer.from("PRE_EXISTING_MEDIA_DATA");
+    await fs.writeFile(preExistingFile, preExistingContent);
+
+    await insertTag("tag-a");
+    await expect(
+      register(
+        {
+          kind: "photo",
+          title: "collision test",
+          tagIds: ["tag-a"]
+        },
+        pngBytes,
+        "image/png",
+        "shot.png"
+      )
+    ).rejects.toBeInstanceOf(AssetStagingFailedError);
+
+    // Verify pre-existing file was NOT overwritten or deleted
+    const currentContent = await fs.readFile(preExistingFile);
+    expect(currentContent).toEqual(preExistingContent);
   });
 });
