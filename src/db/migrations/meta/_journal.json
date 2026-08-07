@@ -15,6 +15,13 @@
       "when": 1785977514788,
       "tag": "0001_curved_colleen_wing",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1785999082958,
+      "tag": "0002_asset-library",
+      "breakpoints": true
     }
   ]
 }

@@ -23,6 +23,12 @@ import {
   terminologySurfaceInputSchema,
   terminologyTermSchema
 } from "./terminology.js";
+import {
+  assetKindSchema,
+  assetUploadReceiptSchema,
+  normalizeAssetOptionalField,
+  normalizeAssetTextField
+} from "./asset.js";
 
 const apiErrorPathSegmentSchema = z.union([z.string(), z.number().int()]);
 
@@ -302,6 +308,37 @@ export const terminologyPreviewResponseSchema = strictObject({
   data: terminologyPreviewResultSchema
 });
 
+const assetTagIdsInputSchema = z
+  .union([z.string(), z.array(z.string())])
+  .transform((value) => (Array.isArray(value) ? value : [value]))
+  .transform((values) => values.map(normalizeAssetTextField))
+  .transform((values) => [...new Set(values)])
+  .pipe(z.array(idSchema))
+  .optional()
+  .default([]);
+
+export const assetUploadFieldsSchema = strictObject({
+  kind: assetKindSchema,
+  title: z
+    .string()
+    .transform(normalizeAssetTextField)
+    .refine((value) => value.length > 0, "タイトルは必須です。"),
+  description: z
+    .string()
+    .transform(normalizeAssetTextField)
+    .optional()
+    .default(""),
+  department: z.string().transform(normalizeAssetOptionalField).optional(),
+  system: z.string().transform(normalizeAssetOptionalField).optional(),
+  confidentiality: z.string().transform(normalizeAssetOptionalField).optional(),
+  tagIds: assetTagIdsInputSchema
+});
+
+export const assetUploadResponseSchema = strictObject({
+  data: assetUploadReceiptSchema,
+  revision: nonNegativeIntegerSchema.optional()
+});
+
 export type ApiErrorDetail = z.infer<typeof apiErrorDetailSchema>;
 export type ApiSuccessResponse<T> = {
   data: T;
@@ -371,6 +408,8 @@ export type TerminologyPreviewResult = z.infer<
 export type TerminologyPreviewResponse = z.infer<
   typeof terminologyPreviewResponseSchema
 >;
+export type AssetUploadFields = z.infer<typeof assetUploadFieldsSchema>;
+export type AssetUploadResponse = z.infer<typeof assetUploadResponseSchema>;
 
 export function createApiSuccessResponse<T>(
   data: T

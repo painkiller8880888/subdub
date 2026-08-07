@@ -107,7 +107,7 @@ describe("workspace SQLite", () => {
     const first = await initializeWorkspaceDatabase({ workspaceRoot });
     const firstHistory = migrationHistory(first.connection);
     expect(first.migrationResult.applied).toBe(true);
-    expect(firstHistory).toHaveLength(2);
+    expect(firstHistory).toHaveLength(3);
     first.close();
 
     const second = await initializeWorkspaceDatabase({ workspaceRoot });
@@ -164,6 +164,122 @@ describe("workspace SQLite", () => {
           "2026-08-06T00:00:00.000Z"
         )
     ).toThrow();
+    initialized.close();
+  });
+
+  it("creates asset library tables with checks, foreign keys, and unique constraints", async () => {
+    const workspaceRoot = await makeWorkspace();
+    const initialized = await initializeWorkspaceDatabase({ workspaceRoot });
+    const connection = initialized.connection;
+
+    const tableSql = (name: string): string => {
+      const row = connection
+        .prepare(
+          "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?"
+        )
+        .get(name) as { sql: string } | undefined;
+      expect(row, `table ${name}`).toBeDefined();
+      return row!.sql;
+    };
+
+    for (const name of [
+      "assets",
+      "asset_versions",
+      "tags",
+      "tag_aliases",
+      "asset_tags"
+    ]) {
+      tableSql(name);
+    }
+    expect(tableSql("assets")).toContain("assets_kind_check");
+    expect(tableSql("assets")).toContain("IN ('video', 'photo', 'document_scan', 'sound_effect')");
+    expect(tableSql("assets")).toContain("assets_status_check");
+    expect(tableSql("tags")).toContain("tags_axis_check");
+    expect(tableSql("tags")).toContain("tags_status_check");
+
+    const now = "2026-08-06T00:00:00.000Z";
+    connection
+      .prepare(
+        `INSERT INTO assets
+          (asset_id, kind, title, description, confidentiality, department, system, status, created_at, updated_at)
+         VALUES (?, 'video', 't', '', 'internal', NULL, NULL, 'processing', ?, ?)`
+      )
+      .run("asset-a", now, now);
+    connection
+      .prepare(
+        `INSERT INTO asset_versions
+          (asset_id, version, library_media_path, mime_type, created_at, updated_at)
+         VALUES (?, 1, 'media/asset-a/v1.mp4', 'video/mp4', ?, ?)`
+      )
+      .run("asset-a", now, now);
+
+    expect(() =>
+      connection
+        .prepare(
+          `INSERT INTO asset_versions
+            (asset_id, version, library_media_path, mime_type, created_at, updated_at)
+           VALUES (?, 1, 'media/asset-a/v1.mp4', 'video/mp4', ?, ?)`
+        )
+        .run("asset-a", now, now)
+    ).toThrow();
+
+    expect(() =>
+      connection
+        .prepare(
+          `INSERT INTO asset_versions
+            (asset_id, version, library_media_path, mime_type, created_at, updated_at)
+           VALUES (?, 1, 'media/asset-b/v1.mp4', 'video/mp4', ?, ?)`
+        )
+        .run("missing-asset", now, now)
+    ).toThrow();
+
+    connection
+      .prepare(
+        `INSERT INTO tags
+          (tag_id, axis, canonical_name, normalized_name, status, created_at, updated_at)
+         VALUES (?, 'department', '現場', '現場', 'active', ?, ?)`
+      )
+      .run("tag-a", now, now);
+    expect(() =>
+      connection
+        .prepare(
+          `INSERT INTO tags
+            (tag_id, axis, canonical_name, normalized_name, status, created_at, updated_at)
+           VALUES (?, 'department', '重複', '現場', 'active', ?, ?)`
+        )
+        .run("tag-b", now, now)
+    ).toThrow();
+
+    connection
+      .prepare(
+        "INSERT INTO asset_tags (asset_id, tag_id, created_at) VALUES (?, ?, ?)"
+      )
+      .run("asset-a", "tag-a", now);
+    expect(() =>
+      connection
+        .prepare(
+          "INSERT INTO asset_tags (asset_id, tag_id, created_at) VALUES (?, ?, ?)"
+        )
+        .run("asset-a", "missing-tag", now)
+    ).toThrow();
+    expect(() =>
+      connection
+        .prepare(
+          "INSERT INTO asset_tags (asset_id, tag_id, created_at) VALUES (?, ?, ?)"
+        )
+        .run("missing-asset", "tag-a", now)
+    ).toThrow();
+
+    expect(() =>
+      connection
+        .prepare(
+          `INSERT INTO assets
+            (asset_id, kind, title, description, confidentiality, status, created_at, updated_at)
+           VALUES (?, 'invalid-kind', 't', '', 'internal', 'processing', ?, ?)`
+        )
+        .run("asset-c", now, now)
+    ).toThrow();
+
     initialized.close();
   });
 

@@ -21,6 +21,7 @@ import {
   TerminologyDuplicateError,
   TerminologyNotFoundError
 } from "../../app/terminology/terminology-errors.js";
+import { AssetError } from "../../app/assets/asset-errors.js";
 
 export class ApiResponseValidationError extends Error {
   constructor(cause: unknown) {
@@ -44,7 +45,21 @@ export const API_ERROR_CODE = {
   openRouterUnavailable: OPENROUTER_ERROR_CODE.unavailable,
   openRouterResponseInvalid: OPENROUTER_ERROR_CODE.responseInvalid,
   terminologyNotFound: "TERMINOLOGY_NOT_FOUND",
-  terminologyDuplicate: "TERMINOLOGY_DUPLICATE"
+  terminologyDuplicate: "TERMINOLOGY_DUPLICATE",
+  assetFileMissing: "ASSET_FILE_MISSING",
+  assetFileEmpty: "ASSET_FILE_EMPTY",
+  assetTooManyFiles: "ASSET_TOO_MANY_FILES",
+  assetTooManyParts: "ASSET_TOO_MANY_PARTS",
+  assetTooManyFields: "ASSET_TOO_MANY_FIELDS",
+  assetFieldTooLarge: "ASSET_FIELD_TOO_LARGE",
+  assetInvalidField: "ASSET_INVALID_FIELD",
+  assetUnsupportedFormat: "ASSET_UNSUPPORTED_FORMAT",
+  assetFormatMismatch: "ASSET_FORMAT_MISMATCH",
+  assetFileTooLarge: "ASSET_FILE_TOO_LARGE",
+  assetTagNotFound: "ASSET_TAG_NOT_FOUND",
+  assetUploadInterrupted: "ASSET_UPLOAD_INTERRUPTED",
+  assetStagingFailed: "ASSET_STAGING_FAILED",
+  assetDatabaseFailed: "ASSET_DATABASE_FAILED"
 };
 
 export type ApiErrorStatus =
@@ -187,6 +202,41 @@ const fastifyRequestErrorMappings: Readonly<
     code: API_ERROR_CODE.requestValidationFailed,
     status: 400,
     message: genericValidationMessage
+  },
+  FST_PARTS_LIMIT: {
+    code: API_ERROR_CODE.assetTooManyParts,
+    status: 413,
+    message: "アップロード項目が多すぎます。"
+  },
+  FST_FILES_LIMIT: {
+    code: API_ERROR_CODE.assetTooManyFiles,
+    status: 413,
+    message: "アップロードできるファイルは1つまでです。"
+  },
+  FST_FIELDS_LIMIT: {
+    code: API_ERROR_CODE.assetTooManyFields,
+    status: 413,
+    message: "アップロードフィールドが多すぎます。"
+  },
+  FST_REQ_FILE_TOO_LARGE: {
+    code: API_ERROR_CODE.assetFileTooLarge,
+    status: 413,
+    message: "アップロードファイルが大きすぎます。"
+  },
+  FST_PROTO_VIOLATION: {
+    code: API_ERROR_CODE.assetInvalidField,
+    status: 400,
+    message: "アップロード項目が不正です。"
+  },
+  FST_INVALID_MULTIPART_CONTENT_TYPE: {
+    code: API_ERROR_CODE.assetInvalidField,
+    status: 400,
+    message: "アップロード項目が不正です。"
+  },
+  FST_MP_PREMATURE_CLOSE: {
+    code: API_ERROR_CODE.assetUploadInterrupted,
+    status: 400,
+    message: "アップロードが途中で中断されました。"
   }
 };
 
@@ -472,6 +522,16 @@ export function mapApiError(error: unknown): MappedApiError {
       message: "同じ表記の用語が既に存在します。",
       details: [],
       shouldLog: false
+    };
+  }
+
+  if (error instanceof AssetError) {
+    return {
+      code: error.code,
+      status: error.status,
+      message: error.message,
+      details: error.details,
+      shouldLog: error.shouldLog
     };
   }
 
