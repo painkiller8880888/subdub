@@ -71,3 +71,5 @@ Issue #35（P3-02 メタデータ・チェックサム・サムネイル生成�
 
 - ネイティブ依存（@mediabunny/server / sharp / pdfjs）の導入により、CI のビルド環境でネイティブビルドが必要になります（`node-av: true` で許可済み）。
 - Windows では sqlite の一時ファイル `unlink` が EBUSY になるケースがあり、検証スクリプトでクローズ順序を明示しています。
+
+Closes #35
