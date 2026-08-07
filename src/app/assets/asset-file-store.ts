@@ -4,7 +4,10 @@ import * as path from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 
-import { AssetStagingFailedError } from "./asset-errors.js";
+import {
+  AssetFileTooLargeError,
+  AssetStagingFailedError
+} from "./asset-errors.js";
 
 export type StagedUploadRecord = {
   uploadId: string;
@@ -67,7 +70,7 @@ export class NodeAssetFileStore implements AssetFileStore {
       await mkdir(stagingDir, { recursive: true });
       await pipeline(Readable.from(stream), createWriteStream(targetPath));
       if (isTruncated(stream)) {
-        throw new Error("upload truncated by the multipart size limit");
+        throw new AssetFileTooLargeError();
       }
       const { size } = await stat(targetPath);
       return { uploadId, stagingRelativePath, fileRelativePath, bytes: size };

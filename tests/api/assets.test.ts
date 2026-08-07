@@ -385,6 +385,41 @@ describe("asset upload API", () => {
     }
   });
 
+  it("rejects files exceeding maxGlobalFileBytes with 413 ASSET_FILE_TOO_LARGE", async () => {
+    const serverWithLimits = await initializeServer({
+      workspaceRoot: await fs.mkdtemp(
+        path.join(tmpdir(), "subdub-assets-limits-")
+      ),
+      assetUploadLimits: {
+        ...DEFAULT_ASSET_UPLOAD_LIMITS,
+        maxGlobalFileBytes: 1024
+      }
+    });
+    try {
+      const largePng = Buffer.alloc(2048);
+      largePng.fill(0x89);
+      largePng[0] = 0x89;
+      largePng[1] = 0x50;
+      largePng[2] = 0x4e;
+      largePng[3] = 0x47;
+      const { body, contentType } = buildMultipartBody([
+        field("kind", "photo"),
+        field("title", "t"),
+        file(largePng, "image/png", "large.png")
+      ]);
+      const response = await serverWithLimits.app.inject({
+        method: "POST",
+        url: "/api/assets",
+        payload: body,
+        headers: { "content-type": contentType }
+      });
+      expect(response.statusCode).toBe(413);
+      expect(apiError(response).code).toBe("ASSET_FILE_TOO_LARGE");
+    } finally {
+      await serverWithLimits.app.close();
+    }
+  });
+
   it("maps unexpected service failures to a safe 500 without internal details", async () => {
     const failingApp = (await import("../../src/api/app.js")).buildApp({
       assetService: {
