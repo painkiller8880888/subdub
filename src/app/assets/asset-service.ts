@@ -5,6 +5,7 @@ import * as path from "node:path";
 import { assetUploadFieldsSchema } from "../../schema/api.js";
 import {
   idSchema,
+  type AssetDetail,
   type AssetKind,
   type AssetUploadReceipt
 } from "../../schema/index.js";
@@ -13,6 +14,7 @@ import {
   AssetFileTooLargeError,
   AssetFormatMismatchError,
   AssetInvalidFieldError,
+  AssetNotFoundError,
   AssetTagNotFoundError,
   AssetUnsupportedFormatError
 } from "./asset-errors.js";
@@ -87,6 +89,14 @@ export class AssetService {
 
   async discardStaged(staged: StagedUpload): Promise<void> {
     await this.fileStore.removeBestEffort(staged.stagingRelativePath);
+  }
+
+  findDetail(assetId: string): AssetDetail {
+    const detail = this.repository.findAssetDetail(assetId);
+    if (detail === undefined) {
+      throw new AssetNotFoundError();
+    }
+    return detail;
   }
 
   async commitUpload(

@@ -27,15 +27,20 @@
   "dependencies": {
     "@fastify/multipart": "10.1.0",
     "@fastify/static": "8.2.0",
+    "@mediabunny/server": "1.52.3",
+    "@napi-rs/canvas": "1.0.3",
     "@remotion/player": "4.0.499",
     "@tanstack/react-query": "5.101.4",
     "better-sqlite3": "12.10.0",
     "drizzle-orm": "0.45.2",
     "fastify": "5.10.0",
+    "mediabunny": "1.52.3",
+    "pdfjs-dist": "6.2.108",
     "react": "19.2.8",
     "react-dom": "19.2.8",
     "react-router": "7.18.0",
     "remotion": "4.0.499",
+    "sharp": "0.35.3",
     "zod": "4.4.3"
   },
   "devDependencies": {

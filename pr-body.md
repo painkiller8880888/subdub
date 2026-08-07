@@ -1,17 +1,73 @@
 ## 変更内容
 
-### 1. ファイルサイズ上限処理の修正 (`src/app/assets/asset-file-store.ts`)
+Issue #35（P3-02 メタデータ・チェックサム・サムネイル生成）を実装します。
 
-multipart の `fileSize` 上限で stream が truncate された場合、従来は汎用的な `Error("upload truncated by the multipart size limit")` を投げていましたが、公式の `@fastify/multipart` ドキュメントに従い `stream.truncated` をチェックし、確実に `AssetFileTooLargeError` を投げるようにしました。これにより API 側で 413 / `ASSET_FILE_TOO_LARGE` に正しく変換されます。
+### 1. メディア処理パイプライン (`src/app/assets/processing/`)
 
-### 2. API テスト追加 (`tests/api/assets.test.ts`)
+- `types.ts`: `AssetMediaProcessingPort` / `AssetMediaProcessingInput` / `AssetProcessedMedia` を定義。処理を Fastify ハンドラ外に分離し、テストで差し替え可能にしました。
+- `video-audio.ts`（mediabunny + @mediabunny/server + @napi-rs/canvas）: 動画・音声の長さと表示解像度を取得し、中央フレーム（`duration/2`）からサムネイルを PNG 生成します。動画の回転情報はサムネイルに反映します。WAV は長さのみ取得しサムネイルは生成しません。
+- `photo.ts`（sharp）: EXIF Orientation（5〜8）を考慮した表示解像度を返し、向きを補正したサムネイルを生成します。
+- `pdf.ts`（pdfjs-dist legacy + @napi-rs/canvas）: ページ数・1 ページ目の寸法・ページ順のサムネイル（`page-0001.png` …）を生成します。
+- `real-media-processing.ts` + `index.ts`: 種類ごとのディスパッチと遅延読み込みファクトリ。起動時はネイティブ依存を読み込まず、初回処理時に `real-media-processing.js` を動的 import します（失敗時は `PROCESSING_INTERNAL_FAILED`）。
 
-`maxGlobalFileBytes: 1024` に制限したサーバーで 2KB ファイルをアップロードし、413 `ASSET_FILE_TOO_LARGE` になることを検証するテストを追加しました。
+### 2. 処理サービスの整合性 (`asset-processing-service.ts` / `asset-repository.ts`)
 
-### 3. dist/ の git 追跡除外
+- ストリーミングで SHA-256 とサイズを計算し、`asset_versions.checksum` / `size_bytes` に保存します。
+- サムネイルは `thumbnails-tmp/<uuid>` に一時書き込み → `thumbnails/{assetId}/v{version}/` へ move。コミットが成立しない場合は配置済みファイルをロールバックします。
+- 成功時はバージョン更新後に `status = 'processing'` ガード付きで `active` へ遷移（トランザクション）。重複・競合処理でデータを破損しません。
+- 失敗時は `status = 'error'` に遷移し、安定した `error_code`（`PROCESSING_MEDIA_NOT_FOUND` / `PROCESSING_METADATA_FAILED` / `PROCESSING_MEDIA_CORRUPTED` / `PROCESSING_THUMBNAIL_FAILED` / `PROCESSING_DATABASE_FAILED` / `PROCESSING_INTERNAL_FAILED`）と日本語メッセージを保存します。元のメディアは削除しません。
+- `processing` 素材を対象に 5 秒間隔でポーリングするワーカー (`asset-processing-worker.ts`) をサーバ起動時に開始し、`onClose` で停止します。停止は AbortSignal により即座に反映されます。
 
-`.gitignore` に既に含まれていた `dist/` を `git rm -r --cached` で追跡から削除しました。これによりソース修正のみのコミットになります。
+### 3. API (`src/api/routes/assets.ts` / `src/schema/api.ts`)
+
+- `GET /api/assets/:assetId` を追加。詳細（メタデータ・サムネイル相対パス・`errorCode`/`errorMessage`・`status`）を厳密な Zod スキーマで返します。未知の ID は 404 `ASSET_NOT_FOUND`。
+
+### 4. 依存関係
+
+- 追加: `mediabunny` / `@mediabunny/server`（動画・音声メタデータ）、`sharp`（画像）、`pdfjs-dist`（PDF）、`@napi-rs/canvas`（PDF/動画の PNG 描画）。すべて exact-pinned。
+- `pnpm-workspace.yaml` の `allowBuilds` に `node-av: true` を追加（@mediabunny/server のネイティブビルド許可）。
+- Remotion のバージョンは変更していません。
+
+### 5. ルール
+
+- 追加のみのマイグレーション（`size_bytes` / `error_code` / `error_message`）。既存列・意味を変更しません。
+- DB / API にスタックトレース・OS 絶対パス・入力ファイルの内容は含めません。
+- サムネイルは PNG・長辺 480px 上限・拡大なし。
+- テストはネットワーク・グローバルバイナリ（FFmpeg/Poppler/ImageMagick）不要。実バイナリフィクスチャをリポジトリにコミット済みです。
+
+## 状態遷移
+
+- `processing` → `active`: メタデータ・チェックサム取得とサムネイル配置がすべて成功し、`status='processing'` ガード付きコミットが成立した場合。
+- `processing` → `error`: いずれかの工程が失敗した場合。`error_code` / `error_message` を保存し、配置済みサムネイルは削除・一時ファイルは後始末します。
+
+## マイグレーション
+
+`src/db/migrations/0003_asset-processing-metadata.sql`（追加のみ、冪等テスト済み）:
+
+- `asset_versions` に `size_bytes` を追加。
+- `assets` に `error_code` / `error_message` を追加。
+
+## 完了条件への対応
+
+完了条件「処理に失敗した素材が検索候補へ出ず、理由を診断できる」: 失敗素材は `status='error'` に遷移し、`GET /api/assets/:assetId` で `errorCode` / `errorMessage` から診断できます。
 
 ## テスト結果
 
-全 355 件のテストがパスしています。
+- `pnpm typecheck`: パス
+- `pnpm lint`: パス
+- `pnpm format:check`: パス
+- `pnpm test`: 51 ファイル / 379 テスト パス（追加: 実メディア処理 5、処理サービス 9、ワーカー 6、API GET 詳細 3、0003 マイグレーション冪等性）
+- `pnpm build`: パス
+- `pnpm verify:build`: パス（マイグレーション履歴 4 件で再初期化一致）
+- `pnpm verify:character-assets`: パス
+- `pnpm verify`: exit 0
+
+## 未検証
+
+- 実サーバー上でのエンドツーエンド実行（ローテート動画 / 大量ページ PDF / 破損メディアの実運用挙動）。
+- ワーカー多重起動（複数プロセス）時の排他制御。現状は DB トランザクションガードで整合性を確保しています。
+
+## リスク
+
+- ネイティブ依存（@mediabunny/server / sharp / pdfjs）の導入により、CI のビルド環境でネイティブビルドが必要になります（`node-av: true` で許可済み）。
+- Windows では sqlite の一時ファイル `unlink` が EBUSY になるケースがあり、検証スクリプトでクローズ順序を明示しています。

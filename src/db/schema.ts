@@ -49,6 +49,8 @@ export const assets = sqliteTable(
     status: text("status", {
       enum: ["processing", "active", "inactive", "error"]
     }).notNull(),
+    errorCode: text("error_code"),
+    errorMessage: text("error_message"),
     createdAt: text("created_at").notNull(),
     updatedAt: text("updated_at").notNull()
   },
@@ -75,6 +77,7 @@ export const assetVersions = sqliteTable(
     libraryMediaPath: text("library_media_path").notNull(),
     mimeType: text("mime_type").notNull(),
     checksum: text("checksum"),
+    sizeBytes: integer("size_bytes"),
     width: integer("width"),
     height: integer("height"),
     durationMs: integer("duration_ms"),

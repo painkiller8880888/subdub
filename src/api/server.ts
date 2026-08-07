@@ -14,6 +14,12 @@ import { TerminologyRepository } from "../app/terminology/terminology-repository
 import { TerminologyService } from "../app/terminology/terminology-service.js";
 import { AssetRepository } from "../app/assets/asset-repository.js";
 import { AssetService } from "../app/assets/asset-service.js";
+import { AssetProcessingService } from "../app/assets/asset-processing-service.js";
+import { AssetProcessingWorker } from "../app/assets/asset-processing-worker.js";
+import {
+  NodeAssetFileStore
+} from "../app/assets/asset-file-store.js";
+import { createLazyMediaProcessingPort } from "../app/assets/processing/index.js";
 import type { AssetUploadLimits } from "../app/assets/asset-upload-limits.js";
 import { createOpenRouterChatAdapter } from "../openrouter/chat-adapter.js";
 import { createOpenRouterModelService } from "../openrouter/model-service.js";
@@ -34,6 +40,8 @@ export type ServerOptions = AppOptions & {
   projectRepository?: ProjectRepository;
   terminologyRepository?: TerminologyRepository;
   assetRepository?: AssetRepository;
+  assetProcessingService?: AssetProcessingService;
+  assetProcessingWorker?: AssetProcessingWorker;
   assetUploadLimits?: AssetUploadLimits;
   workspaceRoot?: string;
 };
@@ -69,6 +77,8 @@ export async function initializeServer(
     projectRepository,
     terminologyRepository,
     assetRepository,
+    assetProcessingService,
+    assetProcessingWorker,
     terminologyService: suppliedTerminologyService,
     projectService: suppliedProjectService,
     workspaceRoot = process.cwd(),
@@ -114,6 +124,17 @@ export async function initializeServer(
         managementRoot: path.join(workspaceRoot, "library"),
         limits: options.assetUploadLimits
       });
+    const resolvedProcessingService =
+      assetProcessingService ??
+      new AssetProcessingService({
+        repository:
+          assetRepository ?? new AssetRepository(database.database),
+        fileStore: new NodeAssetFileStore(path.join(workspaceRoot, "library")),
+        processingPort: createLazyMediaProcessingPort()
+      });
+    const resolvedProcessingWorker =
+      assetProcessingWorker ??
+      new AssetProcessingWorker({ service: resolvedProcessingService });
     const app = buildApp({
       ...appOptions,
       modelService: resolvedModelService,
@@ -123,7 +144,9 @@ export async function initializeServer(
       assetService: resolvedAssetService,
       assetUploadLimits: options.assetUploadLimits
     });
+    resolvedProcessingWorker.start();
     app.addHook("onClose", async () => {
+      await resolvedProcessingWorker.stop();
       database.close();
     });
     return { app, database };
