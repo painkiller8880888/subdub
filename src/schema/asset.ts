@@ -4,6 +4,9 @@ import {
   finiteNumberSchema,
   idSchema,
   isoUtcDateTimeSchema,
+  nonNegativeIntegerSchema,
+  relativePosixPathSchema,
+  sha256Schema,
   strictObject
 } from "./primitives.js";
 
@@ -68,6 +71,40 @@ export const assetUploadReceiptSchema = strictObject({
   updatedAt: isoUtcDateTimeSchema
 });
 
+export const assetProcessingErrorCodeSchema = z.enum([
+  "PROCESSING_MEDIA_NOT_FOUND",
+  "PROCESSING_METADATA_FAILED",
+  "PROCESSING_MEDIA_CORRUPTED",
+  "PROCESSING_THUMBNAIL_FAILED",
+  "PROCESSING_DATABASE_FAILED",
+  "PROCESSING_INTERNAL_FAILED"
+]);
+
+export const assetDetailSchema = strictObject({
+  assetId: idSchema,
+  version: finiteNumberSchema.int().positive(),
+  kind: assetKindSchema,
+  title: z.string().min(1),
+  description: z.string(),
+  confidentiality: z.string().min(1),
+  department: z.string().min(1).nullable(),
+  system: z.string().min(1).nullable(),
+  mimeType: z.string().min(1),
+  libraryMediaPath: relativePosixPathSchema,
+  checksum: sha256Schema.nullable(),
+  sizeBytes: nonNegativeIntegerSchema.nullable(),
+  width: nonNegativeIntegerSchema.nullable(),
+  height: nonNegativeIntegerSchema.nullable(),
+  durationMs: nonNegativeIntegerSchema.nullable(),
+  pageCount: nonNegativeIntegerSchema.nullable(),
+  thumbnailPaths: z.array(relativePosixPathSchema),
+  status: assetStatusSchema,
+  errorCode: assetProcessingErrorCodeSchema.nullable(),
+  errorMessage: z.string().nullable(),
+  createdAt: isoUtcDateTimeSchema,
+  updatedAt: isoUtcDateTimeSchema
+});
+
 export function normalizeAssetTextField(value: string): string {
   return value.normalize("NFC").trim();
 }
@@ -84,3 +121,7 @@ export type AssetTagAxis = z.infer<typeof assetTagAxisSchema>;
 export type AssetTag = z.infer<typeof assetTagSchema>;
 export type AssetTagAlias = z.infer<typeof assetTagAliasSchema>;
 export type AssetUploadReceipt = z.infer<typeof assetUploadReceiptSchema>;
+export type AssetProcessingErrorCode = z.infer<
+  typeof assetProcessingErrorCodeSchema
+>;
+export type AssetDetail = z.infer<typeof assetDetailSchema>;

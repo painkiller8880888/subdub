@@ -107,7 +107,7 @@ describe("workspace SQLite", () => {
     const first = await initializeWorkspaceDatabase({ workspaceRoot });
     const firstHistory = migrationHistory(first.connection);
     expect(first.migrationResult.applied).toBe(true);
-    expect(firstHistory).toHaveLength(3);
+    expect(firstHistory).toHaveLength(4);
     first.close();
 
     const second = await initializeWorkspaceDatabase({ workspaceRoot });
@@ -281,6 +281,92 @@ describe("workspace SQLite", () => {
     ).toThrow();
 
     initialized.close();
+  });
+
+  it("applies the asset processing metadata migration with nullable columns once", async () => {
+    const workspaceRoot = await makeWorkspace();
+    const migrationsRoot = path.join(
+      process.cwd(),
+      "src",
+      "db",
+      "migrations"
+    );
+    const migrationTags = [
+      "0000_baseline",
+      "0001_curved_colleen_wing",
+      "0002_asset-library",
+      "0003_asset-processing-metadata"
+    ];
+    const definitions: MigrationDefinition[] = [];
+    for (let index = 0; index < migrationTags.length; index++) {
+      definitions.push({
+        sql: await fs.readFile(
+          path.join(migrationsRoot, `${migrationTags[index]}.sql`),
+          "utf8"
+        ),
+        tag: migrationTags[index],
+        when: BASE_MIGRATION_TIME + index
+      });
+    }
+
+    const baselineFolder = await makeMigrationFolder(workspaceRoot, [
+      definitions[0]
+    ]);
+    const first = await initializeWorkspaceDatabase({
+      migrationsFolder: baselineFolder,
+      workspaceRoot
+    });
+    first.close();
+
+    const extendedFolder = await makeMigrationFolder(
+      workspaceRoot,
+      definitions
+    );
+    const second = await initializeWorkspaceDatabase({
+      migrationsFolder: extendedFolder,
+      workspaceRoot
+    });
+    expect(second.migrationResult.applied).toBe(true);
+    const connection = second.connection;
+    const columns = (name: string): string[] =>
+      (
+        connection
+          .prepare(`PRAGMA table_info(${name})`)
+          .all() as Array<{ name: string }>
+      ).map((row) => row.name);
+    expect(columns("assets")).toContain("error_code");
+    expect(columns("assets")).toContain("error_message");
+    expect(columns("asset_versions")).toContain("size_bytes");
+
+    const now = "2026-08-06T00:00:00.000Z";
+    connection
+      .prepare(
+        `INSERT INTO assets
+          (asset_id, kind, title, description, confidentiality, status, error_code, error_message, created_at, updated_at)
+         VALUES (?, 'video', 't', '', 'internal', 'error', 'PROCESSING_METADATA_FAILED', 'メタデータを取得できませんでした。', ?, ?)`
+      )
+      .run("asset-a", now, now);
+    const inserted = connection
+      .prepare(
+        "SELECT error_code, error_message FROM assets WHERE asset_id = ?"
+      )
+      .get("asset-a") as {
+      error_code: string;
+      error_message: string;
+    };
+    expect(inserted.error_code).toBe("PROCESSING_METADATA_FAILED");
+    expect(inserted.error_message).toBe("メタデータを取得できませんでした。");
+    second.close();
+
+    const third = await initializeWorkspaceDatabase({
+      migrationsFolder: extendedFolder,
+      workspaceRoot
+    });
+    expect(third.migrationResult.applied).toBe(false);
+    expect(migrationHistory(third.connection)).toHaveLength(
+      migrationTags.length
+    );
+    third.close();
   });
 
   it("applies the new migration to an already-baselined database only once", async () => {

@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { promises as fs } from "node:fs";
 import { tmpdir } from "node:os";
 import * as path from "node:path";
@@ -5,10 +6,12 @@ import * as path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { initializeServer } from "../../src/api/server.js";
-import { tags } from "../../src/db/schema.js";
+import { and, eq } from "drizzle-orm";
+import { assetVersions, assets, tags } from "../../src/db/schema.js";
 import { DEFAULT_ASSET_UPLOAD_LIMITS } from "../../src/app/assets/asset-upload-limits.js";
 import {
   apiErrorResponseSchema,
+  assetDetailResponseSchema,
   assetUploadResponseSchema
 } from "../../src/schema/api.js";
 import {
@@ -477,5 +480,95 @@ describe("asset upload API", () => {
     ]);
     expect(response.statusCode).toBe(400);
     expect(apiError(response).code).toBe("ASSET_INVALID_FIELD");
+  });
+
+  it("returns detail for a registered asset with relative thumbnail paths", async () => {
+    const uploadResponse = await upload([
+      field("kind", "photo"),
+      field("title", "取得テスト"),
+      field("department", "部署"),
+      file(pngBytes, "image/png", "shot.png")
+    ]);
+    expect(uploadResponse.statusCode).toBe(200);
+    const receipt = assetUploadResponseSchema.parse(uploadResponse.json()).data;
+
+    const detailResponse = await server.app.inject({
+      method: "GET",
+      url: `/api/assets/${receipt.assetId}`
+    });
+    expect(detailResponse.statusCode).toBe(200);
+    const detail = assetDetailResponseSchema.parse(detailResponse.json()).data;
+    expect(detail).toMatchObject({
+      assetId: receipt.assetId,
+      version: 1,
+      kind: "photo",
+      title: "取得テスト",
+      status: "processing",
+      checksum: null,
+      sizeBytes: null,
+      thumbnailPaths: []
+    });
+    expect(detail.department).toBe("部署");
+  });
+
+  it("returns processed metadata for an activated asset", async () => {
+    const uploadResponse = await upload([
+      field("kind", "photo"),
+      field("title", "完了素材"),
+      file(pngBytes, "image/png", "shot.png")
+    ]);
+    const receipt = assetUploadResponseSchema.parse(uploadResponse.json()).data;
+    const checksum = createHash("sha256").update(pngBytes).digest("hex");
+    const database = server.database.database;
+    database
+      .update(assetVersions)
+      .set({
+        checksum,
+        sizeBytes: pngBytes.length,
+        width: 64,
+        height: 48,
+        thumbnailPaths: JSON.stringify(["thumbnails/asset/v1/image.png"])
+      })
+      .where(
+        and(
+          eq(assetVersions.assetId, receipt.assetId),
+          eq(assetVersions.version, 1)
+        )
+      )
+      .run();
+    database
+      .update(assets)
+      .set({ status: "active" })
+      .where(eq(assets.assetId, receipt.assetId))
+      .run();
+
+    const detailResponse = await server.app.inject({
+      method: "GET",
+      url: `/api/assets/${receipt.assetId}`
+    });
+    expect(detailResponse.statusCode).toBe(200);
+    const detail = assetDetailResponseSchema.parse(detailResponse.json()).data;
+    expect(detail).toMatchObject({
+      status: "active",
+      checksum,
+      sizeBytes: pngBytes.length,
+      width: 64,
+      height: 48,
+      thumbnailPaths: ["thumbnails/asset/v1/image.png"]
+    });
+    for (const thumbnailPath of detail.thumbnailPaths) {
+      expect(thumbnailPath).toMatch(/^thumbnails\//);
+      expect(thumbnailPath).not.toContain("\\");
+      expect(thumbnailPath).not.toMatch(/^[a-zA-Z]:/);
+    }
+  });
+
+  it("returns 404 ASSET_NOT_FOUND for an unknown asset id", async () => {
+    const response = await server.app.inject({
+      method: "GET",
+      url: "/api/assets/does-not-exist"
+    });
+    expect(response.statusCode).toBe(404);
+    expect(apiError(response).code).toBe("ASSET_NOT_FOUND");
   });
 });

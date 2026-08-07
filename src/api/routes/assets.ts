@@ -20,13 +20,15 @@ import {
   type AssetUploadLimits
 } from "../../app/assets/asset-upload-limits.js";
 import {
+  assetDetailResponseSchema,
+  assetIdParamsSchema,
   assetUploadResponseSchema,
   createApiSuccessResponse
 } from "../../schema/api.js";
 
 export type AssetServicePort = Pick<
   AssetService,
-  "stageUpload" | "commitUpload" | "discardStaged"
+  "stageUpload" | "commitUpload" | "discardStaged" | "findDetail"
 >;
 
 const allowedFieldNames = new Set([
@@ -167,4 +169,14 @@ export function registerAssetRoutes(
       throw toDomainError(error);
     }
   });
+
+  app.get<{ Params: { assetId: string } }>(
+    "/api/assets/:assetId",
+    async (request) => {
+      const params = assetIdParamsSchema.parse(request.params);
+      return assetDetailResponseSchema.parse(
+        createApiSuccessResponse(assetService.findDetail(params.assetId))
+      );
+    }
+  );
 }

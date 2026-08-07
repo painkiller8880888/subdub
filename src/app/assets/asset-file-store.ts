@@ -1,5 +1,13 @@
 import { constants, createWriteStream } from "node:fs";
-import { copyFile, mkdir, open, rename, rm, stat } from "node:fs/promises";
+import {
+  copyFile,
+  mkdir,
+  open,
+  rename,
+  rm,
+  stat,
+  writeFile as writeFileNode
+} from "node:fs/promises";
 import * as path from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
@@ -23,6 +31,8 @@ export type AssetFileStore = {
   readHead(relativePath: string, byteCount: number): Promise<Buffer>;
   moveToMedia(relativePath: string, mediaRelativePath: string): Promise<void>;
   removeBestEffort(relativePath: string): Promise<void>;
+  resolvePath(relativePath: string): string;
+  writeFile(relativePath: string, data: Buffer): Promise<void>;
 };
 
 const safeUploadIdPattern = /^[a-z0-9-]{1,64}$/;
@@ -52,6 +62,20 @@ export class NodeAssetFileStore implements AssetFileStore {
       throw new AssetStagingFailedError(new Error("unsafe media path"));
     }
     return resolved;
+  }
+
+  resolvePath(relativePath: string): string {
+    return this.resolveSafe(relativePath);
+  }
+
+  async writeFile(relativePath: string, data: Buffer): Promise<void> {
+    const targetPath = this.resolveSafe(relativePath);
+    try {
+      await mkdir(path.dirname(targetPath), { recursive: true });
+      await writeFileNode(targetPath, data);
+    } catch (error) {
+      throw new AssetStagingFailedError(error);
+    }
   }
 
   async stageUpload(

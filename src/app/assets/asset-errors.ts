@@ -14,9 +14,10 @@ export type AssetErrorCode =
   | "ASSET_TAG_NOT_FOUND"
   | "ASSET_UPLOAD_INTERRUPTED"
   | "ASSET_STAGING_FAILED"
-  | "ASSET_DATABASE_FAILED";
+  | "ASSET_DATABASE_FAILED"
+  | "ASSET_NOT_FOUND";
 
-export type AssetErrorStatus = 400 | 413 | 422 | 500;
+export type AssetErrorStatus = 400 | 404 | 413 | 422 | 500;
 
 export class AssetError extends Error {
   readonly code: AssetErrorCode;
@@ -165,5 +166,19 @@ export class AssetDatabaseError extends AssetError {
       cause
     });
     this.name = "AssetDatabaseError";
+  }
+}
+
+export class AssetNotFoundError extends AssetError {
+  constructor() {
+    super("ASSET_NOT_FOUND", 404, "素材が見つかりません。");
+    this.name = "AssetNotFoundError";
+  }
+}
+
+export class AssetProcessingRaceError extends Error {
+  constructor() {
+    super("asset processing commit lost the concurrent status guard");
+    this.name = "AssetProcessingRaceError";
   }
 }

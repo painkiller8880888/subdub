@@ -1,14 +1,20 @@
-import { and, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 
 import type { WorkspaceDatabase } from "../../db/client.js";
 import { assetTags, assetVersions, assets, tags } from "../../db/schema.js";
 import {
+  assetDetailSchema,
   assetTagSchema,
+  type AssetDetail,
   type AssetKind,
   type AssetStatus,
   type AssetTag
 } from "../../schema/index.js";
-import { AssetDatabaseError } from "./asset-errors.js";
+import type { AssetProcessingErrorCode } from "../../schema/asset.js";
+import {
+  AssetDatabaseError,
+  AssetProcessingRaceError
+} from "./asset-errors.js";
 
 export type AssetInsert = {
   assetId: string;
@@ -47,6 +53,8 @@ export type AssetRecord = {
   department: string | null;
   system: string | null;
   status: AssetStatus;
+  errorCode: string | null;
+  errorMessage: string | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -57,6 +65,7 @@ export type AssetVersionRecord = {
   libraryMediaPath: string;
   mimeType: string;
   checksum: string | null;
+  sizeBytes: number | null;
   width: number | null;
   height: number | null;
   durationMs: number | null;
@@ -64,6 +73,31 @@ export type AssetVersionRecord = {
   thumbnailPaths: string | null;
   createdAt: string;
   updatedAt: string;
+};
+
+export type AssetProcessingSuccessValues = {
+  assetId: string;
+  version: number;
+  checksum: string;
+  sizeBytes: number;
+  width: number | null;
+  height: number | null;
+  durationMs: number | null;
+  pageCount: number | null;
+  thumbnailPaths: string[];
+  updatedAt: string;
+};
+
+export type AssetProcessingFailureValues = {
+  assetId: string;
+  errorCode: AssetProcessingErrorCode;
+  errorMessage: string;
+  updatedAt: string;
+};
+
+export type AssetProcessingKey = {
+  assetId: string;
+  version: number;
 };
 
 function toTag(row: typeof tags.$inferSelect): AssetTag {
@@ -88,6 +122,8 @@ function toAssetRecord(row: typeof assets.$inferSelect): AssetRecord {
     department: row.department,
     system: row.system,
     status: row.status,
+    errorCode: row.errorCode,
+    errorMessage: row.errorMessage,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt
   };
@@ -102,6 +138,7 @@ function toAssetVersionRecord(
     libraryMediaPath: row.libraryMediaPath,
     mimeType: row.mimeType,
     checksum: row.checksum,
+    sizeBytes: row.sizeBytes,
     width: row.width,
     height: row.height,
     durationMs: row.durationMs,
@@ -112,11 +149,28 @@ function toAssetVersionRecord(
   };
 }
 
+function parseThumbnailPaths(value: string | null): string[] {
+  if (value === null) {
+    return [];
+  }
+  try {
+    const parsed: unknown = JSON.parse(value);
+    return Array.isArray(parsed)
+      ? parsed.filter((entry): entry is string => typeof entry === "string")
+      : [];
+  } catch {
+    return [];
+  }
+}
+
 function withDatabaseErrors<T>(operation: () => T): T {
   try {
     return operation();
   } catch (error) {
     if (error instanceof AssetDatabaseError) {
+      throw error;
+    }
+    if (error instanceof AssetProcessingRaceError) {
       throw error;
     }
     throw new AssetDatabaseError(error);
@@ -180,6 +234,144 @@ export class AssetRepository {
         .orderBy(assetTags.tagId)
         .all();
       return rows.map((row) => row.tagId);
+    });
+  }
+
+  findProcessingAssetKeys(): AssetProcessingKey[] {
+    return withDatabaseErrors(() => {
+      const rows = this.database
+        .select()
+        .from(assets)
+        .where(eq(assets.status, "processing"))
+        .orderBy(assets.createdAt)
+        .all();
+      const keys: AssetProcessingKey[] = [];
+      for (const row of rows) {
+        const version = this.database
+          .select({ version: assetVersions.version })
+          .from(assetVersions)
+          .where(eq(assetVersions.assetId, row.assetId))
+          .orderBy(desc(assetVersions.version))
+          .limit(1)
+          .get();
+        if (version !== undefined) {
+          keys.push({ assetId: row.assetId, version: version.version });
+        }
+      }
+      return keys;
+    });
+  }
+
+  findAssetDetail(assetId: string): AssetDetail | undefined {
+    return withDatabaseErrors(() => {
+      const asset = this.database
+        .select()
+        .from(assets)
+        .where(eq(assets.assetId, assetId))
+        .get();
+      if (asset === undefined) {
+        return undefined;
+      }
+      const version = this.database
+        .select()
+        .from(assetVersions)
+        .where(eq(assetVersions.assetId, assetId))
+        .orderBy(desc(assetVersions.version))
+        .limit(1)
+        .get();
+      if (version === undefined) {
+        return undefined;
+      }
+      return assetDetailSchema.parse({
+        assetId: asset.assetId,
+        version: version.version,
+        kind: asset.kind,
+        title: asset.title,
+        description: asset.description,
+        confidentiality: asset.confidentiality,
+        department: asset.department,
+        system: asset.system,
+        mimeType: version.mimeType,
+        libraryMediaPath: version.libraryMediaPath,
+        checksum: version.checksum,
+        sizeBytes: version.sizeBytes,
+        width: version.width,
+        height: version.height,
+        durationMs: version.durationMs,
+        pageCount: version.pageCount,
+        thumbnailPaths: parseThumbnailPaths(version.thumbnailPaths),
+        status: asset.status,
+        errorCode: asset.errorCode,
+        errorMessage: asset.errorMessage,
+        createdAt: asset.createdAt,
+        updatedAt: asset.updatedAt
+      });
+    });
+  }
+
+  markProcessingSucceeded(values: AssetProcessingSuccessValues): void {
+    withDatabaseErrors(() => {
+      this.database
+        .update(assetVersions)
+        .set({
+          checksum: values.checksum,
+          sizeBytes: values.sizeBytes,
+          width: values.width,
+          height: values.height,
+          durationMs: values.durationMs,
+          pageCount: values.pageCount,
+          thumbnailPaths:
+            values.thumbnailPaths.length === 0
+              ? null
+              : JSON.stringify(values.thumbnailPaths),
+          updatedAt: values.updatedAt
+        })
+        .where(
+          and(
+            eq(assetVersions.assetId, values.assetId),
+            eq(assetVersions.version, values.version)
+          )
+        )
+        .run();
+      const result = this.database
+        .update(assets)
+        .set({
+          status: "active",
+          errorCode: null,
+          errorMessage: null,
+          updatedAt: values.updatedAt
+        })
+        .where(
+          and(
+            eq(assets.assetId, values.assetId),
+            eq(assets.status, "processing")
+          )
+        )
+        .run();
+      if ((result.changes ?? 0) === 0) {
+        throw new AssetProcessingRaceError();
+      }
+    });
+  }
+
+  markProcessingFailed(values: AssetProcessingFailureValues): boolean {
+    return withDatabaseErrors(() => {
+      const result = this.database
+        .update(assets)
+        .set({
+          status: "error",
+          errorCode: values.errorCode,
+          errorMessage: values.errorMessage,
+          updatedAt: values.updatedAt
+        })
+        .where(
+          and(
+            eq(assets.assetId, values.assetId),
+            eq(assets.status, "processing")
+          )
+        )
+        .run();
+      return (result.changes ?? 0) > 0;
     });
   }
 

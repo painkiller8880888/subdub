@@ -24,6 +24,7 @@ import {
   terminologyTermSchema
 } from "./terminology.js";
 import {
+  assetDetailSchema,
   assetKindSchema,
   assetUploadReceiptSchema,
   normalizeAssetOptionalField,
@@ -339,6 +340,15 @@ export const assetUploadResponseSchema = strictObject({
   revision: nonNegativeIntegerSchema.optional()
 });
 
+export const assetDetailResponseSchema = strictObject({
+  data: assetDetailSchema,
+  revision: nonNegativeIntegerSchema.optional()
+});
+
+export const assetIdParamsSchema = strictObject({
+  assetId: idSchema
+});
+
 export type ApiErrorDetail = z.infer<typeof apiErrorDetailSchema>;
 export type ApiSuccessResponse<T> = {
   data: T;
@@ -410,6 +420,8 @@ export type TerminologyPreviewResponse = z.infer<
 >;
 export type AssetUploadFields = z.infer<typeof assetUploadFieldsSchema>;
 export type AssetUploadResponse = z.infer<typeof assetUploadResponseSchema>;
+export type AssetDetailResponse = z.infer<typeof assetDetailResponseSchema>;
+export type AssetIdParams = z.infer<typeof assetIdParamsSchema>;
 
 export function createApiSuccessResponse<T>(
   data: T

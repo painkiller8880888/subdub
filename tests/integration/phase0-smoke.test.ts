@@ -77,7 +77,7 @@ describe("Phase 0 integration smoke", () => {
     try {
       firstHistory = migrationHistory(firstDatabase.connection);
       expect(firstDatabase.migrationResult.applied).toBe(true);
-      expect(firstHistory).toHaveLength(3);
+      expect(firstHistory).toHaveLength(4);
       expect(
         firstDatabase.connection.pragma("foreign_keys", { simple: true })
       ).toBe(1);
