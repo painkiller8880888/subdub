@@ -16,7 +16,7 @@ try {
     .prepare("SELECT hash, created_at FROM __drizzle_migrations")
     .all();
 
-  assert.equal(firstHistory.length, 4);
+  assert.equal(firstHistory.length, 5);
   assert.equal(first.database.connection.open, true);
 
   const projectsPage = await first.app.inject({

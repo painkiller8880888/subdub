@@ -7,11 +7,18 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { initializeServer } from "../../src/api/server.js";
 import { and, eq } from "drizzle-orm";
-import { assetVersions, assets, tags } from "../../src/db/schema.js";
+import {
+  assetTags,
+  assetVersions,
+  assets,
+  tagAliases,
+  tags
+} from "../../src/db/schema.js";
 import { DEFAULT_ASSET_UPLOAD_LIMITS } from "../../src/app/assets/asset-upload-limits.js";
 import {
   apiErrorResponseSchema,
   assetDetailResponseSchema,
+  assetListResponseSchema,
   assetUploadResponseSchema
 } from "../../src/schema/api.js";
 import {
@@ -81,6 +88,57 @@ describe("asset upload API", () => {
       .run();
   }
 
+  function insertSearchAsset(
+    assetId: string,
+    values: Partial<{
+      title: string;
+      description: string;
+      department: string | null;
+      system: string | null;
+      kind: "photo" | "video" | "document_scan" | "sound_effect";
+      status: "processing" | "active" | "inactive" | "error";
+    }> = {}
+  ) {
+    const now = "2026-08-07T00:00:00.000Z";
+    server.database.database
+      .insert(assets)
+      .values({
+        assetId,
+        kind: values.kind ?? "photo",
+        title: values.title ?? assetId,
+        description: values.description ?? "",
+        confidentiality: "internal",
+        department: values.department ?? null,
+        system: values.system ?? null,
+        status: values.status ?? "active",
+        createdAt: now,
+        updatedAt: now
+      })
+      .run();
+    server.database.database
+      .insert(assetVersions)
+      .values({
+        assetId,
+        version: 1,
+        libraryMediaPath: `media/${assetId}/v1.png`,
+        mimeType: "image/png",
+        createdAt: now,
+        updatedAt: now
+      })
+      .run();
+  }
+
+  function linkSearchAsset(assetId: string, tagId: string) {
+    server.database.database
+      .insert(assetTags)
+      .values({
+        assetId,
+        tagId,
+        createdAt: "2026-08-07T00:00:00.000Z"
+      })
+      .run();
+  }
+
   async function stagingFiles(): Promise<string[]> {
     return fs.readdir(path.join(workspaceRoot, "library", "staging"));
   }
@@ -95,6 +153,132 @@ describe("asset upload API", () => {
     }
     return files;
   }
+
+  it("lists active assets with full-text, tag, structured filters, and pagination", async () => {
+    await insertTag("tag-application");
+    server.database.database
+      .update(tags)
+      .set({ canonicalName: "申請手順", normalizedName: "申請手順" })
+      .where(eq(tags.tagId, "tag-application"))
+      .run();
+    server.database.database
+      .insert(tagAliases)
+      .values({
+        aliasId: "alias-application",
+        tagId: "tag-application",
+        alias: "申請フロー",
+        normalizedAlias: "申請フロー",
+        createdAt: "2026-08-07T00:00:00.000Z"
+      })
+      .run();
+    insertSearchAsset("asset-a", {
+      title: "申請画面",
+      description: "パスワード更新の説明",
+      department: "総務部",
+      system: "申請システム"
+    });
+    insertSearchAsset("asset-b", {
+      title: "別の画面",
+      description: "別の説明",
+      department: "総務部",
+      system: "申請システム"
+    });
+    insertSearchAsset("asset-inactive", {
+      title: "申請画面",
+      status: "inactive"
+    });
+    insertSearchAsset("asset-error", {
+      title: "申請画面",
+      status: "error"
+    });
+    insertSearchAsset("asset-processing", {
+      title: "申請画面",
+      status: "processing"
+    });
+    linkSearchAsset("asset-a", "tag-application");
+
+    const response = await server.app.inject({
+      method: "GET",
+      url: `/api/assets?q=${encodeURIComponent("申請フロー")}&department=${encodeURIComponent("総務部")}&system=${encodeURIComponent("申請システム")}&tagIds=tag-application&page=1&pageSize=1`
+    });
+    expect(response.statusCode).toBe(200);
+    const result = assetListResponseSchema.parse(response.json()).data;
+    expect(result.items.map((item) => item.assetId)).toEqual(["asset-a"]);
+    expect(result.total).toBe(1);
+    expect(result.items[0]?.tags).toEqual([
+      {
+        tagId: "tag-application",
+        axis: "department",
+        canonicalName: "申請手順"
+      }
+    ]);
+
+    const defaultResponse = await server.app.inject({
+      method: "GET",
+      url: "/api/assets?page=1&pageSize=20"
+    });
+    const defaultResult = assetListResponseSchema.parse(
+      defaultResponse.json()
+    ).data;
+    expect(defaultResult.items.map((item) => item.assetId)).toEqual([
+      "asset-a",
+      "asset-b"
+    ]);
+    expect(defaultResult.items.every((item) => item.status === "active")).toBe(
+      true
+    );
+
+    const explicitStatusResponse = await server.app.inject({
+      method: "GET",
+      url: "/api/assets?status=error&page=1&pageSize=20"
+    });
+    expect(
+      assetListResponseSchema
+        .parse(explicitStatusResponse.json())
+        .data.items.map((item) => item.assetId)
+    ).toEqual(["asset-error"]);
+  });
+
+  it("filters asset list results by kind", async () => {
+    insertSearchAsset("asset-photo", { kind: "photo" });
+    insertSearchAsset("asset-video", { kind: "video" });
+
+    const response = await server.app.inject({
+      method: "GET",
+      url: "/api/assets?kind=photo&page=1&pageSize=20"
+    });
+    expect(response.statusCode).toBe(200);
+    expect(
+      assetListResponseSchema
+        .parse(response.json())
+        .data.items.map((item) => item.assetId)
+    ).toEqual(["asset-photo"]);
+  });
+
+  it("does not treat FTS punctuation as query language or return a server error", async () => {
+    for (const query of ["'", '"', "-", "(", ")", ":", "*", "日本語。", "  "]) {
+      const response = await server.app.inject({
+        method: "GET",
+        url: `/api/assets?q=${encodeURIComponent(query)}`
+      });
+      expect(response.statusCode).toBe(200);
+      expect(() =>
+        assetListResponseSchema.parse(response.json())
+      ).not.toThrow();
+    }
+  });
+
+  it("returns common validation errors for invalid asset list parameters", async () => {
+    for (const query of ["pageSize=101", "status=unknown", "kind=unknown"]) {
+      const response = await server.app.inject({
+        method: "GET",
+        url: `/api/assets?${query}`
+      });
+
+      expect(response.statusCode).toBe(422);
+      expect(apiError(response).code).toBe("REQUEST_VALIDATION_FAILED");
+    }
+  });
 
   it("registers sound_effect, photo, video, and document_scan fixtures", async () => {
     await insertTag("tag-a");

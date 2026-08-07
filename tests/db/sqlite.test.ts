@@ -107,7 +107,7 @@ describe("workspace SQLite", () => {
     const first = await initializeWorkspaceDatabase({ workspaceRoot });
     const firstHistory = migrationHistory(first.connection);
     expect(first.migrationResult.applied).toBe(true);
-    expect(firstHistory).toHaveLength(4);
+    expect(firstHistory).toHaveLength(5);
     first.close();
 
     const second = await initializeWorkspaceDatabase({ workspaceRoot });
@@ -295,7 +295,8 @@ describe("workspace SQLite", () => {
       "0000_baseline",
       "0001_curved_colleen_wing",
       "0002_asset-library",
-      "0003_asset-processing-metadata"
+      "0003_asset-processing-metadata",
+      "0004_asset-search"
     ];
     const definitions: MigrationDefinition[] = [];
     for (let index = 0; index < migrationTags.length; index++) {
@@ -418,6 +419,80 @@ describe("workspace SQLite", () => {
     expect(third.migrationResult.applied).toBe(false);
     expect(migrationHistory(third.connection)).toEqual(history);
     third.close();
+  });
+
+  it("backfills assets, tags, and aliases that predate the search migration", async () => {
+    const workspaceRoot = await makeWorkspace();
+    const migrationsRoot = path.join(process.cwd(), "src", "db", "migrations");
+    const migrationTags = [
+      "0000_baseline",
+      "0001_curved_colleen_wing",
+      "0002_asset-library",
+      "0003_asset-processing-metadata",
+      "0004_asset-search"
+    ];
+    const definitions: MigrationDefinition[] = [];
+    for (let index = 0; index < migrationTags.length; index++) {
+      definitions.push({
+        sql: await fs.readFile(
+          path.join(migrationsRoot, `${migrationTags[index]}.sql`),
+          "utf8"
+        ),
+        tag: migrationTags[index],
+        when: BASE_MIGRATION_TIME + index
+      });
+    }
+
+    const beforeSearchFolder = await makeMigrationFolder(
+      workspaceRoot,
+      definitions.slice(0, 4)
+    );
+    const beforeSearch = await initializeWorkspaceDatabase({
+      migrationsFolder: beforeSearchFolder,
+      workspaceRoot
+    });
+    const now = "2026-08-07T00:00:00.000Z";
+    beforeSearch.connection
+      .prepare(
+        `INSERT INTO assets
+          (asset_id, kind, title, description, confidentiality, department, system, status, created_at, updated_at)
+         VALUES ('asset-before-search', 'photo', '移行前タイトル', '移行前説明', 'internal', '総務部', '申請システム', 'active', ?, ?)`
+      )
+      .run(now, now);
+    beforeSearch.connection
+      .prepare(
+        `INSERT INTO tags
+          (tag_id, axis, canonical_name, normalized_name, status, created_at, updated_at)
+         VALUES ('tag-before-search', 'task', '移行タグ', '移行タグ', 'active', ?, ?)`
+      )
+      .run(now, now);
+    beforeSearch.connection
+      .prepare(
+        `INSERT INTO tag_aliases
+          (alias_id, tag_id, alias, normalized_alias, created_at)
+         VALUES ('alias-before-search', 'tag-before-search', '移行別名', '移行別名', ?)`
+      )
+      .run(now);
+    beforeSearch.connection
+      .prepare(
+        "INSERT INTO asset_tags (asset_id, tag_id, created_at) VALUES ('asset-before-search', 'tag-before-search', ?)"
+      )
+      .run(now);
+    beforeSearch.close();
+
+    const afterSearchFolder = await makeMigrationFolder(workspaceRoot, definitions);
+    const afterSearch = await initializeWorkspaceDatabase({
+      migrationsFolder: afterSearchFolder,
+      workspaceRoot
+    });
+    expect(
+      afterSearch.connection
+        .prepare(
+          "SELECT asset_id FROM asset_search WHERE asset_search MATCH ?"
+        )
+        .all("移行別名")
+    ).toEqual([{ asset_id: "asset-before-search" }]);
+    afterSearch.close();
   });
 
   it("does not repeat a migration side effect on reinitialization", async () => {
