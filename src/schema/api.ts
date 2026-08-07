@@ -25,9 +25,12 @@ import {
 } from "./terminology.js";
 import {
   assetDetailSchema,
+  assetListResultSchema,
   assetKindSchema,
+  assetStatusSchema,
   assetUploadReceiptSchema,
   normalizeAssetOptionalField,
+  normalizeAssetSearchQuery,
   normalizeAssetTextField
 } from "./asset.js";
 
@@ -345,6 +348,32 @@ export const assetDetailResponseSchema = strictObject({
   revision: nonNegativeIntegerSchema.optional()
 });
 
+export const assetListQuerySchema = strictObject({
+  q: z.string().optional(),
+  query: z.string().optional(),
+  kind: assetKindSchema.optional(),
+  department: z.string().transform(normalizeAssetOptionalField).optional(),
+  system: z.string().transform(normalizeAssetOptionalField).optional(),
+  status: assetStatusSchema.optional(),
+  tagIds: assetTagIdsInputSchema,
+  page: z.coerce.number().int().positive().optional().default(1),
+  pageSize: z.coerce.number().int().positive().max(100).optional().default(24)
+}).transform((query) => ({
+  q: normalizeAssetSearchQuery(query.q ?? query.query ?? ""),
+  kind: query.kind,
+  department: query.department,
+  system: query.system,
+  status: query.status ?? "active",
+  tagIds: query.tagIds,
+  page: query.page,
+  pageSize: query.pageSize
+}));
+
+export const assetListResponseSchema = strictObject({
+  data: assetListResultSchema,
+  revision: nonNegativeIntegerSchema.optional()
+});
+
 export const assetIdParamsSchema = strictObject({
   assetId: idSchema
 });
@@ -421,6 +450,8 @@ export type TerminologyPreviewResponse = z.infer<
 export type AssetUploadFields = z.infer<typeof assetUploadFieldsSchema>;
 export type AssetUploadResponse = z.infer<typeof assetUploadResponseSchema>;
 export type AssetDetailResponse = z.infer<typeof assetDetailResponseSchema>;
+export type AssetListQuery = z.infer<typeof assetListQuerySchema>;
+export type AssetListResponse = z.infer<typeof assetListResponseSchema>;
 export type AssetIdParams = z.infer<typeof assetIdParamsSchema>;
 
 export function createApiSuccessResponse<T>(

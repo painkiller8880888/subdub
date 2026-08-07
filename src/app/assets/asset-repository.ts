@@ -1,12 +1,15 @@
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray, sql, type SQL } from "drizzle-orm";
 
 import type { WorkspaceDatabase } from "../../db/client.js";
 import { assetTags, assetVersions, assets, tags } from "../../db/schema.js";
 import {
   assetDetailSchema,
+  assetListItemSchema,
   assetTagSchema,
   type AssetDetail,
   type AssetKind,
+  type AssetListItem,
+  type AssetListResult,
   type AssetStatus,
   type AssetTag
 } from "../../schema/index.js";
@@ -100,6 +103,43 @@ export type AssetProcessingKey = {
   version: number;
 };
 
+export type AssetRepositoryListFilters = {
+  readonly q?: string;
+  readonly kind?: AssetKind;
+  readonly department?: string;
+  readonly system?: string;
+  readonly status: AssetStatus;
+  readonly tagIds: readonly string[];
+  readonly page: number;
+  readonly pageSize: number;
+};
+
+type AssetListRow = {
+  assetId: string;
+  version: number | null;
+  kind: AssetKind;
+  title: string;
+  description: string;
+  confidentiality: string;
+  department: string | null;
+  system: string | null;
+  mimeType: string | null;
+  checksum: string | null;
+  sizeBytes: number | null;
+  width: number | null;
+  height: number | null;
+  durationMs: number | null;
+  pageCount: number | null;
+  thumbnailPaths: string | null;
+  tagsJson: string;
+  tagIdsJson: string;
+  status: AssetStatus;
+  errorCode: string | null;
+  errorMessage: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
 function toTag(row: typeof tags.$inferSelect): AssetTag {
   return assetTagSchema.parse({
     tagId: row.tagId,
@@ -161,6 +201,81 @@ function parseThumbnailPaths(value: string | null): string[] {
   } catch {
     return [];
   }
+}
+
+function parseJsonArray(value: string | null | undefined): unknown[] {
+  if (value === null || value === undefined) {
+    return [];
+  }
+  try {
+    const parsed: unknown = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function buildFtsQuery(query: string): string {
+  return query
+    .split(" ")
+    .filter((token) => token.length > 0)
+    .map((token) => `"${token.replaceAll('"', '""')}"`)
+    .join(" AND ");
+}
+
+function canUseFtsQuery(query: string): boolean {
+  return query
+    .split(" ")
+    .filter((token) => token.length > 0)
+    .every((token) => [...token].length >= 3);
+}
+
+function substringSearchCondition(query: string): SQL {
+  const tokens = query.split(" ").filter((token) => token.length > 0);
+  return sql.join(
+    tokens.map((token) => {
+      const fields = [
+        sql`asset_search.title`,
+        sql`asset_search.description`,
+        sql`asset_search.department`,
+        sql`asset_search.system`,
+        sql`asset_search.tags`
+      ];
+      return sql`(${sql.join(
+        fields.map((field) => sql`instr(lower(${field}), lower(${token})) > 0`),
+        sql` OR `
+      )})`;
+    }),
+    sql` AND `
+  );
+}
+
+function toAssetListItem(row: AssetListRow): AssetListItem {
+  return assetListItemSchema.parse({
+    assetId: row.assetId,
+    version: row.version,
+    kind: row.kind,
+    title: row.title,
+    description: row.description,
+    confidentiality: row.confidentiality,
+    department: row.department,
+    system: row.system,
+    mimeType: row.mimeType,
+    checksum: row.checksum,
+    sizeBytes: row.sizeBytes,
+    width: row.width,
+    height: row.height,
+    durationMs: row.durationMs,
+    pageCount: row.pageCount,
+    thumbnailPaths: parseThumbnailPaths(row.thumbnailPaths),
+    tags: parseJsonArray(row.tagsJson),
+    tagIds: parseJsonArray(row.tagIdsJson),
+    status: row.status,
+    errorCode: row.errorCode,
+    errorMessage: row.errorMessage,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt
+  });
 }
 
 function withDatabaseErrors<T>(operation: () => T): T {
@@ -306,6 +421,139 @@ export class AssetRepository {
         createdAt: asset.createdAt,
         updatedAt: asset.updatedAt
       });
+    });
+  }
+
+  list(filters: AssetRepositoryListFilters): AssetListResult {
+    return withDatabaseErrors(() => {
+      const conditions: SQL[] = [sql`${assets.status} = ${filters.status}`];
+      if (filters.kind !== undefined) {
+        conditions.push(sql`${assets.kind} = ${filters.kind}`);
+      }
+      if (filters.department !== undefined) {
+        conditions.push(sql`${assets.department} = ${filters.department}`);
+      }
+      if (filters.system !== undefined) {
+        conditions.push(sql`${assets.system} = ${filters.system}`);
+      }
+      for (const tagId of filters.tagIds) {
+        conditions.push(sql`
+          EXISTS (
+            SELECT 1
+            FROM asset_tags AS filter_asset_tags
+            INNER JOIN tags AS filter_tags
+              ON filter_tags.tag_id = filter_asset_tags.tag_id
+             AND filter_tags.status = 'active'
+            WHERE filter_asset_tags.asset_id = ${assets.assetId}
+              AND filter_asset_tags.tag_id = ${tagId}
+          )
+        `);
+      }
+
+      const useFts = filters.q !== undefined && canUseFtsQuery(filters.q);
+      const searchJoin =
+        filters.q === undefined
+          ? sql``
+          : sql`INNER JOIN asset_search
+              ON asset_search.asset_id = ${assets.assetId}`;
+      if (filters.q !== undefined) {
+        conditions.push(
+          useFts
+            ? sql`asset_search MATCH ${buildFtsQuery(filters.q)}`
+            : substringSearchCondition(filters.q)
+        );
+      }
+
+      const where = sql.join(conditions, sql` AND `);
+      const totalRow = this.database.get<{ total: number }>(sql`
+        SELECT COUNT(*) AS total
+        FROM assets
+        ${searchJoin}
+        WHERE ${where}
+      `);
+      const total = Number(totalRow?.total ?? 0);
+      const offset = (filters.page - 1) * filters.pageSize;
+      const orderBy = useFts
+        ? sql`asset_search.rank ASC, assets.updated_at DESC, assets.asset_id ASC`
+        : sql`assets.updated_at DESC, assets.asset_id ASC`;
+
+      const rows = this.database.all<AssetListRow>(sql`
+        SELECT
+          assets.asset_id AS assetId,
+          latest_version.version AS version,
+          assets.kind AS kind,
+          assets.title AS title,
+          assets.description AS description,
+          assets.confidentiality AS confidentiality,
+          assets.department AS department,
+          assets.system AS system,
+          latest_version.mime_type AS mimeType,
+          latest_version.checksum AS checksum,
+          latest_version.size_bytes AS sizeBytes,
+          latest_version.width AS width,
+          latest_version.height AS height,
+          latest_version.duration_ms AS durationMs,
+          latest_version.page_count AS pageCount,
+          latest_version.thumbnail_paths AS thumbnailPaths,
+          COALESCE(
+            (
+              SELECT json_group_array(json_object(
+                'tagId', ordered_tags.tag_id,
+                'axis', ordered_tags.axis,
+                'canonicalName', ordered_tags.canonical_name
+              ))
+              FROM (
+                SELECT DISTINCT tags.tag_id, tags.axis, tags.canonical_name
+                FROM asset_tags
+                INNER JOIN tags ON tags.tag_id = asset_tags.tag_id
+                WHERE asset_tags.asset_id = assets.asset_id
+                  AND tags.status = 'active'
+                ORDER BY tags.canonical_name, tags.tag_id
+              ) AS ordered_tags
+            ),
+            '[]'
+          ) AS tagsJson,
+          COALESCE(
+            (
+              SELECT json_group_array(ordered_tag_ids.tag_id)
+              FROM (
+                SELECT DISTINCT tags.tag_id
+                FROM asset_tags
+                INNER JOIN tags ON tags.tag_id = asset_tags.tag_id
+                WHERE asset_tags.asset_id = assets.asset_id
+                  AND tags.status = 'active'
+                ORDER BY tags.tag_id
+              ) AS ordered_tag_ids
+            ),
+            '[]'
+          ) AS tagIdsJson,
+          assets.status AS status,
+          assets.error_code AS errorCode,
+          assets.error_message AS errorMessage,
+          assets.created_at AS createdAt,
+          assets.updated_at AS updatedAt
+        FROM assets
+        ${searchJoin}
+        LEFT JOIN asset_versions AS latest_version
+          ON latest_version.asset_id = assets.asset_id
+         AND latest_version.version = (
+           SELECT MAX(version)
+           FROM asset_versions
+           WHERE asset_versions.asset_id = assets.asset_id
+         )
+        WHERE ${where}
+        ORDER BY ${orderBy}
+        LIMIT ${filters.pageSize} OFFSET ${offset}
+      `);
+
+      const items = rows.map(toAssetListItem);
+      return {
+        items,
+        page: filters.page,
+        pageSize: filters.pageSize,
+        total,
+        hasNextPage: offset + items.length < total
+      };
     });
   }
 

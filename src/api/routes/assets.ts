@@ -22,13 +22,15 @@ import {
 import {
   assetDetailResponseSchema,
   assetIdParamsSchema,
+  assetListQuerySchema,
+  assetListResponseSchema,
   assetUploadResponseSchema,
   createApiSuccessResponse
 } from "../../schema/api.js";
 
 export type AssetServicePort = Pick<
   AssetService,
-  "stageUpload" | "commitUpload" | "discardStaged" | "findDetail"
+  "stageUpload" | "commitUpload" | "discardStaged" | "findDetail" | "list"
 >;
 
 const allowedFieldNames = new Set([
@@ -107,6 +109,13 @@ export function registerAssetRoutes(
       fieldSize: limits.maxFieldValueLength,
       fileSize: limits.maxGlobalFileBytes
     }
+  });
+
+  app.get("/api/assets", async (request) => {
+    const query = assetListQuerySchema.parse(request.query);
+    return assetListResponseSchema.parse(
+      createApiSuccessResponse(assetService.list(query))
+    );
   });
 
   app.post("/api/assets", async (request) => {

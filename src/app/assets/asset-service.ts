@@ -2,10 +2,14 @@ import { randomUUID } from "node:crypto";
 import type { Readable } from "node:stream";
 import * as path from "node:path";
 
-import { assetUploadFieldsSchema } from "../../schema/api.js";
+import {
+  assetListQuerySchema,
+  assetUploadFieldsSchema
+} from "../../schema/api.js";
 import {
   idSchema,
   type AssetDetail,
+  type AssetListResult,
   type AssetKind,
   type AssetUploadReceipt
 } from "../../schema/index.js";
@@ -97,6 +101,11 @@ export class AssetService {
       throw new AssetNotFoundError();
     }
     return detail;
+  }
+
+  list(input: unknown): AssetListResult {
+    const query = assetListQuerySchema.parse(input);
+    return this.repository.list(query);
   }
 
   async commitUpload(

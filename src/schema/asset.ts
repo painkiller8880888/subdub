@@ -5,6 +5,7 @@ import {
   idSchema,
   isoUtcDateTimeSchema,
   nonNegativeIntegerSchema,
+  positiveIntegerSchema,
   relativePosixPathSchema,
   sha256Schema,
   strictObject
@@ -105,6 +106,46 @@ export const assetDetailSchema = strictObject({
   updatedAt: isoUtcDateTimeSchema
 });
 
+export const assetListTagSchema = strictObject({
+  tagId: idSchema,
+  axis: assetTagAxisSchema,
+  canonicalName: z.string().min(1)
+});
+
+export const assetListItemSchema = strictObject({
+  assetId: idSchema,
+  version: positiveIntegerSchema.nullable(),
+  kind: assetKindSchema,
+  title: z.string().min(1),
+  description: z.string(),
+  confidentiality: z.string().min(1),
+  department: z.string().min(1).nullable(),
+  system: z.string().min(1).nullable(),
+  mimeType: z.string().min(1).nullable(),
+  checksum: sha256Schema.nullable(),
+  sizeBytes: nonNegativeIntegerSchema.nullable(),
+  width: nonNegativeIntegerSchema.nullable(),
+  height: nonNegativeIntegerSchema.nullable(),
+  durationMs: nonNegativeIntegerSchema.nullable(),
+  pageCount: nonNegativeIntegerSchema.nullable(),
+  thumbnailPaths: z.array(relativePosixPathSchema),
+  tags: z.array(assetListTagSchema),
+  tagIds: z.array(idSchema),
+  status: assetStatusSchema,
+  errorCode: assetProcessingErrorCodeSchema.nullable(),
+  errorMessage: z.string().nullable(),
+  createdAt: isoUtcDateTimeSchema,
+  updatedAt: isoUtcDateTimeSchema
+});
+
+export const assetListResultSchema = strictObject({
+  items: z.array(assetListItemSchema),
+  page: positiveIntegerSchema,
+  pageSize: positiveIntegerSchema,
+  total: nonNegativeIntegerSchema,
+  hasNextPage: z.boolean()
+});
+
 export function normalizeAssetTextField(value: string): string {
   return value.normalize("NFC").trim();
 }
@@ -112,6 +153,11 @@ export function normalizeAssetTextField(value: string): string {
 export function normalizeAssetOptionalField(value: string): string | undefined {
   const normalized = value.normalize("NFC").trim();
   return normalized.length === 0 ? undefined : normalized;
+}
+
+export function normalizeAssetSearchQuery(value: string): string | undefined {
+  const tokens = value.normalize("NFC").match(/[\p{L}\p{N}]+/gu);
+  return tokens === null ? undefined : tokens.join(" ");
 }
 
 export type AssetKind = z.infer<typeof assetKindSchema>;
@@ -125,3 +171,6 @@ export type AssetProcessingErrorCode = z.infer<
   typeof assetProcessingErrorCodeSchema
 >;
 export type AssetDetail = z.infer<typeof assetDetailSchema>;
+export type AssetListTag = z.infer<typeof assetListTagSchema>;
+export type AssetListItem = z.infer<typeof assetListItemSchema>;
+export type AssetListResult = z.infer<typeof assetListResultSchema>;
