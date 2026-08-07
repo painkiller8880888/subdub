@@ -312,6 +312,43 @@ describe("asset repository search", () => {
     ).toBe(0);
   });
 
+  it("removes canonical and alias search results when an asset tag is deleted", async () => {
+    const repository = await createRepository();
+    insertTag("tag-removable", "解除対象タグ");
+    database!.database
+      .insert(tagAliases)
+      .values({
+        aliasId: "alias-removable",
+        tagId: "tag-removable",
+        alias: "解除対象別名",
+        normalizedAlias: "解除対象別名",
+        createdAt: NOW
+      })
+      .run();
+    insertAsset("asset-unlinked");
+    linkAsset("asset-unlinked", "tag-removable");
+
+    const search = (q: string) =>
+      repository.list({
+        q,
+        status: "active",
+        tagIds: [],
+        page: 1,
+        pageSize: 20
+      }).total;
+
+    expect(search("解除対象タグ")).toBe(1);
+    expect(search("解除対象別名")).toBe(1);
+
+    database!.database
+      .delete(assetTags)
+      .where(eq(assetTags.assetId, "asset-unlinked"))
+      .run();
+
+    expect(search("解除対象タグ")).toBe(0);
+    expect(search("解除対象別名")).toBe(0);
+  });
+
   it("uses explicit status filters, AND tag filters, and deterministic pagination", async () => {
     const repository = await createRepository();
     const service = new AssetService({ repository });

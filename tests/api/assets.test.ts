@@ -95,6 +95,7 @@ describe("asset upload API", () => {
       description: string;
       department: string | null;
       system: string | null;
+      kind: "photo" | "video" | "document_scan" | "sound_effect";
       status: "processing" | "active" | "inactive" | "error";
     }> = {}
   ) {
@@ -103,7 +104,7 @@ describe("asset upload API", () => {
       .insert(assets)
       .values({
         assetId,
-        kind: "photo",
+        kind: values.kind ?? "photo",
         title: values.title ?? assetId,
         description: values.description ?? "",
         confidentiality: "internal",
@@ -238,6 +239,22 @@ describe("asset upload API", () => {
     ).toEqual(["asset-error"]);
   });
 
+  it("filters asset list results by kind", async () => {
+    insertSearchAsset("asset-photo", { kind: "photo" });
+    insertSearchAsset("asset-video", { kind: "video" });
+
+    const response = await server.app.inject({
+      method: "GET",
+      url: "/api/assets?kind=photo&page=1&pageSize=20"
+    });
+    expect(response.statusCode).toBe(200);
+    expect(
+      assetListResponseSchema
+        .parse(response.json())
+        .data.items.map((item) => item.assetId)
+    ).toEqual(["asset-photo"]);
+  });
+
   it("does not treat FTS punctuation as query language or return a server error", async () => {
     for (const query of ["'", '"', "-", "(", ")", ":", "*", "日本語。", "  "]) {
       const response = await server.app.inject({
@@ -248,6 +265,18 @@ describe("asset upload API", () => {
       expect(() =>
         assetListResponseSchema.parse(response.json())
       ).not.toThrow();
+    }
+  });
+
+  it("returns common validation errors for invalid asset list parameters", async () => {
+    for (const query of ["pageSize=101", "status=unknown", "kind=unknown"]) {
+      const response = await server.app.inject({
+        method: "GET",
+        url: `/api/assets?${query}`
+      });
+
+      expect(response.statusCode).toBe(422);
+      expect(apiError(response).code).toBe("REQUEST_VALIDATION_FAILED");
     }
   });
 
