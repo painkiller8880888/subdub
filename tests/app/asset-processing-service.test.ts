@@ -3,9 +3,13 @@ import { promises as fs } from "node:fs";
 import { tmpdir } from "node:os";
 import * as path from "node:path";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { initializeWorkspaceDatabase } from "../../src/db/initialize.js";
+import {
+  AssetProcessingRaceError,
+  AssetStagingFailedError
+} from "../../src/app/assets/asset-errors.js";
 import { AssetProcessingError } from "../../src/app/assets/asset-processing-errors.js";
 import { NodeAssetFileStore } from "../../src/app/assets/asset-file-store.js";
 import { AssetRepository } from "../../src/app/assets/asset-repository.js";
@@ -387,5 +391,121 @@ describe("asset processing service", () => {
     const version = repository.findAssetVersion("asset-race", 1);
     expect(version?.width).toBe(320);
     expect(version?.thumbnailPaths).not.toBeNull();
+    const thumbnailPaths = JSON.parse(
+      version!.thumbnailPaths as string
+    ) as string[];
+    expect(thumbnailPaths.length).toBeGreaterThan(0);
+    for (const thumbnailPath of thumbnailPaths) {
+      await expect(
+        fs.access(fileStore.resolvePath(thumbnailPath))
+      ).resolves.toBeUndefined();
+    }
+  });
+
+  it("cleans up already-placed thumbnails when a later move fails", async () => {
+    await createService({
+      document_scan: processed(
+        { width: 200, height: 150, durationMs: null, pageCount: 3 },
+        [Buffer.from("page-1"), Buffer.from("page-2"), Buffer.from("page-3")]
+      )
+    });
+    await registerProcessingAsset(
+      "asset-scan-fail",
+      "document_scan",
+      "scan-3pages.pdf",
+      "pdf"
+    );
+    const originalMoveToMedia = fileStore.moveToMedia.bind(fileStore);
+    let moveCount = 0;
+    vi.spyOn(fileStore, "moveToMedia").mockImplementation(
+      async (relativePath, mediaRelativePath) => {
+        moveCount += 1;
+        if (moveCount === 2) {
+          throw new AssetStagingFailedError(new Error("injected move failure"));
+        }
+        return originalMoveToMedia(relativePath, mediaRelativePath);
+      }
+    );
+
+    const outcome = await service.processAsset("asset-scan-fail", 1);
+    expect(outcome).toEqual({ status: "failed" });
+
+    const asset = repository.findAsset("asset-scan-fail");
+    expect(asset?.status).toBe("error");
+    expect(asset?.errorCode).toBe("PROCESSING_THUMBNAIL_FAILED");
+    const version = repository.findAssetVersion("asset-scan-fail", 1);
+    expect(version?.checksum).toBeNull();
+    expect(version?.thumbnailPaths).toBeNull();
+    expect(await thumbnailsOnDisk()).toEqual([]);
+  });
+
+  it("does not leave empty thumbnail temp directories after success", async () => {
+    await createService({
+      photo: processed(
+        { width: 64, height: 48, durationMs: null, pageCount: null },
+        [Buffer.from("thumb")]
+      )
+    });
+    await registerProcessingAsset("asset-temp", "photo", "shot.png", "png");
+
+    const outcome = await service.processAsset("asset-temp", 1);
+    expect(outcome.status).toBe("processed");
+
+    const tempRoot = path.join(workspaceRoot, "library", "thumbnails-tmp");
+    const exists = await fs
+      .access(tempRoot)
+      .then(() => true)
+      .catch(() => false);
+    if (exists) {
+      expect(await fs.readdir(tempRoot)).toEqual([]);
+    }
+  });
+
+  it("rolls back the version update when the success guard loses the race", async () => {
+    await createService({
+      photo: processed(
+        { width: 64, height: 48, durationMs: null, pageCount: null },
+        [Buffer.from("thumb")]
+      )
+    });
+    const bytes = await registerProcessingAsset(
+      "asset-rollback",
+      "photo",
+      "shot.png",
+      "png"
+    );
+    repository.markProcessingSucceeded({
+      assetId: "asset-rollback",
+      version: 1,
+      checksum: sha256(bytes),
+      sizeBytes: bytes.length,
+      width: 64,
+      height: 48,
+      durationMs: null,
+      pageCount: null,
+      thumbnailPaths: [],
+      updatedAt: FIXED_NOW
+    });
+
+    expect(() =>
+      repository.transaction((transactionRepository) =>
+        transactionRepository.markProcessingSucceeded({
+          assetId: "asset-rollback",
+          version: 1,
+          checksum: "deadbeef",
+          sizeBytes: 1,
+          width: null,
+          height: null,
+          durationMs: null,
+          pageCount: null,
+          thumbnailPaths: [],
+          updatedAt: FIXED_NOW
+        })
+      )
+    ).toThrow(AssetProcessingRaceError);
+
+    const version = repository.findAssetVersion("asset-rollback", 1);
+    expect(version?.checksum).toBe(sha256(bytes));
+    expect(version?.sizeBytes).toBe(bytes.length);
   });
 });

@@ -11,7 +11,10 @@ import {
   type AssetTag
 } from "../../schema/index.js";
 import type { AssetProcessingErrorCode } from "../../schema/asset.js";
-import { AssetDatabaseError } from "./asset-errors.js";
+import {
+  AssetDatabaseError,
+  AssetProcessingRaceError
+} from "./asset-errors.js";
 
 export type AssetInsert = {
   assetId: string;
@@ -167,6 +170,9 @@ function withDatabaseErrors<T>(operation: () => T): T {
     if (error instanceof AssetDatabaseError) {
       throw error;
     }
+    if (error instanceof AssetProcessingRaceError) {
+      throw error;
+    }
     throw new AssetDatabaseError(error);
   }
 }
@@ -303,8 +309,8 @@ export class AssetRepository {
     });
   }
 
-  markProcessingSucceeded(values: AssetProcessingSuccessValues): boolean {
-    return withDatabaseErrors(() => {
+  markProcessingSucceeded(values: AssetProcessingSuccessValues): void {
+    withDatabaseErrors(() => {
       this.database
         .update(assetVersions)
         .set({
@@ -342,7 +348,9 @@ export class AssetRepository {
           )
         )
         .run();
-      return (result.changes ?? 0) > 0;
+      if ((result.changes ?? 0) === 0) {
+        throw new AssetProcessingRaceError();
+      }
     });
   }
 

@@ -13,8 +13,9 @@ Issue #35（P3-02 メタデータ・チェックサム・サムネイル生成�
 ### 2. 処理サービスの整合性 (`asset-processing-service.ts` / `asset-repository.ts`)
 
 - ストリーミングで SHA-256 とサイズを計算し、`asset_versions.checksum` / `size_bytes` に保存します。
-- サムネイルは `thumbnails-tmp/<uuid>` に一時書き込み → `thumbnails/{assetId}/v{version}/` へ move。コミットが成立しない場合は配置済みファイルをロールバックします。
-- 成功時はバージョン更新後に `status = 'processing'` ガード付きで `active` へ遷移（トランザクション）。重複・競合処理でデータを破損しません。
+- サムネイルは `thumbnails-tmp/<uuid>` に一時書き込み → `thumbnails/{assetId}/v{version}/` へ move。move は 1 件成功するたびにロールバック対象へ追加するため、途中失敗時も配置済みファイルを残しません。一時ディレクトリは成功・失敗・スキップを問わず最後に削除します。
+- 成功時はバージョン更新後に `status='processing'` ガード付きで `active` へ遷移します。ガードが競合に負けた場合（別プロセスが先に `active` 化）はトランザクションを rollback してバージョン更新を破棄し、勝者のファイルを削除しません。
+- 同一 `assetId:version` の同時処理はサービス内の per-key ミューテックスで直列化します。これにより単一プロセスでのファイル公開（stat → rename）と DB 更新の競合窓を閉じます。
 - 失敗時は `status = 'error'` に遷移し、安定した `error_code`（`PROCESSING_MEDIA_NOT_FOUND` / `PROCESSING_METADATA_FAILED` / `PROCESSING_MEDIA_CORRUPTED` / `PROCESSING_THUMBNAIL_FAILED` / `PROCESSING_DATABASE_FAILED` / `PROCESSING_INTERNAL_FAILED`）と日本語メッセージを保存します。元のメディアは削除しません。
 - `processing` 素材を対象に 5 秒間隔でポーリングするワーカー (`asset-processing-worker.ts`) をサーバ起動時に開始し、`onClose` で停止します。停止は AbortSignal により即座に反映されます。
 
@@ -56,7 +57,7 @@ Issue #35（P3-02 メタデータ・チェックサム・サムネイル生成�
 - `pnpm typecheck`: パス
 - `pnpm lint`: パス
 - `pnpm format:check`: パス
-- `pnpm test`: 51 ファイル / 379 テスト パス（追加: 実メディア処理 5、処理サービス 9、ワーカー 6、API GET 詳細 3、0003 マイグレーション冪等性）
+- `pnpm test`: 51 ファイル / 382 テスト パス（追加: 実メディア処理 5、処理サービス 12、ワーカー 6、API GET 詳細 3、0003 マイグレーション冪等性）
 - `pnpm build`: パス
 - `pnpm verify:build`: パス（マイグレーション履歴 4 件で再初期化一致）
 - `pnpm verify:character-assets`: パス
@@ -65,7 +66,7 @@ Issue #35（P3-02 メタデータ・チェックサム・サムネイル生成�
 ## 未検証
 
 - 実サーバー上でのエンドツーエンド実行（ローテート動画 / 大量ページ PDF / 破損メディアの実運用挙動）。
-- ワーカー多重起動（複数プロセス）時の排他制御。現状は DB トランザクションガードで整合性を確保しています。
+- 複数プロセスが同一素材を同時処理するケース。このローカル単一ユーザー MVP はワーカーを 1 プロセス 1 インスタンスで運用するため対象外とします。競合時の DB 整合性（ガード失敗 → rollback、敗者は勝者のファイルを削除しない）は保証していますが、ファイル公開側の `rename` はプロセス間で原子性を保証しません。
 
 ## リスク
 

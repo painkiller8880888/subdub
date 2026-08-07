@@ -2,7 +2,11 @@ import { createHash, randomUUID } from "node:crypto";
 import { createReadStream } from "node:fs";
 
 import type { AssetKind } from "../../schema/asset.js";
-import { AssetDatabaseError, AssetStagingFailedError } from "./asset-errors.js";
+import {
+  AssetDatabaseError,
+  AssetProcessingRaceError,
+  AssetStagingFailedError
+} from "./asset-errors.js";
 import { AssetProcessingError } from "./asset-processing-errors.js";
 import type { AssetFileStore } from "./asset-file-store.js";
 import {
@@ -102,6 +106,7 @@ export class AssetProcessingService {
   private readonly processingPort: AssetMediaProcessingPort;
   private readonly maxThumbnailEdgePx: number;
   private readonly now: () => Date;
+  private readonly inFlight = new Map<string, Promise<void>>();
 
   constructor(options: AssetProcessingServiceOptions) {
     this.repository = options.repository;
@@ -117,6 +122,38 @@ export class AssetProcessingService {
   }
 
   async processAsset(
+    assetId: string,
+    version: number
+  ): Promise<AssetProcessingOutcome> {
+    const key = `${assetId}:${version}`;
+    return this.runExclusive(key, () =>
+      this.processAssetUnlocked(assetId, version)
+    );
+  }
+
+  private async runExclusive<T>(
+    key: string,
+    task: () => Promise<T>
+  ): Promise<T> {
+    const previous = this.inFlight.get(key) ?? Promise.resolve();
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const next = previous.then(() => gate);
+    this.inFlight.set(key, next);
+    await previous;
+    try {
+      return await task();
+    } finally {
+      release();
+      if (this.inFlight.get(key) === next) {
+        this.inFlight.delete(key);
+      }
+    }
+  }
+
+  private async processAssetUnlocked(
     assetId: string,
     version: number
   ): Promise<AssetProcessingOutcome> {
@@ -157,40 +194,42 @@ export class AssetProcessingService {
         const finalPath = `thumbnails/${assetId}/v${version}/${name}`;
         await this.fileStore.moveToMedia(`${tempRoot}/${name}`, finalPath);
         finalThumbnailPaths.push(finalPath);
+        placedThumbnailPaths.push(finalPath);
       }
-      placedThumbnailPaths.push(...finalThumbnailPaths);
 
-      const committed = this.repository.transaction((repository) =>
-        repository.markProcessingSucceeded({
-          assetId,
-          version,
-          checksum,
-          sizeBytes,
-          width: processed.metadata.width,
-          height: processed.metadata.height,
-          durationMs: processed.metadata.durationMs,
-          pageCount: processed.metadata.pageCount,
-          thumbnailPaths: finalThumbnailPaths,
-          updatedAt: this.now().toISOString()
-        })
-      );
-      if (!committed) {
-        for (const placedPath of placedThumbnailPaths) {
-          await this.fileStore.removeBestEffort(placedPath);
+      try {
+        this.repository.transaction((repository) =>
+          repository.markProcessingSucceeded({
+            assetId,
+            version,
+            checksum,
+            sizeBytes,
+            width: processed.metadata.width,
+            height: processed.metadata.height,
+            durationMs: processed.metadata.durationMs,
+            pageCount: processed.metadata.pageCount,
+            thumbnailPaths: finalThumbnailPaths,
+            updatedAt: this.now().toISOString()
+          })
+        );
+      } catch (error) {
+        if (error instanceof AssetProcessingRaceError) {
+          return { status: "skipped" };
         }
-        return { status: "skipped" };
+        throw error;
       }
       return { status: "processed" };
     } catch (error) {
-      if (tempRoot !== undefined) {
-        await this.fileStore.removeBestEffort(tempRoot);
-      }
       for (const placedPath of placedThumbnailPaths) {
         await this.fileStore.removeBestEffort(placedPath);
       }
       const processingError = toProcessingError(error);
       await this.recordFailure(assetId, processingError);
       return { status: "failed" };
+    } finally {
+      if (tempRoot !== undefined) {
+        await this.fileStore.removeBestEffort(tempRoot);
+      }
     }
   }
 

@@ -175,3 +175,10 @@ export class AssetNotFoundError extends AssetError {
     this.name = "AssetNotFoundError";
   }
 }
+
+export class AssetProcessingRaceError extends Error {
+  constructor() {
+    super("asset processing commit lost the concurrent status guard");
+    this.name = "AssetProcessingRaceError";
+  }
+}
