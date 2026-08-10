@@ -1097,7 +1097,7 @@ export function ScriptPage() {
 
   async function saveVisualAssignment(
     assignment: VisualAssignment
-  ): Promise<void> {
+  ): Promise<boolean> {
     const context: VisualMutationContext = {
       projectId: projectIdRef.current,
       projectGeneration: projectGenerationRef.current,
@@ -1111,12 +1111,13 @@ export function ScriptPage() {
         assignmentId: assignment.id,
         assignment: assignmentInput(assignment)
       });
-      acceptVisualMutationResult(saved, context);
+      return acceptVisualMutationResult(saved, context);
     } catch (error) {
       if (isVisualMutationCurrent(context)) {
         setVisualError(error);
         setVisualSaveState("idle");
       }
+      return false;
     }
   }
 

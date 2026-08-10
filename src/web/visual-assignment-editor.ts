@@ -70,22 +70,15 @@ export function defaultDisplayForAsset(
   };
 }
 
-function nextAnnotationId(annotations: readonly StaticAnnotation[]): string {
-  const ids = new Set(annotations.map((annotation) => annotation.id));
-  let suffix = annotations.length + 1;
-  let id = `annotation-${suffix}`;
-  while (ids.has(id)) {
-    suffix += 1;
-    id = `annotation-${suffix}`;
-  }
-  return id;
+function nextAnnotationId(): string {
+  return `annotation-${globalThis.crypto.randomUUID()}`;
 }
 
 export function addVisualAnnotation(
   assignment: VisualAssignment
 ): VisualAssignment {
   const annotation: StaticAnnotation = {
-    id: nextAnnotationId(assignment.display.annotations),
+    id: nextAnnotationId(),
     kind: "label",
     text: "",
     x: 0.1,

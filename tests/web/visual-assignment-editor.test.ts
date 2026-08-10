@@ -92,6 +92,18 @@ describe("visual assignment editor helpers", () => {
     ).toEqual([]);
   });
 
+  it("uses project-safe IDs for annotations added to different assignments", () => {
+    const assignments = clone(
+      videoProjectFixture.visuals.assignments
+    ) as VisualAssignment[];
+    const first = addVisualAnnotation(assignments[0]);
+    const second = addVisualAnnotation(assignments[1]);
+
+    expect(first.display.annotations[0]?.id).not.toBe(
+      second.display.annotations[0]?.id
+    );
+  });
+
   it("generates a non-conflicting assignment ID", () => {
     const assignments = clone(videoProjectFixture.visuals.assignments);
     assignments[0].id = "visual-assignment-1";

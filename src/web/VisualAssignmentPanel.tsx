@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import type {
   AssetDetail,
@@ -18,7 +18,7 @@ type AssetView = AssetDetail | AssetListItem;
 export type VisualAssignmentPanelProps = {
   readonly project: VideoProject;
   readonly assets: ReadonlyMap<string, AssetView | undefined>;
-  readonly onSave: (assignment: VisualAssignment) => Promise<void>;
+  readonly onSave: (assignment: VisualAssignment) => Promise<boolean>;
   readonly onRemove: (assignmentId: string) => Promise<void>;
   readonly isMutating: boolean;
 };
@@ -211,29 +211,67 @@ function VisualAssignmentEditor({
   readonly assignment: VisualAssignment;
   readonly project: VideoProject;
   readonly asset: AssetView | undefined;
-  readonly onSave: (assignment: VisualAssignment) => Promise<void>;
+  readonly onSave: (assignment: VisualAssignment) => Promise<boolean>;
   readonly onRemove: (assignmentId: string) => Promise<void>;
   readonly isMutating: boolean;
 }) {
   const [draft, setDraft] = useState<VisualAssignment>(() =>
     structuredClone(assignment)
   );
+  const [isDirty, setIsDirty] = useState(false);
+  const [hasExternalUpdate, setHasExternalUpdate] = useState(false);
+  const draftVersionRef = useRef(0);
+  const lastAssignmentRef = useRef(assignment);
 
   useEffect(() => {
+    const assignmentChanged = lastAssignmentRef.current !== assignment;
+    if (isDirty) {
+      if (assignmentChanged) {
+        setHasExternalUpdate(true);
+      }
+      lastAssignmentRef.current = assignment;
+      return;
+    }
     setDraft(structuredClone(assignment));
-  }, [assignment]);
+    setHasExternalUpdate(false);
+    lastAssignmentRef.current = assignment;
+  }, [assignment, isDirty]);
+
+  const updateDraft = (
+    update: (current: VisualAssignment) => VisualAssignment
+  ): void => {
+    draftVersionRef.current += 1;
+    setIsDirty(true);
+    setDraft(update);
+  };
+
+  const reloadFromServer = (): void => {
+    draftVersionRef.current += 1;
+    setDraft(structuredClone(assignment));
+    setIsDirty(false);
+    setHasExternalUpdate(false);
+  };
+
+  const saveDraft = async (): Promise<void> => {
+    const saveVersion = draftVersionRef.current;
+    const saved = await onSave(draft);
+    if (saved && draftVersionRef.current === saveVersion) {
+      setIsDirty(false);
+      setHasExternalUpdate(false);
+    }
+  };
 
   const section = assignmentSection(project, draft);
   const updateDisplay = (
     update: Partial<VisualAssignment["display"]>
   ): void => {
-    setDraft((current) => ({
+    updateDraft((current) => ({
       ...current,
       display: { ...current.display, ...update } as VisualAssignment["display"]
     }));
   };
   const updateCrop = (key: "x" | "y" | "width" | "height", value: string) => {
-    setDraft((current) => ({
+    updateDraft((current) => ({
       ...current,
       display: {
         ...current.display,
@@ -242,7 +280,7 @@ function VisualAssignmentEditor({
     }));
   };
   const updatePosition = (key: "x" | "y", value: string) => {
-    setDraft((current) => ({
+    updateDraft((current) => ({
       ...current,
       display: {
         ...current.display,
@@ -315,7 +353,7 @@ function VisualAssignmentEditor({
               const nextSection = project.script.sections.find(
                 (candidate) => candidate.id === event.target.value
               );
-              setDraft((current) => ({
+              updateDraft((current) => ({
                 ...current,
                 startLineId: nextSection?.lines[0]?.id ?? "",
                 endLineId: nextSection?.lines.at(-1)?.id ?? ""
@@ -335,7 +373,7 @@ function VisualAssignmentEditor({
             id={`${draft.id}-start-line`}
             value={draft.startLineId}
             onChange={(event) =>
-              setDraft((current) => ({
+              updateDraft((current) => ({
                 ...current,
                 startLineId: event.target.value
               }))
@@ -354,7 +392,7 @@ function VisualAssignmentEditor({
             id={`${draft.id}-end-line`}
             value={draft.endLineId}
             onChange={(event) =>
-              setDraft((current) => ({
+              updateDraft((current) => ({
                 ...current,
                 endLineId: event.target.value
               }))
@@ -550,7 +588,9 @@ function VisualAssignmentEditor({
           <button
             className="button button-small"
             type="button"
-            onClick={() => setDraft((current) => addVisualAnnotation(current))}
+            onClick={() =>
+              updateDraft((current) => addVisualAnnotation(current))
+            }
           >
             注釈を追加
           </button>
@@ -560,12 +600,12 @@ function VisualAssignmentEditor({
             key={annotation.id}
             annotation={annotation}
             onChange={(update) =>
-              setDraft((current) =>
+              updateDraft((current) =>
                 updateVisualAnnotation(current, annotation.id, update)
               )
             }
             onRemove={() =>
-              setDraft((current) =>
+              updateDraft((current) =>
                 removeVisualAnnotation(current, annotation.id)
               )
             }
@@ -573,12 +613,26 @@ function VisualAssignmentEditor({
         ))}
       </section>
 
+      {hasExternalUpdate ? (
+        <div className="status-message" role="status">
+          Server update detected. Your unsaved draft is being kept.
+          <button
+            className="button button-small"
+            type="button"
+            disabled={isMutating}
+            onClick={reloadFromServer}
+          >
+            Reload latest server value
+          </button>
+        </div>
+      ) : null}
+
       <div className="form-actions">
         <button
           className="button button-primary"
           type="button"
           disabled={isMutating}
-          onClick={() => void onSave(draft)}
+          onClick={() => void saveDraft()}
         >
           {isMutating ? "保存中…" : "表示設定を保存"}
         </button>
