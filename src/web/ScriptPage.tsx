@@ -419,7 +419,12 @@ export function ScriptPage() {
     queryFn: () => fetchProjectVoiceStatus(projectId ?? ""),
     enabled: projectId !== undefined,
     retry: false,
-    refetchInterval: 1_000
+    refetchInterval: (query) =>
+      query.state.data?.jobs.some(
+        (job) => job.status === "queued" || job.status === "running"
+      )
+        ? 1_000
+        : false
   });
   const assignmentAssetQueries = useQueries({
     queries: (projectQuery.data?.visuals.assignments ?? []).map(
