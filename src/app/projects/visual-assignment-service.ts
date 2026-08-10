@@ -22,7 +22,8 @@ import {
 import { AssetRepository } from "../assets/asset-repository.js";
 import {
   ProjectRepository,
-  ProjectRepositoryError
+  ProjectRepositoryError,
+  type ProjectRepositoryLockedOperations
 } from "./project-repository.js";
 import {
   VISUAL_ASSIGNMENT_ERROR_CODE,
@@ -33,7 +34,7 @@ import {
   type VisualAssignmentFileSystem
 } from "./visual-assignment-file-system.js";
 
-type ProjectRepositoryPort = Pick<ProjectRepository, "read" | "save">;
+type ProjectRepositoryPort = Pick<ProjectRepository, "withProjectLock">;
 type AssetRepositoryPort = Pick<AssetRepository, "findAssetDetail">;
 
 export type VisualAssignmentServiceOptions = {
@@ -215,7 +216,17 @@ export class VisualAssignmentService {
     }
     const safeProjectId = projectIdResult.data;
     const request = visualAssignmentRequestSchema.parse(input);
-    const currentProject = await this.repository.read(safeProjectId);
+    return this.repository.withProjectLock(safeProjectId, (repository) =>
+      this.assignLocked(safeProjectId, request, repository)
+    );
+  }
+
+  private async assignLocked(
+    safeProjectId: string,
+    request: VisualAssignmentRequest,
+    repository: ProjectRepositoryLockedOperations
+  ): Promise<VisualAssignmentServiceResult> {
+    const currentProject = await repository.read();
 
     if (currentProject.revision !== request.expectedRevision) {
       throw projectRevisionConflict();
@@ -285,8 +296,7 @@ export class VisualAssignmentService {
     );
 
     try {
-      const saved = await this.repository.save(
-        safeProjectId,
+      const saved = await repository.save(
         candidateResult.data,
         request.expectedRevision
       );
@@ -294,7 +304,7 @@ export class VisualAssignmentService {
     } catch (error) {
       if (placement.createdFinalFile) {
         await this.cleanupFinalFileIfUnreferenced(
-          safeProjectId,
+          repository,
           projectPaths.projectRoot,
           placement.finalPath,
           placement.projectMediaPath
@@ -788,14 +798,14 @@ export class VisualAssignmentService {
   }
 
   private async cleanupFinalFileIfUnreferenced(
-    projectId: string,
+    repository: ProjectRepositoryLockedOperations,
     projectRoot: string,
     finalPath: string,
     projectMediaPath: string
   ): Promise<void> {
     let currentProject: VideoProject;
     try {
-      currentProject = await this.repository.read(projectId);
+      currentProject = await repository.read();
     } catch {
       throw visualAssignmentError(
         VISUAL_ASSIGNMENT_ERROR_CODE.cleanupFailed,

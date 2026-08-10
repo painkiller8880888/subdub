@@ -1,10 +1,10 @@
 import { constants, createReadStream } from "node:fs";
 import {
   copyFile,
+  link as linkNode,
   mkdir as mkdirNode,
   lstat,
   realpath as realpathNode,
-  rename as renameNode,
   unlink as unlinkNode
 } from "node:fs/promises";
 import { createHash } from "node:crypto";
@@ -13,6 +13,7 @@ export interface VisualAssignmentFileSystem {
   mkdir(directoryPath: string): Promise<void>;
   copyFile(sourcePath: string, destinationPath: string): Promise<void>;
   hashFile(filePath: string): Promise<string>;
+  /** Install a complete temporary file without replacing an existing path. */
   rename(sourcePath: string, destinationPath: string): Promise<void>;
   pathExists(filePath: string): Promise<boolean>;
   unlink(filePath: string): Promise<void>;
@@ -45,7 +46,18 @@ export class NodeVisualAssignmentFileSystem
   }
 
   async rename(sourcePath: string, destinationPath: string): Promise<void> {
-    await renameNode(sourcePath, destinationPath);
+    await linkNode(sourcePath, destinationPath);
+    try {
+      await unlinkNode(sourcePath);
+    } catch (error) {
+      try {
+        await unlinkNode(destinationPath);
+      } catch {
+        // The service will report the original placement failure and perform
+        // its normal cleanup handling if the destination cannot be removed.
+      }
+      throw error;
+    }
   }
 
   async pathExists(filePath: string): Promise<boolean> {

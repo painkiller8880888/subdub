@@ -8,7 +8,8 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { AssetRepository } from "../../src/app/assets/asset-repository.js";
 import {
   ProjectRepository,
-  ProjectRepositoryError
+  ProjectRepositoryError,
+  type ProjectRepositoryLockedOperations
 } from "../../src/app/projects/project-repository.js";
 import {
   VISUAL_ASSIGNMENT_ERROR_CODE,
@@ -105,11 +106,59 @@ function createAssignment(
   };
 }
 
+type RepositoryPort = Pick<
+  ProjectRepository,
+  "read" | "save" | "withProjectLock"
+>;
+
+type RepositorySave = (
+  projectId: unknown,
+  candidate: unknown,
+  expectedRevision: unknown,
+  lockedRepository?: ProjectRepositoryLockedOperations
+) => Promise<VideoProject>;
+
+function createRepositoryDouble(
+  repository: ProjectRepository,
+  save: RepositorySave
+): RepositoryPort {
+  const read = repository.read.bind(repository);
+  const saveWithProjectId: RepositorySave = (
+    projectId,
+    candidate,
+    expectedRevision,
+    lockedRepository
+  ) => save(projectId, candidate, expectedRevision, lockedRepository);
+
+  return {
+    read,
+    save: saveWithProjectId,
+    withProjectLock: <T>(
+      projectId: unknown,
+      operation: (
+        lockedRepository: ProjectRepositoryLockedOperations
+      ) => Promise<T>
+    ) =>
+      repository.withProjectLock(projectId, (lockedRepository) =>
+        operation({
+          read: lockedRepository.read,
+          save: (candidate, expectedRevision) =>
+            saveWithProjectId(
+              projectId,
+              candidate,
+              expectedRevision,
+              lockedRepository
+            )
+        })
+      )
+  };
+}
+
 type SetupOptions = {
   readonly asset?: AssetDetail | undefined;
   readonly bytes?: Uint8Array;
   readonly fileSystem?: Partial<VisualAssignmentFileSystem>;
-  readonly repository?: Pick<ProjectRepository, "read" | "save">;
+  readonly repository?: RepositoryPort;
 };
 
 describe("VisualAssignmentService", () => {
@@ -225,6 +274,58 @@ describe("VisualAssignmentService", () => {
     ]);
     const mediaEntries = await fs.readdir(path.dirname(destination));
     expect(mediaEntries.filter((entry) => entry.endsWith(".tmp"))).toEqual([]);
+  });
+
+  it("serializes placement and compensation with other project saves", async () => {
+    const context = await setup();
+    let releaseCopy!: () => void;
+    let copyStartedResolve!: () => void;
+    const copyGate = new Promise<void>((resolve) => {
+      releaseCopy = resolve;
+    });
+    const copyStarted = new Promise<void>((resolve) => {
+      copyStartedResolve = resolve;
+    });
+    let copyCalls = 0;
+    const fileSystem: Partial<VisualAssignmentFileSystem> = {
+      copyFile: async (sourcePath, destinationPath) => {
+        copyCalls += 1;
+        copyStartedResolve();
+        await copyGate;
+        await fs.copyFile(sourcePath, destinationPath);
+      }
+    };
+    const createService = () =>
+      new VisualAssignmentService({
+        repository: context.repository,
+        assetRepository: { findAssetDetail: () => context.asset },
+        workspaceRoot: context.workspaceRoot,
+        libraryRoot: context.libraryRoot,
+        fileSystem,
+        createId: () => `temp-file-id-${copyCalls}`
+      });
+
+    const firstAssignment = createService().assign(PROJECT_ID, {
+      expectedRevision: 0,
+      assignment: createAssignment("first-assignment")
+    });
+    await copyStarted;
+
+    const secondAssignment = createService()
+      .assign(PROJECT_ID, {
+        expectedRevision: 0,
+        assignment: createAssignment("second-assignment")
+      })
+      .catch((error: unknown) => error);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(copyCalls).toBe(1);
+
+    releaseCopy();
+    await expect(firstAssignment).resolves.toMatchObject({ revision: 1 });
+    await expect(secondAssignment).resolves.toMatchObject({
+      code: "PROJECT_REVISION_CONFLICT"
+    });
+    expect(copyCalls).toBe(1);
   });
 
   it.each(["processing", "inactive", "error"] as const)(
@@ -389,16 +490,16 @@ describe("VisualAssignmentService", () => {
 
   it("rolls back the newly placed file on revision conflict", async () => {
     const context = await setup();
-    const repository: Pick<ProjectRepository, "read" | "save"> = {
-      read: context.repository.read.bind(context.repository),
-      save: async () => {
+    const repository = createRepositoryDouble(
+      context.repository as ProjectRepository,
+      async () => {
         throw new ProjectRepositoryError(
           "PROJECT_REVISION_CONFLICT",
           409,
           "The project revision does not match the expected revision."
         );
       }
-    };
+    );
     const service = new VisualAssignmentService({
       repository,
       assetRepository: { findAssetDetail: () => context.asset },
@@ -473,16 +574,16 @@ describe("VisualAssignmentService", () => {
     const destination = await finalPath(context.projectRoot);
     await fs.mkdir(path.dirname(destination), { recursive: true });
     await fs.writeFile(destination, context.bytes);
-    const repository: Pick<ProjectRepository, "read" | "save"> = {
-      read: context.repository.read.bind(context.repository),
-      save: async () => {
+    const repository = createRepositoryDouble(
+      context.repository as ProjectRepository,
+      async () => {
         throw new ProjectRepositoryError(
           "PROJECT_WRITE_FAILED",
           500,
           "The project could not be saved."
         );
       }
-    };
+    );
     const service = new VisualAssignmentService({
       repository,
       assetRepository: { findAssetDetail: () => context.asset },
@@ -504,16 +605,16 @@ describe("VisualAssignmentService", () => {
 
   it("reports cleanup failure and keeps the newly placed file when compensation cannot unlink it", async () => {
     const context = await setup();
-    const repository: Pick<ProjectRepository, "read" | "save"> = {
-      read: context.repository.read.bind(context.repository),
-      save: async () => {
+    const repository = createRepositoryDouble(
+      context.repository as ProjectRepository,
+      async () => {
         throw new ProjectRepositoryError(
           "PROJECT_WRITE_FAILED",
           500,
           "The project could not be saved."
         );
       }
-    };
+    );
     const destination = await finalPath(context.projectRoot);
     const service = new VisualAssignmentService({
       repository,
@@ -542,6 +643,58 @@ describe("VisualAssignmentService", () => {
     expect(await fs.readFile(destination)).toEqual(context.bytes);
   });
 
+  it("does not replace a file created after the initial final-path check", async () => {
+    const context = await setup();
+    const destination = await finalPath(context.projectRoot);
+    const competingBytes = Buffer.from(
+      "created by a competing request",
+      "utf8"
+    );
+    let firstFinalPathProbe = true;
+    const service = new VisualAssignmentService({
+      repository: context.repository,
+      assetRepository: { findAssetDetail: () => context.asset },
+      workspaceRoot: context.workspaceRoot,
+      libraryRoot: context.libraryRoot,
+      fileSystem: {
+        pathExists: async (filePath) => {
+          if (filePath === destination && firstFinalPathProbe) {
+            firstFinalPathProbe = false;
+            return false;
+          }
+          try {
+            await fs.access(filePath);
+            return true;
+          } catch {
+            return false;
+          }
+        },
+        rename: async (_sourcePath, destinationPath) => {
+          await fs.writeFile(destinationPath, competingBytes);
+          throw Object.assign(new Error("destination exists"), {
+            code: "EEXIST"
+          });
+        }
+      },
+      createId: () => "temp-file-id"
+    });
+
+    await expectError(
+      () =>
+        service.assign(PROJECT_ID, {
+          expectedRevision: 0,
+          assignment: createAssignment()
+        }),
+      VISUAL_ASSIGNMENT_ERROR_CODE.mediaPathConflict
+    );
+    expect(await fs.readFile(destination)).toEqual(competingBytes);
+    expect(
+      (await fs.readdir(path.dirname(destination))).filter((entry) =>
+        entry.endsWith(".tmp")
+      )
+    ).toEqual([]);
+  });
+
   it("does not overwrite a different existing final file", async () => {
     const context = await setup();
     const destination = await finalPath(context.projectRoot);
@@ -562,10 +715,13 @@ describe("VisualAssignmentService", () => {
 
   it("protects a final file referenced by another assignment during cleanup", async () => {
     const context = await setup();
-    const repository: Pick<ProjectRepository, "read" | "save"> = {
-      read: context.repository.read.bind(context.repository),
-      save: async (projectId, _candidate, expectedRevision) => {
-        const current = await context.repository.read(projectId);
+    const repository = createRepositoryDouble(
+      context.repository as ProjectRepository,
+      async (_projectId, _candidate, expectedRevision, lockedRepository) => {
+        if (lockedRepository === undefined) {
+          throw new Error("locked repository is required");
+        }
+        const current = await lockedRepository.read();
         const referenced = {
           ...current,
           visuals: {
@@ -580,14 +736,14 @@ describe("VisualAssignmentService", () => {
             ]
           }
         };
-        await context.repository.save(projectId, referenced, expectedRevision);
+        await lockedRepository.save(referenced, expectedRevision);
         throw new ProjectRepositoryError(
           "PROJECT_WRITE_FAILED",
           500,
           "The project could not be saved."
         );
       }
-    };
+    );
     const service = new VisualAssignmentService({
       repository,
       assetRepository: { findAssetDetail: () => context.asset },

@@ -105,6 +105,11 @@ export type ProjectRepositoryOptions = {
   now?: () => Date;
 };
 
+export type ProjectRepositoryLockedOperations = {
+  read(): Promise<VideoProject>;
+  save(candidate: unknown, expectedRevision: unknown): Promise<VideoProject>;
+};
+
 type ResolvedProjectPaths = {
   readonly projectDirectoryPath: string;
   readonly projectFilePath: string;
@@ -421,10 +426,28 @@ export class ProjectRepository {
     this.now = options.now ?? (() => new Date());
   }
 
+  private async readUnlocked(projectId: string): Promise<VideoProject> {
+    const paths = await this.resolveProjectPaths(projectId);
+    return this.readProjectWithExpectedId(projectId, paths);
+  }
+
   async read(projectId: unknown): Promise<VideoProject> {
     const safeProjectId = this.validateProjectId(projectId);
-    const paths = await this.resolveProjectPaths(safeProjectId);
-    return this.readProjectWithExpectedId(safeProjectId, paths);
+    return this.readUnlocked(safeProjectId);
+  }
+
+  async withProjectLock<T>(
+    projectId: unknown,
+    operation: (repository: ProjectRepositoryLockedOperations) => Promise<T>
+  ): Promise<T> {
+    const safeProjectId = this.validateProjectId(projectId);
+    return this.withSaveLock(safeProjectId, () =>
+      operation({
+        read: () => this.readUnlocked(safeProjectId),
+        save: (candidate, expectedRevision) =>
+          this.saveUnlocked(safeProjectId, candidate, expectedRevision)
+      })
+    );
   }
 
   async readSource(projectId: unknown): Promise<ProjectSourceDocument> {
