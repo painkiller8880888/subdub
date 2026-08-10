@@ -15,6 +15,43 @@ export const voicevoxSpeakerSchema = z.object({
 
 export const voicevoxSpeakersResponseSchema = z.array(voicevoxSpeakerSchema);
 
+const voicevoxMoraSchema = z
+  .object({
+    text: z.string(),
+    consonant: z.string().nullable(),
+    consonant_length: finiteNumberSchema.nullable(),
+    vowel: z.string(),
+    vowel_length: finiteNumberSchema,
+    pitch: finiteNumberSchema
+  })
+  .passthrough();
+
+const voicevoxAccentPhraseSchema = z
+  .object({
+    moras: z.array(voicevoxMoraSchema),
+    accent: finiteNumberSchema,
+    pause_mora: voicevoxMoraSchema.nullable(),
+    is_interrogative: z.boolean()
+  })
+  .passthrough();
+
+export const voicevoxEngineVersionSchema = z.string().min(1);
+
+export const voicevoxAudioQuerySchema = z
+  .object({
+    accent_phrases: z.array(voicevoxAccentPhraseSchema),
+    speedScale: finiteNumberSchema,
+    pitchScale: finiteNumberSchema,
+    intonationScale: finiteNumberSchema,
+    volumeScale: finiteNumberSchema,
+    prePhonemeLength: finiteNumberSchema,
+    postPhonemeLength: finiteNumberSchema,
+    outputSamplingRate: finiteNumberSchema.int().positive(),
+    outputStereo: z.boolean(),
+    kana: z.string()
+  })
+  .passthrough();
+
 export const voicevoxSpeakerReferenceSchema = strictObject({
   speakerName: z.string().min(1),
   speakerUuid: z.string().min(1).nullable().optional(),
@@ -33,6 +70,7 @@ export type VoicevoxSpeaker = z.infer<typeof voicevoxSpeakerSchema>;
 export type VoicevoxSpeakersResponse = z.infer<
   typeof voicevoxSpeakersResponseSchema
 >;
+export type VoicevoxAudioQuery = z.infer<typeof voicevoxAudioQuerySchema>;
 export type VoicevoxSpeakerReference = z.infer<
   typeof voicevoxSpeakerReferenceSchema
 >;
