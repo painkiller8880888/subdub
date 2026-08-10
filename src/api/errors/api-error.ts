@@ -27,6 +27,10 @@ import {
   VISUAL_ASSIGNMENT_ERROR_CODE,
   VisualAssignmentError
 } from "../../app/projects/visual-assignment-errors.js";
+import {
+  VoicevoxAdapterError,
+  VoicevoxResolutionError
+} from "../../voicevox/errors.js";
 
 export class ApiResponseValidationError extends Error {
   constructor(cause: unknown) {
@@ -49,6 +53,7 @@ export const API_ERROR_CODE = {
   openRouterRequestFailed: OPENROUTER_ERROR_CODE.requestFailed,
   openRouterUnavailable: OPENROUTER_ERROR_CODE.unavailable,
   openRouterResponseInvalid: OPENROUTER_ERROR_CODE.responseInvalid,
+  voicevoxUnavailable: "VOICEVOX_UNAVAILABLE",
   terminologyNotFound: "TERMINOLOGY_NOT_FOUND",
   terminologyDuplicate: "TERMINOLOGY_DUPLICATE",
   assetFileMissing: "ASSET_FILE_MISSING",
@@ -655,6 +660,19 @@ export function mapApiError(error: unknown): MappedApiError {
       message: mapped.message,
       details: [],
       shouldLog: error.code !== OPENROUTER_ERROR_CODE.notConfigured
+    };
+  }
+
+  if (
+    error instanceof VoicevoxAdapterError ||
+    error instanceof VoicevoxResolutionError
+  ) {
+    return {
+      code: API_ERROR_CODE.voicevoxUnavailable,
+      status: 503,
+      message: "VOICEVOX audio is unavailable.",
+      details: [],
+      shouldLog: false
     };
   }
 
