@@ -12,6 +12,8 @@
   "include": [
     "vite.config.ts",
     "src/schema/**/*.ts",
+    "src/remotion/**/*.ts",
+    "src/remotion/**/*.tsx",
     "src/web/**/*.ts",
     "src/web/**/*.tsx"
   ]
