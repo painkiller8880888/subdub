@@ -4,8 +4,11 @@ import { Img } from "remotion";
 
 import type { RenderManifest } from "../schema/index";
 import { resolveManifestAssetUrl } from "./asset-url";
-import { DESIGN_COLORS } from "./layout";
-import { selectCharacterVariantForFrame } from "./selection";
+import { characterLayerStyle } from "./layout-helpers";
+import {
+  selectCharacterImagePathForFrame,
+  selectCharacterVariantForFrame
+} from "./selection";
 
 export function CharacterLayer({
   manifest,
@@ -25,31 +28,23 @@ export function CharacterLayer({
       );
     }
 
-    const source =
-      variant.renderType === "single-image"
-        ? variant.files.single.path
-        : variant.files.closed.path;
-    const left = index === 0;
-    const size = prioritizeVisual ? "18%" : "25%";
+    const source = selectCharacterImagePathForFrame(manifest, character, frame);
+    if (source === undefined) {
+      throw new Error(
+        `character image is missing from the render manifest: ${character.characterId}`
+      );
+    }
     return (
       <Img
         key={character.characterId}
         src={resolveManifestAssetUrl(source)}
-        alt=""
-        style={{
-          position: "absolute",
-          zIndex: 3,
-          bottom: prioritizeVisual ? 142 : 124,
-          [left ? "left" : "right"]: "4%",
-          width: size,
-          height: "48%",
-          objectFit: "contain",
-          objectPosition: "bottom center",
-          filter: `drop-shadow(0 12px 18px rgba(7, 16, 31, 0.28))`,
-          borderBottom: `7px solid ${
-            left ? DESIGN_COLORS.accent : DESIGN_COLORS.caution
-          }`
-        }}
+        alt={character.displayName}
+        data-character-id={character.characterId}
+        style={characterLayerStyle(
+          index,
+          prioritizeVisual,
+          character.themeColorToken
+        )}
       />
     );
   });

@@ -49,6 +49,34 @@ describe("renderManifestSchema", () => {
     expect(result.success).toBe(true);
   });
 
+  it("requires resolved character display metadata and positive lip sync periods", () => {
+    const invalidToken = clone(renderManifestFixture);
+    (invalidToken.characters[0] as unknown as { themeColorToken: string }).themeColorToken =
+      "character.unknown";
+    expectInvalid(invalidToken, ["characters", 0, "themeColorToken"]);
+
+    const invalidPeriod = clone(renderManifestFixture);
+    invalidPeriod.characters[0].lipSyncPeriodFrames = 0;
+    expectInvalid(invalidPeriod, [
+      "characters",
+      0,
+      "lipSyncPeriodFrames"
+    ]);
+
+    const unknownCharacterKey = clone(renderManifestFixture);
+    Object.assign(unknownCharacterKey.characters[0], { unexpected: true });
+    expectInvalid(unknownCharacterKey, ["characters", 0]);
+  });
+
+  it("does not accept the previous render manifest version", () => {
+    const legacy = JSON.parse(JSON.stringify(renderManifestFixture)) as Record<
+      string,
+      unknown
+    >;
+    legacy.manifestVersion = "2.0.0";
+    expectInvalid(legacy, ["manifestVersion"]);
+  });
+
   it("rejects unknown keys at the root and in deep objects", () => {
     const rootUnknown = clone(renderManifestFixture);
     Object.assign(rootUnknown, { unexpected: true });

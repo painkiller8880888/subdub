@@ -1,11 +1,17 @@
 import type { ReactNode } from "react";
 
-import type { RenderLine } from "../schema/index";
+import type { RenderLine, RenderManifest } from "../schema/index";
 import { DESIGN_COLORS } from "./layout";
+import {
+  resolveSubtitleContent,
+  subtitleContainerStyle
+} from "./layout-helpers";
 
 export function SubtitleLayer({
+  manifest,
   lines
 }: {
+  manifest: RenderManifest;
   lines: readonly RenderLine[];
 }): ReactNode {
   const line = lines[0];
@@ -13,36 +19,54 @@ export function SubtitleLayer({
     return null;
   }
 
+  const { displayName, side, speakerColor, subtitleText } =
+    resolveSubtitleContent(manifest, line);
+
   return (
-    <div
-      style={{
-        position: "absolute",
-        zIndex: 5,
-        left: "9%",
-        right: "9%",
-        bottom: 48,
-        display: "flex",
-        justifyContent: "center",
-        pointerEvents: "none"
-      }}
-    >
+    <div style={subtitleContainerStyle(side)}>
       <div
         style={{
-          maxWidth: "82%",
+          width: "fit-content",
+          maxWidth: "100%",
+          minWidth: 0,
+          boxSizing: "border-box",
           padding: "16px 30px",
           borderRadius: 16,
           backgroundColor: DESIGN_COLORS.subtitleBackground,
           color: DESIGN_COLORS.card,
           fontFamily: "Noto Sans JP, Arial, sans-serif",
-          fontSize: 38,
           fontWeight: 700,
           lineHeight: 1.4,
-          textAlign: "center",
-          whiteSpace: "pre-wrap",
-          overflowWrap: "anywhere"
+          textAlign: side === "left" ? "left" : "right",
+          overflowWrap: "anywhere",
+          wordBreak: "break-word",
+          display: "flex",
+          flexDirection: "column",
+          alignItems: side === "left" ? "flex-start" : "flex-end"
         }}
       >
-        {line.subtitleText}
+        <div
+          style={{
+            color: speakerColor,
+            fontSize: 26,
+            fontWeight: 800,
+            lineHeight: 1.2,
+            marginBottom: 4,
+            whiteSpace: "nowrap"
+          }}
+        >
+          {displayName}
+        </div>
+        <div
+          style={{
+            fontSize: 38,
+            whiteSpace: "pre-wrap",
+            overflowWrap: "anywhere",
+            wordBreak: "break-word"
+          }}
+        >
+          {subtitleText}
+        </div>
       </div>
     </div>
   );

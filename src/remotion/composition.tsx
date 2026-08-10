@@ -65,7 +65,7 @@ export function RenderManifestComposition(manifest: RenderManifest): ReactNode {
         frame={frame}
         prioritizeVisual={prioritizeVisual}
       />
-      <SubtitleLayer lines={activeLines} />
+      <SubtitleLayer manifest={manifest} lines={activeLines} />
     </AbsoluteFill>
   );
 }

@@ -85,3 +85,80 @@ export function selectCharacterVariantForFrame(
   const variantId = activeLine?.characterVariantId ?? character.idleVariantId;
   return findCharacterVariant(manifest, variantId);
 }
+
+export type CharacterImageSlot = "single" | "closed" | "open";
+
+function validateFrameInputs(character: RenderCharacter, frame: number): void {
+  if (!Number.isInteger(frame)) {
+    throw new RangeError("Remotion character frame must be an integer");
+  }
+  if (
+    !Number.isInteger(character.lipSyncPeriodFrames) ||
+    character.lipSyncPeriodFrames <= 0
+  ) {
+    throw new RangeError(
+      "character lipSyncPeriodFrames must be a positive integer"
+    );
+  }
+}
+
+/**
+ * Select the manifest file slot for one character at one frame. Speech uses a
+ * half-open interval and starts closed, then alternates at each configured
+ * period. The function has no audio, filesystem, time, or random input.
+ */
+export function selectCharacterImageSlotForFrame(
+  manifest: RenderManifest,
+  character: RenderCharacter,
+  frame: number
+): CharacterImageSlot | undefined {
+  validateFrameInputs(character, frame);
+
+  const variant = selectCharacterVariantForFrame(manifest, character, frame);
+  if (variant === undefined) {
+    return undefined;
+  }
+  if (variant.renderType === "single-image") {
+    return "single";
+  }
+
+  const activeLine = selectActiveLineForSpeaker(
+    manifest,
+    character.characterId,
+    frame
+  );
+  if (activeLine === undefined) {
+    return "closed";
+  }
+
+  const speechFrom = activeLine.from + activeLine.speechFrom;
+  const speechEnd = speechFrom + activeLine.speechDurationInFrames;
+  if (frame < speechFrom || frame >= speechEnd) {
+    return "closed";
+  }
+
+  const periodIndex = Math.floor(
+    (frame - speechFrom) / character.lipSyncPeriodFrames
+  );
+  return periodIndex % 2 === 0 ? "closed" : "open";
+}
+
+export function selectCharacterImagePathForFrame(
+  manifest: RenderManifest,
+  character: RenderCharacter,
+  frame: number
+): string | undefined {
+  const variant = selectCharacterVariantForFrame(manifest, character, frame);
+  if (variant === undefined) {
+    return undefined;
+  }
+
+  const slot = selectCharacterImageSlotForFrame(manifest, character, frame);
+  if (slot === undefined) {
+    return undefined;
+  }
+  if (variant.renderType === "single-image") {
+    return slot === "single" ? variant.files.single.path : undefined;
+  }
+  return slot === "single" ? undefined : variant.files[slot].path;
+}

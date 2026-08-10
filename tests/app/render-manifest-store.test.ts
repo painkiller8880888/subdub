@@ -88,6 +88,33 @@ describe("RenderManifestStore", () => {
       store.compileAndStore(projectId, { ...input, project: changedProject })
     ).resolves.toMatchObject({ status: "compiled", reused: false });
 
+    const changedCharacter = structuredClone(input.project) as VideoProject;
+    changedCharacter.characters[0].name += "（変更）";
+    changedCharacter.characters[0].lipSyncPeriodFrames = 5;
+    await expect(
+      store.compileAndStore(projectId, {
+        ...input,
+        project: changedCharacter
+      })
+    ).resolves.toMatchObject({ status: "compiled", reused: false });
+
+    const invalidThemeProject = structuredClone(input.project) as VideoProject;
+    (
+      invalidThemeProject.characters[0] as unknown as {
+        themeColorToken: string;
+      }
+    ).themeColorToken = "character.unknown";
+    await expect(
+      store.compileAndStore(projectId, {
+        ...input,
+        project: invalidThemeProject
+      })
+    ).resolves.toMatchObject({
+      status: "failed",
+      reused: false,
+      manifest: null
+    });
+
     const changedAudio = structuredClone(
       input.audioIndex
     ) as VoicevoxAudioIndex;
@@ -156,7 +183,7 @@ describe("RenderManifestStore", () => {
     ).resolves.toMatchObject({ status: "compiled", reused: false });
   });
 
-  it("treats malformed and 1.0.0 caches as misses", async () => {
+  it("treats malformed, 2.0.0, and 1.0.0 caches as misses", async () => {
     const root = await createRoot();
     const store = new RenderManifestStore({ workspaceRoot: root });
     const cacheDirectory = path.dirname(targetPath(root));
@@ -167,6 +194,19 @@ describe("RenderManifestStore", () => {
       JSON.stringify({ manifestVersion: "1.0.0" }),
       "utf8"
     );
+    await expect(
+      store.compileAndStore(projectId, cacheInput())
+    ).resolves.toMatchObject({
+      status: "compiled",
+      reused: false
+    });
+
+    const legacy = structuredClone(renderManifestFixture) as Record<
+      string,
+      unknown
+    >;
+    legacy.manifestVersion = "2.0.0";
+    await fs.writeFile(targetPath(root), JSON.stringify(legacy), "utf8");
     await expect(
       store.compileAndStore(projectId, cacheInput())
     ).resolves.toMatchObject({

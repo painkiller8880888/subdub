@@ -9,6 +9,7 @@ import {
 } from "../../schema/index.js";
 import {
   compileRenderManifest,
+  RENDER_MANIFEST_VERSION,
   serializeRenderManifest,
   type RenderManifestCompilerInput,
   type RenderManifestDiagnostic
@@ -117,7 +118,7 @@ function cacheMatches(
   expected: RenderManifest
 ): boolean {
   return (
-    current.manifestVersion === "2.0.0" &&
+    current.manifestVersion === RENDER_MANIFEST_VERSION &&
     current.sourceProjectHash === expected.sourceProjectHash &&
     current.compilerInputHash === expected.compilerInputHash &&
     current.characterCatalogVersion === expected.characterCatalogVersion &&

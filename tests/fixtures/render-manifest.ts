@@ -14,7 +14,7 @@ const COMPILER_INPUT_HASH =
   "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff";
 
 export const renderManifestFixture = {
-  manifestVersion: "2.0.0",
+  manifestVersion: "2.1.0",
   sourceProjectHash: SOURCE_HASH,
   compilerInputHash: COMPILER_INPUT_HASH,
   characterCatalogVersion: "1.0.0",
@@ -22,10 +22,16 @@ export const renderManifestFixture = {
   characters: [
     {
       characterId: "character-mentor",
+      displayName: "四国めたん",
+      themeColorToken: "character.metan",
+      lipSyncPeriodFrames: 3,
       idleVariantId: "character-mentor-stand-v1"
     },
     {
       characterId: "character-learner",
+      displayName: "ずんだもん",
+      themeColorToken: "character.zundamon",
+      lipSyncPeriodFrames: 3,
       idleVariantId: "character-learner-stand-v1"
     }
   ],
@@ -210,7 +216,8 @@ export const renderManifestFixture = {
       speechFrom: 2,
       speechDurationInFrames: 42,
       audioPath: "audio/speech-main-learner.wav",
-      subtitleText: "内容を確認してから登録します。",
+      subtitleText:
+        "申請内容を確認してから、必要な添付資料と入力値に誤りがないことを確認して登録します。\n不明点がある場合は、登録前に担当者へ確認してください。",
       speakerId: "character-learner",
       expression: "caution",
       characterVariantId: "character-learner-speak-pointing-v1"

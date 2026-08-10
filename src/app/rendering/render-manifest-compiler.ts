@@ -38,7 +38,7 @@ import {
   type VoicevoxAudioIndexEntry
 } from "../voicevox/audio-index.js";
 
-export const RENDER_MANIFEST_VERSION = "2.0.0" as const;
+export const RENDER_MANIFEST_VERSION = "2.1.0" as const;
 
 export const renderManifestAssetMetadataSchema = z
   .object({
@@ -788,6 +788,9 @@ function orderedManifest(manifest: RenderManifest): RenderManifest {
     characterMappingVersion: manifest.characterMappingVersion,
     characters: manifest.characters.map((character): RenderCharacter => ({
       characterId: character.characterId,
+      displayName: character.displayName,
+      themeColorToken: character.themeColorToken,
+      lipSyncPeriodFrames: character.lipSyncPeriodFrames,
       idleVariantId: character.idleVariantId
     })),
     characterVariants: manifest.characterVariants.map(
@@ -1812,7 +1815,13 @@ export function compileRenderManifest(
     if (idleVariantId === undefined) {
       throw new Error(`idle variant is missing: ${character.id}`);
     }
-    return { characterId: character.id, idleVariantId };
+    return {
+      characterId: character.id,
+      displayName: character.name,
+      themeColorToken: character.themeColorToken,
+      lipSyncPeriodFrames: character.lipSyncPeriodFrames,
+      idleVariantId
+    };
   });
   const characterVariants = [...resolvedCharacterVariants.values()].sort(
     (left, right) => compareStrings(left.variantId, right.variantId)

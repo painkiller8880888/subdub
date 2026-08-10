@@ -2,15 +2,9 @@ import type { CSSProperties, ReactNode } from "react";
 
 import type { CommonDisplay, StaticAnnotation } from "../schema/index";
 
-export const DESIGN_COLORS = {
-  background: "#17243a",
-  accent: "#64b5f6",
-  caution: "#ffb74d",
-  warning: "#ef5350",
-  card: "#ffffff",
-  text: "#17212f",
-  subtitleBackground: "rgba(10, 18, 31, 0.84)"
-} as const;
+import { DESIGN_COLORS } from "./layout-helpers";
+
+export { DESIGN_COLORS } from "./layout-helpers";
 
 const visualWidth = "82%";
 const visualHeight = "62%";
