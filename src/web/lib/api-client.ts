@@ -28,6 +28,12 @@ import {
   terminologyTermParamsSchema,
   terminologyTermResponseSchema,
   terminologyUpdateRequestSchema,
+  visualAssignmentDeleteRequestSchema,
+  visualAssignmentRequestSchema,
+  visualAssignmentResponseSchema,
+  visualAssignmentUpdateRequestSchema,
+  visualApprovalRequestSchema,
+  assetDetailResponseSchema,
   visualSuggestionRequestSchema,
   visualSuggestionResponseSchema,
   type ApiErrorDetail,
@@ -50,10 +56,15 @@ import {
   type TerminologyPreviewResult,
   type TerminologyUpdateRequest,
   type VisualSuggestionRequest,
-  type VisualSuggestionResponse
+  type VisualSuggestionResponse,
+  type VisualAssignmentRequest,
+  type VisualAssignmentUpdateRequest,
+  type VisualAssignmentDeleteRequest,
+  type VisualApprovalRequest
 } from "../../schema/api.js";
 import type { TerminologyTerm } from "../../schema/terminology.js";
 import type { AssetListResult } from "../../schema/asset.js";
+import type { AssetDetail } from "../../schema/asset.js";
 import type { VideoProject } from "../../schema/video-project.js";
 
 export type ApiClientErrorData = {
@@ -377,6 +388,84 @@ export async function suggestProjectVisuals(
       body: JSON.stringify(validatedInput)
     }
   );
+}
+
+export async function assignProjectVisual(
+  projectId: string,
+  input: VisualAssignmentRequest
+): Promise<VideoProject> {
+  const validatedInput = visualAssignmentRequestSchema.parse(input);
+  const response = await fetchApi(
+    `/api/projects/${encodeURIComponent(projectId)}/visual-assignments`,
+    visualAssignmentResponseSchema,
+    {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(validatedInput)
+    }
+  );
+  return response.data;
+}
+
+export async function updateProjectVisualAssignment(
+  projectId: string,
+  assignmentId: string,
+  input: VisualAssignmentUpdateRequest
+): Promise<VideoProject> {
+  const validatedInput = visualAssignmentUpdateRequestSchema.parse(input);
+  const response = await fetchApi(
+    `/api/projects/${encodeURIComponent(projectId)}/visual-assignments/${encodeURIComponent(assignmentId)}`,
+    visualAssignmentResponseSchema,
+    {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(validatedInput)
+    }
+  );
+  return response.data;
+}
+
+export async function deleteProjectVisualAssignment(
+  projectId: string,
+  assignmentId: string,
+  input: VisualAssignmentDeleteRequest
+): Promise<VideoProject> {
+  const validatedInput = visualAssignmentDeleteRequestSchema.parse(input);
+  const response = await fetchApi(
+    `/api/projects/${encodeURIComponent(projectId)}/visual-assignments/${encodeURIComponent(assignmentId)}`,
+    visualAssignmentResponseSchema,
+    {
+      method: "DELETE",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(validatedInput)
+    }
+  );
+  return response.data;
+}
+
+export async function approveProjectVisuals(
+  projectId: string,
+  input: VisualApprovalRequest
+): Promise<VideoProject> {
+  const validatedInput = visualApprovalRequestSchema.parse(input);
+  const response = await fetchApi(
+    `/api/projects/${encodeURIComponent(projectId)}/visuals/approve`,
+    visualAssignmentResponseSchema,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(validatedInput)
+    }
+  );
+  return response.data;
+}
+
+export async function fetchAsset(assetId: string): Promise<AssetDetail> {
+  const response = await fetchApi(
+    `/api/assets/${encodeURIComponent(assetId)}`,
+    assetDetailResponseSchema
+  );
+  return response.data;
 }
 
 export async function searchAssets(

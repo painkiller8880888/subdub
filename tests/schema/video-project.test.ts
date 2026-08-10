@@ -169,6 +169,49 @@ describe("videoProjectSchema", () => {
     ]);
   });
 
+  it("limits static annotations to normalized display rectangles", () => {
+    const outsideX = clone(videoProjectFixture);
+    outsideX.visuals.assignments[0].display.annotations[0].x = 0.8;
+    expectInvalid(outsideX, [
+      "visuals",
+      "assignments",
+      0,
+      "display",
+      "annotations",
+      0,
+      "width"
+    ]);
+
+    const outsideY = clone(videoProjectFixture);
+    outsideY.visuals.assignments[0].display.annotations[0].y = 0.95;
+    expectInvalid(outsideY, [
+      "visuals",
+      "assignments",
+      0,
+      "display",
+      "annotations",
+      0,
+      "height"
+    ]);
+
+    const invalidCoordinate = clone(videoProjectFixture);
+    invalidCoordinate.visuals.assignments[0].display.annotations[0].x = -0.1;
+    expectInvalid(invalidCoordinate, [
+      "visuals",
+      "assignments",
+      0,
+      "display",
+      "annotations",
+      0,
+      "x"
+    ]);
+
+    const nullableSize = clone(videoProjectFixture);
+    nullableSize.visuals.assignments[0].display.annotations[0].width = null;
+    nullableSize.visuals.assignments[0].display.annotations[0].height = null;
+    expect(videoProjectSchema.safeParse(nullableSize).success).toBe(true);
+  });
+
   it("rejects non-literal placeholder durations and empty thumbnail fields", () => {
     const invalidOpening = clone(videoProjectFixture);
     Object.assign(invalidOpening.inserts.opening, { durationMs: 1000 });

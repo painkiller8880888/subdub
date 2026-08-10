@@ -103,6 +103,15 @@ export class AssetService {
     return detail;
   }
 
+  getThumbnailPath(assetId: string, thumbnailIndex: number): string {
+    const detail = this.findDetail(assetId);
+    const thumbnailPath = detail.thumbnailPaths[thumbnailIndex];
+    if (thumbnailPath === undefined) {
+      throw new AssetNotFoundError();
+    }
+    return this.fileStore.resolvePath(thumbnailPath);
+  }
+
   list(input: unknown): AssetListResult {
     const query = assetListQuerySchema.parse(input);
     return this.repository.list(query);

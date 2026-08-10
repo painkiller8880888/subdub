@@ -745,6 +745,27 @@ describe("asset upload API", () => {
       expect(thumbnailPath).not.toContain("\\");
       expect(thumbnailPath).not.toMatch(/^[a-zA-Z]:/);
     }
+    await fs.mkdir(
+      path.join(workspaceRoot, "library", "thumbnails", "asset", "v1"),
+      { recursive: true }
+    );
+    await fs.writeFile(
+      path.join(
+        workspaceRoot,
+        "library",
+        "thumbnails",
+        "asset",
+        "v1",
+        "image.png"
+      ),
+      pngBytes
+    );
+    const thumbnailResponse = await server.app.inject({
+      method: "GET",
+      url: `/api/assets/${receipt.assetId}/thumbnails/0`
+    });
+    expect(thumbnailResponse.statusCode).toBe(200);
+    expect(thumbnailResponse.headers["content-type"]).toMatch(/^image\/png/);
   });
 
   it("returns 404 ASSET_NOT_FOUND for an unknown asset id", async () => {

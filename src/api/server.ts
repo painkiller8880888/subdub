@@ -44,7 +44,7 @@ export type ServerOptions = AppOptions & {
   assetRepository?: AssetRepository;
   assetProcessingService?: AssetProcessingService;
   assetProcessingWorker?: AssetProcessingWorker;
-  visualAssignmentService?: Pick<VisualAssignmentService, "assign">;
+  visualAssignmentService?: import("./routes/visual-assignments.js").VisualAssignmentServicePort;
   assetUploadLimits?: AssetUploadLimits;
   workspaceRoot?: string;
 };
