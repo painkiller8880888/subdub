@@ -63,18 +63,42 @@ function AnnotationLayer({
       const width = annotation.width ?? 0.2;
       const height = annotation.height ?? 0;
       const angle = (Math.atan2(height, width) * 180) / Math.PI;
+      const color = annotationColor(annotation);
       return (
         <div
           key={annotation.id}
           style={{
             ...baseStyle,
             width: `${Math.hypot(width, height) * 100}%`,
-            height: 5,
-            backgroundColor: annotationColor(annotation),
+            height: 22,
             transformOrigin: "left center",
             transform: `translateY(-50%) rotate(${angle}deg)`
           }}
-        />
+        >
+          <div
+            style={{
+              position: "absolute",
+              left: 0,
+              right: 14,
+              top: "50%",
+              height: 5,
+              transform: "translateY(-50%)",
+              backgroundColor: color
+            }}
+          />
+          <div
+            style={{
+              position: "absolute",
+              right: 0,
+              top: "50%",
+              width: 24,
+              height: 24,
+              transform: "translateY(-50%)",
+              backgroundColor: color,
+              clipPath: "polygon(0 0, 100% 50%, 0 100%)"
+            }}
+          />
+        </div>
       );
     }
 

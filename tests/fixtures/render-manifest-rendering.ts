@@ -24,6 +24,27 @@ export const renderManifestRenderingFixture = {
         display: { ...visual.display, page: 2 }
       };
     }
+    if (visual.kind === "photo") {
+      return {
+        ...visual,
+        src: renderingPath(visual.src),
+        display: {
+          ...visual.display,
+          annotations: [
+            {
+              id: "photo-arrow",
+              kind: "arrow",
+              text: null,
+              x: 0.2,
+              y: 0.3,
+              width: 0.25,
+              height: 0,
+              colorToken: "warning"
+            }
+          ]
+        }
+      };
+    }
     return { ...visual, src: renderingPath(visual.src) };
   }),
   backgrounds: renderManifestFixture.backgrounds.map((background) =>

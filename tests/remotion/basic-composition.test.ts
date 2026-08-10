@@ -138,6 +138,48 @@ async function imageStats(buffer: Buffer): Promise<{
   };
 }
 
+async function warningPixelsInRegion(
+  buffer: Buffer,
+  region: {
+    left: number;
+    right: number;
+    top: number;
+    bottom: number;
+  }
+): Promise<number> {
+  const { data, info } = await sharp(buffer)
+    .ensureAlpha()
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+  const left = Math.floor(info.width * region.left);
+  const right = Math.ceil(info.width * region.right);
+  const top = Math.floor(info.height * region.top);
+  const bottom = Math.ceil(info.height * region.bottom);
+  let count = 0;
+
+  for (let y = top; y < bottom; y += 1) {
+    for (let x = left; x < right; x += 1) {
+      const offset = (y * info.width + x) * 4;
+      const red = data[offset] ?? 0;
+      const green = data[offset + 1] ?? 0;
+      const blue = data[offset + 2] ?? 0;
+      const alpha = data[offset + 3] ?? 0;
+      if (
+        red >= 225 &&
+        green >= 60 &&
+        green <= 110 &&
+        blue >= 60 &&
+        blue <= 110 &&
+        alpha > 200
+      ) {
+        count += 1;
+      }
+    }
+  }
+
+  return count;
+}
+
 describe("RenderManifest interval selection", () => {
   const manifest = renderManifestFixture as RenderManifest;
 
@@ -246,6 +288,27 @@ describe("basic Remotion composition", () => {
         (visual) => visual.kind === "document_scan"
       )?.display.page
     ).toBe(2);
+    const photo = rendered.find((result) => result.frame === 220);
+    if (photo === undefined) {
+      throw new Error("photo still was not rendered");
+    }
+    expect(
+      await warningPixelsInRegion(photo.buffer, {
+        left: 0.2,
+        right: 0.75,
+        top: 0.25,
+        bottom: 0.5
+      })
+    ).toBeGreaterThan(20);
+    // The triangle's top fringe is outside the 5px line and proves the arrowhead is rendered.
+    expect(
+      await warningPixelsInRegion(photo.buffer, {
+        left: 0.44,
+        right: 0.47,
+        top: 0.35,
+        bottom: 0.372
+      })
+    ).toBeGreaterThan(0);
     const repeat = await renderFixtureFrame(80, "video-repeat");
     const first = rendered[0];
     if (first === undefined) {
