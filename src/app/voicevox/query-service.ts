@@ -86,6 +86,10 @@ export type PreparedVoicevoxQuery = {
 
 export type ResolveVoicevoxQueryInput = PrepareVoicevoxQueryInput;
 
+export type VoicevoxQueryResolutionContext = {
+  readonly voicevoxEngineVersion: string;
+};
+
 export type ResolvedVoicevoxQueryConditions = {
   readonly projectId: string;
   readonly line: ScriptLine;
@@ -181,8 +185,17 @@ export class VoicevoxQueryService {
    * not call /audio_query. It is shared by generation and status inspection so
    * the two paths cannot drift into different cache-key calculations.
    */
+  async resolveContext(): Promise<VoicevoxQueryResolutionContext> {
+    return {
+      voicevoxEngineVersion: voicevoxEngineVersionSchema.parse(
+        await this.client.getVersion()
+      )
+    };
+  }
+
   async resolveCurrent(
-    input: ResolveVoicevoxQueryInput
+    input: ResolveVoicevoxQueryInput,
+    context?: VoicevoxQueryResolutionContext
   ): Promise<ResolvedVoicevoxQueryConditions> {
     const projectId = idSchema.parse(input.projectId);
     const line = scriptLineSchema.parse(input.line);
@@ -202,9 +215,9 @@ export class VoicevoxQueryService {
       projectId,
       lineId: line.id
     });
-    const voicevoxEngineVersion = voicevoxEngineVersionSchema.parse(
-      await this.client.getVersion()
-    );
+    const voicevoxEngineVersion =
+      context?.voicevoxEngineVersion ??
+      (await this.resolveContext()).voicevoxEngineVersion;
     const cacheKeyInput: VoicevoxQueryCacheKeyInput = {
       resolvedSpokenText: resolvedText.resolvedSpokenText,
       speakerUuid: resolvedSpeaker.speakerUuid,

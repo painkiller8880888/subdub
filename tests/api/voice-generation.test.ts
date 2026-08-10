@@ -1,6 +1,13 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { promises as fs } from "node:fs";
+import { tmpdir } from "node:os";
+import * as path from "node:path";
+
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { buildApp } from "../../src/api/app.js";
+import { initializeServer } from "../../src/api/server.js";
+import { ProjectRepository } from "../../src/app/projects/project-repository.js";
+import { VoicevoxClient } from "../../src/voicevox/client.js";
 import {
   apiErrorResponseSchema,
   voiceGenerationAcceptedResponseSchema,
@@ -10,6 +17,38 @@ import {
   VOICEVOX_GENERATION_ERROR_CODE,
   VoicevoxGenerationError
 } from "../../src/app/voicevox/generation-service.js";
+import {
+  createVoicevoxAudioQueryFixture,
+  createVoicevoxSpeakersFixture,
+  createVoicevoxWavFixture
+} from "../fixtures/voicevox.js";
+import { videoProjectFixture } from "../fixtures/video-project.js";
+
+async function nextTurn(): Promise<void> {
+  await new Promise<void>((resolve) => setImmediate(resolve));
+}
+
+async function waitForProductionVoiceJob(
+  app: Awaited<ReturnType<typeof initializeServer>>["app"],
+  projectId: string,
+  runId: string
+): Promise<"succeeded" | "failed"> {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    const response = await app.inject({
+      method: "GET",
+      url: `/api/projects/${projectId}/voice/status`
+    });
+    const status = voiceGenerationStatusResponseSchema.parse(
+      response.json()
+    ).data;
+    const job = status.jobs.find((candidate) => candidate.runId === runId);
+    if (job?.status === "succeeded" || job?.status === "failed") {
+      return job.status;
+    }
+    await nextTurn();
+  }
+  throw new Error(`voice job ${runId} did not finish`);
+}
 
 describe("project voice generation API", () => {
   const apps: Array<Awaited<ReturnType<typeof buildApp>>> = [];
@@ -160,5 +199,116 @@ describe("project voice generation API", () => {
       "internal engine path"
     );
     expect(JSON.stringify(unavailable.json())).not.toContain("stack");
+  });
+
+  it("uses the adjustment fingerprint in the default server wiring", async () => {
+    const workspaceRoot = await fs.mkdtemp(
+      path.join(tmpdir(), "subdub-voice-generation-server-")
+    );
+    const projectRepository = new ProjectRepository({ workspaceRoot });
+    const initialized = await initializeServer({
+      workspaceRoot,
+      projectRepository
+    });
+    const project = structuredClone(videoProjectFixture);
+    const changedLine = project.script.sections[0]?.lines[0];
+    if (changedLine === undefined) {
+      throw new Error("fixture line is required");
+    }
+
+    const getSpeakers = vi
+      .spyOn(VoicevoxClient.prototype, "getSpeakers")
+      .mockResolvedValue(
+        createVoicevoxSpeakersFixture({
+          metanStyleId: 10_001,
+          zundamonStyleId: 10_002
+        })
+      );
+    const getVersion = vi
+      .spyOn(VoicevoxClient.prototype, "getVersion")
+      .mockResolvedValue("engine-fixture-1");
+    const getAudioQuery = vi
+      .spyOn(VoicevoxClient.prototype, "getAudioQuery")
+      .mockResolvedValue(createVoicevoxAudioQueryFixture());
+    const synthesize = vi
+      .spyOn(VoicevoxClient.prototype, "synthesize")
+      .mockResolvedValue(createVoicevoxWavFixture());
+
+    try {
+      await projectRepository.create(project);
+      const acceptedResponse = await initialized.app.inject({
+        method: "POST",
+        url: `/api/projects/${project.metadata.id}/voice/generate-all`,
+        payload: {}
+      });
+      expect(acceptedResponse.statusCode).toBe(202);
+      const accepted = voiceGenerationAcceptedResponseSchema.parse(
+        acceptedResponse.json()
+      ).data;
+      await expect(
+        waitForProductionVoiceJob(
+          initialized.app,
+          project.metadata.id,
+          accepted.runId
+        )
+      ).resolves.toBe("succeeded");
+
+      getAudioQuery.mockClear();
+      synthesize.mockClear();
+      const adjustmentDirectory = path.join(
+        workspaceRoot,
+        "projects",
+        project.metadata.id,
+        "voice-adjustments"
+      );
+      await fs.mkdir(adjustmentDirectory, { recursive: true });
+      await fs.writeFile(
+        path.join(adjustmentDirectory, `${changedLine.id}.json`),
+        '{"adjustmentVersion":"1.0.0","lineId":"intro-mentor-1"}\n',
+        "utf8"
+      );
+
+      const statusResponse = await initialized.app.inject({
+        method: "GET",
+        url: `/api/projects/${project.metadata.id}/voice/status`
+      });
+      const status = voiceGenerationStatusResponseSchema.parse(
+        statusResponse.json()
+      ).data;
+      expect(
+        status.lines.find((line) => line.lineId === changedLine.id)
+      ).toEqual({ lineId: changedLine.id, status: "stale" });
+      expect(
+        status.lines
+          .filter((line) => line.lineId !== changedLine.id)
+          .every((line) => line.status === "current")
+      ).toBe(true);
+
+      const incrementalResponse = await initialized.app.inject({
+        method: "POST",
+        url: `/api/projects/${project.metadata.id}/voice/generate-all`,
+        payload: {}
+      });
+      const incremental = voiceGenerationAcceptedResponseSchema.parse(
+        incrementalResponse.json()
+      ).data;
+      expect(incremental.lineIds).toEqual([changedLine.id]);
+      await expect(
+        waitForProductionVoiceJob(
+          initialized.app,
+          project.metadata.id,
+          incremental.runId
+        )
+      ).resolves.toBe("failed");
+      expect(getAudioQuery).not.toHaveBeenCalled();
+      expect(synthesize).not.toHaveBeenCalled();
+    } finally {
+      getSpeakers.mockRestore();
+      getVersion.mockRestore();
+      getAudioQuery.mockRestore();
+      synthesize.mockRestore();
+      await initialized.app.close();
+      await fs.rm(workspaceRoot, { recursive: true, force: true });
+    }
   });
 });

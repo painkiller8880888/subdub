@@ -32,6 +32,7 @@ import {
 } from "../db/initialize.js";
 import type { MigrationFolder } from "../db/paths.js";
 import { VoicevoxGenerationService } from "../app/voicevox/generation-service.js";
+import { createVoicevoxAdjustmentFingerprintProvider } from "../app/voicevox/adjustment-fingerprint.js";
 
 export const SERVER_HOST = API_HOST;
 export const SERVER_PORT = API_PORT;
@@ -154,7 +155,9 @@ export async function initializeServer(
       new VoicevoxGenerationService({
         repository: resolvedProjectRepository,
         terminologyService: resolvedTerminologyService,
-        workspaceRoot
+        workspaceRoot,
+        adjustmentFingerprintProvider:
+          createVoicevoxAdjustmentFingerprintProvider({ workspaceRoot })
       });
     const resolvedProcessingService =
       assetProcessingService ??

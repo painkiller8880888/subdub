@@ -38,7 +38,8 @@ import {
   type VoicevoxAdjustmentFingerprintProvider,
   VoicevoxQueryService,
   VoicevoxQueryServiceError,
-  type ResolvedVoicevoxQueryConditions
+  type ResolvedVoicevoxQueryConditions,
+  type VoicevoxQueryResolutionContext
 } from "./query-service.js";
 import {
   VoicevoxQueryCacheError,
@@ -82,7 +83,7 @@ type VoicevoxProjectRepositoryPort = Pick<ProjectRepository, "read">;
 
 type VoicevoxQueryConditionServicePort = Pick<
   VoicevoxQueryService,
-  "resolveCurrent" | "prepare"
+  "resolveContext" | "resolveCurrent" | "prepare"
 >;
 
 type VoicevoxAudioGenerationServicePort = Pick<
@@ -476,6 +477,8 @@ export class VoicevoxGenerationService {
   ): Promise<LineInspection[]> {
     const index = await this.readIndex(project.metadata.id);
     const speakers = await this.resolveProjectSpeakers(project);
+    const queryContext: VoicevoxQueryResolutionContext =
+      await this.queryService.resolveContext();
     const requested = lineIds === undefined ? undefined : new Set(lineIds);
     const inspections: LineInspection[] = [];
 
@@ -497,12 +500,15 @@ export class VoicevoxGenerationService {
       if (resolvedSpeaker === undefined) {
         throw unavailableError();
       }
-      const conditions = await this.queryService.resolveCurrent({
-        projectId: project.metadata.id,
-        line: item.line,
-        character,
-        resolvedSpeaker
-      });
+      const conditions = await this.queryService.resolveCurrent(
+        {
+          projectId: project.metadata.id,
+          line: item.line,
+          character,
+          resolvedSpeaker
+        },
+        queryContext
+      );
       const entry = index[item.line.id];
       const current =
         entry !== undefined &&
