@@ -4,6 +4,7 @@ export const VOICEVOX_ERROR_CODE = {
   timeout: "VOICEVOX_TIMEOUT",
   responseInvalidJson: "VOICEVOX_RESPONSE_INVALID_JSON",
   responseInvalid: "VOICEVOX_RESPONSE_INVALID",
+  synthesisResponseInvalid: "VOICEVOX_SYNTHESIS_RESPONSE_INVALID",
   speakerNotFound: "VOICEVOX_SPEAKER_NOT_FOUND",
   speakerAmbiguous: "VOICEVOX_SPEAKER_AMBIGUOUS",
   styleNotFound: "VOICEVOX_STYLE_NOT_FOUND",
@@ -18,7 +19,8 @@ export type VoicevoxAdapterErrorCode =
   | typeof VOICEVOX_ERROR_CODE.connectionFailed
   | typeof VOICEVOX_ERROR_CODE.timeout
   | typeof VOICEVOX_ERROR_CODE.responseInvalidJson
-  | typeof VOICEVOX_ERROR_CODE.responseInvalid;
+  | typeof VOICEVOX_ERROR_CODE.responseInvalid
+  | typeof VOICEVOX_ERROR_CODE.synthesisResponseInvalid;
 
 export type VoicevoxResolutionErrorCode =
   | typeof VOICEVOX_ERROR_CODE.speakerNotFound

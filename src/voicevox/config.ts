@@ -36,3 +36,13 @@ export function getVoicevoxAudioQueryUrl(
   });
   return `${normalizeVoicevoxEngineUrl(engineUrl)}/audio_query?${query.toString()}`;
 }
+
+export function getVoicevoxSynthesisUrl(
+  engineUrl: string,
+  resolvedStyleId: number
+): string {
+  const query = new URLSearchParams({
+    speaker: String(resolvedStyleId)
+  });
+  return `${normalizeVoicevoxEngineUrl(engineUrl)}/synthesis?${query.toString()}`;
+}
