@@ -93,6 +93,85 @@ export const voicevoxStatusResponseSchema = strictObject({
   data: voicevoxStatusDataSchema
 });
 
+export const voiceLineGenerationStatusSchema = z.enum([
+  "current",
+  "stale",
+  "generating",
+  "failed"
+]);
+
+export const voiceGenerationJobStatusSchema = z.enum([
+  "queued",
+  "running",
+  "succeeded",
+  "failed"
+]);
+
+export const voiceGenerateRequestSchema = strictObject({
+  lineIds: z
+    .array(idSchema)
+    .min(1)
+    .superRefine((lineIds, ctx) => {
+      if (new Set(lineIds).size !== lineIds.length) {
+        ctx.addIssue({
+          code: "custom",
+          message: "lineIds must not contain duplicates"
+        });
+      }
+    })
+});
+
+export const voiceGenerateAllRequestSchema = strictObject({});
+
+export const voiceGenerationAcceptedDataSchema = strictObject({
+  runId: idSchema,
+  status: z.literal("queued"),
+  lineIds: z.array(idSchema)
+});
+
+export const voiceGenerationAcceptedResponseSchema = strictObject({
+  data: voiceGenerationAcceptedDataSchema
+});
+
+export const voiceGenerationLineStatusSchema = strictObject({
+  lineId: idSchema,
+  status: voiceLineGenerationStatusSchema,
+  errorCode: z.string().min(1).optional()
+}).superRefine((line, ctx) => {
+  if (line.status === "failed" && line.errorCode === undefined) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["errorCode"],
+      message: "failed voice lines must include an error code"
+    });
+  }
+  if (line.status !== "failed" && line.errorCode !== undefined) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["errorCode"],
+      message: "only failed voice lines may include an error code"
+    });
+  }
+});
+
+export const voiceGenerationJobSummarySchema = strictObject({
+  runId: idSchema,
+  status: voiceGenerationJobStatusSchema,
+  lineIds: z.array(idSchema),
+  failedLineIds: z.array(idSchema)
+});
+
+export const voiceGenerationStatusDataSchema = strictObject({
+  available: z.boolean(),
+  unavailableCode: z.string().min(1).optional(),
+  lines: z.array(voiceGenerationLineStatusSchema),
+  jobs: z.array(voiceGenerationJobSummarySchema)
+});
+
+export const voiceGenerationStatusResponseSchema = strictObject({
+  data: voiceGenerationStatusDataSchema
+});
+
 export const projectCreateRequestSchema = z
   .object({
     title: z.string().trim().min(1),
@@ -452,6 +531,21 @@ export type HealthResponse = z.infer<typeof healthResponseSchema>;
 export type VoicevoxStatusData = z.infer<typeof voicevoxStatusDataSchema>;
 export type VoicevoxStatusResponse = z.infer<
   typeof voicevoxStatusResponseSchema
+>;
+export type VoiceLineGenerationStatus = z.infer<
+  typeof voiceGenerationLineStatusSchema
+>;
+export type VoiceGenerationAccepted = z.infer<
+  typeof voiceGenerationAcceptedDataSchema
+>;
+export type VoiceGenerateRequest = z.infer<
+  typeof voiceGenerateRequestSchema
+>;
+export type VoiceGenerationJobSummary = z.infer<
+  typeof voiceGenerationJobSummarySchema
+>;
+export type VoiceGenerationStatusData = z.infer<
+  typeof voiceGenerationStatusDataSchema
 >;
 export type ProjectCreateRequest = z.infer<typeof projectCreateRequestSchema>;
 export type ProjectSummary = z.infer<typeof projectSummarySchema>;

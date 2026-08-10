@@ -52,7 +52,14 @@ function makeTerminologyService() {
   };
 }
 
-async function makeService(options: { version?: string } = {}) {
+async function makeService(
+  options: {
+    version?: string;
+    adjustmentFingerprintProvider?: {
+      getChecksum(input: { projectId: string; lineId: string }): string | null;
+    };
+  } = {}
+) {
   const workspaceRoot = await fs.mkdtemp(
     path.join(tmpdir(), "subdub-voicevox-query-")
   );
@@ -79,7 +86,8 @@ async function makeService(options: { version?: string } = {}) {
     service: new VoicevoxQueryService({
       client,
       terminologyService,
-      workspaceRoot
+      workspaceRoot,
+      adjustmentFingerprintProvider: options.adjustmentFingerprintProvider
     })
   };
 }
@@ -119,6 +127,47 @@ afterEach(async () => {
 });
 
 describe("VoicevoxQueryService", () => {
+  it("resolves current conditions without calling audio_query", async () => {
+    const { client, service } = await makeService();
+
+    const current = await service.resolveCurrent(input());
+
+    expect(current.cacheKey).toMatch(/^[0-9a-f]{64}$/);
+    expect(current.adjustmentChecksum).toBeNull();
+    expect(client.getVersion).toHaveBeenCalledTimes(1);
+    expect(client.getAudioQuery).not.toHaveBeenCalled();
+  });
+
+  it("changes only the affected line key when its adjustment fingerprint changes", async () => {
+    let adjustmentChecksum: string | null = null;
+    const { client, service } = await makeService({
+      adjustmentFingerprintProvider: {
+        getChecksum: () => adjustmentChecksum
+      }
+    });
+
+    const before = await service.resolveCurrent(input());
+    adjustmentChecksum = "adjustment-v2";
+    const after = await service.resolveCurrent(input());
+
+    expect(after.adjustmentChecksum).toBe("adjustment-v2");
+    expect(after.cacheKey).not.toBe(before.cacheKey);
+    expect(client.getAudioQuery).not.toHaveBeenCalled();
+  });
+
+  it("does not claim an unapplied adjustment is generated", async () => {
+    const { client, service } = await makeService({
+      adjustmentFingerprintProvider: {
+        getChecksum: () => "adjustment-v2"
+      }
+    });
+
+    await expect(service.prepare(input())).rejects.toMatchObject({
+      code: "VOICEVOX_QUERY_SERVICE_ADJUSTMENT_UNSUPPORTED"
+    });
+    expect(client.getAudioQuery).not.toHaveBeenCalled();
+  });
+
   it("resolves terminology, applies effective voice, and reuses the query cache", async () => {
     const { workspaceRoot, client, terminologyService, service } =
       await makeService();

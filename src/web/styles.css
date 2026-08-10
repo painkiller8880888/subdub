@@ -306,6 +306,66 @@ input:focus-visible {
   grid-column: 1 / -1;
 }
 
+.script-line-voice-status,
+.voice-generation-panel {
+  background: #f8faff;
+  border: 1px solid #d7deea;
+  border-radius: 0.6rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  align-items: center;
+  padding: 0.8rem;
+}
+
+.voice-generation-panel {
+  display: grid;
+  gap: 0.8rem;
+}
+
+.voice-generation-panel h2,
+.voice-generation-panel p {
+  margin: 0;
+}
+
+.voice-generation-panel > div {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.voice-status {
+  border-radius: 999px;
+  font-size: 0.82rem;
+  font-weight: 700;
+  padding: 0.3rem 0.65rem;
+}
+
+.voice-status-current {
+  background: #e4f4e8;
+  color: #22613a;
+}
+
+.voice-status-stale {
+  background: #fff3d7;
+  color: #805b10;
+}
+
+.voice-status-generating {
+  background: #e5efff;
+  color: #1e4f9a;
+}
+
+.voice-status-failed {
+  background: #fbe7e7;
+  color: #9b3030;
+}
+
+.script-line-voice-status code {
+  color: #59647b;
+  font-size: 0.75rem;
+  overflow-wrap: anywhere;
+}
+
 .script-line-errors,
 .bulk-paste-panel ul {
   margin: 0;

@@ -31,6 +31,7 @@ import {
   type WorkspaceDatabaseHandle
 } from "../db/initialize.js";
 import type { MigrationFolder } from "../db/paths.js";
+import { VoicevoxGenerationService } from "../app/voicevox/generation-service.js";
 
 export const SERVER_HOST = API_HOST;
 export const SERVER_PORT = API_PORT;
@@ -85,6 +86,7 @@ export async function initializeServer(
     terminologyService: suppliedTerminologyService,
     projectService: suppliedProjectService,
     visualAssignmentService: suppliedVisualAssignmentService,
+    voiceGenerationService: suppliedVoiceGenerationService,
     workspaceRoot = process.cwd(),
     ...appOptions
   } = options;
@@ -147,6 +149,13 @@ export async function initializeServer(
         managementRoot: path.join(workspaceRoot, "library"),
         limits: options.assetUploadLimits
       });
+    const resolvedVoiceGenerationService =
+      suppliedVoiceGenerationService ??
+      new VoicevoxGenerationService({
+        repository: resolvedProjectRepository,
+        terminologyService: resolvedTerminologyService,
+        workspaceRoot
+      });
     const resolvedProcessingService =
       assetProcessingService ??
       new AssetProcessingService({
@@ -167,7 +176,8 @@ export async function initializeServer(
       projectService: resolvedProjectService,
       terminologyService: resolvedTerminologyService,
       assetService: resolvedAssetService,
-      assetUploadLimits: options.assetUploadLimits
+      assetUploadLimits: options.assetUploadLimits,
+      voiceGenerationService: resolvedVoiceGenerationService
     });
     resolvedProcessingWorker.start();
     app.addHook("onClose", async () => {

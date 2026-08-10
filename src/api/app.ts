@@ -26,6 +26,10 @@ import {
   registerVoicevoxRoutes,
   type VoicevoxStatusServicePort
 } from "./routes/voicevox.js";
+import {
+  registerVoiceGenerationRoutes,
+  type VoicevoxGenerationServicePort
+} from "./routes/voice-generation.js";
 import { createVoicevoxStatusService } from "../voicevox/service.js";
 
 export type AppOptions = {
@@ -43,6 +47,7 @@ export type AppOptions = {
   assetUploadLimits?: AssetUploadLimits;
   staticRoot?: string;
   voicevoxService?: VoicevoxStatusServicePort;
+  voiceGenerationService?: VoicevoxGenerationServicePort;
 };
 
 export function buildApp(options: AppOptions = {}): FastifyInstance {
@@ -56,6 +61,10 @@ export function buildApp(options: AppOptions = {}): FastifyInstance {
     app,
     options.voicevoxService ?? createVoicevoxStatusService()
   );
+
+  if (options.voiceGenerationService !== undefined) {
+    registerVoiceGenerationRoutes(app, options.voiceGenerationService);
+  }
 
   app.get("/api/health", async () =>
     createApiSuccessResponse({ status: "ok" })

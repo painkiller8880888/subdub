@@ -19,7 +19,10 @@ import {
   type VoicevoxAudioIndexEntry
 } from "./audio-index.js";
 import { inspectVoicevoxWav } from "./wav-metadata.js";
-import { voicevoxResolvedSpeakerSchema } from "../../voicevox/schemas.js";
+import {
+  voicevoxAudioQuerySchema,
+  voicevoxResolvedSpeakerSchema
+} from "../../voicevox/schemas.js";
 
 export const VOICEVOX_AUDIO_RELATIVE_DIRECTORY = "audio/voice" as const;
 export const VOICEVOX_AUDIO_INDEX_RELATIVE_PATH =
@@ -243,7 +246,17 @@ export class VoicevoxAudioStore {
       throw new VoicevoxAudioStoreError("VOICEVOX_AUDIO_STORE_INPUT_INVALID");
     }
 
-    const relativePath = `projects/${parsedProjectId.data}/${VOICEVOX_AUDIO_INDEX_RELATIVE_PATH}`;
+    return this.withProjectAudioUpdateLock(parsedProjectId.data, () =>
+      this.readIndexUnlocked(parsedProjectId.data)
+    );
+  }
+
+  private async readIndexUnlocked(
+    projectId: string
+  ): Promise<VoicevoxAudioIndex> {
+    const parsedProjectId = idSchema.parse(projectId);
+
+    const relativePath = `projects/${parsedProjectId}/${VOICEVOX_AUDIO_INDEX_RELATIVE_PATH}`;
     const filePath = await this.resolveExistingFilePath(relativePath);
     if (filePath === null) {
       return {};
@@ -269,7 +282,7 @@ export class VoicevoxAudioStore {
     }
 
     const validatedIndex = validateIndexPaths(
-      parsedProjectId.data,
+      parsedProjectId,
       parsedIndex.data
     );
     for (const entry of Object.values(validatedIndex)) {
@@ -277,6 +290,58 @@ export class VoicevoxAudioStore {
       await this.resolveExistingFilePath(entry.queryPath);
     }
     return validatedIndex;
+  }
+
+  /**
+   * Check the derived files referenced by one index entry without mutating
+   * them. A missing, malformed, or checksum-mismatched artifact is simply not
+   * current; callers can then safely treat the line as stale.
+   */
+  async isEntryUsable(projectId: unknown, entry: unknown): Promise<boolean> {
+    const parsedProjectId = idSchema.safeParse(projectId);
+    const parsedEntry = voicevoxAudioIndexEntrySchema.safeParse(entry);
+    if (!parsedProjectId.success || !parsedEntry.success) {
+      return false;
+    }
+
+    return this.withProjectAudioUpdateLock(parsedProjectId.data, () =>
+      this.isEntryUsableUnlocked(parsedProjectId.data, parsedEntry.data)
+    );
+  }
+
+  private async isEntryUsableUnlocked(
+    projectId: string,
+    entry: VoicevoxAudioIndexEntry
+  ): Promise<boolean> {
+    const parsedProjectId = idSchema.parse(projectId);
+
+    try {
+      validateIndexPaths(parsedProjectId, {
+        [entry.lineId]: entry
+      });
+      const audioPath = await this.resolveExistingFilePath(entry.audioPath);
+      const queryPath = await this.resolveExistingFilePath(entry.queryPath);
+      if (audioPath === null || queryPath === null) {
+        return false;
+      }
+
+      const audioBytes = await this.fileSystem.readFile(audioPath);
+      const metadata = inspectVoicevoxWav(audioBytes);
+      if (
+        metadata.audioSha256 !== entry.audioSha256 ||
+        metadata.durationMs !== entry.durationMs
+      ) {
+        return false;
+      }
+
+      const queryContents = await this.fileSystem.readTextFile(queryPath);
+      const parsedQuery = voicevoxAudioQuerySchema.safeParse(
+        JSON.parse(queryContents) as unknown
+      );
+      return parsedQuery.success;
+    } catch {
+      return false;
+    }
   }
 
   async save(input: VoicevoxAudioStoreInput): Promise<VoicevoxAudioIndexEntry> {
@@ -354,7 +419,7 @@ export class VoicevoxAudioStore {
         newlyCreatedAudioPath = paths.audioFilePath;
       }
 
-      const currentIndex = await this.readIndex(parsed.projectId);
+      const currentIndex = await this.readIndexUnlocked(parsed.projectId);
       const nextIndex = voicevoxAudioIndexSchema.parse({
         ...currentIndex,
         [parsed.lineId]: entry
