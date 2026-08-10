@@ -47,6 +47,7 @@
   "devDependencies": {
     "@eslint/js": "10.0.1",
     "@playwright/test": "1.61.1",
+    "@remotion/bundler": "4.0.499",
     "@remotion/cli": "4.0.499",
     "@remotion/renderer": "4.0.499",
     "@types/node": "24.0.10",
