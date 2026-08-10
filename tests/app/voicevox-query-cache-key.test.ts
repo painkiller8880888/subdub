@@ -31,7 +31,8 @@ const baseInput: VoicevoxQueryCacheKeyInput = {
       termUpdatedAt: "2026-08-06T00:00:00.000Z"
     }
   ],
-  voicevoxEngineVersion: "0.14.1"
+  voicevoxEngineVersion: "0.14.1",
+  adjustmentChecksum: null
 };
 
 function input(
@@ -141,7 +142,8 @@ describe("VOICEVOX query cache key", () => {
         ]
       }
     ],
-    ["engine version", { voicevoxEngineVersion: "0.14.2" }]
+    ["engine version", { voicevoxEngineVersion: "0.14.2" }],
+    ["adjustment checksum", { adjustmentChecksum: "adjustment-v2" }]
   ] as const)("changes when only %s changes", (_label, changed) => {
     expect(createVoicevoxQueryCacheKey(baseInput)).not.toBe(
       createVoicevoxQueryCacheKey(input(changed))

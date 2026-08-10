@@ -21,7 +21,8 @@ import type {
   VisualAssignmentUpdateRequest,
   VisualAssignmentDeleteRequest,
   VisualApprovalRequest,
-  VisualSuggestionResponse
+  VisualSuggestionResponse,
+  VoiceLineGenerationStatus
 } from "../schema/api.js";
 import type {
   AssetDetail,
@@ -43,6 +44,9 @@ import {
   deleteProjectVisualAssignment,
   fetchAsset,
   fetchProject,
+  fetchProjectVoiceStatus,
+  generateAllProjectVoice,
+  generateProjectVoice,
   initializeProjectScript,
   saveProjectScript,
   searchAssets,
@@ -113,6 +117,19 @@ function scriptStatusLabel(status: Script["status"]): string {
       return "needs_review（要確認）";
     default:
       return "draft（下書き）";
+  }
+}
+
+function voiceStatusLabel(status: VoiceLineGenerationStatus["status"]): string {
+  switch (status) {
+    case "current":
+      return "最新";
+    case "stale":
+      return "再生成が必要";
+    case "generating":
+      return "生成中";
+    case "failed":
+      return "失敗";
   }
 }
 
@@ -200,20 +217,26 @@ function ScriptLineCard({
   lineIndex,
   project,
   issues,
+  voiceStatus,
+  voiceGenerationDisabled,
   onChange,
   onMove,
   onDuplicate,
-  onDelete
+  onDelete,
+  onGenerateVoice
 }: {
   readonly line: ScriptLine;
   readonly sectionIndex: number;
   readonly lineIndex: number;
   readonly project: VideoProject;
   readonly issues: readonly ScriptDraftIssue[];
+  readonly voiceStatus: VoiceLineGenerationStatus | undefined;
+  readonly voiceGenerationDisabled: boolean;
   readonly onChange: (update: Partial<ScriptLine>) => void;
   readonly onMove: (direction: "up" | "down") => void;
   readonly onDuplicate: () => void;
   readonly onDelete: () => void;
+  readonly onGenerateVoice: () => void;
 }) {
   const lineIssues = lineIssueText(issues, sectionIndex, lineIndex);
   const numberValue = (value: number): string =>
@@ -342,6 +365,34 @@ function ScriptLineCard({
           />
         </div>
       </div>
+      <div className="script-line-voice-status" aria-label="音声状態">
+        <span className="eyebrow">音声状態</span>
+        {voiceStatus === undefined ? (
+          <span className="status-message">確認中…</span>
+        ) : (
+          <span className={`voice-status voice-status-${voiceStatus.status}`}>
+            {voiceStatusLabel(voiceStatus.status)}
+          </span>
+        )}
+        {voiceStatus?.status === "failed" &&
+        voiceStatus.errorCode !== undefined ? (
+          <code>{voiceStatus.errorCode}</code>
+        ) : null}
+        <button
+          className="button button-small"
+          type="button"
+          disabled={
+            voiceGenerationDisabled ||
+            voiceStatus?.status === "current" ||
+            voiceStatus?.status === "generating"
+          }
+          onClick={onGenerateVoice}
+        >
+          {voiceStatus?.status === "generating"
+            ? "生成中…"
+            : "このセリフを生成"}
+        </button>
+      </div>
       {lineIssues.length > 0 ? (
         <ul className="form-error script-line-errors" role="alert">
           {lineIssues.map((issue) => (
@@ -362,6 +413,18 @@ export function ScriptPage() {
     queryFn: () => fetchProject(projectId ?? ""),
     enabled: projectId !== undefined,
     retry: false
+  });
+  const voiceStatusQuery = useQuery({
+    queryKey: ["voice-status", projectId],
+    queryFn: () => fetchProjectVoiceStatus(projectId ?? ""),
+    enabled: projectId !== undefined,
+    retry: false,
+    refetchInterval: (query) =>
+      query.state.data?.jobs.some(
+        (job) => job.status === "queued" || job.status === "running"
+      )
+        ? 1_000
+        : false
   });
   const assignmentAssetQueries = useQueries({
     queries: (projectQuery.data?.visuals.assignments ?? []).map(
@@ -395,6 +458,7 @@ export function ScriptPage() {
     useState<AssetListResult | null>(null);
   const [assetSearchError, setAssetSearchError] = useState<unknown>(null);
   const [visualError, setVisualError] = useState<unknown>(null);
+  const [voiceError, setVoiceError] = useState<unknown>(null);
   const [visualSaveState, setVisualSaveState] =
     useState<VisualSaveState>("idle");
   const projectIdRef = useRef(projectId ?? "");
@@ -437,6 +501,37 @@ export function ScriptPage() {
   });
   const saveMutationRef = useRef(saveMutation);
   saveMutationRef.current = saveMutation;
+
+  const generateVoiceMutation = useMutation({
+    mutationFn: ({
+      projectId,
+      lineId
+    }: {
+      projectId: string;
+      lineId: string;
+    }) => generateProjectVoice(projectId, { lineIds: [lineId] }),
+    onSuccess: () => {
+      setVoiceError(null);
+      void queryClient.invalidateQueries({
+        queryKey: ["voice-status", projectId]
+      });
+    },
+    onError: setVoiceError,
+    retry: false
+  });
+
+  const generateAllVoiceMutation = useMutation({
+    mutationFn: (requestProjectId: string) =>
+      generateAllProjectVoice(requestProjectId),
+    onSuccess: () => {
+      setVoiceError(null);
+      void queryClient.invalidateQueries({
+        queryKey: ["voice-status", projectId]
+      });
+    },
+    onError: setVoiceError,
+    retry: false
+  });
 
   const approveMutation = useMutation({
     mutationFn: ({
@@ -553,6 +648,9 @@ export function ScriptPage() {
 
   function updateMutationCaches(project: VideoProject): void {
     queryClient.setQueryData(["projects", project.metadata.id], project);
+    void queryClient.invalidateQueries({
+      queryKey: ["voice-status", project.metadata.id]
+    });
     queryClient.setQueryData<ProjectSummary[]>(["projects"], (summaries) =>
       summaries?.map((summary) =>
         summary.id === project.metadata.id
@@ -1298,6 +1396,46 @@ export function ScriptPage() {
     assetSearchMutation.mutate({ query: assetSearchQuery, tagIds });
   }
 
+  async function generateVoiceLine(lineId: string): Promise<void> {
+    if (generateVoiceMutation.isPending || generateAllVoiceMutation.isPending) {
+      return;
+    }
+    const flushed = await coordinatorRef.current?.flush();
+    if (flushed !== true) {
+      return;
+    }
+    setVoiceError(null);
+    generateVoiceMutation.mutate({
+      projectId: projectIdRef.current,
+      lineId
+    });
+  }
+
+  async function generateAllVoice(): Promise<void> {
+    if (generateVoiceMutation.isPending || generateAllVoiceMutation.isPending) {
+      return;
+    }
+    const flushed = await coordinatorRef.current?.flush();
+    if (flushed !== true) {
+      return;
+    }
+    setVoiceError(null);
+    generateAllVoiceMutation.mutate(projectIdRef.current);
+  }
+
+  const voiceStatusByLine = new Map(
+    (voiceStatusQuery.data?.lines ?? []).map((lineStatus) => [
+      lineStatus.lineId,
+      lineStatus
+    ])
+  );
+  const voiceGenerationDisabled =
+    voiceStatusQuery.isPending ||
+    voiceStatusQuery.isError ||
+    voiceStatusQuery.data?.available !== true ||
+    generateVoiceMutation.isPending ||
+    generateAllVoiceMutation.isPending;
+
   return (
     <main className="page-shell script-editor-page">
       <p className="back-link">
@@ -1381,6 +1519,49 @@ export function ScriptPage() {
           </p>
         </section>
       ) : null}
+
+      <section
+        className="voice-generation-panel"
+        aria-labelledby="voice-generation-title"
+      >
+        <div>
+          <p className="eyebrow">P4-04 音声</p>
+          <h2 id="voice-generation-title">差分のあるセリフだけを生成</h2>
+          <p>
+            台本、話者、音声設定、用語、ENGINE版の条件を比較し、最新でないセリフだけを対象にします。
+          </p>
+        </div>
+        {voiceStatusQuery.isPending ? (
+          <p className="status-message">音声状態を確認しています…</p>
+        ) : null}
+        {voiceStatusQuery.isError ? (
+          <p className="message-panel message-panel-warning" role="status">
+            VOICEVOX
+            が利用できないため、音声操作を無効にしています。台本編集は続けられます。
+          </p>
+        ) : null}
+        {voiceStatusQuery.data?.available === false ? (
+          <p className="message-panel message-panel-warning" role="status">
+            VOICEVOX
+            が停止中です。台本編集は続けられますが、音声生成は利用できません。
+          </p>
+        ) : null}
+        {voiceError !== null ? (
+          <p className="form-error" role="alert">
+            {getErrorMessage(voiceError, "音声生成に失敗しました。")}
+          </p>
+        ) : null}
+        <button
+          className="button button-primary"
+          type="button"
+          disabled={voiceGenerationDisabled || issues.length > 0}
+          onClick={() => void generateAllVoice()}
+        >
+          {generateAllVoiceMutation.isPending
+            ? "差分音声を生成中…"
+            : "差分音声を一括生成"}
+        </button>
+      </section>
 
       <section
         className="visual-suggestion-panel"
@@ -1830,6 +2011,10 @@ export function ScriptPage() {
                     lineIndex={lineIndex}
                     project={project}
                     issues={issues}
+                    voiceStatus={voiceStatusByLine.get(line.id)}
+                    voiceGenerationDisabled={
+                      voiceGenerationDisabled || issues.length > 0
+                    }
                     onChange={(update) =>
                       updateLine(sectionIndex, lineIndex, update)
                     }
@@ -1853,6 +2038,7 @@ export function ScriptPage() {
                         deleteScriptLine(draft, sectionIndex, lineIndex)
                       )
                     }
+                    onGenerateVoice={() => void generateVoiceLine(line.id)}
                   />
                 ))}
               </div>

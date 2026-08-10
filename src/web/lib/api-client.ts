@@ -36,6 +36,9 @@ import {
   assetDetailResponseSchema,
   visualSuggestionRequestSchema,
   visualSuggestionResponseSchema,
+  voiceGenerateRequestSchema,
+  voiceGenerationAcceptedResponseSchema,
+  voiceGenerationStatusResponseSchema,
   type ApiErrorDetail,
   type OutlineApproveRequest,
   type OutlineGenerateRequest,
@@ -60,7 +63,10 @@ import {
   type VisualAssignmentRequest,
   type VisualAssignmentUpdateRequest,
   type VisualAssignmentDeleteRequest,
-  type VisualApprovalRequest
+  type VisualApprovalRequest,
+  type VoiceGenerateRequest,
+  type VoiceGenerationAccepted,
+  type VoiceGenerationStatusData
 } from "../../schema/api.js";
 import type { TerminologyTerm } from "../../schema/terminology.js";
 import type { AssetListResult } from "../../schema/asset.js";
@@ -370,6 +376,48 @@ export async function approveProjectScript(
       },
       body: JSON.stringify(validatedInput)
     }
+  );
+  return response.data;
+}
+
+export async function generateProjectVoice(
+  projectId: string,
+  input: VoiceGenerateRequest
+): Promise<VoiceGenerationAccepted> {
+  const validatedInput = voiceGenerateRequestSchema.parse(input);
+  const response = await fetchApi(
+    `/api/projects/${encodeURIComponent(projectId)}/voice/generate`,
+    voiceGenerationAcceptedResponseSchema,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(validatedInput)
+    }
+  );
+  return response.data;
+}
+
+export async function generateAllProjectVoice(
+  projectId: string
+): Promise<VoiceGenerationAccepted> {
+  const response = await fetchApi(
+    `/api/projects/${encodeURIComponent(projectId)}/voice/generate-all`,
+    voiceGenerationAcceptedResponseSchema,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({})
+    }
+  );
+  return response.data;
+}
+
+export async function fetchProjectVoiceStatus(
+  projectId: string
+): Promise<VoiceGenerationStatusData> {
+  const response = await fetchApi(
+    `/api/projects/${encodeURIComponent(projectId)}/voice/status`,
+    voiceGenerationStatusResponseSchema
   );
   return response.data;
 }

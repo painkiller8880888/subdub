@@ -31,6 +31,10 @@ import {
   VoicevoxAdapterError,
   VoicevoxResolutionError
 } from "../../voicevox/errors.js";
+import {
+  VOICEVOX_GENERATION_ERROR_CODE,
+  VoicevoxGenerationError
+} from "../../app/voicevox/generation-service.js";
 
 export class ApiResponseValidationError extends Error {
   constructor(cause: unknown) {
@@ -673,6 +677,34 @@ export function mapApiError(error: unknown): MappedApiError {
       message: "VOICEVOX audio is unavailable.",
       details: [],
       shouldLog: false
+    };
+  }
+
+  if (error instanceof VoicevoxGenerationError) {
+    if (error.code === VOICEVOX_GENERATION_ERROR_CODE.unavailable) {
+      return {
+        code: API_ERROR_CODE.voicevoxUnavailable,
+        status: 503,
+        message: "VOICEVOX audio is unavailable.",
+        details: [],
+        shouldLog: false
+      };
+    }
+    if (error.code === VOICEVOX_GENERATION_ERROR_CODE.lineNotFound) {
+      return {
+        code: error.code,
+        status: 404,
+        message: "指定されたセリフが見つかりません。",
+        details: [],
+        shouldLog: false
+      };
+    }
+    return {
+      code: API_ERROR_CODE.internalServerError,
+      status: 500,
+      message: genericInternalMessage,
+      details: [],
+      shouldLog: true
     };
   }
 

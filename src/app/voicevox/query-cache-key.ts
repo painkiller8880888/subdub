@@ -26,6 +26,11 @@ export type VoicevoxQueryCacheKeyInput = {
     "termId" | "termUpdatedAt"
   >[];
   readonly voicevoxEngineVersion: string;
+  /**
+   * P4-05 の調整ファイルとの境界。調整の適用自体はまだ実装しないが、
+   * fingerprint が変わったセリフだけを stale にできるよう key に含める。
+   */
+  readonly adjustmentChecksum?: string | null;
 };
 
 type CanonicalValue =
@@ -81,7 +86,8 @@ export function createVoicevoxQueryCacheKey(
       termId: term.termId,
       termUpdatedAt: term.termUpdatedAt
     })),
-    voicevoxEngineVersion: input.voicevoxEngineVersion
+    voicevoxEngineVersion: input.voicevoxEngineVersion,
+    adjustmentChecksum: input.adjustmentChecksum ?? null
   };
 
   return createHash("sha256")

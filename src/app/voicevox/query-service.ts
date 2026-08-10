@@ -4,7 +4,7 @@ import {
   scriptLineSchema,
   voiceSchema
 } from "../../schema/index.js";
-import type { ScriptLine, Voice } from "../../schema/index.js";
+import type { Character, ScriptLine, Voice } from "../../schema/index.js";
 import {
   VoicevoxClient,
   type VoicevoxAudioQuery,
@@ -45,12 +45,24 @@ export type VoicevoxQueryCachePort = {
   write(entry: VoicevoxQueryCacheEntry, query: unknown): Promise<void>;
 };
 
+export type VoicevoxAdjustmentFingerprintInput = {
+  readonly projectId: string;
+  readonly lineId: string;
+};
+
+export type VoicevoxAdjustmentFingerprintProvider = {
+  getChecksum(
+    input: VoicevoxAdjustmentFingerprintInput
+  ): Promise<string | null> | string | null;
+};
+
 export type VoicevoxQueryServiceOptions = {
   readonly client?: VoicevoxQueryClientPort;
   readonly terminologyService: VoicevoxTerminologyServicePort;
   readonly cache?: VoicevoxQueryCachePort;
   readonly workspaceRoot?: string;
   readonly fileSystem?: Partial<VoicevoxQueryCacheFileSystem>;
+  readonly adjustmentFingerprintProvider?: VoicevoxAdjustmentFingerprintProvider;
 };
 
 export type PrepareVoicevoxQueryInput = {
@@ -69,11 +81,32 @@ export type PreparedVoicevoxQuery = {
   readonly appliedTerms: readonly AppliedTerminology[];
   readonly voicevoxEngineVersion: string;
   readonly resolvedSpeaker: VoicevoxResolvedSpeaker;
+  readonly adjustmentChecksum?: string | null;
+};
+
+export type ResolveVoicevoxQueryInput = PrepareVoicevoxQueryInput;
+
+export type VoicevoxQueryResolutionContext = {
+  readonly voicevoxEngineVersion: string;
+};
+
+export type ResolvedVoicevoxQueryConditions = {
+  readonly projectId: string;
+  readonly line: ScriptLine;
+  readonly character: Character;
+  readonly resolvedSpeaker: VoicevoxResolvedSpeaker;
+  readonly resolvedSpokenText: string;
+  readonly appliedTerms: readonly AppliedTerminology[];
+  readonly voicevoxEngineVersion: string;
+  readonly adjustmentChecksum: string | null;
+  readonly cacheKey: string;
+  readonly queryPath: string;
 };
 
 export type VoicevoxQueryServiceErrorCode =
   | "VOICEVOX_QUERY_SERVICE_CACHE_REQUIRED"
-  | "VOICEVOX_QUERY_SERVICE_LINE_CHARACTER_MISMATCH";
+  | "VOICEVOX_QUERY_SERVICE_LINE_CHARACTER_MISMATCH"
+  | "VOICEVOX_QUERY_SERVICE_ADJUSTMENT_UNSUPPORTED";
 
 export class VoicevoxQueryServiceError extends Error {
   readonly code: VoicevoxQueryServiceErrorCode;
@@ -115,10 +148,15 @@ function normalizeResolvedText(result: ResolvedSpokenText): ResolvedSpokenText {
   };
 }
 
+const noVoicevoxAdjustments: VoicevoxAdjustmentFingerprintProvider = {
+  getChecksum: () => null
+};
+
 export class VoicevoxQueryService {
   private readonly client: VoicevoxQueryClientPort;
   private readonly terminologyService: VoicevoxTerminologyServicePort;
   private readonly cache: VoicevoxQueryCachePort;
+  private readonly adjustmentFingerprintProvider: VoicevoxAdjustmentFingerprintProvider;
 
   constructor(options: VoicevoxQueryServiceOptions) {
     this.client = options.client ?? new VoicevoxClient();
@@ -135,11 +173,30 @@ export class VoicevoxQueryService {
         "VOICEVOX_QUERY_SERVICE_CACHE_REQUIRED"
       );
     }
+
+    this.adjustmentFingerprintProvider =
+      options.adjustmentFingerprintProvider ?? noVoicevoxAdjustments;
   }
 
-  async prepare(
-    input: PrepareVoicevoxQueryInput
-  ): Promise<PreparedVoicevoxQuery> {
+  /**
+   * Resolve every input which participates in the query cache key.
+   *
+   * This method deliberately does not read or write query cache files and does
+   * not call /audio_query. It is shared by generation and status inspection so
+   * the two paths cannot drift into different cache-key calculations.
+   */
+  async resolveContext(): Promise<VoicevoxQueryResolutionContext> {
+    return {
+      voicevoxEngineVersion: voicevoxEngineVersionSchema.parse(
+        await this.client.getVersion()
+      )
+    };
+  }
+
+  async resolveCurrent(
+    input: ResolveVoicevoxQueryInput,
+    context?: VoicevoxQueryResolutionContext
+  ): Promise<ResolvedVoicevoxQueryConditions> {
     const projectId = idSchema.parse(input.projectId);
     const line = scriptLineSchema.parse(input.line);
     const character = characterSchema.parse(input.character);
@@ -154,13 +211,13 @@ export class VoicevoxQueryService {
     }
 
     const resolvedText = normalizeResolvedText(this.resolveSpokenText(line));
-    const effectiveVoice = voiceSchema.parse({
-      ...character.voice,
-      ...getDefinedVoiceOverrides(line.voiceOverrides)
+    const adjustmentChecksum = await this.getAdjustmentChecksum({
+      projectId,
+      lineId: line.id
     });
-    const voicevoxEngineVersion = voicevoxEngineVersionSchema.parse(
-      await this.client.getVersion()
-    );
+    const voicevoxEngineVersion =
+      context?.voicevoxEngineVersion ??
+      (await this.resolveContext()).voicevoxEngineVersion;
     const cacheKeyInput: VoicevoxQueryCacheKeyInput = {
       resolvedSpokenText: resolvedText.resolvedSpokenText,
       speakerUuid: resolvedSpeaker.speakerUuid,
@@ -169,7 +226,8 @@ export class VoicevoxQueryService {
       characterVoice: character.voice,
       voiceOverrides: line.voiceOverrides,
       appliedTerms: resolvedText.appliedTerms,
-      voicevoxEngineVersion
+      voicevoxEngineVersion,
+      adjustmentChecksum
     };
     const cacheKey = createVoicevoxQueryCacheKey(cacheKeyInput);
     const cacheEntry: VoicevoxQueryCacheEntry = {
@@ -177,36 +235,95 @@ export class VoicevoxQueryService {
       lineId: line.id,
       cacheKey
     };
-    const queryPath = this.cache.getQueryPath(cacheEntry);
+
+    return {
+      projectId,
+      line,
+      character,
+      resolvedSpeaker,
+      resolvedSpokenText: resolvedText.resolvedSpokenText,
+      appliedTerms: resolvedText.appliedTerms,
+      voicevoxEngineVersion,
+      adjustmentChecksum,
+      cacheKey,
+      queryPath: this.cache.getQueryPath(cacheEntry)
+    };
+  }
+
+  async prepare(
+    input: PrepareVoicevoxQueryInput
+  ): Promise<PreparedVoicevoxQuery> {
+    const current = await this.resolveCurrent(input);
+    if (current.adjustmentChecksum !== null) {
+      throw new VoicevoxQueryServiceError(
+        "VOICEVOX_QUERY_SERVICE_ADJUSTMENT_UNSUPPORTED"
+      );
+    }
+
+    const effectiveVoice = voiceSchema.parse({
+      ...current.character.voice,
+      ...getDefinedVoiceOverrides(current.line.voiceOverrides)
+    });
+    const cacheEntry: VoicevoxQueryCacheEntry = {
+      projectId: current.projectId,
+      lineId: current.line.id,
+      cacheKey: current.cacheKey
+    };
+    const queryPath = current.queryPath;
     const cachedQuery = await this.cache.read(cacheEntry);
     if (cachedQuery !== null) {
       return this.result({
         cached: true,
-        cacheKey,
+        cacheKey: current.cacheKey,
         queryPath,
         query: cachedQuery,
-        resolvedText,
-        voicevoxEngineVersion,
-        resolvedSpeaker
+        resolvedText: {
+          resolvedSpokenText: current.resolvedSpokenText,
+          appliedTerms: current.appliedTerms
+        },
+        voicevoxEngineVersion: current.voicevoxEngineVersion,
+        resolvedSpeaker: current.resolvedSpeaker,
+        adjustmentChecksum: current.adjustmentChecksum
       });
     }
 
     const fetchedQuery = await this.client.getAudioQuery(
-      resolvedText.resolvedSpokenText,
-      resolvedSpeaker.resolvedStyleId
+      current.resolvedSpokenText,
+      current.resolvedSpeaker.resolvedStyleId
     );
     const query = applyVoiceSettings(fetchedQuery, effectiveVoice);
     await this.cache.write(cacheEntry, query);
 
     return this.result({
       cached: false,
-      cacheKey,
+      cacheKey: current.cacheKey,
       queryPath,
       query,
-      resolvedText,
-      voicevoxEngineVersion,
-      resolvedSpeaker
+      resolvedText: {
+        resolvedSpokenText: current.resolvedSpokenText,
+        appliedTerms: current.appliedTerms
+      },
+      voicevoxEngineVersion: current.voicevoxEngineVersion,
+      resolvedSpeaker: current.resolvedSpeaker,
+      adjustmentChecksum: current.adjustmentChecksum
     });
+  }
+
+  private async getAdjustmentChecksum(input: {
+    readonly projectId: string;
+    readonly lineId: string;
+  }): Promise<string | null> {
+    const checksum =
+      await this.adjustmentFingerprintProvider.getChecksum(input);
+    if (checksum === null || checksum === undefined) {
+      return null;
+    }
+    if (typeof checksum !== "string" || checksum.length === 0) {
+      throw new VoicevoxQueryServiceError(
+        "VOICEVOX_QUERY_SERVICE_ADJUSTMENT_UNSUPPORTED"
+      );
+    }
+    return checksum;
   }
 
   private resolveSpokenText(line: ScriptLine): ResolvedSpokenText {
@@ -224,6 +341,7 @@ export class VoicevoxQueryService {
     readonly resolvedText: ResolvedSpokenText;
     readonly voicevoxEngineVersion: string;
     readonly resolvedSpeaker: VoicevoxResolvedSpeaker;
+    readonly adjustmentChecksum: string | null;
   }): PreparedVoicevoxQuery {
     return {
       cached: input.cached,
@@ -233,7 +351,8 @@ export class VoicevoxQueryService {
       resolvedSpokenText: input.resolvedText.resolvedSpokenText,
       appliedTerms: input.resolvedText.appliedTerms,
       voicevoxEngineVersion: input.voicevoxEngineVersion,
-      resolvedSpeaker: input.resolvedSpeaker
+      resolvedSpeaker: input.resolvedSpeaker,
+      adjustmentChecksum: input.adjustmentChecksum
     };
   }
 }
