@@ -20,6 +20,8 @@ import {
   resetVoiceAdjustmentAccent,
   resetVoiceAdjustmentEditing,
   resetVoiceAdjustmentMora,
+  resetVoiceAdjustmentMoraDetails,
+  resetVoiceAdjustmentMoraItem,
   resetVoiceAdjustmentScalar,
   type VoiceAdjustmentEditorState,
   type VoiceAdjustmentMoraKey,
@@ -111,7 +113,11 @@ export function VoiceAdjustmentEditor({
       return;
     }
     setSnapshot(adjustmentQuery.data);
-    setEditor(createVoiceAdjustmentEditorState(adjustmentQuery.data));
+    setEditor(
+      createVoiceAdjustmentEditorState(adjustmentQuery.data, {
+        loadSaved: adjustmentQuery.data.status !== "needs_review"
+      })
+    );
     setPreviewId(null);
   }, [adjustmentQuery.data]);
 
@@ -388,7 +394,7 @@ export function VoiceAdjustmentEditor({
                       setEditor((current) =>
                         current === null
                           ? current
-                          : resetVoiceAdjustmentAccent(current)
+                          : resetVoiceAdjustmentMoraDetails(current)
                       )
                     }
                   >
@@ -504,22 +510,11 @@ export function VoiceAdjustmentEditor({
                               setEditor((current) =>
                                 current === null
                                   ? current
-                                  : (resetVoiceAdjustmentMora(
-                                      resetVoiceAdjustmentMora(
-                                        resetVoiceAdjustmentMora(
-                                          current,
-                                          phraseIndex,
-                                          moraIndex,
-                                          "pitch"
-                                        ),
-                                        phraseIndex,
-                                        moraIndex,
-                                        "consonant_length"
-                                      ),
+                                  : resetVoiceAdjustmentMoraItem(
+                                      current,
                                       phraseIndex,
-                                      moraIndex,
-                                      "vowel_length"
-                                    ) as VoiceAdjustmentEditorState)
+                                      moraIndex
+                                    )
                               )
                             }
                           >

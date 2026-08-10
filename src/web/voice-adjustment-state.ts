@@ -31,12 +31,20 @@ export type VoiceAdjustmentScalarKey =
 export type VoiceAdjustmentMoraKey =
   "pitch" | "consonant_length" | "vowel_length" | "is_devoiced";
 
+export const VOICE_ADJUSTMENT_MORA_KEYS = [
+  "pitch",
+  "consonant_length",
+  "vowel_length",
+  "is_devoiced"
+] as const satisfies ReadonlyArray<VoiceAdjustmentMoraKey>;
+
 export type VoiceAdjustmentEditorState = {
   readonly baseQuery: VoicevoxAudioQuery;
   readonly savedQuery: VoicevoxAudioQuery;
   readonly query: VoicevoxAudioQuery;
   readonly savedAdjustment: VoicevoxAdjustmentFile | null;
   readonly status: VoiceAdjustmentStatus;
+  readonly savedAdjustmentLoaded: boolean;
 };
 
 function cloneMora(mora: VoicevoxMora): VoicevoxMora {
@@ -118,7 +126,11 @@ function equalValue(first: unknown, second: unknown): boolean {
 export function isVoiceAdjustmentDirty(
   state: VoiceAdjustmentEditorState
 ): boolean {
-  return !equalValue(state.query, state.savedQuery);
+  const savedQuery =
+    state.status === "needs_review" && !state.savedAdjustmentLoaded
+      ? state.baseQuery
+      : state.savedQuery;
+  return !equalValue(state.query, savedQuery);
 }
 
 export function createVoiceAdjustmentEditorState(
@@ -126,6 +138,7 @@ export function createVoiceAdjustmentEditorState(
   options: { readonly loadSaved?: boolean } = {}
 ): VoiceAdjustmentEditorState {
   const baseQuery = cloneVoicevoxQuery(snapshot.query);
+  const loadSaved = options.loadSaved !== false;
   const savedQuery =
     snapshot.adjustment === null
       ? cloneVoicevoxQuery(baseQuery)
@@ -133,19 +146,23 @@ export function createVoiceAdjustmentEditorState(
   return {
     baseQuery,
     savedQuery,
-    query:
-      options.loadSaved === false
-        ? cloneVoicevoxQuery(baseQuery)
-        : cloneVoicevoxQuery(savedQuery),
+    query: loadSaved
+      ? cloneVoicevoxQuery(savedQuery)
+      : cloneVoicevoxQuery(baseQuery),
     savedAdjustment: snapshot.adjustment,
-    status: snapshot.status
+    status: snapshot.status,
+    savedAdjustmentLoaded: loadSaved
   };
 }
 
 export function loadSavedVoiceAdjustment(
   state: VoiceAdjustmentEditorState
 ): VoiceAdjustmentEditorState {
-  return { ...state, query: cloneVoicevoxQuery(state.savedQuery) };
+  return {
+    ...state,
+    query: cloneVoicevoxQuery(state.savedQuery),
+    savedAdjustmentLoaded: true
+  };
 }
 
 export function discardSavedVoiceAdjustment(
@@ -158,7 +175,8 @@ export function discardSavedVoiceAdjustment(
     savedQuery: cloneVoicevoxQuery(baseQuery),
     query: cloneVoicevoxQuery(baseQuery),
     savedAdjustment: null,
-    status: "current"
+    status: "current",
+    savedAdjustmentLoaded: true
   };
 }
 
@@ -197,11 +215,18 @@ export function updateVoiceAdjustmentAccent(
 export function resetVoiceAdjustmentAccent(
   state: VoiceAdjustmentEditorState
 ): VoiceAdjustmentEditorState {
+  const phrases = cloneAccentPhrases(state.query.accent_phrases);
+  for (const [phraseIndex, phrase] of phrases.entries()) {
+    const basePhrase = state.baseQuery.accent_phrases[phraseIndex];
+    if (basePhrase !== undefined) {
+      phrases[phraseIndex] = { ...phrase, accent: basePhrase.accent };
+    }
+  }
   return {
     ...state,
     query: {
       ...state.query,
-      accent_phrases: cloneAccentPhrases(state.baseQuery.accent_phrases)
+      accent_phrases: phrases
     }
   };
 }
@@ -252,9 +277,48 @@ export function resetVoiceAdjustmentMora(
   return { ...state, query: { ...state.query, accent_phrases: phrases } };
 }
 
+export function resetVoiceAdjustmentMoraItem(
+  state: VoiceAdjustmentEditorState,
+  phraseIndex: number,
+  moraIndex: number
+): VoiceAdjustmentEditorState {
+  return VOICE_ADJUSTMENT_MORA_KEYS.reduce(
+    (current, key) =>
+      resetVoiceAdjustmentMora(current, phraseIndex, moraIndex, key),
+    state
+  );
+}
+
+export function resetVoiceAdjustmentMoraDetails(
+  state: VoiceAdjustmentEditorState
+): VoiceAdjustmentEditorState {
+  let nextState = state;
+  for (
+    let phraseIndex = 0;
+    phraseIndex < nextState.query.accent_phrases.length;
+    phraseIndex += 1
+  ) {
+    const phrase = nextState.query.accent_phrases[phraseIndex];
+    if (phrase === undefined) {
+      continue;
+    }
+    for (let moraIndex = 0; moraIndex < phrase.moras.length; moraIndex += 1) {
+      nextState = resetVoiceAdjustmentMoraItem(
+        nextState,
+        phraseIndex,
+        moraIndex
+      );
+    }
+  }
+  return nextState;
+}
+
 export function resetVoiceAdjustmentEditing(
   state: VoiceAdjustmentEditorState
 ): VoiceAdjustmentEditorState {
+  if (state.status === "needs_review" && !state.savedAdjustmentLoaded) {
+    return { ...state, query: cloneVoicevoxQuery(state.baseQuery) };
+  }
   return loadSavedVoiceAdjustment(state);
 }
 

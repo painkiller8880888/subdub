@@ -6,8 +6,11 @@ import {
   buildVoiceAdjustmentFile,
   createVoiceAdjustmentEditorState,
   isVoiceAdjustmentDirty,
+  loadSavedVoiceAdjustment,
   resetVoiceAdjustmentAccent,
   resetVoiceAdjustmentEditing,
+  resetVoiceAdjustmentMoraDetails,
+  resetVoiceAdjustmentMoraItem,
   updateVoiceAdjustmentAccent,
   updateVoiceAdjustmentMora,
   updateVoiceAdjustmentScalar
@@ -45,7 +48,7 @@ describe("voice adjustment editor state", () => {
     expect(isVoiceAdjustmentDirty(changed)).toBe(true);
   });
 
-  it("stores accent and mora changes as a snapshot and can reset them", () => {
+  it("resets accent and mora details independently", () => {
     const initial = createVoiceAdjustmentEditorState(snapshot);
     const changedAccent = updateVoiceAdjustmentAccent(initial, 0, 0);
     const changedMora = updateVoiceAdjustmentMora(
@@ -55,8 +58,15 @@ describe("voice adjustment editor state", () => {
       "pitch",
       8.8
     );
-    const saved = buildVoiceAdjustmentFile(
+    const changedMoraWithDevoicing = updateVoiceAdjustmentMora(
       changedMora,
+      0,
+      0,
+      "is_devoiced",
+      true
+    );
+    const saved = buildVoiceAdjustmentFile(
+      changedMoraWithDevoicing,
       snapshot,
       "2026-08-10T00:00:00.000Z"
     );
@@ -65,12 +75,38 @@ describe("voice adjustment editor state", () => {
     expect(saved.accentPhrases).toHaveLength(1);
     expect(saved.accentPhrases?.[0]?.accent).toBe(0);
     expect(saved.accentPhrases?.[0]?.moras[0]?.pitch).toBe(8.8);
+    expect(saved.accentPhrases?.[0]?.moras[0]?.is_devoiced).toBe(true);
 
-    const reset = resetVoiceAdjustmentAccent(changedMora);
-    expect(isVoiceAdjustmentDirty(reset)).toBe(false);
+    const resetAccent = resetVoiceAdjustmentAccent(changedMoraWithDevoicing);
+    expect(resetAccent.query.accent_phrases[0]?.accent).toBe(
+      initial.baseQuery.accent_phrases[0]?.accent
+    );
+    expect(resetAccent.query.accent_phrases[0]?.moras[0]?.pitch).toBe(8.8);
+    expect(isVoiceAdjustmentDirty(resetAccent)).toBe(true);
+
+    const resetDetails = resetVoiceAdjustmentMoraDetails(resetAccent);
+    expect(resetDetails.query.accent_phrases[0]?.accent).toBe(
+      initial.baseQuery.accent_phrases[0]?.accent
+    );
+    expect(resetDetails.query.accent_phrases[0]?.moras[0]?.pitch).toBe(5.5);
+    expect(
+      resetDetails.query.accent_phrases[0]?.moras[0]?.is_devoiced
+    ).toBeUndefined();
+    expect(isVoiceAdjustmentDirty(resetDetails)).toBe(false);
+
+    const resetItem = resetVoiceAdjustmentMoraItem(
+      changedMoraWithDevoicing,
+      0,
+      0
+    );
+    expect(resetItem.query.accent_phrases[0]?.accent).toBe(0);
+    expect(resetItem.query.accent_phrases[0]?.moras[0]?.pitch).toBe(5.5);
+    expect(
+      resetItem.query.accent_phrases[0]?.moras[0]?.is_devoiced
+    ).toBeUndefined();
   });
 
-  it("loads stale values only as an explicit re-edit draft", () => {
+  it("loads stale values only after explicit re-edit selection", () => {
     const staleSnapshot = {
       ...snapshot,
       status: "needs_review" as const,
@@ -83,7 +119,21 @@ describe("voice adjustment editor state", () => {
         editedAt: "2026-08-10T00:00:00.000Z"
       }
     };
-    const reedit = createVoiceAdjustmentEditorState(staleSnapshot);
+    const initial = createVoiceAdjustmentEditorState(staleSnapshot, {
+      loadSaved: false
+    });
+
+    expect(initial.query.speedScale).toBe(initial.baseQuery.speedScale);
+    expect(isVoiceAdjustmentDirty(initial)).toBe(false);
+
+    const discardedBeforeSelection = resetVoiceAdjustmentEditing(
+      updateVoiceAdjustmentScalar(initial, "speedScale", 1.8)
+    );
+    expect(discardedBeforeSelection.query.speedScale).toBe(
+      initial.baseQuery.speedScale
+    );
+
+    const reedit = loadSavedVoiceAdjustment(initial);
 
     expect(reedit.query.speedScale).toBe(1.5);
     expect(isVoiceAdjustmentDirty(reedit)).toBe(false);
