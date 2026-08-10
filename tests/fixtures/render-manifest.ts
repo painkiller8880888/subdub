@@ -8,14 +8,155 @@ const PHOTO_CHECKSUM =
   "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc";
 const DOCUMENT_CHECKSUM =
   "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd";
+const CHARACTER_CHECKSUM =
+  "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee";
+const COMPILER_INPUT_HASH =
+  "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff";
 
 export const renderManifestFixture = {
-  manifestVersion: "1.0.0",
+  manifestVersion: "2.0.0",
   sourceProjectHash: SOURCE_HASH,
+  compilerInputHash: COMPILER_INPUT_HASH,
+  characterCatalogVersion: "1.0.0",
+  characterMappingVersion: "1.0.0",
+  characters: [
+    {
+      characterId: "character-mentor",
+      idleVariantId: "character-mentor-stand-v1"
+    },
+    {
+      characterId: "character-learner",
+      idleVariantId: "character-learner-stand-v1"
+    }
+  ],
+  characterVariants: [
+    {
+      variantId: "character-learner-stand-v1",
+      characterId: "character-learner",
+      renderType: "single-image",
+      files: {
+        single: {
+          path: "shared-assets/characters/character-learner/stand/stand.png",
+          sha256: CHARACTER_CHECKSUM
+        }
+      }
+    },
+    {
+      variantId: "character-learner-speak-normal-v1",
+      characterId: "character-learner",
+      renderType: "mouth-pair",
+      files: {
+        closed: {
+          path: "shared-assets/characters/character-learner/speak-normal/closed.png",
+          sha256: CHARACTER_CHECKSUM
+        },
+        open: {
+          path: "shared-assets/characters/character-learner/speak-normal/open.png",
+          sha256: CHARACTER_CHECKSUM
+        }
+      }
+    },
+    {
+      variantId: "character-learner-speak-pointing-v1",
+      characterId: "character-learner",
+      renderType: "mouth-pair",
+      files: {
+        closed: {
+          path: "shared-assets/characters/character-learner/speak-pointing/closed.png",
+          sha256: CHARACTER_CHECKSUM
+        },
+        open: {
+          path: "shared-assets/characters/character-learner/speak-pointing/open.png",
+          sha256: CHARACTER_CHECKSUM
+        }
+      }
+    },
+    {
+      variantId: "character-mentor-speak-normal-v1",
+      characterId: "character-mentor",
+      renderType: "mouth-pair",
+      files: {
+        closed: {
+          path: "shared-assets/characters/character-mentor/speak-normal/closed.png",
+          sha256: CHARACTER_CHECKSUM
+        },
+        open: {
+          path: "shared-assets/characters/character-mentor/speak-normal/open.png",
+          sha256: CHARACTER_CHECKSUM
+        }
+      }
+    },
+    {
+      variantId: "character-mentor-speak-pointing-v1",
+      characterId: "character-mentor",
+      renderType: "mouth-pair",
+      files: {
+        closed: {
+          path: "shared-assets/characters/character-mentor/speak-pointing/closed.png",
+          sha256: CHARACTER_CHECKSUM
+        },
+        open: {
+          path: "shared-assets/characters/character-mentor/speak-pointing/open.png",
+          sha256: CHARACTER_CHECKSUM
+        }
+      }
+    },
+    {
+      variantId: "character-mentor-stand-v1",
+      characterId: "character-mentor",
+      renderType: "single-image",
+      files: {
+        single: {
+          path: "shared-assets/characters/character-mentor/stand/stand.png",
+          sha256: CHARACTER_CHECKSUM
+        }
+      }
+    }
+  ],
   sourceAssetChecksums: [
     { path: "media/application-demo.mp4", sha256: VIDEO_CHECKSUM },
     { path: "media/application-form.png", sha256: PHOTO_CHECKSUM },
-    { path: "media/completion-report.pdf", sha256: DOCUMENT_CHECKSUM }
+    { path: "media/completion-report.pdf", sha256: DOCUMENT_CHECKSUM },
+    {
+      path: "shared-assets/characters/character-learner/speak-normal/closed.png",
+      sha256: CHARACTER_CHECKSUM
+    },
+    {
+      path: "shared-assets/characters/character-learner/speak-normal/open.png",
+      sha256: CHARACTER_CHECKSUM
+    },
+    {
+      path: "shared-assets/characters/character-learner/speak-pointing/closed.png",
+      sha256: CHARACTER_CHECKSUM
+    },
+    {
+      path: "shared-assets/characters/character-learner/speak-pointing/open.png",
+      sha256: CHARACTER_CHECKSUM
+    },
+    {
+      path: "shared-assets/characters/character-learner/stand/stand.png",
+      sha256: CHARACTER_CHECKSUM
+    },
+    {
+      path: "shared-assets/characters/character-mentor/speak-normal/closed.png",
+      sha256: CHARACTER_CHECKSUM
+    },
+    {
+      path: "shared-assets/characters/character-mentor/speak-normal/open.png",
+      sha256: CHARACTER_CHECKSUM
+    },
+    {
+      path: "shared-assets/characters/character-mentor/speak-pointing/closed.png",
+      sha256: CHARACTER_CHECKSUM
+    },
+    {
+      path: "shared-assets/characters/character-mentor/speak-pointing/open.png",
+      sha256: CHARACTER_CHECKSUM
+    },
+    {
+      path: "shared-assets/characters/character-mentor/stand/stand.png",
+      sha256: CHARACTER_CHECKSUM
+    }
   ],
   fps: 30,
   width: 1920,
@@ -32,7 +173,8 @@ export const renderManifestFixture = {
       audioPath: "audio/speech-intro-mentor.wav",
       subtitleText: "社内申請の登録手順を説明します。",
       speakerId: "character-mentor",
-      expression: "explain"
+      expression: "explain",
+      characterVariantId: "character-mentor-speak-pointing-v1"
     },
     {
       id: "intro-learner-1",
@@ -44,7 +186,8 @@ export const renderManifestFixture = {
       audioPath: "audio/speech-intro-learner.wav",
       subtitleText: "まず、申請前の確認から始めます。",
       speakerId: "character-learner",
-      expression: "neutral"
+      expression: "neutral",
+      characterVariantId: "character-learner-speak-normal-v1"
     },
     {
       id: "main-mentor-1",
@@ -56,7 +199,8 @@ export const renderManifestFixture = {
       audioPath: "audio/speech-main-mentor.wav",
       subtitleText: "申請メニューから「新規申請」を選びます。",
       speakerId: "character-mentor",
-      expression: "explain"
+      expression: "explain",
+      characterVariantId: "character-mentor-speak-pointing-v1"
     },
     {
       id: "main-learner-1",
@@ -68,7 +212,8 @@ export const renderManifestFixture = {
       audioPath: "audio/speech-main-learner.wav",
       subtitleText: "内容を確認してから登録します。",
       speakerId: "character-learner",
-      expression: "caution"
+      expression: "caution",
+      characterVariantId: "character-learner-speak-pointing-v1"
     },
     {
       id: "outro-mentor-1",
@@ -80,7 +225,8 @@ export const renderManifestFixture = {
       audioPath: "audio/speech-outro-mentor.wav",
       subtitleText: "完了画面が表示されたら登録終了です。",
       speakerId: "character-mentor",
-      expression: "smile"
+      expression: "smile",
+      characterVariantId: "character-mentor-speak-normal-v1"
     }
   ],
   visuals: [
@@ -88,8 +234,8 @@ export const renderManifestFixture = {
       id: "visual-intro-video",
       from: 60,
       durationInFrames: 85,
-      kind: "video",
       src: "media/application-demo.mp4",
+      kind: "video",
       display: {
         kind: "video",
         fit: "cover",
@@ -108,8 +254,8 @@ export const renderManifestFixture = {
       id: "visual-main-photo",
       from: 210,
       durationInFrames: 95,
-      kind: "photo",
       src: "media/application-form.png",
+      kind: "photo",
       display: {
         kind: "photo",
         fit: "contain",
@@ -124,8 +270,8 @@ export const renderManifestFixture = {
       id: "visual-outro-document",
       from: 375,
       durationInFrames: 45,
-      kind: "document_scan",
       src: "media/completion-report.pdf",
+      kind: "document_scan",
       display: {
         kind: "document_scan",
         fit: "contain",

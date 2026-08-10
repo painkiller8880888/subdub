@@ -3,6 +3,9 @@ export const CHARACTER_CANVAS_SIZE = {
   height: 1000
 } as const;
 
+export const CHARACTER_VARIANT_CATALOG_VERSION = "1.0.0" as const;
+export const CHARACTER_VARIANT_MAPPING_VERSION = "1.0.0" as const;
+
 export type CharacterVariantRenderType = "single-image" | "mouth-pair";
 
 export type CharacterVariantFile = {
@@ -21,6 +24,34 @@ export type CharacterVariant = {
 };
 
 export type CharacterVariantCatalog = readonly CharacterVariant[];
+
+export type CharacterVariantMappingExpression =
+  "idle" | "neutral" | "smile" | "explain" | "caution";
+
+export type CharacterVariantMapping = Readonly<
+  Record<string, Readonly<Record<CharacterVariantMappingExpression, string>>>
+>;
+
+/**
+ * Logical expressions are intentionally resolved by an explicit table. The
+ * catalog tags are descriptive metadata and must not participate in mapping.
+ */
+export const characterVariantMapping = {
+  "character-mentor": {
+    idle: "character-mentor-stand-v1",
+    neutral: "character-mentor-speak-normal-v1",
+    smile: "character-mentor-speak-normal-v1",
+    explain: "character-mentor-speak-pointing-v1",
+    caution: "character-mentor-speak-pointing-v1"
+  },
+  "character-learner": {
+    idle: "character-learner-stand-v1",
+    neutral: "character-learner-speak-normal-v1",
+    smile: "character-learner-speak-normal-v1",
+    explain: "character-learner-speak-pointing-v1",
+    caution: "character-learner-speak-pointing-v1"
+  }
+} as const satisfies CharacterVariantMapping;
 
 export const characterVariantCatalog = [
   {
@@ -147,4 +178,12 @@ export function characterVariantsForCharacter(
   catalog: CharacterVariantCatalog = characterVariantCatalog
 ): readonly CharacterVariant[] {
   return catalog.filter((variant) => variant.characterId === characterId);
+}
+
+export function resolveCharacterVariantId(
+  characterId: string,
+  expression: CharacterVariantMappingExpression,
+  mapping: CharacterVariantMapping = characterVariantMapping
+): string | undefined {
+  return mapping[characterId]?.[expression];
 }
