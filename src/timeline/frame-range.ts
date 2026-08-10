@@ -23,6 +23,10 @@ export function containsFrame(range: FrameRange, frame: number): boolean {
 }
 
 export function rangesOverlap(left: FrameRange, right: FrameRange): boolean {
+  if (left.durationInFrames <= 0 || right.durationInFrames <= 0) {
+    return false;
+  }
+
   return (
     left.from < getEndExclusive(right) && right.from < getEndExclusive(left)
   );

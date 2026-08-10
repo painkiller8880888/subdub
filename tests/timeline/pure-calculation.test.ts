@@ -41,6 +41,12 @@ describe("timeline pure calculations", () => {
     expect(
       rangesOverlap(createFrameRange(0, 10), createFrameRange(9, 20))
     ).toBe(true);
+    expect(
+      rangesOverlap(createFrameRange(10, 10), createFrameRange(9, 11))
+    ).toBe(false);
+    expect(
+      rangesOverlap(createFrameRange(9, 11), createFrameRange(10, 10))
+    ).toBe(false);
   });
 
   it("converts each pause and audio component before adding them", () => {
