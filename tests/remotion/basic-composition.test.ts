@@ -29,6 +29,8 @@ import {
   resolveCharacterThemeColor,
   resolveSubtitleContent,
   SUBTITLE_SAFE_AREA_PX,
+  SUBTITLE_SAFE_AREA_HEIGHT_PX,
+  subtitleTypographyScale,
   subtitleContainerStyle
 } from "../../src/remotion/layout-helpers.js";
 
@@ -93,7 +95,8 @@ async function preparePublicDirectory(): Promise<string> {
 
 async function renderFixtureFrame(
   frame: number,
-  name: string
+  name: string,
+  props: Record<string, unknown> = inputProps
 ): Promise<Buffer> {
   if (bundleDirectory === undefined || composition === undefined) {
     throw new Error("Remotion bundle has not been initialized");
@@ -102,11 +105,24 @@ async function renderFixtureFrame(
     throw new Error("Remotion output directory has not been initialized");
   }
 
+  const selectedComposition =
+    props === inputProps
+      ? composition
+      : await selectComposition({
+          serveUrl: bundleDirectory,
+          id: "BasicRemotionComposition",
+          inputProps: props,
+          browserExecutable
+        });
+  if (selectedComposition === undefined) {
+    throw new Error("Remotion composition could not be selected");
+  }
+
   const output = path.join(outputDirectory, `${name}.png`);
   await renderStill({
     serveUrl: bundleDirectory,
-    composition,
-    inputProps,
+    composition: selectedComposition,
+    inputProps: props,
     browserExecutable,
     frame,
     imageFormat: "png",
@@ -370,6 +386,9 @@ describe("RenderManifest interval selection", () => {
     );
     expect(subtitle.subtitleText).toBe(line.subtitleText);
     expect(subtitle.side).toBe("right");
+    expect(
+      subtitleTypographyScale(subtitle.displayName, subtitle.subtitleText)
+    ).toBe(1);
 
     const side = subtitleContainerStyle(subtitle.side);
     expect(side).toMatchObject({
@@ -518,6 +537,109 @@ describe("basic Remotion composition", () => {
         bottom: 0.95
       })
     ).toBe(0);
+  }, 180_000);
+
+  it("shrinks long multi-line subtitles so their rendered pixels stay in the safe area", async () => {
+    const boundaryManifest = structuredClone(
+      renderManifestRenderingFixture
+    ) as RenderManifest;
+    const boundaryLine = boundaryManifest.lines.find(
+      (line) => line.id === "main-learner-1"
+    );
+    if (boundaryLine === undefined) {
+      throw new Error("subtitle boundary fixture line is missing");
+    }
+    boundaryLine.subtitleText = [
+      "あ".repeat(138),
+      ...Array.from({ length: 11 }, () => "行")
+    ].join("\n");
+    expect(boundaryLine.subtitleText.length).toBe(160);
+    expect(boundaryLine.subtitleText.split("\n")).toHaveLength(12);
+    expect(renderManifestSchema.safeParse(boundaryManifest).success).toBe(true);
+    const noSubtitleManifest = structuredClone(
+      boundaryManifest
+    ) as RenderManifest;
+    const noSubtitleLine = noSubtitleManifest.lines.find(
+      (line) => line.id === "main-learner-1"
+    );
+    if (noSubtitleLine === undefined) {
+      throw new Error("subtitle boundary comparison line is missing");
+    }
+    noSubtitleLine.subtitleText = "";
+
+    const withSubtitle = await renderFixtureFrame(
+      260,
+      "subtitle-safe-area-boundary",
+      boundaryManifest as unknown as Record<string, unknown>
+    );
+    const withoutSubtitle = await renderFixtureFrame(
+      260,
+      "subtitle-safe-area-boundary-empty",
+      noSubtitleManifest as unknown as Record<string, unknown>
+    );
+
+    expect(
+      subtitleTypographyScale(
+        boundaryManifest.characters[1]?.displayName ?? "",
+        boundaryLine.subtitleText
+      )
+    ).toBeLessThan(1);
+    expect(
+      await differentPixelsInRegion(withSubtitle, withoutSubtitle, {
+        left: SUBTITLE_SAFE_AREA_PX / renderManifestRenderingFixture.width,
+        right:
+          (renderManifestRenderingFixture.width - SUBTITLE_SAFE_AREA_PX) /
+          renderManifestRenderingFixture.width,
+        top: SUBTITLE_SAFE_AREA_PX / renderManifestRenderingFixture.height,
+        bottom:
+          (renderManifestRenderingFixture.height - SUBTITLE_SAFE_AREA_PX) /
+          renderManifestRenderingFixture.height
+      })
+    ).toBeGreaterThan(0);
+
+    const outsideSafeArea = [
+      {
+        left: 0,
+        right: 1,
+        top: 0,
+        bottom: SUBTITLE_SAFE_AREA_PX / renderManifestRenderingFixture.height
+      },
+      {
+        left: 0,
+        right: 1,
+        top:
+          (renderManifestRenderingFixture.height - SUBTITLE_SAFE_AREA_PX) /
+          renderManifestRenderingFixture.height,
+        bottom: 1
+      },
+      {
+        left: 0,
+        right: SUBTITLE_SAFE_AREA_PX / renderManifestRenderingFixture.width,
+        top: SUBTITLE_SAFE_AREA_PX / renderManifestRenderingFixture.height,
+        bottom:
+          (renderManifestRenderingFixture.height - SUBTITLE_SAFE_AREA_PX) /
+          renderManifestRenderingFixture.height
+      },
+      {
+        left:
+          (renderManifestRenderingFixture.width - SUBTITLE_SAFE_AREA_PX) /
+          renderManifestRenderingFixture.width,
+        right: 1,
+        top: SUBTITLE_SAFE_AREA_PX / renderManifestRenderingFixture.height,
+        bottom:
+          (renderManifestRenderingFixture.height - SUBTITLE_SAFE_AREA_PX) /
+          renderManifestRenderingFixture.height
+      }
+    ];
+    for (const region of outsideSafeArea) {
+      expect(
+        await differentPixelsInRegion(withSubtitle, withoutSubtitle, region)
+      ).toBe(0);
+    }
+
+    expect(SUBTITLE_SAFE_AREA_HEIGHT_PX).toBe(
+      renderManifestRenderingFixture.height - SUBTITLE_SAFE_AREA_PX * 2
+    );
   }, 180_000);
 });
 

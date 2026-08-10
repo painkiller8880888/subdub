@@ -19,6 +19,18 @@ export const DESIGN_COLORS = {
 } as const;
 
 export const SUBTITLE_SAFE_AREA_PX = 60 as const;
+export const SUBTITLE_SAFE_AREA_HEIGHT_PX = 960 as const;
+
+const SUBTITLE_CARD_HORIZONTAL_PADDING_PX = 60 as const;
+const SUBTITLE_CARD_VERTICAL_PADDING_PX = 32 as const;
+const SUBTITLE_CONTENT_WIDTH_PX =
+  1920 - SUBTITLE_SAFE_AREA_PX * 2 - SUBTITLE_CARD_HORIZONTAL_PADDING_PX;
+const SUBTITLE_ESTIMATED_GLYPH_WIDTH_EM = 2 as const;
+const SUBTITLE_BODY_FONT_SIZE_PX = 38 as const;
+const SUBTITLE_BODY_LINE_HEIGHT = 1.4 as const;
+const SUBTITLE_LABEL_FONT_SIZE_PX = 26 as const;
+const SUBTITLE_LABEL_LINE_HEIGHT = 1.2 as const;
+const SUBTITLE_LABEL_MARGIN_BOTTOM_PX = 4 as const;
 
 export type CharacterSide = "left" | "right";
 
@@ -79,6 +91,45 @@ export function subtitleContainerStyle(side: CharacterSide): CSSProperties {
     justifyContent: side === "left" ? "flex-start" : "flex-end",
     pointerEvents: "none"
   };
+}
+
+function estimateSubtitleLineCount(text: string, fontSizePx: number): number {
+  const charactersPerLine = Math.max(
+    1,
+    Math.floor(
+      SUBTITLE_CONTENT_WIDTH_PX /
+        (fontSizePx * SUBTITLE_ESTIMATED_GLYPH_WIDTH_EM)
+    )
+  );
+
+  return text.split(/\r\n|\r|\n/).reduce((lineCount, line) => {
+    const characterCount = Array.from(line).length;
+    return (
+      lineCount + Math.max(1, Math.ceil(characterCount / charactersPerLine))
+    );
+  }, 0);
+}
+
+export function subtitleTypographyScale(
+  displayName: string,
+  subtitleText: string
+): number {
+  const estimatedLabelHeight =
+    estimateSubtitleLineCount(displayName, SUBTITLE_LABEL_FONT_SIZE_PX) *
+    SUBTITLE_LABEL_FONT_SIZE_PX *
+    SUBTITLE_LABEL_LINE_HEIGHT;
+  const estimatedBodyHeight =
+    estimateSubtitleLineCount(subtitleText, SUBTITLE_BODY_FONT_SIZE_PX) *
+    SUBTITLE_BODY_FONT_SIZE_PX *
+    SUBTITLE_BODY_LINE_HEIGHT;
+  const estimatedTextHeight =
+    estimatedLabelHeight +
+    SUBTITLE_LABEL_MARGIN_BOTTOM_PX +
+    estimatedBodyHeight;
+  const availableTextHeight =
+    SUBTITLE_SAFE_AREA_HEIGHT_PX - SUBTITLE_CARD_VERTICAL_PADDING_PX;
+
+  return Math.min(1, availableTextHeight / estimatedTextHeight);
 }
 
 export type ResolvedSubtitleContent = Readonly<{

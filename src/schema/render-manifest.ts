@@ -22,6 +22,20 @@ export const sourceAssetChecksumSchema = strictObject({
   sha256: sha256Schema
 });
 
+export const RENDER_MANIFEST_MAX_SUBTITLE_TEXT_LENGTH = 160 as const;
+export const RENDER_MANIFEST_MAX_SUBTITLE_LINES = 12 as const;
+
+export const renderSubtitleTextSchema = z
+  .string()
+  .max(
+    RENDER_MANIFEST_MAX_SUBTITLE_TEXT_LENGTH,
+    `subtitleText must be at most ${RENDER_MANIFEST_MAX_SUBTITLE_TEXT_LENGTH} characters`
+  )
+  .refine(
+    (value) => value.split(/\r\n|\r|\n/).length <= RENDER_MANIFEST_MAX_SUBTITLE_LINES,
+    `subtitleText must contain at most ${RENDER_MANIFEST_MAX_SUBTITLE_LINES} lines`
+  );
+
 export const renderLineSchema = strictObject({
   id: idSchema,
   sectionId: idSchema,
@@ -30,7 +44,7 @@ export const renderLineSchema = strictObject({
   speechFrom: nonNegativeIntegerSchema,
   speechDurationInFrames: positiveIntegerSchema,
   audioPath: relativePosixPathSchema,
-  subtitleText: z.string(),
+  subtitleText: renderSubtitleTextSchema,
   speakerId: idSchema,
   expression: expressionSchema,
   characterVariantId: idSchema

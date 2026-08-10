@@ -68,6 +68,19 @@ describe("renderManifestSchema", () => {
     expectInvalid(unknownCharacterKey, ["characters", 0]);
   });
 
+  it("limits subtitle text length and explicit line count", () => {
+    const tooLong = clone(renderManifestFixture);
+    tooLong.lines[0].subtitleText = "あ".repeat(161);
+    expectInvalid(tooLong, ["lines", 0, "subtitleText"]);
+
+    const tooManyLines = clone(renderManifestFixture);
+    tooManyLines.lines[0].subtitleText = Array.from(
+      { length: 13 },
+      (_, index) => `行${index + 1}`
+    ).join("\n");
+    expectInvalid(tooManyLines, ["lines", 0, "subtitleText"]);
+  });
+
   it("does not accept the previous render manifest version", () => {
     const legacy = JSON.parse(JSON.stringify(renderManifestFixture)) as Record<
       string,

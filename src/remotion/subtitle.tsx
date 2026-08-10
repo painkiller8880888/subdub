@@ -4,7 +4,8 @@ import type { RenderLine, RenderManifest } from "../schema/index";
 import { DESIGN_COLORS } from "./layout";
 import {
   resolveSubtitleContent,
-  subtitleContainerStyle
+  subtitleContainerStyle,
+  subtitleTypographyScale
 } from "./layout-helpers";
 
 export function SubtitleLayer({
@@ -21,6 +22,7 @@ export function SubtitleLayer({
 
   const { displayName, side, speakerColor, subtitleText } =
     resolveSubtitleContent(manifest, line);
+  const typographyScale = subtitleTypographyScale(displayName, subtitleText);
 
   return (
     <div style={subtitleContainerStyle(side)}>
@@ -30,6 +32,7 @@ export function SubtitleLayer({
           maxWidth: "100%",
           minWidth: 0,
           boxSizing: "border-box",
+          maxHeight: "100%",
           padding: "16px 30px",
           borderRadius: 16,
           backgroundColor: DESIGN_COLORS.subtitleBackground,
@@ -48,18 +51,22 @@ export function SubtitleLayer({
         <div
           style={{
             color: speakerColor,
-            fontSize: 26,
             fontWeight: 800,
             lineHeight: 1.2,
             marginBottom: 4,
-            whiteSpace: "nowrap"
+            maxWidth: "100%",
+            minWidth: 0,
+            whiteSpace: "pre-wrap",
+            overflowWrap: "anywhere",
+            wordBreak: "break-word",
+            fontSize: 26 * typographyScale
           }}
         >
           {displayName}
         </div>
         <div
           style={{
-            fontSize: 38,
+            fontSize: 38 * typographyScale,
             whiteSpace: "pre-wrap",
             overflowWrap: "anywhere",
             wordBreak: "break-word"
