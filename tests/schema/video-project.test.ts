@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  DEFAULT_SOUND_EFFECT_VOLUME,
+  createSoundEffect,
   videoProjectSchema,
   type VideoProject
 } from "../../src/schema/index.js";
@@ -35,6 +37,23 @@ describe("videoProjectSchema", () => {
     const result = videoProjectSchema.safeParse(clone(videoProjectFixture));
 
     expect(result.success).toBe(true);
+  });
+
+  it("defaults newly created sound effects to 0.2 without rewriting explicit volume", () => {
+    const draft = {
+      id: "created-effect",
+      soundEffectAssetId: "created-asset",
+      assetChecksum: "a".repeat(64),
+      projectMediaPath: "media/created-effect.wav",
+      category: "confirm" as const,
+      lineId: "main-learner-1",
+      offsetMs: 0
+    };
+
+    expect(DEFAULT_SOUND_EFFECT_VOLUME).toBe(0.2);
+    expect(createSoundEffect(draft).volume).toBe(0.2);
+    expect(createSoundEffect({ ...draft, volume: 0 }).volume).toBe(0);
+    expect(createSoundEffect({ ...draft, volume: 0.35 }).volume).toBe(0.35);
   });
 
   it("rejects unknown keys at the root and in deep objects", () => {
