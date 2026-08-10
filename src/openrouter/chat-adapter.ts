@@ -20,6 +20,7 @@ export type OutlineChatRequest = {
   readonly zdr: boolean;
   readonly dataCollection: "deny";
   readonly allowProviderFallbacks: true;
+  readonly schemaName?: string;
 };
 
 export type ChatTokenUsage = {
@@ -195,7 +196,7 @@ export class OpenRouterChatAdapter {
     const responseFormat = {
       type: "json_schema",
       json_schema: {
-        name: "subdub_outline_generation",
+        name: input.schemaName ?? "subdub_outline_generation",
         strict: true,
         schema: input.jsonSchema
       }

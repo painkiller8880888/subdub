@@ -98,6 +98,18 @@ describe("OpenRouterChatAdapter", () => {
       data_collection: "deny",
       allow_fallbacks: true
     });
+
+    await adapter.complete({
+      ...request,
+      schemaName: "subdub_visual_search_intent"
+    });
+    expect(body?.response_format).toMatchObject({
+      type: "json_schema",
+      json_schema: {
+        name: "subdub_visual_search_intent",
+        strict: true
+      }
+    });
   });
 
   it("does not retry invalid content, empty content, or non-retryable status", async () => {

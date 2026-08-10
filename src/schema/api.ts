@@ -33,6 +33,12 @@ import {
   normalizeAssetSearchQuery,
   normalizeAssetTextField
 } from "./asset.js";
+import {
+  visualSuggestionRequestSchema,
+  visualSuggestionResponseSchema,
+  type VisualSuggestionRequest,
+  type VisualSuggestionResponse
+} from "./visual-search-intent.js";
 
 const apiErrorPathSegmentSchema = z.union([z.string(), z.number().int()]);
 
@@ -453,6 +459,11 @@ export type AssetDetailResponse = z.infer<typeof assetDetailResponseSchema>;
 export type AssetListQuery = z.infer<typeof assetListQuerySchema>;
 export type AssetListResponse = z.infer<typeof assetListResponseSchema>;
 export type AssetIdParams = z.infer<typeof assetIdParamsSchema>;
+export {
+  visualSuggestionRequestSchema,
+  visualSuggestionResponseSchema
+};
+export type { VisualSuggestionRequest, VisualSuggestionResponse };
 
 export function createApiSuccessResponse<T>(
   data: T

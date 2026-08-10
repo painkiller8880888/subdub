@@ -13,12 +13,14 @@ import { registerApiErrorHandler } from "./middleware/error-handler.js";
 import { registerNotFoundHandler } from "./middleware/not-found-handler.js";
 import { registerModelRoutes } from "./routes/models.js";
 import { registerOutlineRoutes } from "./routes/outline.js";
+import { registerVisualSuggestionRoutes } from "./routes/visual-suggestions.js";
 import { registerProjectRoutes } from "./routes/projects.js";
 import {
   registerTerminologyRoutes,
   type TerminologyServicePort
 } from "./routes/terminology.js";
 import { registerAssetRoutes, type AssetServicePort } from "./routes/assets.js";
+import { VisualSuggestionService } from "../app/projects/visual-suggestion-service.js";
 
 export type AppOptions = {
   logger?: FastifyServerOptions["logger"];
@@ -28,6 +30,7 @@ export type AppOptions = {
   >;
   projectService?: ProjectService;
   outlineGenerationService?: Pick<OutlineGenerationService, "generate">;
+  visualSuggestionService?: Pick<VisualSuggestionService, "generate">;
   terminologyService?: TerminologyServicePort;
   assetService?: AssetServicePort;
   assetUploadLimits?: AssetUploadLimits;
@@ -52,6 +55,10 @@ export function buildApp(options: AppOptions = {}): FastifyInstance {
 
   if (options.outlineGenerationService !== undefined) {
     registerOutlineRoutes(app, options.outlineGenerationService);
+  }
+
+  if (options.visualSuggestionService !== undefined) {
+    registerVisualSuggestionRoutes(app, options.visualSuggestionService);
   }
 
   if (options.terminologyService !== undefined) {

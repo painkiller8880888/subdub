@@ -2,11 +2,12 @@ import { z } from "zod";
 
 import { isoUtcDateTimeSchema } from "./primitives.js";
 import { sha256Schema, strictObject } from "./primitives.js";
+import { aiTaskKindSchema } from "./video-project.js";
 
 export const aiRunLogSchema = strictObject({
   runId: z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/),
   kind: z.literal("ai"),
-  taskKind: z.literal("outline_generation"),
+  taskKind: aiTaskKindSchema,
   projectId: z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/),
   startRevision: z.number().int().nonnegative(),
   sourceHash: sha256Schema,

@@ -164,6 +164,42 @@ export function isProjectContextCurrent(
   );
 }
 
+export type VisualSuggestionRequestContext = {
+  readonly projectId: string;
+  readonly projectGeneration: number;
+  readonly sectionId: string;
+  readonly startLineId: string;
+  readonly endLineId: string;
+  readonly expectedRevision: number;
+};
+
+export type VisualSuggestionCurrentContext = {
+  readonly projectId: string;
+  readonly projectGeneration: number;
+  readonly sectionId: string;
+  readonly startLineId: string;
+  readonly endLineId: string;
+  readonly revision: number;
+};
+
+export function isVisualSuggestionContextCurrent(
+  current: VisualSuggestionCurrentContext,
+  requested: VisualSuggestionRequestContext
+): boolean {
+  return (
+    isProjectContextCurrent(
+      current.projectId,
+      current.projectGeneration,
+      requested.projectId,
+      requested.projectGeneration
+    ) &&
+    current.sectionId === requested.sectionId &&
+    current.startLineId === requested.startLineId &&
+    current.endLineId === requested.endLineId &&
+    current.revision === requested.expectedRevision
+  );
+}
+
 export function scriptStatusAfterEdit(
   previousStatus: Script["status"],
   candidateStatus: Script["status"]
