@@ -32,8 +32,50 @@ export const renderLineSchema = strictObject({
   audioPath: relativePosixPathSchema,
   subtitleText: z.string(),
   speakerId: idSchema,
-  expression: expressionSchema
+  expression: expressionSchema,
+  characterVariantId: idSchema
 });
+
+const renderCharacterFileSchema = strictObject({
+  path: relativePosixPathSchema,
+  sha256: sha256Schema
+});
+
+const renderSingleImageFilesSchema = strictObject({
+  single: renderCharacterFileSchema
+});
+
+const renderMouthPairFilesSchema = strictObject({
+  closed: renderCharacterFileSchema,
+  open: renderCharacterFileSchema
+});
+
+export const renderCharacterSchema = strictObject({
+  characterId: idSchema,
+  idleVariantId: idSchema
+});
+
+export const renderSingleImageCharacterVariantSchema = strictObject({
+  variantId: idSchema,
+  characterId: idSchema,
+  renderType: z.literal("single-image"),
+  files: renderSingleImageFilesSchema
+});
+
+export const renderMouthPairCharacterVariantSchema = strictObject({
+  variantId: idSchema,
+  characterId: idSchema,
+  renderType: z.literal("mouth-pair"),
+  files: renderMouthPairFilesSchema
+});
+
+export const renderCharacterVariantSchema = z.discriminatedUnion(
+  "renderType",
+  [
+    renderSingleImageCharacterVariantSchema,
+    renderMouthPairCharacterVariantSchema
+  ]
+);
 
 const renderVisualFields = {
   id: idSchema,
@@ -106,8 +148,13 @@ export const renderInsertSchema = strictObject({
 });
 
 const renderManifestBaseSchema = strictObject({
-  manifestVersion: z.literal("1.0.0"),
+  manifestVersion: z.literal("2.0.0"),
   sourceProjectHash: sha256Schema,
+  compilerInputHash: sha256Schema,
+  characterCatalogVersion: z.string().min(1),
+  characterMappingVersion: z.string().min(1),
+  characters: z.array(renderCharacterSchema),
+  characterVariants: z.array(renderCharacterVariantSchema),
   sourceAssetChecksums: z.array(sourceAssetChecksumSchema),
   fps: positiveIntegerSchema,
   width: positiveIntegerSchema,
@@ -214,6 +261,23 @@ export const renderManifestSchema = renderManifestBaseSchema.superRefine(
     );
 
     addDuplicateIssues(
+      manifest.characters.map((character, index) => ({
+        value: character.characterId,
+        path: ["characters", index, "characterId"]
+      })),
+      ctx,
+      "render character id"
+    );
+    addDuplicateIssues(
+      manifest.characterVariants.map((variant, index) => ({
+        value: variant.variantId,
+        path: ["characterVariants", index, "variantId"]
+      })),
+      ctx,
+      "render character variant id"
+    );
+
+    addDuplicateIssues(
       manifest.lines.map((line, index) => ({
         value: line.id,
         path: ["lines", index, "id"]
@@ -301,6 +365,50 @@ export const renderManifestSchema = renderManifestBaseSchema.superRefine(
 
     const lineById = new Map<string, (typeof manifest.lines)[number]>();
     const sectionIds = new Set<string>();
+    const characterById = new Map<
+      string,
+      (typeof manifest.characters)[number]
+    >();
+    const variantById = new Map<
+      string,
+      (typeof manifest.characterVariants)[number]
+    >();
+
+    for (const [index, character] of manifest.characters.entries()) {
+      if (!characterById.has(character.characterId)) {
+        characterById.set(character.characterId, character);
+      }
+      const idleVariant = manifest.characterVariants.find(
+        (variant) => variant.variantId === character.idleVariantId
+      );
+      if (idleVariant === undefined) {
+        addIssue(
+          ctx,
+          ["characters", index, "idleVariantId"],
+          "idleVariantId must reference a character variant"
+        );
+      } else if (idleVariant.characterId !== character.characterId) {
+        addIssue(
+          ctx,
+          ["characters", index, "idleVariantId"],
+          "idleVariantId must reference a variant for the same character"
+        );
+      }
+    }
+
+    for (const [index, variant] of manifest.characterVariants.entries()) {
+      if (!variantById.has(variant.variantId)) {
+        variantById.set(variant.variantId, variant);
+      }
+      if (!characterById.has(variant.characterId)) {
+        addIssue(
+          ctx,
+          ["characterVariants", index, "characterId"],
+          "character variant characterId must reference a render character"
+        );
+      }
+    }
+
     for (const [index, line] of manifest.lines.entries()) {
       if (!lineById.has(line.id)) {
         lineById.set(line.id, line);
@@ -315,6 +423,29 @@ export const renderManifestSchema = renderManifestBaseSchema.superRefine(
           ctx,
           ["lines", index, "speechDurationInFrames"],
           "speech interval must fit within the line interval"
+        );
+      }
+
+      const speaker = characterById.get(line.speakerId);
+      if (speaker === undefined) {
+        addIssue(
+          ctx,
+          ["lines", index, "speakerId"],
+          "speakerId must reference a render character"
+        );
+      }
+      const variant = variantById.get(line.characterVariantId);
+      if (variant === undefined) {
+        addIssue(
+          ctx,
+          ["lines", index, "characterVariantId"],
+          "characterVariantId must reference a character variant"
+        );
+      } else if (variant.characterId !== line.speakerId) {
+        addIssue(
+          ctx,
+          ["lines", index, "characterVariantId"],
+          "characterVariantId must reference a variant for the line speaker"
         );
       }
     }
@@ -465,6 +596,10 @@ export const renderManifestSchema = renderManifestBaseSchema.superRefine(
 
 export type SourceAssetChecksum = z.infer<typeof sourceAssetChecksumSchema>;
 export type RenderLine = z.infer<typeof renderLineSchema>;
+export type RenderCharacter = z.infer<typeof renderCharacterSchema>;
+export type RenderCharacterVariant = z.infer<
+  typeof renderCharacterVariantSchema
+>;
 export type RenderVisual = z.infer<typeof renderVisualSchema>;
 export type RenderBackground = z.infer<typeof renderBackgroundSchema>;
 export type RenderAudioTrack = z.infer<typeof renderAudioTrackSchema>;
