@@ -17,11 +17,22 @@ import {
 } from "../../src/schema/index.js";
 import {
   findCharacterVariant,
+  selectCharacterImagePathForFrame,
+  selectCharacterImageSlotForFrame,
   selectActiveBackground,
   selectActiveLines,
   selectActiveVisuals,
   selectCharacterVariantForFrame
 } from "../../src/remotion/selection.js";
+import {
+  characterLayerStyle,
+  resolveCharacterThemeColor,
+  resolveSubtitleContent,
+  SUBTITLE_SAFE_AREA_PX,
+  SUBTITLE_SAFE_AREA_HEIGHT_PX,
+  subtitleTypographyScale,
+  subtitleContainerStyle
+} from "../../src/remotion/layout-helpers.js";
 
 const repositoryRoot = fileURLToPath(new URL("../../", import.meta.url));
 const remotionEntryPoint = path.join(
@@ -84,7 +95,8 @@ async function preparePublicDirectory(): Promise<string> {
 
 async function renderFixtureFrame(
   frame: number,
-  name: string
+  name: string,
+  props: Record<string, unknown> = inputProps
 ): Promise<Buffer> {
   if (bundleDirectory === undefined || composition === undefined) {
     throw new Error("Remotion bundle has not been initialized");
@@ -93,11 +105,24 @@ async function renderFixtureFrame(
     throw new Error("Remotion output directory has not been initialized");
   }
 
+  const selectedComposition =
+    props === inputProps
+      ? composition
+      : await selectComposition({
+          serveUrl: bundleDirectory,
+          id: "BasicRemotionComposition",
+          inputProps: props,
+          browserExecutable
+        });
+  if (selectedComposition === undefined) {
+    throw new Error("Remotion composition could not be selected");
+  }
+
   const output = path.join(outputDirectory, `${name}.png`);
   await renderStill({
     serveUrl: bundleDirectory,
-    composition,
-    inputProps,
+    composition: selectedComposition,
+    inputProps: props,
     browserExecutable,
     frame,
     imageFormat: "png",
@@ -180,6 +205,47 @@ async function warningPixelsInRegion(
   return count;
 }
 
+async function differentPixelsInRegion(
+  first: Buffer,
+  second: Buffer,
+  region: {
+    left: number;
+    right: number;
+    top: number;
+    bottom: number;
+  }
+): Promise<number> {
+  const [firstImage, secondImage] = await Promise.all([
+    sharp(first).ensureAlpha().raw().toBuffer({ resolveWithObject: true }),
+    sharp(second).ensureAlpha().raw().toBuffer({ resolveWithObject: true })
+  ]);
+  expect(firstImage.info.width).toBe(secondImage.info.width);
+  expect(firstImage.info.height).toBe(secondImage.info.height);
+
+  const left = Math.floor(firstImage.info.width * region.left);
+  const right = Math.ceil(firstImage.info.width * region.right);
+  const top = Math.floor(firstImage.info.height * region.top);
+  const bottom = Math.ceil(firstImage.info.height * region.bottom);
+  let count = 0;
+
+  for (let y = top; y < bottom; y += 1) {
+    for (let x = left; x < right; x += 1) {
+      const offset = (y * firstImage.info.width + x) * 4;
+      for (let channel = 0; channel < 4; channel += 1) {
+        if (
+          firstImage.data[offset + channel] !==
+          secondImage.data[offset + channel]
+        ) {
+          count += 1;
+          break;
+        }
+      }
+    }
+  }
+
+  return count;
+}
+
 describe("RenderManifest interval selection", () => {
   const manifest = renderManifestFixture as RenderManifest;
 
@@ -217,6 +283,142 @@ describe("RenderManifest interval selection", () => {
     expect(
       findCharacterVariant(manifest, mentor.idleVariantId)?.renderType
     ).toBe("single-image");
+  });
+
+  it("selects closed and open mouth slots at deterministic speech boundaries", () => {
+    const mentor = manifest.characters.find(
+      (character) => character.characterId === "character-mentor"
+    );
+    const learner = manifest.characters.find(
+      (character) => character.characterId === "character-learner"
+    );
+    if (mentor === undefined || learner === undefined) {
+      throw new Error("character fixture is incomplete");
+    }
+
+    expect(selectCharacterImageSlotForFrame(manifest, mentor, 60)).toBe(
+      "closed"
+    );
+    expect(selectCharacterImageSlotForFrame(manifest, mentor, 62)).toBe(
+      "closed"
+    );
+    expect(selectCharacterImageSlotForFrame(manifest, mentor, 63)).toBe("open");
+    expect(selectCharacterImageSlotForFrame(manifest, mentor, 66)).toBe(
+      "closed"
+    );
+    expect(selectCharacterImageSlotForFrame(manifest, mentor, 100)).toBe(
+      "closed"
+    );
+    expect(selectCharacterImageSlotForFrame(manifest, mentor, 105)).toBe(
+      "single"
+    );
+
+    // The learner line has a three-frame pause before speech and a pause after
+    // speech while its mouth-pair variant remains selected.
+    expect(selectCharacterImageSlotForFrame(manifest, learner, 105)).toBe(
+      "closed"
+    );
+    expect(selectCharacterImageSlotForFrame(manifest, learner, 107)).toBe(
+      "closed"
+    );
+    expect(selectCharacterImageSlotForFrame(manifest, learner, 108)).toBe(
+      "closed"
+    );
+    expect(selectCharacterImageSlotForFrame(manifest, learner, 111)).toBe(
+      "open"
+    );
+    expect(selectCharacterImageSlotForFrame(manifest, learner, 143)).toBe(
+      "closed"
+    );
+    expect(selectCharacterImageSlotForFrame(manifest, learner, 145)).toBe(
+      "single"
+    );
+
+    const repeated = Array.from({ length: 24 }, (_, offset) =>
+      selectCharacterImageSlotForFrame(manifest, mentor, 60 + offset)
+    );
+    expect(repeated).toEqual(
+      Array.from({ length: 24 }, (_, offset) =>
+        selectCharacterImageSlotForFrame(manifest, mentor, 60 + offset)
+      )
+    );
+  });
+
+  it("moves only the speaking character and never invents a single-image mouth pair", () => {
+    const mentor = manifest.characters[0];
+    const learner = manifest.characters[1];
+    if (mentor === undefined || learner === undefined) {
+      throw new Error("character fixture is incomplete");
+    }
+
+    expect(
+      selectCharacterVariantForFrame(manifest, mentor, 63)?.variantId
+    ).toBe("character-mentor-speak-pointing-v1");
+    expect(selectCharacterImageSlotForFrame(manifest, mentor, 63)).toBe("open");
+    expect(
+      selectCharacterVariantForFrame(manifest, learner, 63)?.variantId
+    ).toBe(learner.idleVariantId);
+    expect(selectCharacterImageSlotForFrame(manifest, learner, 63)).toBe(
+      "single"
+    );
+    expect(selectCharacterImagePathForFrame(manifest, mentor, 60)).toMatch(
+      /\/closed\.png$/
+    );
+    expect(selectCharacterImagePathForFrame(manifest, mentor, 63)).toMatch(
+      /\/open\.png$/
+    );
+    expect(selectCharacterImagePathForFrame(manifest, learner, 63)).toMatch(
+      /\/stand\.png$/
+    );
+  });
+
+  it("renders the manifest speaker label and keeps subtitle geometry in the safe area", () => {
+    const line = manifest.lines.find(
+      (candidate) => candidate.id === "main-learner-1"
+    );
+    if (line === undefined) {
+      throw new Error("long learner subtitle fixture is missing");
+    }
+    const subtitle = resolveSubtitleContent(manifest, line);
+    expect(subtitle.displayName).toBe("ずんだもん");
+    expect(subtitle.speakerColor).toBe(
+      resolveCharacterThemeColor("character.zundamon")
+    );
+    expect(subtitle.subtitleText).toBe(line.subtitleText);
+    expect(subtitle.side).toBe("right");
+    expect(
+      subtitleTypographyScale(subtitle.displayName, subtitle.subtitleText)
+    ).toBe(1);
+
+    const side = subtitleContainerStyle(subtitle.side);
+    expect(side).toMatchObject({
+      left: SUBTITLE_SAFE_AREA_PX,
+      right: SUBTITLE_SAFE_AREA_PX,
+      top: SUBTITLE_SAFE_AREA_PX,
+      bottom: SUBTITLE_SAFE_AREA_PX,
+      boxSizing: "border-box",
+      justifyContent: "flex-end"
+    });
+    expect(subtitleContainerStyle("left")).toMatchObject({
+      left: SUBTITLE_SAFE_AREA_PX,
+      right: SUBTITLE_SAFE_AREA_PX,
+      top: SUBTITLE_SAFE_AREA_PX,
+      bottom: SUBTITLE_SAFE_AREA_PX
+    });
+  });
+
+  it("keeps character geometry independent of the selected mouth slot", () => {
+    const closedStyle = characterLayerStyle(0, false, "character.metan");
+    const openStyle = characterLayerStyle(0, false, "character.metan");
+    expect(openStyle).toEqual(closedStyle);
+    expect(closedStyle).toMatchObject({
+      left: "4%",
+      bottom: 124,
+      width: "25%",
+      height: "48%",
+      objectFit: "contain",
+      objectPosition: "bottom center"
+    });
   });
 });
 
@@ -260,6 +462,7 @@ describe("basic Remotion composition", () => {
     const frames = [
       { frame: 80, name: "video" },
       { frame: 220, name: "photo" },
+      { frame: 260, name: "long-subtitle" },
       { frame: 390, name: "document" }
     ];
     const rendered = [] as Array<{
@@ -315,6 +518,128 @@ describe("basic Remotion composition", () => {
       throw new Error("video still was not rendered");
     }
     expect(repeat.equals(first.buffer)).toBe(true);
+
+    const closed = await renderFixtureFrame(210, "mentor-closed");
+    const open = await renderFixtureFrame(213, "mentor-open");
+    expect(
+      await differentPixelsInRegion(closed, open, {
+        left: 0,
+        right: 0.35,
+        top: 0.35,
+        bottom: 0.95
+      })
+    ).toBeGreaterThan(0);
+    expect(
+      await differentPixelsInRegion(closed, open, {
+        left: 0.65,
+        right: 1,
+        top: 0.35,
+        bottom: 0.95
+      })
+    ).toBe(0);
+  }, 180_000);
+
+  it("shrinks long multi-line subtitles so their rendered pixels stay in the safe area", async () => {
+    const boundaryManifest = structuredClone(
+      renderManifestRenderingFixture
+    ) as RenderManifest;
+    const boundaryLine = boundaryManifest.lines.find(
+      (line) => line.id === "main-learner-1"
+    );
+    if (boundaryLine === undefined) {
+      throw new Error("subtitle boundary fixture line is missing");
+    }
+    boundaryLine.subtitleText = [
+      "あ".repeat(137),
+      ...Array.from({ length: 12 }, () => "行")
+    ].join("\n");
+    expect(boundaryLine.subtitleText.length).toBe(161);
+    expect(boundaryLine.subtitleText.split("\n")).toHaveLength(13);
+    expect(renderManifestSchema.safeParse(boundaryManifest).success).toBe(true);
+    const noSubtitleManifest = structuredClone(
+      boundaryManifest
+    ) as RenderManifest;
+    const noSubtitleLine = noSubtitleManifest.lines.find(
+      (line) => line.id === "main-learner-1"
+    );
+    if (noSubtitleLine === undefined) {
+      throw new Error("subtitle boundary comparison line is missing");
+    }
+    noSubtitleLine.subtitleText = "";
+
+    const withSubtitle = await renderFixtureFrame(
+      260,
+      "subtitle-safe-area-boundary",
+      boundaryManifest as unknown as Record<string, unknown>
+    );
+    const withoutSubtitle = await renderFixtureFrame(
+      260,
+      "subtitle-safe-area-boundary-empty",
+      noSubtitleManifest as unknown as Record<string, unknown>
+    );
+
+    expect(
+      subtitleTypographyScale(
+        boundaryManifest.characters[1]?.displayName ?? "",
+        boundaryLine.subtitleText
+      )
+    ).toBeLessThan(1);
+    expect(
+      await differentPixelsInRegion(withSubtitle, withoutSubtitle, {
+        left: SUBTITLE_SAFE_AREA_PX / renderManifestRenderingFixture.width,
+        right:
+          (renderManifestRenderingFixture.width - SUBTITLE_SAFE_AREA_PX) /
+          renderManifestRenderingFixture.width,
+        top: SUBTITLE_SAFE_AREA_PX / renderManifestRenderingFixture.height,
+        bottom:
+          (renderManifestRenderingFixture.height - SUBTITLE_SAFE_AREA_PX) /
+          renderManifestRenderingFixture.height
+      })
+    ).toBeGreaterThan(0);
+
+    const outsideSafeArea = [
+      {
+        left: 0,
+        right: 1,
+        top: 0,
+        bottom: SUBTITLE_SAFE_AREA_PX / renderManifestRenderingFixture.height
+      },
+      {
+        left: 0,
+        right: 1,
+        top:
+          (renderManifestRenderingFixture.height - SUBTITLE_SAFE_AREA_PX) /
+          renderManifestRenderingFixture.height,
+        bottom: 1
+      },
+      {
+        left: 0,
+        right: SUBTITLE_SAFE_AREA_PX / renderManifestRenderingFixture.width,
+        top: SUBTITLE_SAFE_AREA_PX / renderManifestRenderingFixture.height,
+        bottom:
+          (renderManifestRenderingFixture.height - SUBTITLE_SAFE_AREA_PX) /
+          renderManifestRenderingFixture.height
+      },
+      {
+        left:
+          (renderManifestRenderingFixture.width - SUBTITLE_SAFE_AREA_PX) /
+          renderManifestRenderingFixture.width,
+        right: 1,
+        top: SUBTITLE_SAFE_AREA_PX / renderManifestRenderingFixture.height,
+        bottom:
+          (renderManifestRenderingFixture.height - SUBTITLE_SAFE_AREA_PX) /
+          renderManifestRenderingFixture.height
+      }
+    ];
+    for (const region of outsideSafeArea) {
+      expect(
+        await differentPixelsInRegion(withSubtitle, withoutSubtitle, region)
+      ).toBe(0);
+    }
+
+    expect(SUBTITLE_SAFE_AREA_HEIGHT_PX).toBe(
+      renderManifestRenderingFixture.height - SUBTITLE_SAFE_AREA_PX * 2
+    );
   }, 180_000);
 });
 

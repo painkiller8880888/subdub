@@ -52,6 +52,9 @@ const renderMouthPairFilesSchema = strictObject({
 
 export const renderCharacterSchema = strictObject({
   characterId: idSchema,
+  displayName: z.string(),
+  themeColorToken: z.enum(["character.metan", "character.zundamon"]),
+  lipSyncPeriodFrames: positiveIntegerSchema,
   idleVariantId: idSchema
 });
 
@@ -148,7 +151,7 @@ export const renderInsertSchema = strictObject({
 });
 
 const renderManifestBaseSchema = strictObject({
-  manifestVersion: z.literal("2.0.0"),
+  manifestVersion: z.literal("2.1.0"),
   sourceProjectHash: sha256Schema,
   compilerInputHash: sha256Schema,
   characterCatalogVersion: z.string().min(1),

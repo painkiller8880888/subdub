@@ -34,7 +34,7 @@ describe("compileRenderManifest", () => {
       return;
     }
 
-    expect(result.manifest.manifestVersion).toBe("2.0.0");
+    expect(result.manifest.manifestVersion).toBe("2.1.0");
     expect(result.manifest.characterCatalogVersion).toBe(
       CHARACTER_VARIANT_CATALOG_VERSION
     );
@@ -44,10 +44,16 @@ describe("compileRenderManifest", () => {
     expect(result.manifest.characters).toEqual([
       {
         characterId: "character-mentor",
+        displayName: "四国めたん",
+        themeColorToken: "character.metan",
+        lipSyncPeriodFrames: 3,
         idleVariantId: "character-mentor-stand-v1"
       },
       {
         characterId: "character-learner",
+        displayName: "ずんだもん",
+        themeColorToken: "character.zundamon",
+        lipSyncPeriodFrames: 3,
         idleVariantId: "character-learner-stand-v1"
       }
     ]);
@@ -157,6 +163,51 @@ describe("compileRenderManifest", () => {
     expect(serializeRenderManifest(first.manifest)).toBe(
       serializeRenderManifest(second.manifest)
     );
+  });
+
+  it("changes the source hash when resolved character display metadata changes", () => {
+    const first = compileRenderManifest(validInput());
+    const changedProject = structuredClone(videoProjectFixture) as VideoProject;
+    changedProject.characters[0].name += "（変更）";
+    changedProject.characters[0].lipSyncPeriodFrames = 5;
+    const second = compileRenderManifest(validInput(changedProject));
+
+    expect(first.success).toBe(true);
+    expect(second.success).toBe(true);
+    if (!first.success || !second.success) {
+      return;
+    }
+    expect(second.manifest.characters[0]).toMatchObject({
+      displayName: "四国めたん（変更）",
+      lipSyncPeriodFrames: 5
+    });
+    expect(second.manifest.sourceProjectHash).not.toBe(
+      first.manifest.sourceProjectHash
+    );
+    expect(second.manifest.compilerInputHash).not.toBe(
+      first.manifest.compilerInputHash
+    );
+  });
+
+  it("keeps source-valid long subtitles renderable in the derived manifest", () => {
+    const project = structuredClone(videoProjectFixture) as VideoProject;
+    const sourceLine = project.script.sections[0]?.lines[0];
+    if (sourceLine === undefined) {
+      throw new Error("fixture source line is missing");
+    }
+    sourceLine.subtitleText = [
+      "あ".repeat(137),
+      ...Array.from({ length: 12 }, () => "行")
+    ].join("\n");
+
+    const result = compileRenderManifest(validInput(project));
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.manifest.lines[0]?.subtitleText).toBe(
+        sourceLine.subtitleText
+      );
+    }
   });
 
   it("collects independent approval, stale, audio, and material diagnostics", () => {
