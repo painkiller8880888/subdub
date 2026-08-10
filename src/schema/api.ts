@@ -40,6 +40,7 @@ import {
   type VisualSuggestionRequest,
   type VisualSuggestionResponse
 } from "./visual-search-intent.js";
+import { voicevoxResolvedSpeakerSchema } from "../voicevox/schemas.js";
 
 const apiErrorPathSegmentSchema = z.union([z.string(), z.number().int()]);
 
@@ -82,6 +83,15 @@ export const healthResponseSchema = z
     revision: z.number().int().nonnegative().optional()
   })
   .strict();
+
+export const voicevoxStatusDataSchema = strictObject({
+  available: z.literal(true),
+  speakers: z.array(voicevoxResolvedSpeakerSchema).length(2)
+});
+
+export const voicevoxStatusResponseSchema = strictObject({
+  data: voicevoxStatusDataSchema
+});
 
 export const projectCreateRequestSchema = z
   .object({
@@ -439,6 +449,10 @@ export type ApiSuccessResponse<T> = {
 };
 export type ApiErrorResponse = z.infer<typeof apiErrorResponseSchema>;
 export type HealthResponse = z.infer<typeof healthResponseSchema>;
+export type VoicevoxStatusData = z.infer<typeof voicevoxStatusDataSchema>;
+export type VoicevoxStatusResponse = z.infer<
+  typeof voicevoxStatusResponseSchema
+>;
 export type ProjectCreateRequest = z.infer<typeof projectCreateRequestSchema>;
 export type ProjectSummary = z.infer<typeof projectSummarySchema>;
 export type ProjectListResponse = z.infer<typeof projectListResponseSchema>;

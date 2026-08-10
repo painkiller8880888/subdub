@@ -20,6 +20,7 @@
     "build": "node scripts/build.mjs",
     "verify:build": "node scripts/verify-build.mjs",
     "verify:character-assets": "node node_modules/tsx/dist/cli.mjs scripts/verify-character-assets.ts",
+    "verify:voicevox": "node --env-file-if-exists=.env node_modules/tsx/dist/cli.mjs scripts/verify-voicevox.mjs",
     "start": "node --env-file-if-exists=.env dist/api/production.js",
     "verify": "node scripts/verify.mjs",
     "verify:openrouter:outline": "node --env-file-if-exists=.env node_modules/tsx/dist/cli.mjs scripts/verify-openrouter-outline.mjs"

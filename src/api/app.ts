@@ -22,6 +22,11 @@ import {
 import { registerAssetRoutes, type AssetServicePort } from "./routes/assets.js";
 import { VisualSuggestionService } from "../app/projects/visual-suggestion-service.js";
 import { registerVisualAssignmentRoutes } from "./routes/visual-assignments.js";
+import {
+  registerVoicevoxRoutes,
+  type VoicevoxStatusServicePort
+} from "./routes/voicevox.js";
+import { createVoicevoxStatusService } from "../voicevox/service.js";
 
 export type AppOptions = {
   logger?: FastifyServerOptions["logger"];
@@ -37,6 +42,7 @@ export type AppOptions = {
   assetService?: AssetServicePort;
   assetUploadLimits?: AssetUploadLimits;
   staticRoot?: string;
+  voicevoxService?: VoicevoxStatusServicePort;
 };
 
 export function buildApp(options: AppOptions = {}): FastifyInstance {
@@ -45,6 +51,10 @@ export function buildApp(options: AppOptions = {}): FastifyInstance {
   registerModelRoutes(
     app,
     options.modelService ?? createOpenRouterModelService()
+  );
+  registerVoicevoxRoutes(
+    app,
+    options.voicevoxService ?? createVoicevoxStatusService()
   );
 
   app.get("/api/health", async () =>
