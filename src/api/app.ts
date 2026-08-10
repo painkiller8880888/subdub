@@ -21,6 +21,8 @@ import {
 } from "./routes/terminology.js";
 import { registerAssetRoutes, type AssetServicePort } from "./routes/assets.js";
 import { VisualSuggestionService } from "../app/projects/visual-suggestion-service.js";
+import { VisualAssignmentService } from "../app/projects/visual-assignment-service.js";
+import { registerVisualAssignmentRoutes } from "./routes/visual-assignments.js";
 
 export type AppOptions = {
   logger?: FastifyServerOptions["logger"];
@@ -31,6 +33,7 @@ export type AppOptions = {
   projectService?: ProjectService;
   outlineGenerationService?: Pick<OutlineGenerationService, "generate">;
   visualSuggestionService?: Pick<VisualSuggestionService, "generate">;
+  visualAssignmentService?: Pick<VisualAssignmentService, "assign">;
   terminologyService?: TerminologyServicePort;
   assetService?: AssetServicePort;
   assetUploadLimits?: AssetUploadLimits;
@@ -59,6 +62,10 @@ export function buildApp(options: AppOptions = {}): FastifyInstance {
 
   if (options.visualSuggestionService !== undefined) {
     registerVisualSuggestionRoutes(app, options.visualSuggestionService);
+  }
+
+  if (options.visualAssignmentService !== undefined) {
+    registerVisualAssignmentRoutes(app, options.visualAssignmentService);
   }
 
   if (options.terminologyService !== undefined) {

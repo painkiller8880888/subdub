@@ -15,6 +15,7 @@ import {
   scriptSchema,
   videoProjectSchema
 } from "./video-project.js";
+import { displaySchema } from "./common.js";
 import {
   normalizeTerminologySearchValue,
   terminologyCategoryInputSchema,
@@ -165,6 +166,23 @@ export const projectMutationResponseSchema = z
     revision: nonNegativeIntegerSchema
   })
   .strict();
+
+export const visualAssignmentInputSchema = strictObject({
+  id: idSchema,
+  startLineId: idSchema,
+  endLineId: idSchema,
+  assetId: idSchema,
+  display: displaySchema
+});
+
+export const visualAssignmentRequestSchema = strictObject({
+  expectedRevision: nonNegativeIntegerSchema,
+  assignment: visualAssignmentInputSchema
+});
+
+export const visualAssignmentSaveRequestSchema = visualAssignmentRequestSchema;
+
+export const visualAssignmentResponseSchema = projectMutationResponseSchema;
 
 export const outlineGenerateRequestSchema = z
   .object({
@@ -412,6 +430,16 @@ export type ProjectBriefSaveRequest = z.infer<
 >;
 export type ProjectMutationResponse = z.infer<
   typeof projectMutationResponseSchema
+>;
+export type VisualAssignmentInput = z.infer<typeof visualAssignmentInputSchema>;
+export type VisualAssignmentRequest = z.infer<
+  typeof visualAssignmentRequestSchema
+>;
+export type VisualAssignmentSaveRequest = z.infer<
+  typeof visualAssignmentSaveRequestSchema
+>;
+export type VisualAssignmentResponse = z.infer<
+  typeof visualAssignmentResponseSchema
 >;
 export type OutlineGenerateRequest = z.infer<
   typeof outlineGenerateRequestSchema
