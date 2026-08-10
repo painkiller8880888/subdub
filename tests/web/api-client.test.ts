@@ -141,6 +141,9 @@ describe("web API client", () => {
     await expect(
       searchAssets({
         q: "申請フロー",
+        department: "総務部",
+        system: "申請システム",
+        status: "inactive",
         tagIds: ["tag-application", "tag-confirm"],
         pageSize: 12
       })
@@ -150,6 +153,9 @@ describe("web API client", () => {
     const query = new URLSearchParams(queryString);
     expect(query.getAll("tagIds")).toEqual(["tag-application", "tag-confirm"]);
     expect(query.get("q")).toBe("申請フロー");
+    expect(query.get("department")).toBe("総務部");
+    expect(query.get("system")).toBe("申請システム");
+    expect(query.get("status")).toBe("inactive");
   });
 
   it("uses a protocol error when an error response is not the common shape", async () => {

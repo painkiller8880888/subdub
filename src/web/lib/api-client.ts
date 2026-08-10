@@ -390,6 +390,15 @@ export async function searchAssets(
   if (query.kind !== undefined) {
     searchParams.set("kind", query.kind);
   }
+  if (query.department !== undefined) {
+    searchParams.set("department", query.department);
+  }
+  if (query.system !== undefined) {
+    searchParams.set("system", query.system);
+  }
+  if (query.status !== undefined) {
+    searchParams.set("status", query.status);
+  }
   for (const tagId of query.tagIds) {
     searchParams.append("tagIds", tagId);
   }
