@@ -23,6 +23,10 @@ import {
 } from "../../app/terminology/terminology-errors.js";
 import { AssetError } from "../../app/assets/asset-errors.js";
 import { VisualSuggestionError } from "../../app/projects/visual-suggestion-errors.js";
+import {
+  VISUAL_ASSIGNMENT_ERROR_CODE,
+  VisualAssignmentError
+} from "../../app/projects/visual-assignment-errors.js";
 
 export class ApiResponseValidationError extends Error {
   constructor(cause: unknown) {
@@ -60,7 +64,36 @@ export const API_ERROR_CODE = {
   assetTagNotFound: "ASSET_TAG_NOT_FOUND",
   assetUploadInterrupted: "ASSET_UPLOAD_INTERRUPTED",
   assetStagingFailed: "ASSET_STAGING_FAILED",
-  assetDatabaseFailed: "ASSET_DATABASE_FAILED"
+  assetDatabaseFailed: "ASSET_DATABASE_FAILED",
+  visualAssignmentProjectPathInvalid:
+    VISUAL_ASSIGNMENT_ERROR_CODE.projectPathInvalid,
+  visualAssignmentAssetNotFound: VISUAL_ASSIGNMENT_ERROR_CODE.assetNotFound,
+  visualAssignmentAssetNotActive: VISUAL_ASSIGNMENT_ERROR_CODE.assetNotActive,
+  visualAssignmentAssetChecksumUnavailable:
+    VISUAL_ASSIGNMENT_ERROR_CODE.assetChecksumUnavailable,
+  visualAssignmentAssetKindUnsupported:
+    VISUAL_ASSIGNMENT_ERROR_CODE.assetKindUnsupported,
+  visualAssignmentDisplayKindMismatch:
+    VISUAL_ASSIGNMENT_ERROR_CODE.displayKindMismatch,
+  visualAssignmentAssignmentIdConflict:
+    VISUAL_ASSIGNMENT_ERROR_CODE.assignmentIdConflict,
+  visualAssignmentLibraryPathInvalid:
+    VISUAL_ASSIGNMENT_ERROR_CODE.libraryPathInvalid,
+  visualAssignmentLibraryFileNotFound:
+    VISUAL_ASSIGNMENT_ERROR_CODE.libraryFileNotFound,
+  visualAssignmentMediaPathInvalid: VISUAL_ASSIGNMENT_ERROR_CODE.mediaPathInvalid,
+  visualAssignmentMediaPathCheckFailed:
+    VISUAL_ASSIGNMENT_ERROR_CODE.mediaPathCheckFailed,
+  visualAssignmentCopyFailed: VISUAL_ASSIGNMENT_ERROR_CODE.copyFailed,
+  visualAssignmentHashFailed: VISUAL_ASSIGNMENT_ERROR_CODE.hashFailed,
+  visualAssignmentChecksumMismatch:
+    VISUAL_ASSIGNMENT_ERROR_CODE.checksumMismatch,
+  visualAssignmentMediaPathConflict:
+    VISUAL_ASSIGNMENT_ERROR_CODE.mediaPathConflict,
+  visualAssignmentRenameFailed: VISUAL_ASSIGNMENT_ERROR_CODE.renameFailed,
+  visualAssignmentCandidateInvalid:
+    VISUAL_ASSIGNMENT_ERROR_CODE.candidateInvalid,
+  visualAssignmentCleanupFailed: VISUAL_ASSIGNMENT_ERROR_CODE.cleanupFailed
 };
 
 export type ApiErrorStatus =
@@ -577,6 +610,16 @@ export function mapApiError(error: unknown): MappedApiError {
       message: error.message,
       details: error.details,
       shouldLog: false
+    };
+  }
+
+  if (error instanceof VisualAssignmentError) {
+    return {
+      code: error.code,
+      status: error.status,
+      message: error.message,
+      details: error.details,
+      shouldLog: error.status >= 500
     };
   }
 

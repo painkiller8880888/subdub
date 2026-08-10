@@ -11,6 +11,7 @@ import {
 import { ProjectService } from "../app/projects/project-service.js";
 import { OutlineGenerationService } from "../app/projects/outline-generation-service.js";
 import { VisualSuggestionService } from "../app/projects/visual-suggestion-service.js";
+import { VisualAssignmentService } from "../app/projects/visual-assignment-service.js";
 import { TerminologyRepository } from "../app/terminology/terminology-repository.js";
 import { TerminologyService } from "../app/terminology/terminology-service.js";
 import { AssetRepository } from "../app/assets/asset-repository.js";
@@ -43,6 +44,7 @@ export type ServerOptions = AppOptions & {
   assetRepository?: AssetRepository;
   assetProcessingService?: AssetProcessingService;
   assetProcessingWorker?: AssetProcessingWorker;
+  visualAssignmentService?: Pick<VisualAssignmentService, "assign">;
   assetUploadLimits?: AssetUploadLimits;
   workspaceRoot?: string;
 };
@@ -82,6 +84,7 @@ export async function initializeServer(
     assetProcessingWorker,
     terminologyService: suppliedTerminologyService,
     projectService: suppliedProjectService,
+    visualAssignmentService: suppliedVisualAssignmentService,
     workspaceRoot = process.cwd(),
     ...appOptions
   } = options;
@@ -122,6 +125,14 @@ export async function initializeServer(
         modelService: resolvedModelService,
         chatAdapter: resolvedChatAdapter
       });
+    const resolvedVisualAssignmentService =
+      suppliedVisualAssignmentService ??
+      new VisualAssignmentService({
+        repository: resolvedProjectRepository,
+        assetRepository: resolvedAssetRepository,
+        workspaceRoot,
+        libraryRoot: path.join(workspaceRoot, "library")
+      });
     const resolvedTerminologyService =
       suppliedTerminologyService ??
       new TerminologyService({
@@ -152,6 +163,7 @@ export async function initializeServer(
       modelService: resolvedModelService,
       outlineGenerationService: resolvedOutlineGenerationService,
       visualSuggestionService: resolvedVisualSuggestionService,
+      visualAssignmentService: resolvedVisualAssignmentService,
       projectService: resolvedProjectService,
       terminologyService: resolvedTerminologyService,
       assetService: resolvedAssetService,

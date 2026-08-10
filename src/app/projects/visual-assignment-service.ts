@@ -1,0 +1,848 @@
+import { randomUUID } from "node:crypto";
+import * as path from "node:path";
+
+import {
+  visualAssignmentRequestSchema,
+  type VisualAssignmentRequest
+} from "../../schema/api.js";
+import {
+  idSchema,
+  relativePosixPathSchema,
+  sha256Schema,
+  videoProjectSchema,
+  type AssetDetail,
+  type VideoProject
+} from "../../schema/index.js";
+import {
+  ASSET_FORMATS,
+  ASSET_KIND_FORMATS,
+  assetFormatForMimeType,
+  type AssetFormat
+} from "../assets/asset-formats.js";
+import { AssetRepository } from "../assets/asset-repository.js";
+import {
+  ProjectRepository,
+  ProjectRepositoryError,
+  type ProjectRepositoryLockedOperations
+} from "./project-repository.js";
+import {
+  VISUAL_ASSIGNMENT_ERROR_CODE,
+  VisualAssignmentError
+} from "./visual-assignment-errors.js";
+import {
+  NodeVisualAssignmentFileSystem,
+  type VisualAssignmentFileSystem
+} from "./visual-assignment-file-system.js";
+
+type ProjectRepositoryPort = Pick<ProjectRepository, "withProjectLock">;
+type AssetRepositoryPort = Pick<AssetRepository, "findAssetDetail">;
+
+export type VisualAssignmentServiceOptions = {
+  repository: ProjectRepositoryPort;
+  assetRepository: AssetRepositoryPort;
+  workspaceRoot: string;
+  libraryRoot?: string;
+  fileSystem?: Partial<VisualAssignmentFileSystem>;
+  createId?: () => string;
+};
+
+export type VisualAssignmentServiceResult = {
+  readonly data: VideoProject;
+  readonly revision: number;
+};
+
+type ProjectPaths = {
+  readonly projectRoot: string;
+  readonly finalPath: string;
+  readonly projectMediaPath: string;
+};
+
+type PlacementResult = {
+  readonly createdFinalFile: boolean;
+  readonly finalPath: string;
+  readonly projectMediaPath: string;
+};
+
+function isMissingPathError(error: unknown): boolean {
+  return getFileSystemErrorCode(error) === "ENOENT";
+}
+
+function isExistingPathError(error: unknown): boolean {
+  return getFileSystemErrorCode(error) === "EEXIST";
+}
+
+function getFileSystemErrorCode(error: unknown): string | undefined {
+  if (typeof error !== "object" || error === null || !("code" in error)) {
+    return undefined;
+  }
+
+  const code = error.code;
+  return typeof code === "string" ? code : undefined;
+}
+
+function isPathInside(rootPath: string, candidatePath: string): boolean {
+  const relativePath = path.relative(rootPath, candidatePath);
+  return (
+    relativePath === "" ||
+    (relativePath !== ".." &&
+      !relativePath.startsWith(`..${path.sep}`) &&
+      !path.isAbsolute(relativePath))
+  );
+}
+
+function normalizeChecksum(checksum: string): string {
+  return checksum.toLowerCase();
+}
+
+function validationDetails(
+  issues: readonly { path: readonly PropertyKey[]; message: string }[]
+): Array<{ path: Array<string | number>; message: string }> {
+  return issues.map((issue) => ({
+    path: issue.path.filter(
+      (segment): segment is string | number =>
+        typeof segment === "string" || typeof segment === "number"
+    ),
+    message: issue.message
+  }));
+}
+
+function visualAssignmentError(
+  code: (typeof VISUAL_ASSIGNMENT_ERROR_CODE)[keyof typeof VISUAL_ASSIGNMENT_ERROR_CODE],
+  status: 400 | 404 | 409 | 422 | 500,
+  message: string,
+  details: readonly {
+    path: readonly (string | number)[];
+    message: string;
+  }[] = []
+): VisualAssignmentError {
+  return new VisualAssignmentError(code, status, message, details);
+}
+
+function projectRevisionConflict(): ProjectRepositoryError {
+  return new ProjectRepositoryError(
+    "PROJECT_REVISION_CONFLICT",
+    409,
+    "The project revision does not match the expected revision."
+  );
+}
+
+function formatFromLibraryPath(
+  libraryMediaPath: string,
+  kind: AssetDetail["kind"]
+): AssetFormat | undefined {
+  const extension = path.posix.extname(libraryMediaPath).slice(1).toLowerCase();
+  if (extension.length === 0) {
+    return undefined;
+  }
+
+  for (const format of Object.keys(ASSET_FORMATS) as AssetFormat[]) {
+    const info = ASSET_FORMATS[format];
+    if (info.kind === kind && info.extension === extension) {
+      return format;
+    }
+  }
+  return undefined;
+}
+
+function extensionForAsset(detail: AssetDetail): string {
+  const allowedFormats = ASSET_KIND_FORMATS[detail.kind];
+  const mimeFormat = assetFormatForMimeType(detail.mimeType);
+  if (mimeFormat !== undefined && allowedFormats.includes(mimeFormat)) {
+    return ASSET_FORMATS[mimeFormat].extension;
+  }
+
+  const pathFormat = formatFromLibraryPath(detail.libraryMediaPath, detail.kind);
+  if (pathFormat !== undefined && allowedFormats.includes(pathFormat)) {
+    return ASSET_FORMATS[pathFormat].extension;
+  }
+
+  throw visualAssignmentError(
+    VISUAL_ASSIGNMENT_ERROR_CODE.libraryPathInvalid,
+    422,
+    "The asset media path does not have a supported visual extension."
+  );
+}
+
+export class VisualAssignmentService {
+  private readonly repository: ProjectRepositoryPort;
+  private readonly assetRepository: AssetRepositoryPort;
+  private readonly workspaceRoot: string;
+  private readonly libraryRoot: string;
+  private readonly fileSystem: VisualAssignmentFileSystem;
+  private readonly createId: () => string;
+
+  constructor(options: VisualAssignmentServiceOptions) {
+    this.repository = options.repository;
+    this.assetRepository = options.assetRepository;
+    this.workspaceRoot = path.resolve(options.workspaceRoot);
+    this.libraryRoot = path.resolve(
+      options.libraryRoot ?? path.join(this.workspaceRoot, "library")
+    );
+    const defaultFileSystem = new NodeVisualAssignmentFileSystem();
+    const suppliedFileSystem = options.fileSystem;
+    this.fileSystem = {
+      mkdir: suppliedFileSystem?.mkdir ?? defaultFileSystem.mkdir.bind(defaultFileSystem),
+      copyFile:
+        suppliedFileSystem?.copyFile ??
+        defaultFileSystem.copyFile.bind(defaultFileSystem),
+      hashFile:
+        suppliedFileSystem?.hashFile ??
+        defaultFileSystem.hashFile.bind(defaultFileSystem),
+      rename:
+        suppliedFileSystem?.rename ?? defaultFileSystem.rename.bind(defaultFileSystem),
+      pathExists:
+        suppliedFileSystem?.pathExists ??
+        defaultFileSystem.pathExists.bind(defaultFileSystem),
+      unlink:
+        suppliedFileSystem?.unlink ?? defaultFileSystem.unlink.bind(defaultFileSystem),
+      realpath:
+        suppliedFileSystem?.realpath ??
+        defaultFileSystem.realpath.bind(defaultFileSystem)
+    };
+    this.createId = options.createId ?? (() => randomUUID().toLowerCase());
+  }
+
+  async assign(
+    projectId: unknown,
+    input: unknown
+  ): Promise<VisualAssignmentServiceResult> {
+    const projectIdResult = idSchema.safeParse(projectId);
+    if (!projectIdResult.success) {
+      throw visualAssignmentError(
+        VISUAL_ASSIGNMENT_ERROR_CODE.projectPathInvalid,
+        400,
+        "The project path is invalid."
+      );
+    }
+    const safeProjectId = projectIdResult.data;
+    const request = visualAssignmentRequestSchema.parse(input);
+    return this.repository.withProjectLock(safeProjectId, (repository) =>
+      this.assignLocked(safeProjectId, request, repository)
+    );
+  }
+
+  private async assignLocked(
+    safeProjectId: string,
+    request: VisualAssignmentRequest,
+    repository: ProjectRepositoryLockedOperations
+  ): Promise<VisualAssignmentServiceResult> {
+    const currentProject = await repository.read();
+
+    if (currentProject.revision !== request.expectedRevision) {
+      throw projectRevisionConflict();
+    }
+
+    if (
+      currentProject.visuals.assignments.some(
+        (assignment) => assignment.id === request.assignment.id
+      )
+    ) {
+      throw visualAssignmentError(
+        VISUAL_ASSIGNMENT_ERROR_CODE.assignmentIdConflict,
+        409,
+        "The visual assignment ID is already in use."
+      );
+    }
+
+    const asset = this.assetRepository.findAssetDetail(
+      request.assignment.assetId
+    );
+    if (asset === undefined) {
+      throw visualAssignmentError(
+        VISUAL_ASSIGNMENT_ERROR_CODE.assetNotFound,
+        404,
+        "The selected asset does not exist."
+      );
+    }
+
+    this.assertAssetUsable(asset, request.assignment.display.kind);
+    const confirmedChecksum = this.assertChecksum(asset.checksum);
+    const checksum = normalizeChecksum(confirmedChecksum);
+    const extension = extensionForAsset(asset);
+    const projectRoot = await this.resolveProjectRoot(safeProjectId);
+    const sourcePath = await this.resolveLibrarySource(asset.libraryMediaPath);
+    const projectPaths = this.resolveProjectMediaPaths(
+      projectRoot,
+      asset,
+      extension
+    );
+    const assignment = {
+      ...request.assignment,
+      assetId: asset.assetId,
+      assetChecksum: confirmedChecksum,
+      projectMediaPath: projectPaths.projectMediaPath
+    };
+    const candidate = {
+      ...currentProject,
+      visuals: {
+        ...currentProject.visuals,
+        assignments: [...currentProject.visuals.assignments, assignment]
+      }
+    };
+    const candidateResult = videoProjectSchema.safeParse(candidate);
+    if (!candidateResult.success) {
+      throw visualAssignmentError(
+        VISUAL_ASSIGNMENT_ERROR_CODE.candidateInvalid,
+        422,
+        "The visual assignment does not produce a valid project.",
+        validationDetails(candidateResult.error.issues)
+      );
+    }
+
+    const placement = await this.placeFile(
+      sourcePath,
+      projectPaths,
+      checksum
+    );
+
+    try {
+      const saved = await repository.save(
+        candidateResult.data,
+        request.expectedRevision
+      );
+      return { data: saved, revision: saved.revision };
+    } catch (error) {
+      if (placement.createdFinalFile) {
+        await this.cleanupFinalFileIfUnreferenced(
+          repository,
+          projectPaths.projectRoot,
+          placement.finalPath,
+          placement.projectMediaPath
+        );
+      }
+      throw error;
+    }
+  }
+
+  private assertAssetUsable(
+    asset: AssetDetail,
+    displayKind: VisualAssignmentRequest["assignment"]["display"]["kind"]
+  ): void {
+    if (asset.status !== "active") {
+      throw visualAssignmentError(
+        VISUAL_ASSIGNMENT_ERROR_CODE.assetNotActive,
+        422,
+        "The selected asset is not active."
+      );
+    }
+    if (asset.kind === "sound_effect") {
+      throw visualAssignmentError(
+        VISUAL_ASSIGNMENT_ERROR_CODE.assetKindUnsupported,
+        422,
+        "Sound effects cannot be used as visual assignments."
+      );
+    }
+    if (asset.kind !== displayKind) {
+      throw visualAssignmentError(
+        VISUAL_ASSIGNMENT_ERROR_CODE.displayKindMismatch,
+        422,
+        "The display kind does not match the selected asset kind.",
+        [{ path: ["assignment", "display", "kind"], message: "kind mismatch" }]
+      );
+    }
+  }
+
+  private assertChecksum(checksum: string | null): string {
+    const result = sha256Schema.safeParse(checksum);
+    if (!result.success) {
+      throw visualAssignmentError(
+        VISUAL_ASSIGNMENT_ERROR_CODE.assetChecksumUnavailable,
+        422,
+        "The selected asset does not have a confirmed SHA-256 checksum."
+      );
+    }
+    return result.data;
+  }
+
+  private async resolveProjectRoot(projectId: string): Promise<string> {
+    let workspaceRoot: string;
+    try {
+      workspaceRoot = await this.fileSystem.realpath(this.workspaceRoot);
+    } catch {
+      throw visualAssignmentError(
+        VISUAL_ASSIGNMENT_ERROR_CODE.projectPathInvalid,
+        400,
+        "The project path is invalid."
+      );
+    }
+
+    const projectsPath = path.resolve(this.workspaceRoot, "projects");
+    let resolvedProjectsPath: string;
+    try {
+      resolvedProjectsPath = await this.fileSystem.realpath(projectsPath);
+    } catch {
+      throw visualAssignmentError(
+        VISUAL_ASSIGNMENT_ERROR_CODE.projectPathInvalid,
+        400,
+        "The project path is invalid."
+      );
+    }
+    this.assertInside(
+      workspaceRoot,
+      resolvedProjectsPath,
+      VISUAL_ASSIGNMENT_ERROR_CODE.projectPathInvalid,
+      "The project path is invalid."
+    );
+
+    const projectPath = path.resolve(projectsPath, projectId);
+    if (!isPathInside(this.workspaceRoot, projectPath)) {
+      throw visualAssignmentError(
+        VISUAL_ASSIGNMENT_ERROR_CODE.projectPathInvalid,
+        400,
+        "The project path is invalid."
+      );
+    }
+
+    let resolvedProjectPath: string;
+    try {
+      resolvedProjectPath = await this.fileSystem.realpath(projectPath);
+    } catch {
+      throw visualAssignmentError(
+        VISUAL_ASSIGNMENT_ERROR_CODE.projectPathInvalid,
+        400,
+        "The project path is invalid."
+      );
+    }
+    this.assertInside(
+      resolvedProjectsPath,
+      resolvedProjectPath,
+      VISUAL_ASSIGNMENT_ERROR_CODE.projectPathInvalid,
+      "The project path is invalid."
+    );
+    return resolvedProjectPath;
+  }
+
+  private async resolveLibrarySource(libraryMediaPath: string): Promise<string> {
+    const pathResult = relativePosixPathSchema.safeParse(libraryMediaPath);
+    if (!pathResult.success) {
+      throw visualAssignmentError(
+        VISUAL_ASSIGNMENT_ERROR_CODE.libraryPathInvalid,
+        422,
+        "The asset library path is invalid."
+      );
+    }
+
+    let resolvedLibraryRoot: string;
+    try {
+      resolvedLibraryRoot = await this.fileSystem.realpath(this.libraryRoot);
+    } catch {
+      throw visualAssignmentError(
+        VISUAL_ASSIGNMENT_ERROR_CODE.libraryPathInvalid,
+        422,
+        "The asset library path is invalid."
+      );
+    }
+
+    const sourcePath = path.resolve(
+      resolvedLibraryRoot,
+      pathResult.data.split("/").join(path.sep)
+    );
+    this.assertInside(
+      resolvedLibraryRoot,
+      sourcePath,
+      VISUAL_ASSIGNMENT_ERROR_CODE.libraryPathInvalid,
+      "The asset library path is invalid."
+    );
+
+    try {
+      if (!(await this.fileSystem.pathExists(sourcePath))) {
+        throw visualAssignmentError(
+          VISUAL_ASSIGNMENT_ERROR_CODE.libraryFileNotFound,
+          500,
+          "The active asset file is unavailable."
+        );
+      }
+    } catch (error) {
+      if (error instanceof VisualAssignmentError) {
+        throw error;
+      }
+      throw visualAssignmentError(
+        VISUAL_ASSIGNMENT_ERROR_CODE.libraryFileNotFound,
+        500,
+        "The active asset file is unavailable."
+      );
+    }
+
+    let resolvedSourcePath: string;
+    try {
+      resolvedSourcePath = await this.fileSystem.realpath(sourcePath);
+    } catch {
+      throw visualAssignmentError(
+        VISUAL_ASSIGNMENT_ERROR_CODE.libraryFileNotFound,
+        500,
+        "The active asset file is unavailable."
+      );
+    }
+    this.assertInside(
+      resolvedLibraryRoot,
+      resolvedSourcePath,
+      VISUAL_ASSIGNMENT_ERROR_CODE.libraryPathInvalid,
+      "The asset library path is invalid."
+    );
+    return sourcePath;
+  }
+
+  private resolveProjectMediaPaths(
+    projectRoot: string,
+    asset: AssetDetail,
+    extension: string
+  ): ProjectPaths {
+    const projectMediaPath = `media/visuals/${asset.assetId}/v${asset.version}.${extension}`;
+    const finalPath = path.resolve(
+      projectRoot,
+      projectMediaPath.split("/").join(path.sep)
+    );
+    this.assertInside(
+      projectRoot,
+      finalPath,
+      VISUAL_ASSIGNMENT_ERROR_CODE.mediaPathInvalid,
+      "The project media path is invalid."
+    );
+    return { projectRoot, finalPath, projectMediaPath };
+  }
+
+  private assertInside(
+    rootPath: string,
+    candidatePath: string,
+    code:
+      | typeof VISUAL_ASSIGNMENT_ERROR_CODE.projectPathInvalid
+      | typeof VISUAL_ASSIGNMENT_ERROR_CODE.libraryPathInvalid
+      | typeof VISUAL_ASSIGNMENT_ERROR_CODE.mediaPathInvalid,
+    message: string
+  ): void {
+    if (!isPathInside(rootPath, candidatePath)) {
+      throw visualAssignmentError(code, code === "VISUAL_ASSIGNMENT_PROJECT_PATH_INVALID" ? 400 : 422, message);
+    }
+  }
+
+  private async ensureProjectDirectory(
+    projectRoot: string,
+    directoryPath: string
+  ): Promise<void> {
+    this.assertInside(
+      projectRoot,
+      directoryPath,
+      VISUAL_ASSIGNMENT_ERROR_CODE.mediaPathInvalid,
+      "The project media path is invalid."
+    );
+
+    let probe = directoryPath;
+    while (true) {
+      try {
+        const resolvedProbe = await this.fileSystem.realpath(probe);
+        this.assertInside(
+          projectRoot,
+          resolvedProbe,
+          VISUAL_ASSIGNMENT_ERROR_CODE.mediaPathInvalid,
+          "The project media path is invalid."
+        );
+        break;
+      } catch (error) {
+        if (!isMissingPathError(error)) {
+          if (error instanceof VisualAssignmentError) {
+            throw error;
+          }
+          throw visualAssignmentError(
+            VISUAL_ASSIGNMENT_ERROR_CODE.mediaPathInvalid,
+            422,
+            "The project media path is invalid."
+          );
+        }
+        const parent = path.dirname(probe);
+        if (parent === probe || !isPathInside(projectRoot, parent)) {
+          throw visualAssignmentError(
+            VISUAL_ASSIGNMENT_ERROR_CODE.mediaPathInvalid,
+            422,
+            "The project media path is invalid."
+          );
+        }
+        probe = parent;
+      }
+    }
+
+    try {
+      await this.fileSystem.mkdir(directoryPath);
+      const resolvedDirectory = await this.fileSystem.realpath(directoryPath);
+      this.assertInside(
+        projectRoot,
+        resolvedDirectory,
+        VISUAL_ASSIGNMENT_ERROR_CODE.mediaPathInvalid,
+        "The project media path is invalid."
+      );
+    } catch (error) {
+      if (error instanceof VisualAssignmentError) {
+        throw error;
+      }
+      throw visualAssignmentError(
+        VISUAL_ASSIGNMENT_ERROR_CODE.mediaPathInvalid,
+        422,
+        "The project media path is invalid."
+      );
+    }
+  }
+
+  private async inspectExistingFinal(
+    projectRoot: string,
+    finalPath: string,
+    expectedChecksum: string
+  ): Promise<boolean> {
+    let exists: boolean;
+    try {
+      exists = await this.fileSystem.pathExists(finalPath);
+    } catch {
+      throw visualAssignmentError(
+        VISUAL_ASSIGNMENT_ERROR_CODE.mediaPathCheckFailed,
+        500,
+        "The project media path could not be checked."
+      );
+    }
+    if (!exists) {
+      return false;
+    }
+
+    let resolvedFinalPath: string;
+    try {
+      resolvedFinalPath = await this.fileSystem.realpath(finalPath);
+    } catch {
+      throw visualAssignmentError(
+        VISUAL_ASSIGNMENT_ERROR_CODE.mediaPathConflict,
+        409,
+        "The project media path is already occupied."
+      );
+    }
+    this.assertInside(
+      projectRoot,
+      resolvedFinalPath,
+      VISUAL_ASSIGNMENT_ERROR_CODE.mediaPathInvalid,
+      "The project media path is invalid."
+    );
+
+    let existingChecksum: string;
+    try {
+      existingChecksum = normalizeChecksum(
+        await this.fileSystem.hashFile(finalPath)
+      );
+    } catch {
+      throw visualAssignmentError(
+        VISUAL_ASSIGNMENT_ERROR_CODE.mediaPathConflict,
+        409,
+        "The project media path is already occupied."
+      );
+    }
+    if (existingChecksum === expectedChecksum) {
+      return true;
+    }
+    throw visualAssignmentError(
+      VISUAL_ASSIGNMENT_ERROR_CODE.mediaPathConflict,
+      409,
+      "The project media path contains different content."
+    );
+  }
+
+  private async placeFile(
+    sourcePath: string,
+    projectPaths: ProjectPaths,
+    expectedChecksum: string
+  ): Promise<PlacementResult> {
+    const directoryPath = path.dirname(projectPaths.finalPath);
+    await this.ensureProjectDirectory(projectPaths.projectRoot, directoryPath);
+
+    if (
+      await this.inspectExistingFinal(
+        projectPaths.projectRoot,
+        projectPaths.finalPath,
+        expectedChecksum
+      )
+    ) {
+      return {
+        createdFinalFile: false,
+        finalPath: projectPaths.finalPath,
+        projectMediaPath: projectPaths.projectMediaPath
+      };
+    }
+
+    const tempToken = this.createId().toLowerCase();
+    if (!/^[a-z0-9-]+$/.test(tempToken)) {
+      throw visualAssignmentError(
+        VISUAL_ASSIGNMENT_ERROR_CODE.copyFailed,
+        500,
+        "The asset could not be copied into the project."
+      );
+    }
+    const temporaryPath = path.join(
+      directoryPath,
+      `.${path.basename(projectPaths.finalPath)}.${tempToken}.tmp`
+    );
+    let temporaryCreated = false;
+
+    try {
+      try {
+        await this.fileSystem.copyFile(sourcePath, temporaryPath);
+        temporaryCreated = true;
+      } catch (error) {
+        if (!isExistingPathError(error)) {
+          await this.cleanupTemporaryFile(temporaryPath);
+        }
+        throw visualAssignmentError(
+          VISUAL_ASSIGNMENT_ERROR_CODE.copyFailed,
+          500,
+          "The asset could not be copied into the project."
+        );
+      }
+
+      let copiedChecksum: string;
+      try {
+        copiedChecksum = normalizeChecksum(
+          await this.fileSystem.hashFile(temporaryPath)
+        );
+      } catch {
+        await this.cleanupTemporaryFile(temporaryPath);
+        temporaryCreated = false;
+        throw visualAssignmentError(
+          VISUAL_ASSIGNMENT_ERROR_CODE.hashFailed,
+          500,
+          "The copied asset could not be verified."
+        );
+      }
+
+      if (copiedChecksum !== expectedChecksum) {
+        await this.cleanupTemporaryFile(temporaryPath);
+        temporaryCreated = false;
+        throw visualAssignmentError(
+          VISUAL_ASSIGNMENT_ERROR_CODE.checksumMismatch,
+          500,
+          "The copied asset checksum does not match the library record."
+        );
+      }
+
+      try {
+        if (
+          await this.inspectExistingFinal(
+            projectPaths.projectRoot,
+            projectPaths.finalPath,
+            expectedChecksum
+          )
+        ) {
+          await this.cleanupTemporaryFile(temporaryPath);
+          temporaryCreated = false;
+          return {
+            createdFinalFile: false,
+            finalPath: projectPaths.finalPath,
+            projectMediaPath: projectPaths.projectMediaPath
+          };
+        }
+      } catch (error) {
+        await this.cleanupTemporaryFile(temporaryPath);
+        temporaryCreated = false;
+        throw error;
+      }
+
+      try {
+        await this.fileSystem.rename(temporaryPath, projectPaths.finalPath);
+        temporaryCreated = false;
+        return {
+          createdFinalFile: true,
+          finalPath: projectPaths.finalPath,
+          projectMediaPath: projectPaths.projectMediaPath
+        };
+      } catch {
+        try {
+          if (
+            await this.inspectExistingFinal(
+              projectPaths.projectRoot,
+              projectPaths.finalPath,
+              expectedChecksum
+            )
+          ) {
+            await this.cleanupTemporaryFile(temporaryPath);
+            temporaryCreated = false;
+            return {
+              createdFinalFile: false,
+              finalPath: projectPaths.finalPath,
+              projectMediaPath: projectPaths.projectMediaPath
+            };
+          }
+        } catch (raceError) {
+          await this.cleanupTemporaryFile(temporaryPath);
+          temporaryCreated = false;
+          throw raceError;
+        }
+        await this.cleanupTemporaryFile(temporaryPath);
+        temporaryCreated = false;
+        throw visualAssignmentError(
+          VISUAL_ASSIGNMENT_ERROR_CODE.renameFailed,
+          500,
+          "The copied asset could not be placed in the project."
+        );
+      }
+    } finally {
+      if (temporaryCreated) {
+        await this.cleanupTemporaryFile(temporaryPath);
+      }
+    }
+  }
+
+  private async cleanupTemporaryFile(filePath: string): Promise<void> {
+    try {
+      await this.fileSystem.unlink(filePath);
+    } catch (error) {
+      if (isMissingPathError(error)) {
+        return;
+      }
+      throw visualAssignmentError(
+        VISUAL_ASSIGNMENT_ERROR_CODE.cleanupFailed,
+        500,
+        "The failed asset import could not be cleaned up."
+      );
+    }
+  }
+
+  private async cleanupFinalFileIfUnreferenced(
+    repository: ProjectRepositoryLockedOperations,
+    projectRoot: string,
+    finalPath: string,
+    projectMediaPath: string
+  ): Promise<void> {
+    let currentProject: VideoProject;
+    try {
+      currentProject = await repository.read();
+    } catch {
+      throw visualAssignmentError(
+        VISUAL_ASSIGNMENT_ERROR_CODE.cleanupFailed,
+        500,
+        "The failed asset import could not be cleaned up."
+      );
+    }
+
+    if (
+      currentProject.visuals.assignments.some(
+        (assignment) => assignment.projectMediaPath === projectMediaPath
+      )
+    ) {
+      return;
+    }
+
+    try {
+      if (!(await this.fileSystem.pathExists(finalPath))) {
+        return;
+      }
+      const resolvedFinalPath = await this.fileSystem.realpath(finalPath);
+      this.assertInside(
+        projectRoot,
+        resolvedFinalPath,
+        VISUAL_ASSIGNMENT_ERROR_CODE.mediaPathInvalid,
+        "The project media path is invalid."
+      );
+      await this.fileSystem.unlink(finalPath);
+    } catch (error) {
+      if (isMissingPathError(error)) {
+        return;
+      }
+      throw visualAssignmentError(
+        VISUAL_ASSIGNMENT_ERROR_CODE.cleanupFailed,
+        500,
+        "The failed asset import could not be cleaned up."
+      );
+    }
+  }
+}
