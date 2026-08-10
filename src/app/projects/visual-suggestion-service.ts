@@ -2,11 +2,13 @@ import { createHash, randomUUID } from "node:crypto";
 
 import {
   normalizeAssetSearchQuery,
+  assetTagAxisSchema,
   visualSearchIntentJsonSchema,
   visualSearchIntentSchema,
   visualSuggestionRequestSchema,
   visualSuggestionResultSchema,
   type AiRunLog,
+  type AssetTagAxis,
   type VisualSearchIntent,
   type VisualSuggestionResult,
   type VideoProject
@@ -181,6 +183,28 @@ function tagKey(value: string): string {
   return value.normalize("NFC").trim();
 }
 
+function qualifiedTagKey(axis: AssetTagAxis, value: string): string {
+  return `${axis}:${tagKey(value)}`;
+}
+
+function parseTagReference(value: string): {
+  readonly axis: AssetTagAxis | undefined;
+  readonly term: string;
+} {
+  const separator = value.indexOf(":");
+  if (separator <= 0) {
+    return { axis: undefined, term: value };
+  }
+  const axis = assetTagAxisSchema.safeParse(value.slice(0, separator));
+  if (!axis.success) {
+    return { axis: undefined, term: value };
+  }
+  return {
+    axis: axis.data,
+    term: value.slice(separator + 1)
+  };
+}
+
 function uniqueStrings(values: readonly string[]): string[] {
   return [...new Set(values.map(tagKey).filter((value) => value.length > 0))];
 }
@@ -198,9 +222,13 @@ function buildTagLookup(
   };
 
   for (const entry of dictionary) {
+    add(qualifiedTagKey(entry.axis, entry.normalizedName), entry);
+    add(qualifiedTagKey(entry.axis, entry.canonicalName), entry);
     add(tagKey(entry.normalizedName), entry);
     add(tagKey(entry.canonicalName), entry);
     for (const alias of entry.aliases) {
+      add(qualifiedTagKey(entry.axis, alias.normalizedAlias), entry);
+      add(qualifiedTagKey(entry.axis, alias.alias), entry);
       add(tagKey(alias.normalizedAlias), entry);
       add(tagKey(alias.alias), entry);
     }
@@ -225,7 +253,12 @@ function resolveTagGroup(
   const tags: ResolvedTag[] = [];
   const unresolvedTags: UnresolvedTag[] = [];
   for (const value of uniqueStrings(values)) {
-    const matches = lookup.get(tagKey(value)) ?? [];
+    const reference = parseTagReference(value);
+    const lookupKey =
+      reference.axis === undefined
+        ? tagKey(reference.term)
+        : qualifiedTagKey(reference.axis, reference.term);
+    const matches = lookup.get(lookupKey) ?? [];
     if (matches.length === 0) {
       unresolvedTags.push({ group, value, reason: "unknown" });
       continue;

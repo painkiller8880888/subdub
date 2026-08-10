@@ -43,6 +43,7 @@ import {
   duplicateScriptLine,
   isScriptInitializationAllowed,
   isProjectContextCurrent,
+  isVisualSuggestionContextCurrent,
   moveScriptLine,
   parseBulkScript,
   reconcileScriptLineIds,
@@ -50,7 +51,9 @@ import {
   updateScriptLine,
   validateScriptDraft,
   type BulkPasteError,
-  type ScriptDraftIssue
+  type ScriptDraftIssue,
+  type VisualSuggestionCurrentContext,
+  type VisualSuggestionRequestContext
 } from "./script-editor";
 
 function charactersPath(projectId: string): string {
@@ -317,13 +320,31 @@ export function ScriptPage() {
   const [suggestionEndLineId, setSuggestionEndLineId] = useState("");
   const [suggestionResponse, setSuggestionResponse] =
     useState<VisualSuggestionResponse | null>(null);
+  const [suggestionError, setSuggestionError] = useState<unknown>(null);
   const [assetSearchQuery, setAssetSearchQuery] = useState("");
+  const [assetSearchTagIds, setAssetSearchTagIds] = useState("");
   const [assetSearchResult, setAssetSearchResult] =
     useState<AssetListResult | null>(null);
   const [assetSearchError, setAssetSearchError] = useState<unknown>(null);
   const projectIdRef = useRef(projectId ?? "");
   const projectGenerationRef = useRef(0);
   const revisionRef = useRef(0);
+  const visualSuggestionContextRef = useRef<VisualSuggestionCurrentContext>({
+    projectId: projectId ?? "",
+    projectGeneration: 0,
+    sectionId: "",
+    startLineId: "",
+    endLineId: "",
+    revision: 0
+  });
+  visualSuggestionContextRef.current = {
+    projectId: projectId ?? "",
+    projectGeneration: projectGenerationRef.current,
+    sectionId: suggestionSectionId,
+    startLineId: suggestionStartLineId,
+    endLineId: suggestionEndLineId,
+    revision: revisionRef.current
+  };
   const draftRef = useRef<Script | null>(null);
   const lastSavedRef = useRef<Script | null>(null);
   const initializedForProjectRef = useRef<string | null>(null);
@@ -363,26 +384,44 @@ export function ScriptPage() {
       startLineId,
       endLineId,
       expectedRevision
-    }: {
-      projectId: string;
-      startLineId: string;
-      endLineId: string;
-      expectedRevision: number;
-    }) =>
+    }: VisualSuggestionRequestContext) =>
       suggestProjectVisuals(projectId, {
         startLineId,
         endLineId,
         expectedRevision
       }),
-    onSuccess: (response) => {
+    onMutate: () => {
+      setSuggestionError(null);
+    },
+    onSuccess: (response, variables) => {
+      if (
+        !isVisualSuggestionContextCurrent(
+          visualSuggestionContextRef.current,
+          variables
+        )
+      ) {
+        return;
+      }
+      setSuggestionError(null);
       setSuggestionResponse(response);
       revisionRef.current = response.revision;
       void projectQuery.refetch();
+    },
+    onError: (error, variables) => {
+      if (
+        isVisualSuggestionContextCurrent(
+          visualSuggestionContextRef.current,
+          variables
+        )
+      ) {
+        setSuggestionError(error);
+      }
     }
   });
 
   const assetSearchMutation = useMutation({
-    mutationFn: (query: string) => searchAssets({ q: query, pageSize: 12 }),
+    mutationFn: ({ query, tagIds }: { query: string; tagIds: string[] }) =>
+      searchAssets({ q: query, tagIds, pageSize: 12 }),
     onSuccess: (result) => {
       setAssetSearchError(null);
       setAssetSearchResult(result);
@@ -489,6 +528,15 @@ export function ScriptPage() {
     setSuggestionStartLineId("");
     setSuggestionEndLineId("");
     setSuggestionResponse(null);
+    setSuggestionError(null);
+    visualSuggestionContextRef.current = {
+      projectId: projectId ?? "",
+      projectGeneration: projectGenerationRef.current,
+      sectionId: "",
+      startLineId: "",
+      endLineId: "",
+      revision: 0
+    };
     setAssetSearchResult(null);
     setAssetSearchError(null);
     coordinator.reset();
@@ -892,23 +940,42 @@ export function ScriptPage() {
     ) {
       return;
     }
+    const requestContext: VisualSuggestionRequestContext = {
+      projectId: projectIdRef.current,
+      projectGeneration: projectGenerationRef.current,
+      sectionId: suggestionSection.id,
+      startLineId: suggestionStartLineId,
+      endLineId: suggestionEndLineId,
+      expectedRevision: revisionRef.current
+    };
     const flushed = await coordinatorRef.current?.flush();
     if (flushed !== true) {
       return;
     }
+    if (
+      !isVisualSuggestionContextCurrent(
+        visualSuggestionContextRef.current,
+        requestContext
+      )
+    ) {
+      return;
+    }
     setSuggestionResponse(null);
-    suggestionMutation.mutate({
-      projectId: projectIdRef.current,
-      startLineId: suggestionStartLineId,
-      endLineId: suggestionEndLineId,
-      expectedRevision: revisionRef.current
-    });
+    suggestionMutation.mutate(requestContext);
   }
 
   function runAssetSearch(event: FormEvent<HTMLFormElement>): void {
     event.preventDefault();
     setAssetSearchError(null);
-    assetSearchMutation.mutate(assetSearchQuery);
+    const tagIds = [
+      ...new Set(
+        assetSearchTagIds
+          .split(/[\s,]+/u)
+          .map((tagId) => tagId.normalize("NFC").trim())
+          .filter((tagId) => tagId.length > 0)
+      )
+    ];
+    assetSearchMutation.mutate({ query: assetSearchQuery, tagIds });
   }
 
   return (
@@ -1024,7 +1091,9 @@ export function ScriptPage() {
               setSuggestionStartLineId(nextSection?.lines[0]?.id ?? "");
               setSuggestionEndLineId(nextSection?.lines.at(-1)?.id ?? "");
               setSuggestionResponse(null);
+              setSuggestionError(null);
             }}
+            disabled={suggestionMutation.isPending}
           >
             {draft.sections.map((section) => (
               <option key={section.id} value={section.id}>
@@ -1042,8 +1111,11 @@ export function ScriptPage() {
               onChange={(event) => {
                 setSuggestionStartLineId(event.target.value);
                 setSuggestionResponse(null);
+                setSuggestionError(null);
               }}
-              disabled={suggestionSection === undefined}
+              disabled={
+                suggestionSection === undefined || suggestionMutation.isPending
+              }
             >
               {suggestionSection?.lines.map((line) => (
                 <option key={line.id} value={line.id}>
@@ -1060,8 +1132,11 @@ export function ScriptPage() {
               onChange={(event) => {
                 setSuggestionEndLineId(event.target.value);
                 setSuggestionResponse(null);
+                setSuggestionError(null);
               }}
-              disabled={suggestionSection === undefined}
+              disabled={
+                suggestionSection === undefined || suggestionMutation.isPending
+              }
             >
               {suggestionSection?.lines.map((line) => (
                 <option key={line.id} value={line.id}>
@@ -1087,17 +1162,17 @@ export function ScriptPage() {
             ? "検索意図を生成中…"
             : "AIに候補を提案させる"}
         </button>
-        {suggestionMutation.error !== null ? (
+        {suggestionError !== null ? (
           <section className="message-panel message-panel-error" role="alert">
             <p>
               {getErrorMessage(
-                suggestionMutation.error,
+                suggestionError,
                 "AI検索意図の生成に失敗しました。"
               )}
             </p>
-            {errorDetails(suggestionMutation.error).length > 0 ? (
+            {errorDetails(suggestionError).length > 0 ? (
               <ul>
-                {errorDetails(suggestionMutation.error).map((detail) => (
+                {errorDetails(suggestionError).map((detail) => (
                   <li key={detail}>{detail}</li>
                 ))}
               </ul>
@@ -1208,7 +1283,7 @@ export function ScriptPage() {
         aria-labelledby="asset-search-title"
       >
         <p className="eyebrow">P3-03 通常検索</p>
-        <h2 id="asset-search-title">素材をキーワード検索</h2>
+        <h2 id="asset-search-title">素材をキーワード・タグ検索</h2>
         <form onSubmit={runAssetSearch}>
           <div className="form-field-group">
             <div className="form-field">
@@ -1217,6 +1292,17 @@ export function ScriptPage() {
                 id="asset-search-query"
                 value={assetSearchQuery}
                 onChange={(event) => setAssetSearchQuery(event.target.value)}
+              />
+            </div>
+            <div className="form-field">
+              <label htmlFor="asset-search-tag-ids">
+                タグID（カンマまたは空白区切り）
+              </label>
+              <input
+                id="asset-search-tag-ids"
+                value={assetSearchTagIds}
+                onChange={(event) => setAssetSearchTagIds(event.target.value)}
+                placeholder="tag-daily tag-inspection"
               />
             </div>
             <button

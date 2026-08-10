@@ -14,6 +14,7 @@ import {
   generateProjectOutline,
   reviewProjectOutline,
   saveProjectOutline,
+  searchAssets,
   fetchTerminology,
   createTerminology,
   updateTerminology,
@@ -117,6 +118,38 @@ describe("web API client", () => {
       jsonResponse({ data: { models: [], cached: false } }, 200);
 
     await expect(fetchModels()).rejects.toBeInstanceOf(ApiClientProtocolError);
+  });
+
+  it("passes normal asset tag filters through to the asset search API", async () => {
+    let requestUrl = "";
+    globalThis.fetch = async (input) => {
+      requestUrl = String(input);
+      return jsonResponse(
+        {
+          data: {
+            items: [],
+            page: 1,
+            pageSize: 12,
+            total: 0,
+            hasNextPage: false
+          }
+        },
+        200
+      );
+    };
+
+    await expect(
+      searchAssets({
+        q: "申請フロー",
+        tagIds: ["tag-application", "tag-confirm"],
+        pageSize: 12
+      })
+    ).resolves.toMatchObject({ total: 0 });
+
+    const queryString = requestUrl.split("?", 2)[1] ?? "";
+    const query = new URLSearchParams(queryString);
+    expect(query.getAll("tagIds")).toEqual(["tag-application", "tag-confirm"]);
+    expect(query.get("q")).toBe("申請フロー");
   });
 
   it("uses a protocol error when an error response is not the common shape", async () => {

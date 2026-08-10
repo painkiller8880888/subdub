@@ -390,6 +390,9 @@ export async function searchAssets(
   if (query.kind !== undefined) {
     searchParams.set("kind", query.kind);
   }
+  for (const tagId of query.tagIds) {
+    searchParams.append("tagIds", tagId);
+  }
   searchParams.set("page", String(query.page));
   searchParams.set("pageSize", String(query.pageSize));
   const response = await fetchApi(

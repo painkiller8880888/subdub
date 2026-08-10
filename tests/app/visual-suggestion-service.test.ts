@@ -54,9 +54,9 @@ function model(
 
 function intent(overrides: Record<string, unknown> = {}) {
   return {
-    requiredTags: ["must-have"],
-    optionalTags: ["optional"],
-    excludedTags: ["excluded"],
+    requiredTags: ["task:must-have"],
+    optionalTags: ["task:optional"],
+    excludedTags: ["task:excluded"],
     mediaKinds: ["photo", "video"],
     freeTextQuery: "unique visual",
     reason: "The selected lines explain the visual workflow.",
@@ -322,7 +322,7 @@ describe("VisualSuggestionService", () => {
       expectedRevision: setup.project.revision
     });
 
-    expect(result.data.aiIntent.requiredTags).toEqual(["must-have"]);
+    expect(result.data.aiIntent.requiredTags).toEqual(["task:must-have"]);
     expect(result.data.resolvedSearch.requiredTags).toMatchObject([
       { tagId: "tag-required", canonicalName: "required" }
     ]);

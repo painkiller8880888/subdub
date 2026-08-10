@@ -8,6 +8,7 @@ import {
   deleteScriptLine,
   duplicateScriptLine,
   isProjectContextCurrent,
+  isVisualSuggestionContextCurrent,
   moveScriptLine,
   parseBulkScript,
   reconcileScriptLineIds,
@@ -271,6 +272,61 @@ describe("script editor helpers", () => {
       id: "script-line-project-b",
       spokenText: "project B draft"
     });
+  });
+
+  it("rejects visual suggestion results for a changed range, revision, or project", () => {
+    const requested = {
+      projectId: "project-a",
+      projectGeneration: 1,
+      sectionId: "section-a",
+      startLineId: "line-one",
+      endLineId: "line-two",
+      expectedRevision: 4
+    };
+
+    expect(
+      isVisualSuggestionContextCurrent(
+        {
+          projectId: "project-a",
+          projectGeneration: 1,
+          sectionId: "section-a",
+          startLineId: "line-one",
+          endLineId: "line-two",
+          revision: 4
+        },
+        requested
+      )
+    ).toBe(true);
+    expect(
+      isVisualSuggestionContextCurrent(
+        {
+          ...requested,
+          revision: 4,
+          startLineId: "line-two"
+        },
+        requested
+      )
+    ).toBe(false);
+    expect(
+      isVisualSuggestionContextCurrent(
+        {
+          ...requested,
+          revision: 5
+        },
+        requested
+      )
+    ).toBe(false);
+    expect(
+      isVisualSuggestionContextCurrent(
+        {
+          ...requested,
+          projectId: "project-b",
+          projectGeneration: 2,
+          revision: 9
+        },
+        requested
+      )
+    ).toBe(false);
   });
 
   it("ignores a delayed initialization success after switching projects", async () => {

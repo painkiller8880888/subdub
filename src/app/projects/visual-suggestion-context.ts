@@ -32,6 +32,7 @@ export type VisualSuggestionPromptContext = {
   };
   readonly availableMediaKinds: readonly string[];
   readonly activeTagDictionary: readonly {
+    readonly key: string;
     readonly axis: string;
     readonly canonicalName: string;
     readonly aliases: readonly string[];
@@ -154,6 +155,7 @@ export function buildVisualSuggestionPromptContext(
     },
     availableMediaKinds: [...VISUAL_MEDIA_KINDS],
     activeTagDictionary: tagDictionary.map((tag) => ({
+      key: `${tag.axis}:${tag.canonicalName}`,
       axis: tag.axis,
       canonicalName: tag.canonicalName,
       aliases: tag.aliases.map((alias) => alias.alias)
