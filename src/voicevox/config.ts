@@ -20,3 +20,19 @@ export function normalizeVoicevoxEngineUrl(engineUrl: string): string {
 export function getVoicevoxSpeakersUrl(engineUrl: string): string {
   return `${normalizeVoicevoxEngineUrl(engineUrl)}/speakers`;
 }
+
+export function getVoicevoxVersionUrl(engineUrl: string): string {
+  return `${normalizeVoicevoxEngineUrl(engineUrl)}/version`;
+}
+
+export function getVoicevoxAudioQueryUrl(
+  engineUrl: string,
+  text: string,
+  resolvedStyleId: number
+): string {
+  const query = new URLSearchParams({
+    text,
+    speaker: String(resolvedStyleId)
+  });
+  return `${normalizeVoicevoxEngineUrl(engineUrl)}/audio_query?${query.toString()}`;
+}

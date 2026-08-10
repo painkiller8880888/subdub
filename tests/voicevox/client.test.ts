@@ -9,6 +9,7 @@ import {
   VOICEVOX_ERROR_CODE
 } from "../../src/voicevox/errors.js";
 import {
+  createVoicevoxAudioQueryFixture,
   createVoicevoxSpeakersFixture,
   syntheticVoicevoxStyleId,
   voicevoxJsonResponse
@@ -40,6 +41,77 @@ describe("VoicevoxClient", () => {
       }))
     );
     expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("fetches the engine version and audio query with encoded parameters", async () => {
+    const query = createVoicevoxAudioQueryFixture();
+    const text = " 日本語 空白&記号? ";
+    const fetch = vi.fn(async (input: string | URL, init?: RequestInit) => {
+      const url = new URL(String(input));
+      expect(url.pathname).toBe(
+        url.pathname.endsWith("/version")
+          ? "/engine/version"
+          : "/engine/audio_query"
+      );
+      expect(init?.signal).toBeInstanceOf(AbortSignal);
+
+      if (url.pathname.endsWith("/version")) {
+        expect(init?.method).toBe("GET");
+        return voicevoxJsonResponse("0.14.1");
+      }
+
+      expect(init?.method).toBe("POST");
+      expect(url.searchParams.get("text")).toBe(text);
+      expect(url.searchParams.get("speaker")).toBe("42");
+      return voicevoxJsonResponse(query);
+    });
+    const client = new VoicevoxClient({
+      engineUrl: "http://fixture.test/engine///",
+      fetch: fetch as unknown as typeof globalThis.fetch
+    });
+
+    await expect(client.getVersion()).resolves.toBe("0.14.1");
+    await expect(client.getAudioQuery(text, 42)).resolves.toEqual(query);
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps additional audio query fields for later synthesis", async () => {
+    const body = createVoicevoxAudioQueryFixture();
+    const client = new VoicevoxClient({
+      engineUrl: "http://fixture.test",
+      fetch: vi.fn(async () =>
+        voicevoxJsonResponse(body)
+      ) as unknown as typeof globalThis.fetch
+    });
+
+    const query = await client.getAudioQuery("text", 7);
+
+    expect(query.future_query_field).toEqual({ preserve: true });
+    expect(query.accent_phrases[0]?.future_phrase_field).toEqual({
+      preserve: true
+    });
+    expect(query.accent_phrases[0]?.moras[0]?.future_mora_field).toBe(
+      "preserve"
+    );
+  });
+
+  it("rejects fractional accent positions in audio queries", async () => {
+    const body = createVoicevoxAudioQueryFixture();
+    const firstAccentPhrase = body.accent_phrases[0];
+    if (firstAccentPhrase === undefined) {
+      throw new Error("fixture accent phrase is required");
+    }
+    firstAccentPhrase.accent = 1.5;
+    const client = new VoicevoxClient({
+      engineUrl: "http://fixture.test",
+      fetch: vi.fn(async () =>
+        voicevoxJsonResponse(body)
+      ) as unknown as typeof globalThis.fetch
+    });
+
+    await expect(client.getAudioQuery("text", 7)).rejects.toMatchObject({
+      code: VOICEVOX_ERROR_CODE.responseInvalid
+    });
   });
 
   it("distinguishes HTTP failures without retaining the response body", async () => {
@@ -140,6 +212,28 @@ describe("VoicevoxClient", () => {
       ) as unknown as typeof globalThis.fetch
     });
     await expect(missingFieldClient.getSpeakers()).rejects.toMatchObject({
+      code: VOICEVOX_ERROR_CODE.responseInvalid
+    });
+
+    const invalidVersionClient = new VoicevoxClient({
+      engineUrl: "http://fixture.test",
+      fetch: vi.fn(async () =>
+        voicevoxJsonResponse({ version: "0.14.1" })
+      ) as unknown as typeof globalThis.fetch
+    });
+    await expect(invalidVersionClient.getVersion()).rejects.toMatchObject({
+      code: VOICEVOX_ERROR_CODE.responseInvalid
+    });
+
+    const invalidQueryClient = new VoicevoxClient({
+      engineUrl: "http://fixture.test",
+      fetch: vi.fn(async () =>
+        voicevoxJsonResponse({ speedScale: Infinity })
+      ) as unknown as typeof globalThis.fetch
+    });
+    await expect(
+      invalidQueryClient.getAudioQuery("text", 1)
+    ).rejects.toMatchObject({
       code: VOICEVOX_ERROR_CODE.responseInvalid
     });
   });
