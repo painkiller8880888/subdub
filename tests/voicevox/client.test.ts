@@ -95,6 +95,25 @@ describe("VoicevoxClient", () => {
     );
   });
 
+  it("rejects fractional accent positions in audio queries", async () => {
+    const body = createVoicevoxAudioQueryFixture();
+    const firstAccentPhrase = body.accent_phrases[0];
+    if (firstAccentPhrase === undefined) {
+      throw new Error("fixture accent phrase is required");
+    }
+    firstAccentPhrase.accent = 1.5;
+    const client = new VoicevoxClient({
+      engineUrl: "http://fixture.test",
+      fetch: vi.fn(async () =>
+        voicevoxJsonResponse(body)
+      ) as unknown as typeof globalThis.fetch
+    });
+
+    await expect(client.getAudioQuery("text", 7)).rejects.toMatchObject({
+      code: VOICEVOX_ERROR_CODE.responseInvalid
+    });
+  });
+
   it("distinguishes HTTP failures without retaining the response body", async () => {
     const fetch = vi.fn(
       async () => new Response("upstream-secret-body", { status: 503 })

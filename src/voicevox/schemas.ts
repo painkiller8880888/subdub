@@ -29,7 +29,7 @@ const voicevoxMoraSchema = z
 const voicevoxAccentPhraseSchema = z
   .object({
     moras: z.array(voicevoxMoraSchema),
-    accent: finiteNumberSchema,
+    accent: finiteNumberSchema.int(),
     pause_mora: voicevoxMoraSchema.nullable(),
     is_interrogative: z.boolean()
   })

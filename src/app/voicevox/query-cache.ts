@@ -83,6 +83,10 @@ function isMissingPathError(error: unknown): boolean {
   return getErrorCode(error) === "ENOENT";
 }
 
+function isExistingPathError(error: unknown): boolean {
+  return getErrorCode(error) === "EEXIST";
+}
+
 function isPathInside(rootPath: string, candidatePath: string): boolean {
   const relativePath = path.relative(rootPath, candidatePath);
   return (
@@ -253,8 +257,21 @@ export class VoicevoxQueryCache {
 
     try {
       await this.fileSystem.mkdir(directoryPath, { recursive: false });
-    } catch {
-      throw new VoicevoxQueryCacheError("VOICEVOX_QUERY_CACHE_WRITE_FAILED");
+    } catch (error) {
+      if (!isExistingPathError(error)) {
+        throw new VoicevoxQueryCacheError("VOICEVOX_QUERY_CACHE_WRITE_FAILED");
+      }
+
+      const resolvedPathAfterRace =
+        await this.resolveExistingPath(directoryPath);
+      if (resolvedPathAfterRace === null) {
+        throw new VoicevoxQueryCacheError("VOICEVOX_QUERY_CACHE_WRITE_FAILED");
+      }
+      this.assertInsideManagementRoot(
+        managementRootPath,
+        resolvedPathAfterRace
+      );
+      return;
     }
 
     const resolvedPath = await this.resolveExistingPath(directoryPath);

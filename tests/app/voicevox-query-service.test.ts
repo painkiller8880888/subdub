@@ -268,6 +268,38 @@ describe("VoicevoxQueryService", () => {
     ).toBe(false);
   });
 
+  it("revalidates a directory when mkdir reports a concurrent EEXIST", async () => {
+    const { workspaceRoot, client, terminologyService } = await makeService();
+    let reportedConcurrentCreation = false;
+    const cache = new VoicevoxQueryCache({
+      workspaceRoot,
+      fileSystem: {
+        mkdir: async (directoryPath, options) => {
+          await fs.mkdir(directoryPath, {
+            recursive: options?.recursive ?? false
+          });
+          if (options?.recursive === false && !reportedConcurrentCreation) {
+            reportedConcurrentCreation = true;
+            throw Object.assign(new Error("directory already exists"), {
+              code: "EEXIST"
+            });
+          }
+        }
+      }
+    });
+    const service = new VoicevoxQueryService({
+      client,
+      terminologyService,
+      cache
+    });
+
+    await expect(service.prepare(input())).resolves.toMatchObject({
+      cached: false
+    });
+    expect(reportedConcurrentCreation).toBe(true);
+    expect(client.getAudioQuery).toHaveBeenCalledTimes(1);
+  });
+
   it("keeps literal and excluded-term behavior in the existing resolver", async () => {
     const { client, service } = await makeService();
     const originalLine = line();
