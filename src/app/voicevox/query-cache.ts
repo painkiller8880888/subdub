@@ -189,9 +189,24 @@ export class VoicevoxQueryCache {
         temporaryFilePath,
         `${JSON.stringify(parsedQuery.data, null, 2)}\n`
       );
-      await this.fileSystem.rename(temporaryFilePath, filePath);
     } catch {
       await this.removeTemporaryFile(temporaryFilePath);
+      throw new VoicevoxQueryCacheError("VOICEVOX_QUERY_CACHE_WRITE_FAILED");
+    }
+
+    try {
+      await this.fileSystem.rename(temporaryFilePath, filePath);
+    } catch {
+      let existingQuery: VoicevoxAudioQuery | null = null;
+      try {
+        existingQuery = await this.read(entry);
+      } catch {
+        // A failed revalidation leaves the rename failure as a write failure.
+      }
+      await this.removeTemporaryFile(temporaryFilePath);
+      if (existingQuery !== null) {
+        return;
+      }
       throw new VoicevoxQueryCacheError("VOICEVOX_QUERY_CACHE_WRITE_FAILED");
     }
   }

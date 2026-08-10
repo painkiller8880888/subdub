@@ -300,6 +300,38 @@ describe("VoicevoxQueryService", () => {
     expect(client.getAudioQuery).toHaveBeenCalledTimes(1);
   });
 
+  it("allows the same cache entry to be saved concurrently", async () => {
+    const { workspaceRoot } = await makeService();
+    const originalLine = line();
+    if (originalLine === undefined) {
+      throw new Error("fixture line is required");
+    }
+    const cacheKey = "a".repeat(64);
+    const entry = {
+      projectId: videoProjectFixture.metadata.id,
+      lineId: originalLine.id,
+      cacheKey
+    };
+    const query = createVoicevoxAudioQueryFixture();
+    const cache = new VoicevoxQueryCache({ workspaceRoot });
+
+    await expect(
+      Promise.all(Array.from({ length: 20 }, () => cache.write(entry, query)))
+    ).resolves.toHaveLength(20);
+    await expect(cache.read(entry)).resolves.toEqual(query);
+
+    const cacheDirectory = path.join(
+      workspaceRoot,
+      "projects",
+      videoProjectFixture.metadata.id,
+      "cache",
+      "voicevox-query"
+    );
+    expect(await fs.readdir(cacheDirectory)).toEqual([
+      `${originalLine.id}-${cacheKey}.json`
+    ]);
+  });
+
   it("keeps literal and excluded-term behavior in the existing resolver", async () => {
     const { client, service } = await makeService();
     const originalLine = line();
