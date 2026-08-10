@@ -223,6 +223,45 @@ describe("RenderManifestStore", () => {
     });
   });
 
+  it("stores a manifest and returns overlap warnings without failing", async () => {
+    const root = await createRoot();
+    const store = new RenderManifestStore({ workspaceRoot: root });
+    const project = structuredClone(
+      createRenderManifestInput().project
+    ) as VideoProject;
+    const template = project.audio.soundEffects[0];
+    if (template === undefined) {
+      throw new Error("sound effect fixture is missing");
+    }
+    project.audio.soundEffects = [0, 100, 200].map((offsetMs, index) => ({
+      ...template,
+      id: `stored-overlap-${index + 1}`,
+      projectMediaPath: `media/stored-overlap-${index + 1}.wav`,
+      lineId: "main-learner-1",
+      offsetMs
+    }));
+
+    const result = await store.compileAndStore(
+      projectId,
+      createRenderManifestInput(project)
+    );
+
+    expect(result.status).toBe("compiled");
+    expect(result.diagnostics).toEqual([]);
+    expect(result.warnings).toMatchObject([
+      {
+        code: "SOUND_EFFECT_OVERLAP_LIMIT",
+        soundEffectIds: [
+          "stored-overlap-1",
+          "stored-overlap-2",
+          "stored-overlap-3"
+        ],
+        lineIds: ["main-learner-1"]
+      }
+    ]);
+    await expect(store.read(projectId)).resolves.toEqual(result.manifest);
+  });
+
   it("keeps the existing manifest when compilation fails", async () => {
     const root = await createRoot();
     const store = new RenderManifestStore({ workspaceRoot: root });

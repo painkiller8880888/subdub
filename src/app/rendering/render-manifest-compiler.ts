@@ -111,6 +111,22 @@ export type RenderManifestDiagnostic = {
   readonly assetPath?: string;
 };
 
+export const RENDER_MANIFEST_WARNING_CODE = {
+  soundEffectOverlap: "SOUND_EFFECT_OVERLAP_LIMIT"
+} as const;
+
+export type RenderManifestWarningCode =
+  (typeof RENDER_MANIFEST_WARNING_CODE)[keyof typeof RENDER_MANIFEST_WARNING_CODE];
+
+export type RenderManifestWarning = {
+  readonly code: RenderManifestWarningCode;
+  readonly message: string;
+  readonly from: number;
+  readonly to: number;
+  readonly soundEffectIds: readonly string[];
+  readonly lineIds: readonly string[];
+};
+
 export type RenderManifestCompilerInput = {
   readonly project?: unknown;
   readonly videoProject?: unknown;
@@ -133,6 +149,7 @@ export type RenderManifestCompileSuccess = {
   readonly manifest: RenderManifest;
   readonly diagnostics: readonly [];
   readonly errors: readonly [];
+  readonly warnings: readonly RenderManifestWarning[];
 };
 
 export type RenderManifestCompileFailure = {
@@ -141,6 +158,7 @@ export type RenderManifestCompileFailure = {
   readonly manifest: null;
   readonly diagnostics: readonly RenderManifestDiagnostic[];
   readonly errors: readonly RenderManifestDiagnostic[];
+  readonly warnings: readonly RenderManifestWarning[];
 };
 
 export type RenderManifestCompileResult =
@@ -725,6 +743,78 @@ function stableTimelineSort<T extends { readonly from: number }>(
     .map(({ value }) => value);
 }
 
+function sortedUniqueStrings(values: readonly string[]): string[] {
+  return [...new Set(values)].sort(compareStrings);
+}
+
+/**
+ * Detect continuous half-open intervals where at least three sound effects are
+ * active. Adjacent intervals are merged so a warning is emitted per usable
+ * overlap region rather than once per frame.
+ */
+export function detectSoundEffectWarnings(
+  effects: readonly Pick<
+    RenderSoundEffect,
+    "id" | "lineId" | "from" | "durationInFrames"
+  >[]
+): RenderManifestWarning[] {
+  const boundaries = [
+    ...new Set(
+      effects.flatMap((effect) => [
+        effect.from,
+        effect.from + effect.durationInFrames
+      ])
+    )
+  ].sort((left, right) => left - right);
+  const warnings: RenderManifestWarning[] = [];
+
+  for (let index = 0; index < boundaries.length - 1; index += 1) {
+    const from = boundaries[index];
+    const to = boundaries[index + 1];
+    if (from === undefined || to === undefined || from >= to) {
+      continue;
+    }
+    const activeEffects = effects.filter(
+      (effect) =>
+        effect.from <= from && from < effect.from + effect.durationInFrames
+    );
+    if (activeEffects.length < 3) {
+      continue;
+    }
+
+    const soundEffectIds = sortedUniqueStrings(
+      activeEffects.map((effect) => effect.id)
+    );
+    const lineIds = sortedUniqueStrings(
+      activeEffects.map((effect) => effect.lineId)
+    );
+    const previous = warnings[warnings.length - 1];
+    if (previous?.to === from) {
+      warnings[warnings.length - 1] = {
+        ...previous,
+        to,
+        soundEffectIds: sortedUniqueStrings([
+          ...previous.soundEffectIds,
+          ...soundEffectIds
+        ]),
+        lineIds: sortedUniqueStrings([...previous.lineIds, ...lineIds])
+      };
+      continue;
+    }
+
+    warnings.push({
+      code: RENDER_MANIFEST_WARNING_CODE.soundEffectOverlap,
+      message: "three or more sound effects overlap in this interval",
+      from,
+      to,
+      soundEffectIds,
+      lineIds
+    });
+  }
+
+  return warnings;
+}
+
 function orderedVisualDisplay(
   display: RenderVisual["display"]
 ): RenderVisual["display"] {
@@ -918,7 +1008,8 @@ export function serializeRenderManifest(manifest: unknown): string {
 }
 
 function failure(
-  diagnostics: readonly RenderManifestDiagnostic[]
+  diagnostics: readonly RenderManifestDiagnostic[],
+  warnings: readonly RenderManifestWarning[] = []
 ): RenderManifestCompileFailure {
   const copied = diagnostics.map((diagnostic) => ({
     ...diagnostic,
@@ -929,17 +1020,30 @@ function failure(
     ok: false,
     manifest: null,
     diagnostics: copied,
-    errors: copied
+    errors: copied,
+    warnings: warnings.map((warning) => ({
+      ...warning,
+      soundEffectIds: [...warning.soundEffectIds],
+      lineIds: [...warning.lineIds]
+    }))
   };
 }
 
-function success(manifest: RenderManifest): RenderManifestCompileSuccess {
+function success(
+  manifest: RenderManifest,
+  warnings: readonly RenderManifestWarning[]
+): RenderManifestCompileSuccess {
   return {
     success: true,
     ok: true,
     manifest: orderedManifest(manifest),
     diagnostics: [],
-    errors: []
+    errors: [],
+    warnings: warnings.map((warning) => ({
+      ...warning,
+      soundEffectIds: [...warning.soundEffectIds],
+      lineIds: [...warning.lineIds]
+    }))
   };
 }
 
@@ -1760,6 +1864,7 @@ export function compileRenderManifest(
       } satisfies { inputIndex: number; value: RenderSoundEffect };
     })
   );
+  const warnings = detectSoundEffectWarnings(renderSoundEffects);
 
   const renderInserts = [
     {
@@ -1854,12 +1959,12 @@ export function compileRenderManifest(
       manifestResult.error,
       []
     );
-    return failure(diagnostics);
+    return failure(diagnostics, warnings);
   }
   if (diagnostics.length > 0) {
-    return failure(diagnostics);
+    return failure(diagnostics, warnings);
   }
-  return success(manifestResult.data);
+  return success(manifestResult.data, warnings);
 }
 
 export class RenderManifestCompiler {

@@ -12,6 +12,11 @@ import { describe, expect, it, afterAll, beforeAll } from "vitest";
 import { renderManifestFixture } from "../fixtures/render-manifest.js";
 import { renderManifestRenderingFixture } from "../fixtures/render-manifest-rendering.js";
 import {
+  audioTrackSequenceProps,
+  audioTrackVolumeAtFrame,
+  soundEffectSequenceProps
+} from "../../src/remotion/audio.js";
+import {
   renderManifestSchema,
   type RenderManifest
 } from "../../src/schema/index.js";
@@ -20,6 +25,7 @@ import {
   selectCharacterImagePathForFrame,
   selectCharacterImageSlotForFrame,
   selectActiveBackground,
+  selectActiveInsert,
   selectActiveLines,
   selectActiveVisuals,
   selectCharacterVariantForFrame
@@ -88,6 +94,14 @@ async function preparePublicDirectory(): Promise<string> {
   await cp(
     path.join(repositoryRoot, "tests", "fixtures", "media", "shot.png"),
     path.join(mediaDir, "shot.png")
+  );
+  await cp(
+    path.join(repositoryRoot, "tests", "fixtures", "media", "effect-1s.wav"),
+    path.join(mediaDir, "effect-1s.wav")
+  );
+  await cp(
+    path.join(repositoryRoot, "tests", "fixtures", "media", "effect-2s.wav"),
+    path.join(mediaDir, "effect-2s.wav")
   );
   testRoot = root;
   return temporaryPublicDir;
@@ -420,6 +434,73 @@ describe("RenderManifest interval selection", () => {
       objectPosition: "bottom center"
     });
   });
+
+  it("selects opening, eye catch, and ending placeholders as half-open intervals", () => {
+    const manifest = renderManifestFixture as RenderManifest;
+
+    expect(selectActiveInsert(manifest, 0)?.slot).toBe("opening");
+    expect(selectActiveInsert(manifest, 59)?.slot).toBe("opening");
+    expect(selectActiveInsert(manifest, 60)).toBeUndefined();
+    expect(selectActiveInsert(manifest, 149)).toBeUndefined();
+    expect(selectActiveInsert(manifest, 150)?.slot).toBe("eye_catch");
+    expect(selectActiveInsert(manifest, 209)?.slot).toBe("eye_catch");
+    expect(selectActiveInsert(manifest, 210)).toBeUndefined();
+    expect(selectActiveInsert(manifest, 420)?.slot).toBe("ending");
+    expect(selectActiveInsert(manifest, 479)?.slot).toBe("ending");
+    expect(selectActiveInsert(manifest, 480)).toBeUndefined();
+  });
+
+  it("maps manifest audio tracks to bounded sequences and deterministic fades", () => {
+    const track = renderManifestFixture.audioTracks[1];
+    const effect = renderManifestFixture.soundEffects[0];
+    if (track === undefined || effect === undefined) {
+      throw new Error("audio fixture is incomplete");
+    }
+
+    expect(audioTrackSequenceProps(track)).toMatchObject({
+      from: track.from,
+      durationInFrames: track.durationInFrames,
+      loop: true
+    });
+    expect(audioTrackSequenceProps(track).src).toContain(track.src);
+    expect(soundEffectSequenceProps(effect)).toMatchObject({
+      from: effect.from,
+      durationInFrames: effect.durationInFrames,
+      volume: effect.volume
+    });
+    expect(soundEffectSequenceProps(effect).src).toContain(effect.src);
+
+    expect(audioTrackVolumeAtFrame(track, 0)).toBe(0);
+    expect(audioTrackVolumeAtFrame(track, 4)).toBeCloseTo(
+      track.volume * (4 / track.fadeInFrames),
+      10
+    );
+    expect(audioTrackVolumeAtFrame(track, track.fadeInFrames)).toBe(
+      track.volume
+    );
+    expect(
+      audioTrackVolumeAtFrame(track, track.durationInFrames - 1)
+    ).toBeCloseTo(track.volume / track.fadeOutFrames, 10);
+    expect(audioTrackVolumeAtFrame(track, track.durationInFrames)).toBe(0);
+
+    const overlappingFade = {
+      ...track,
+      durationInFrames: 10,
+      volume: 0.8,
+      fadeInFrames: 10,
+      fadeOutFrames: 10
+    };
+    expect(audioTrackVolumeAtFrame(overlappingFade, 5)).toBe(0.2);
+    expect(audioTrackVolumeAtFrame(overlappingFade, 5)).toBeLessThanOrEqual(
+      overlappingFade.volume
+    );
+
+    const noFade = { ...track, fadeInFrames: 0, fadeOutFrames: 0 };
+    expect(audioTrackVolumeAtFrame(noFade, 0)).toBe(noFade.volume);
+    expect(audioTrackVolumeAtFrame(noFade, noFade.durationInFrames)).toBe(
+      noFade.volume
+    );
+  });
 });
 
 describe("basic Remotion composition", () => {
@@ -537,6 +618,46 @@ describe("basic Remotion composition", () => {
         bottom: 0.95
       })
     ).toBe(0);
+  }, 180_000);
+
+  it("renders placeholder frames as isolated labeled screens", async () => {
+    const opening = await renderFixtureFrame(30, "placeholder-opening");
+    const eyeCatch = await renderFixtureFrame(170, "placeholder-eye-catch");
+    const ending = await renderFixtureFrame(450, "placeholder-ending");
+    const content = await renderFixtureFrame(220, "placeholder-content");
+
+    expect(
+      await differentPixelsInRegion(opening, eyeCatch, {
+        left: 0,
+        right: 0.25,
+        top: 0,
+        bottom: 1
+      })
+    ).toBe(0);
+    expect(
+      await differentPixelsInRegion(eyeCatch, ending, {
+        left: 0,
+        right: 0.25,
+        top: 0,
+        bottom: 1
+      })
+    ).toBe(0);
+    expect(
+      await differentPixelsInRegion(eyeCatch, content, {
+        left: 0,
+        right: 0.25,
+        top: 0,
+        bottom: 1
+      })
+    ).toBeGreaterThan(0);
+    expect(
+      await differentPixelsInRegion(opening, eyeCatch, {
+        left: 0.25,
+        right: 0.75,
+        top: 0.4,
+        bottom: 0.6
+      })
+    ).toBeGreaterThan(0);
   }, 180_000);
 
   it("shrinks long multi-line subtitles so their rendered pixels stay in the safe area", async () => {

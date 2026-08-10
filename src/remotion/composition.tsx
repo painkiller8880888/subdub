@@ -3,12 +3,15 @@ import type { ReactNode } from "react";
 import { AbsoluteFill, Sequence, useCurrentFrame } from "remotion";
 
 import type { RenderManifest } from "../schema/index";
+import { ManifestAudioLayer } from "./audio-layer";
 import { BackgroundVisual } from "./background";
 import { CharacterLayer } from "./characters";
 import { DocumentVisual } from "./document-visual";
 import { DESIGN_COLORS } from "./layout";
+import { PlaceholderLayer } from "./placeholder";
 import {
   selectActiveBackground,
+  selectActiveInsert,
   selectActiveLines,
   selectActiveVisuals
 } from "./selection";
@@ -33,6 +36,21 @@ function RenderVisual({
 
 export function RenderManifestComposition(manifest: RenderManifest): ReactNode {
   const frame = useCurrentFrame();
+  const activeInsert = selectActiveInsert(manifest, frame);
+  if (activeInsert !== undefined) {
+    return (
+      <AbsoluteFill
+        style={{
+          backgroundColor: DESIGN_COLORS.background,
+          overflow: "hidden",
+          fontFamily: "Noto Sans JP, Arial, sans-serif"
+        }}
+      >
+        <PlaceholderLayer insert={activeInsert} />
+      </AbsoluteFill>
+    );
+  }
+
   const background = selectActiveBackground(manifest, frame);
   const activeVisuals = selectActiveVisuals(manifest, frame);
   const activeLines = selectActiveLines(manifest, frame);
@@ -48,6 +66,7 @@ export function RenderManifestComposition(manifest: RenderManifest): ReactNode {
         fontFamily: "Noto Sans JP, Arial, sans-serif"
       }}
     >
+      <ManifestAudioLayer manifest={manifest} />
       <BackgroundVisual background={background?.background} />
       {activeVisuals.map((visual) => (
         <Sequence

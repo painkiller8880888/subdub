@@ -103,11 +103,15 @@ describe("compileRenderManifest", () => {
     });
 
     expect(
-      result.manifest.inserts.map(({ slot, from }) => [slot, from])
+      result.manifest.inserts.map(({ slot, from, durationInFrames }) => [
+        slot,
+        from,
+        durationInFrames
+      ])
     ).toEqual([
-      ["opening", 0],
-      ["eye_catch", 139],
-      ["ending", 313]
+      ["opening", 0, 60],
+      ["eye_catch", 139, 60],
+      ["ending", 313, 60]
     ]);
     expect(
       result.manifest.lines.map(({ from, durationInFrames }) => [
@@ -127,15 +131,75 @@ describe("compileRenderManifest", () => {
       from: 240,
       durationInFrames: 12
     });
+    const mainLearnerLine = result.manifest.lines.find(
+      (line) => line.id === "main-learner-1"
+    );
+    if (mainLearnerLine === undefined) {
+      throw new Error("main learner line is missing");
+    }
+    expect(result.manifest.soundEffects[0]?.from).toBe(
+      mainLearnerLine.from +
+        mainLearnerLine.speechFrom +
+        Math.ceil((100 / 1000) * result.manifest.fps)
+    );
     expect(
-      result.manifest.audioTracks.map(({ sectionId, from }) => [
-        sectionId,
-        from
-      ])
+      result.manifest.audioTracks.map(
+        ({
+          sectionId,
+          from,
+          durationInFrames,
+          volume,
+          loop,
+          fadeInFrames,
+          fadeOutFrames
+        }) => [
+          sectionId,
+          from,
+          durationInFrames,
+          volume,
+          loop,
+          fadeInFrames,
+          fadeOutFrames
+        ]
+      )
     ).toEqual([
-      ["section-intro", 60],
-      ["section-main", 199]
+      ["section-intro", 60, 79, 0.25, true, 0, 9],
+      ["section-main", 199, 76, 0.2, true, 9, 9]
     ]);
+    const placeholderRanges = result.manifest.inserts.map((insert) => ({
+      from: insert.from,
+      to: insert.from + insert.durationInFrames
+    }));
+    for (const range of [
+      ...result.manifest.audioTracks,
+      ...result.manifest.soundEffects
+    ]) {
+      expect(
+        placeholderRanges.some(
+          (placeholder) =>
+            range.from < placeholder.to &&
+            placeholder.from < range.from + range.durationInFrames
+        )
+      ).toBe(false);
+    }
+    const ending = result.manifest.inserts.find(
+      (insert) => insert.slot === "ending"
+    );
+    const lastLine = result.manifest.lines[result.manifest.lines.length - 1];
+    expect(ending?.from).toBe(
+      (lastLine?.from ?? 0) + (lastLine?.durationInFrames ?? 0)
+    );
+    expect(ending?.from).toBeGreaterThan(
+      Math.max(
+        ...result.manifest.audioTracks.map(
+          (track) => track.from + track.durationInFrames
+        ),
+        ...result.manifest.soundEffects.map(
+          (effect) => effect.from + effect.durationInFrames
+        )
+      )
+    );
+    expect(result.warnings).toEqual([]);
     expect(
       result.manifest.sourceAssetChecksums.map(({ path }) => path)
     ).toEqual(
@@ -163,6 +227,129 @@ describe("compileRenderManifest", () => {
     expect(serializeRenderManifest(first.manifest)).toBe(
       serializeRenderManifest(second.manifest)
     );
+  });
+
+  it("keeps multiple effects on one line and positions them from speechFrom", () => {
+    const project = structuredClone(videoProjectFixture) as VideoProject;
+    const first = project.audio.soundEffects[0];
+    if (first === undefined) {
+      throw new Error("sound effect fixture is missing");
+    }
+    project.audio.soundEffects = [
+      {
+        ...first,
+        id: "effect-relative-first",
+        projectMediaPath: "media/effect-relative-first.wav",
+        lineId: "intro-learner-1",
+        offsetMs: 101
+      },
+      {
+        ...first,
+        id: "effect-relative-second",
+        projectMediaPath: "media/effect-relative-second.wav",
+        lineId: "intro-learner-1",
+        offsetMs: 201
+      }
+    ];
+
+    const result = compileRenderManifest(createRenderManifestInput(project));
+    expect(result.success).toBe(true);
+    if (!result.success) {
+      return;
+    }
+    const line = result.manifest.lines.find(
+      (candidate) => candidate.id === "intro-learner-1"
+    );
+    if (line === undefined) {
+      throw new Error("intro learner line is missing");
+    }
+    expect(result.manifest.soundEffects).toHaveLength(2);
+    expect(result.manifest.soundEffects.map((effect) => effect.id)).toEqual([
+      "effect-relative-first",
+      "effect-relative-second"
+    ]);
+    expect(result.manifest.soundEffects.map((effect) => effect.from)).toEqual([
+      line.from +
+        line.speechFrom +
+        Math.ceil((101 / 1000) * result.manifest.fps),
+      line.from +
+        line.speechFrom +
+        Math.ceil((201 / 1000) * result.manifest.fps)
+    ]);
+  });
+
+  it("returns a deterministic non-failing warning for three overlapping effects", () => {
+    const project = structuredClone(videoProjectFixture) as VideoProject;
+    const template = project.audio.soundEffects[0];
+    if (template === undefined) {
+      throw new Error("sound effect fixture is missing");
+    }
+    project.audio.soundEffects = [0, 100, 200].map((offsetMs, index) => ({
+      ...template,
+      id: `effect-overlap-${index + 1}`,
+      projectMediaPath: `media/effect-overlap-${index + 1}.wav`,
+      lineId: "main-learner-1",
+      offsetMs
+    }));
+
+    const input = createRenderManifestInput(project);
+    const first = compileRenderManifest(input);
+    const second = compileRenderManifest(structuredClone(input));
+
+    expect(first.success).toBe(true);
+    expect(first).toEqual(second);
+    if (!first.success) {
+      return;
+    }
+    const line = first.manifest.lines.find(
+      (candidate) => candidate.id === "main-learner-1"
+    );
+    if (line === undefined) {
+      throw new Error("main learner line is missing");
+    }
+    expect(first.diagnostics).toEqual([]);
+    expect(first.errors).toEqual([]);
+    expect(first.warnings).toEqual([
+      {
+        code: "SOUND_EFFECT_OVERLAP_LIMIT",
+        message: "three or more sound effects overlap in this interval",
+        from: line.from + Math.ceil((200 / 1000) * first.manifest.fps),
+        to: line.from + 12,
+        soundEffectIds: [
+          "effect-overlap-1",
+          "effect-overlap-2",
+          "effect-overlap-3"
+        ],
+        lineIds: ["main-learner-1"]
+      }
+    ]);
+  });
+
+  it("does not warn for two effects or touching half-open boundaries", () => {
+    const createProject = (offsets: number[]): VideoProject => {
+      const project = structuredClone(videoProjectFixture) as VideoProject;
+      const template = project.audio.soundEffects[0];
+      if (template === undefined) {
+        throw new Error("sound effect fixture is missing");
+      }
+      project.audio.soundEffects = offsets.map((offsetMs, index) => ({
+        ...template,
+        id: `effect-boundary-${index + 1}`,
+        projectMediaPath: `media/effect-boundary-${index + 1}.wav`,
+        lineId: "main-learner-1",
+        offsetMs
+      }));
+      return project;
+    };
+
+    expect(
+      compileRenderManifest(createRenderManifestInput(createProject([0, 100])))
+    ).toMatchObject({ success: true, warnings: [] });
+    expect(
+      compileRenderManifest(
+        createRenderManifestInput(createProject([0, 400, 800]))
+      )
+    ).toMatchObject({ success: true, warnings: [] });
   });
 
   it("changes the source hash when resolved character display metadata changes", () => {

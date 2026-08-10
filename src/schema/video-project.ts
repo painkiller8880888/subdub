@@ -222,6 +222,8 @@ export const soundEffectSchema = strictObject({
   volume: unitIntervalSchema
 });
 
+export const DEFAULT_SOUND_EFFECT_VOLUME = 0.2 as const;
+
 export const audioPlanSchema = strictObject({
   sectionBgms: z.array(sectionBgmSchema),
   soundEffects: z.array(soundEffectSchema)
@@ -686,6 +688,22 @@ export type VisualAssignment = z.infer<typeof visualAssignmentSchema>;
 export type VisualPlan = z.infer<typeof visualPlanSchema>;
 export type SectionBgm = z.infer<typeof sectionBgmSchema>;
 export type SoundEffect = z.infer<typeof soundEffectSchema>;
+export type SoundEffectDraft = Omit<SoundEffect, "volume"> & {
+  volume?: number;
+};
+
+/**
+ * Creates a new sound effect definition at the creation boundary.
+ * Persisted project parsing does not call this factory and never rewrites
+ * an existing volume.
+ */
+export function createSoundEffect(input: SoundEffectDraft): SoundEffect {
+  return soundEffectSchema.parse({
+    ...input,
+    volume: input.volume ?? DEFAULT_SOUND_EFFECT_VOLUME
+  });
+}
+
 export type AudioPlan = z.infer<typeof audioPlanSchema>;
 export type PlaceholderInsert = z.infer<typeof placeholderInsertSchema>;
 export type OpeningPlaceholder = z.infer<typeof openingPlaceholderSchema>;
