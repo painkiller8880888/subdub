@@ -128,6 +128,20 @@ describe("RenderManifestStore", () => {
       })
     ).resolves.toMatchObject({ status: "compiled", reused: false });
 
+    const changedPageCount = [
+      ...((input.assetMetadata ?? []) as readonly RenderManifestAssetMetadata[])
+    ].map((asset) =>
+      asset.path === "media/completion-report.pdf"
+        ? { ...asset, pageCount: 4 }
+        : asset
+    );
+    await expect(
+      store.compileAndStore(projectId, {
+        ...input,
+        assetMetadata: changedPageCount
+      })
+    ).resolves.toMatchObject({ status: "compiled", reused: false });
+
     await expect(
       store.compileAndStore(projectId, {
         ...input,

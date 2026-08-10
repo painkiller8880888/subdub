@@ -47,6 +47,9 @@ export const renderManifestAssetMetadataSchema = z
     sha256: sha256Schema,
     durationMs: z
       .union([z.number().finite().int().nonnegative(), z.null()])
+      .optional(),
+    pageCount: z
+      .union([z.number().finite().int().positive(), z.null()])
       .optional()
   })
   .passthrough();
@@ -82,6 +85,7 @@ export const RENDER_MANIFEST_ERROR_CODE = {
   assetDurationMissing: "ASSET_DURATION_MISSING",
   assetDurationInvalid: "ASSET_DURATION_INVALID",
   assetRangeInvalid: "ASSET_RANGE_INVALID",
+  assetPageCountMissing: "ASSET_PAGE_COUNT_MISSING",
   visualRangeInvalid: "VISUAL_RANGE_INVALID",
   fadeRangeInvalid: "AUDIO_FADE_RANGE_INVALID",
   mappingMissing: "CHARACTER_MAPPING_MISSING",
@@ -1148,6 +1152,34 @@ export function compileRenderManifest(
       addSourceAsset(sourceAssets, asset, diagnostics, {
         assignmentId: assignment.id
       });
+      if (assignment.display.kind === "document_scan") {
+        if (asset.pageCount === undefined || asset.pageCount === null) {
+          addDiagnostic(
+            diagnostics,
+            RENDER_MANIFEST_ERROR_CODE.assetPageCountMissing,
+            ["visuals", "assignments", assignmentIndex, "display", "page"],
+            "document_scan asset metadata pageCount is required",
+            {
+              assignmentId: assignment.id,
+              assetPath: assignment.projectMediaPath
+            }
+          );
+        } else if (
+          assignment.display.page < 1 ||
+          assignment.display.page > asset.pageCount
+        ) {
+          addDiagnostic(
+            diagnostics,
+            RENDER_MANIFEST_ERROR_CODE.assetRangeInvalid,
+            ["visuals", "assignments", assignmentIndex, "display", "page"],
+            "document_scan display page must be between 1 and the verified asset pageCount",
+            {
+              assignmentId: assignment.id,
+              assetPath: assignment.projectMediaPath
+            }
+          );
+        }
+      }
       if (
         assignment.display.kind === "video" &&
         asset.durationMs !== undefined &&
@@ -1524,7 +1556,8 @@ export function compileRenderManifest(
       sha256: normalizeChecksum(asset.sha256),
       ...(asset.durationMs === undefined
         ? {}
-        : { durationMs: asset.durationMs })
+        : { durationMs: asset.durationMs }),
+      ...(asset.pageCount === undefined ? {} : { pageCount: asset.pageCount })
     }))
     .sort((left, right) => compareStrings(left.path, right.path));
   const catalogForHash = catalog.map((variant) => ({

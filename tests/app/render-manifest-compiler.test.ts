@@ -199,6 +199,55 @@ describe("compileRenderManifest", () => {
     ).toBe(true);
   });
 
+  it("requires document pages to fit within the verified pageCount", () => {
+    const project = structuredClone(videoProjectFixture) as VideoProject;
+    const documentAssignment = project.visuals.assignments.find(
+      (assignment) => assignment.display.kind === "document_scan"
+    );
+    if (documentAssignment === undefined) {
+      throw new Error("fixture document assignment is missing");
+    }
+    if (documentAssignment.display.kind !== "document_scan") {
+      throw new Error("fixture document assignment has the wrong kind");
+    }
+    documentAssignment.display.page = 999;
+
+    const outOfRange = compileRenderManifest(validInput(project));
+    expect(outOfRange.success).toBe(false);
+    if (!outOfRange.success) {
+      expect(outOfRange.diagnostics).toContainEqual(
+        expect.objectContaining({
+          code: "ASSET_RANGE_INVALID",
+          assignmentId: documentAssignment.id,
+          assetPath: documentAssignment.projectMediaPath
+        })
+      );
+    }
+
+    const input = validInput();
+    const assets = [
+      ...((input.assetMetadata ?? []) as readonly RenderManifestAssetMetadata[])
+    ].map((asset) =>
+      asset.path === documentAssignment.projectMediaPath
+        ? { ...asset, pageCount: null }
+        : asset
+    );
+    const missingPageCount = compileRenderManifest({
+      ...input,
+      assetMetadata: assets
+    });
+    expect(missingPageCount.success).toBe(false);
+    if (!missingPageCount.success) {
+      expect(missingPageCount.diagnostics).toContainEqual(
+        expect.objectContaining({
+          code: "ASSET_PAGE_COUNT_MISSING",
+          assignmentId: documentAssignment.id,
+          assetPath: documentAssignment.projectMediaPath
+        })
+      );
+    }
+  });
+
   it("does not infer or substitute a missing mapping or variant", () => {
     const mapping = structuredClone(characterVariantMapping) as Record<
       string,

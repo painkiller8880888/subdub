@@ -59,7 +59,8 @@ export function createRenderManifestAssetMetadata(
     path: assignment.projectMediaPath,
     kind: assignment.display.kind,
     sha256: assignment.assetChecksum,
-    ...(assignment.display.kind === "video" ? { durationMs: 5_000 } : {})
+    ...(assignment.display.kind === "video" ? { durationMs: 5_000 } : {}),
+    ...(assignment.display.kind === "document_scan" ? { pageCount: 3 } : {})
   }));
   const backgrounds = project.script.sections.flatMap((section) =>
     section.background.kind === "image"
