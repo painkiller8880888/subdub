@@ -2,9 +2,14 @@ import {
   getVoicevoxAudioQueryUrl,
   getVoicevoxEngineUrl,
   getVoicevoxSpeakersUrl,
+  getVoicevoxSynthesisUrl,
   getVoicevoxVersionUrl
 } from "./config.js";
-import { VoicevoxAdapterError, VOICEVOX_ERROR_CODE } from "./errors.js";
+import {
+  VoicevoxAdapterError,
+  VOICEVOX_ERROR_CODE,
+  type VoicevoxAdapterErrorCode
+} from "./errors.js";
 import {
   voicevoxAudioQuerySchema,
   voicevoxEngineVersionSchema,
@@ -12,6 +17,7 @@ import {
   type VoicevoxAudioQuery,
   type VoicevoxSpeaker
 } from "./schemas.js";
+import { inspectVoicevoxWav } from "./wav.js";
 
 export const VOICEVOX_REQUEST_TIMEOUT_MS = 5_000;
 
@@ -90,7 +96,68 @@ export class VoicevoxClient {
     return parsed.data;
   }
 
+  async synthesize(
+    query: VoicevoxAudioQuery,
+    resolvedStyleId: number
+  ): Promise<Uint8Array> {
+    const parsedQuery = voicevoxAudioQuerySchema.safeParse(query);
+    if (!parsedQuery.success || !Number.isInteger(resolvedStyleId)) {
+      throw new VoicevoxAdapterError(VOICEVOX_ERROR_CODE.responseInvalid);
+    }
+
+    const audio = await this.requestBody(
+      getVoicevoxSynthesisUrl(this.engineUrl, resolvedStyleId),
+      {
+        method: "POST",
+        headers: {
+          Accept: "audio/wav",
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify(parsedQuery.data)
+      },
+      (response) => response.arrayBuffer(),
+      VOICEVOX_ERROR_CODE.synthesisResponseInvalid
+    );
+    const bytes = new Uint8Array(audio);
+    if (bytes.byteLength === 0) {
+      throw new VoicevoxAdapterError(
+        VOICEVOX_ERROR_CODE.synthesisResponseInvalid
+      );
+    }
+
+    try {
+      inspectVoicevoxWav(bytes);
+    } catch {
+      throw new VoicevoxAdapterError(
+        VOICEVOX_ERROR_CODE.synthesisResponseInvalid
+      );
+    }
+
+    return bytes;
+  }
+
+  async synthesizeAudioQuery(
+    query: VoicevoxAudioQuery,
+    resolvedStyleId: number
+  ): Promise<Uint8Array> {
+    return this.synthesize(query, resolvedStyleId);
+  }
+
   private async requestJson(url: string, init: RequestInit): Promise<unknown> {
+    return this.requestBody(
+      url,
+      init,
+      (response) => response.json(),
+      VOICEVOX_ERROR_CODE.responseInvalidJson
+    );
+  }
+
+  private async requestBody<T>(
+    url: string,
+    init: RequestInit,
+    readBody: (response: Response) => Promise<T>,
+    invalidBodyCode: VoicevoxAdapterErrorCode
+  ): Promise<T> {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
 
@@ -119,14 +186,14 @@ export class VoicevoxClient {
         });
       }
 
-      let body: unknown;
+      let body: T;
       try {
-        body = await response.json();
+        body = await readBody(response);
       } catch {
         if (controller.signal.aborted) {
           throw new VoicevoxAdapterError(VOICEVOX_ERROR_CODE.timeout);
         }
-        throw new VoicevoxAdapterError(VOICEVOX_ERROR_CODE.responseInvalidJson);
+        throw new VoicevoxAdapterError(invalidBodyCode);
       }
 
       if (controller.signal.aborted) {

@@ -4,3 +4,4 @@ export * from "./errors.js";
 export * from "./resolver.js";
 export * from "./schemas.js";
 export * from "./service.js";
+export * from "./wav.js";

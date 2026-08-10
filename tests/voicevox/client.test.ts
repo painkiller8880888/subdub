@@ -11,6 +11,7 @@ import {
 import {
   createVoicevoxAudioQueryFixture,
   createVoicevoxSpeakersFixture,
+  createVoicevoxWavFixture,
   syntheticVoicevoxStyleId,
   voicevoxJsonResponse
 } from "../fixtures/voicevox.js";
@@ -93,6 +94,59 @@ describe("VoicevoxClient", () => {
     expect(query.accent_phrases[0]?.moras[0]?.future_mora_field).toBe(
       "preserve"
     );
+  });
+
+  it("posts the verified audio query to synthesis and returns unchanged WAV bytes", async () => {
+    const query = createVoicevoxAudioQueryFixture();
+    const wav = createVoicevoxWavFixture({ durationMs: 1_250 });
+    const fetch = vi.fn(async (input: string | URL, init?: RequestInit) => {
+      const url = new URL(String(input));
+      expect(url.pathname).toBe("/engine/synthesis");
+      expect(url.searchParams.get("speaker")).toBe("123");
+      expect(init?.method).toBe("POST");
+      expect(init?.headers).toEqual({
+        Accept: "audio/wav",
+        "Content-Type": "application/json"
+      });
+      expect(JSON.parse(String(init?.body))).toEqual(query);
+      return new Response(wav, {
+        status: 200,
+        headers: { "content-type": "audio/wav" }
+      });
+    });
+    const client = new VoicevoxClient({
+      engineUrl: "http://fixture.test/engine///",
+      fetch: fetch as unknown as typeof globalThis.fetch
+    });
+
+    await expect(client.synthesize(query, 123)).resolves.toEqual(wav);
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects empty and non-WAV synthesis responses", async () => {
+    const emptyClient = new VoicevoxClient({
+      engineUrl: "http://fixture.test",
+      fetch: vi.fn(
+        async () => new Response(new Uint8Array())
+      ) as unknown as typeof globalThis.fetch
+    });
+    await expect(
+      emptyClient.synthesize(createVoicevoxAudioQueryFixture(), 1)
+    ).rejects.toMatchObject({
+      code: VOICEVOX_ERROR_CODE.synthesisResponseInvalid
+    });
+
+    const invalidClient = new VoicevoxClient({
+      engineUrl: "http://fixture.test",
+      fetch: vi.fn(
+        async () => new Response("not-wav")
+      ) as unknown as typeof globalThis.fetch
+    });
+    await expect(
+      invalidClient.synthesize(createVoicevoxAudioQueryFixture(), 1)
+    ).rejects.toMatchObject({
+      code: VOICEVOX_ERROR_CODE.synthesisResponseInvalid
+    });
   });
 
   it("rejects fractional accent positions in audio queries", async () => {
