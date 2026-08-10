@@ -12,7 +12,8 @@ import {
   RENDER_MANIFEST_VERSION,
   serializeRenderManifest,
   type RenderManifestCompilerInput,
-  type RenderManifestDiagnostic
+  type RenderManifestDiagnostic,
+  type RenderManifestWarning
 } from "./render-manifest-compiler.js";
 
 export const RENDER_MANIFEST_RELATIVE_PATH =
@@ -72,12 +73,14 @@ export type RenderManifestCacheResult =
       readonly reused: boolean;
       readonly manifest: RenderManifest;
       readonly diagnostics: readonly [];
+      readonly warnings: readonly RenderManifestWarning[];
     }
   | {
       readonly status: "failed";
       readonly reused: false;
       readonly manifest: null;
       readonly diagnostics: readonly RenderManifestDiagnostic[];
+      readonly warnings: readonly RenderManifestWarning[];
     };
 
 function errorCode(error: unknown): string | undefined {
@@ -271,7 +274,8 @@ export class RenderManifestStore {
         status: "failed",
         reused: false,
         manifest: null,
-        diagnostics: result.diagnostics
+        diagnostics: result.diagnostics,
+        warnings: result.warnings
       };
     }
 
@@ -281,7 +285,8 @@ export class RenderManifestStore {
         status: "reused",
         reused: true,
         manifest: current,
-        diagnostics: []
+        diagnostics: [],
+        warnings: result.warnings
       };
     }
 
@@ -290,7 +295,8 @@ export class RenderManifestStore {
       status: "compiled",
       reused: false,
       manifest: result.manifest,
-      diagnostics: []
+      diagnostics: [],
+      warnings: result.warnings
     };
   }
 

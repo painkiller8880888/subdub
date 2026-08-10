@@ -57,5 +57,13 @@ export const renderManifestRenderingFixture = {
           }
         }
       : background
-  )
+  ),
+  audioTracks: renderManifestFixture.audioTracks.map((track, index) => ({
+    ...track,
+    src: index === 0 ? "media/effect-2s.wav" : "media/effect-1s.wav"
+  })),
+  soundEffects: renderManifestFixture.soundEffects.map((effect, index) => ({
+    ...effect,
+    src: index === 0 ? "media/effect-1s.wav" : "media/effect-2s.wav"
+  }))
 } satisfies RenderManifest;
