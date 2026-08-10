@@ -350,6 +350,11 @@ input:focus-visible {
   color: #805b10;
 }
 
+.voice-status-needs_review {
+  background: #ffe5c2;
+  color: #8a4b0f;
+}
+
 .voice-status-generating {
   background: #e5efff;
   color: #1e4f9a;
@@ -364,6 +369,115 @@ input:focus-visible {
   color: #59647b;
   font-size: 0.75rem;
   overflow-wrap: anywhere;
+}
+
+.voice-adjustment-editor,
+.voice-adjustment-panel {
+  display: grid;
+  gap: 0.8rem;
+}
+
+.voice-adjustment-editor {
+  border-top: 1px solid #e4e8f0;
+  padding-top: 0.8rem;
+}
+
+.voice-adjustment-panel {
+  background: #fbfcff;
+  border: 1px solid #cfd8e8;
+  border-radius: 0.6rem;
+  padding: 0.9rem;
+}
+
+.voice-adjustment-tabs,
+.voice-adjustment-actions,
+.voice-adjustment-input-row {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.voice-adjustment-fields {
+  display: grid;
+  gap: 0.8rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.voice-adjustment-input-row input {
+  flex: 1;
+  min-width: 7rem;
+}
+
+.voice-adjustment-accent-list,
+.voice-adjustment-detail-list {
+  display: grid;
+  gap: 0.8rem;
+}
+
+.voice-adjustment-accent-card,
+.voice-adjustment-detail-card {
+  background: #fff;
+  border: 1px solid #e1e6ef;
+  border-radius: 0.55rem;
+  display: grid;
+  gap: 0.6rem;
+  padding: 0.75rem;
+}
+
+.voice-adjustment-accent-card > div:first-child {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.voice-adjustment-accent-card span {
+  color: #59647b;
+  font-size: 0.85rem;
+}
+
+.voice-adjustment-detail-card {
+  margin: 0;
+}
+
+.voice-adjustment-detail-card legend {
+  color: #33415c;
+  font-weight: 700;
+  padding: 0 0.3rem;
+}
+
+.voice-adjustment-mora {
+  align-items: end;
+  border-top: 1px solid #edf0f5;
+  display: grid;
+  gap: 0.5rem;
+  grid-template-columns: minmax(4rem, 0.7fr) repeat(3, minmax(5rem, 1fr));
+  padding-top: 0.6rem;
+}
+
+.voice-adjustment-mora label {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.voice-adjustment-mora .checkbox-field {
+  align-self: center;
+}
+
+.voice-adjustment-checkbox-row {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.voice-adjustment-mora > .button {
+  grid-column: 1 / -1;
+  justify-self: start;
+}
+
+.voice-adjustment-panel audio {
+  max-width: 100%;
+  width: 28rem;
 }
 
 .script-line-errors,
@@ -1051,5 +1165,13 @@ input:focus-visible {
 
   .page-header-actions .button {
     flex: 1;
+  }
+
+  .voice-adjustment-fields {
+    grid-template-columns: 1fr;
+  }
+
+  .voice-adjustment-mora {
+    grid-template-columns: 1fr 1fr;
   }
 }

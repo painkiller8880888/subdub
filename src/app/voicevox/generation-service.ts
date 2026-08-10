@@ -583,6 +583,9 @@ export class VoicevoxGenerationService {
     if (runtime?.state === "generating") {
       return { lineId: inspection.line.id, status: "generating" };
     }
+    if (inspection.conditions.adjustmentStatus === "needs_review") {
+      return { lineId: inspection.line.id, status: "needs_review" };
+    }
     if (
       runtime?.state === "failed" &&
       (runtime.cacheKey === null ||

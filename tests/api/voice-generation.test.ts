@@ -20,7 +20,8 @@ import {
 import {
   createVoicevoxAudioQueryFixture,
   createVoicevoxSpeakersFixture,
-  createVoicevoxWavFixture
+  createVoicevoxWavFixture,
+  syntheticVoicevoxStyleId
 } from "../fixtures/voicevox.js";
 import { videoProjectFixture } from "../fixtures/video-project.js";
 
@@ -201,7 +202,7 @@ describe("project voice generation API", () => {
     expect(JSON.stringify(unavailable.json())).not.toContain("stack");
   });
 
-  it("uses the adjustment fingerprint in the default server wiring", async () => {
+  it("uses persisted adjustments in the default server wiring", async () => {
     const workspaceRoot = await fs.mkdtemp(
       path.join(tmpdir(), "subdub-voice-generation-server-")
     );
@@ -215,13 +216,15 @@ describe("project voice generation API", () => {
     if (changedLine === undefined) {
       throw new Error("fixture line is required");
     }
+    const metanStyleId = syntheticVoicevoxStyleId();
+    const zundamonStyleId = syntheticVoicevoxStyleId();
 
     const getSpeakers = vi
       .spyOn(VoicevoxClient.prototype, "getSpeakers")
       .mockResolvedValue(
         createVoicevoxSpeakersFixture({
-          metanStyleId: 10_001,
-          zundamonStyleId: 10_002
+          metanStyleId,
+          zundamonStyleId
         })
       );
     const getVersion = vi
@@ -264,7 +267,21 @@ describe("project voice generation API", () => {
       await fs.mkdir(adjustmentDirectory, { recursive: true });
       await fs.writeFile(
         path.join(adjustmentDirectory, `${changedLine.id}.json`),
-        '{"adjustmentVersion":"1.0.0","lineId":"intro-mentor-1"}\n',
+        `${JSON.stringify({
+          adjustmentVersion: "1.0.0",
+          lineId: changedLine.id,
+          base: {
+            baseHash: "f".repeat(64),
+            resolvedSpokenText: changedLine.spokenText,
+            speakerUuid: "metan-fixture-uuid",
+            styleName: "ノーマル",
+            resolvedStyleId: metanStyleId,
+            voicevoxEngineVersion: "engine-fixture-1"
+          },
+          scalarOverrides: {},
+          accentPhrases: null,
+          editedAt: "2026-08-10T00:00:00.000Z"
+        })}\n`,
         "utf8"
       );
 
@@ -277,7 +294,7 @@ describe("project voice generation API", () => {
       ).data;
       expect(
         status.lines.find((line) => line.lineId === changedLine.id)
-      ).toEqual({ lineId: changedLine.id, status: "stale" });
+      ).toEqual({ lineId: changedLine.id, status: "needs_review" });
       expect(
         status.lines
           .filter((line) => line.lineId !== changedLine.id)

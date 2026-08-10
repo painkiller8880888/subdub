@@ -40,7 +40,12 @@ import {
   type VisualSuggestionRequest,
   type VisualSuggestionResponse
 } from "./visual-search-intent.js";
-import { voicevoxResolvedSpeakerSchema } from "../voicevox/schemas.js";
+import {
+  voicevoxAdjustmentFileSchema,
+  voicevoxAdjustmentBaseSchema,
+  voicevoxAudioQuerySchema,
+  voicevoxResolvedSpeakerSchema
+} from "../voicevox/schemas.js";
 
 const apiErrorPathSegmentSchema = z.union([z.string(), z.number().int()]);
 
@@ -96,6 +101,7 @@ export const voicevoxStatusResponseSchema = strictObject({
 export const voiceLineGenerationStatusSchema = z.enum([
   "current",
   "stale",
+  "needs_review",
   "generating",
   "failed"
 ]);
@@ -170,6 +176,56 @@ export const voiceGenerationStatusDataSchema = strictObject({
 
 export const voiceGenerationStatusResponseSchema = strictObject({
   data: voiceGenerationStatusDataSchema
+});
+
+export const voiceAdjustmentStatusSchema = z.enum(["current", "needs_review"]);
+
+export const voiceAdjustmentParamsSchema = strictObject({
+  lineId: idSchema
+});
+
+export const voiceAdjustmentPreviewParamsSchema = strictObject({
+  lineId: idSchema,
+  previewId: idSchema
+});
+
+export const voiceAdjustmentSnapshotSchema = strictObject({
+  lineId: idSchema,
+  status: voiceAdjustmentStatusSchema,
+  query: voicevoxAudioQuerySchema,
+  adjustment: voicevoxAdjustmentFileSchema.nullable(),
+  currentBase: voicevoxAdjustmentBaseSchema
+});
+
+export const voiceAdjustmentSnapshotResponseSchema = strictObject({
+  data: voiceAdjustmentSnapshotSchema
+});
+
+export const voiceAdjustmentSaveRequestSchema = strictObject({
+  adjustment: voicevoxAdjustmentFileSchema
+});
+
+export const voiceAdjustmentPreviewRequestSchema = strictObject({
+  query: voicevoxAudioQuerySchema
+});
+
+export const voiceAdjustmentPreviewResponseSchema = strictObject({
+  data: strictObject({
+    previewId: idSchema
+  })
+});
+
+export const voiceAdjustmentMutationResponseSchema = strictObject({
+  data: strictObject({
+    lineId: idSchema
+  })
+});
+
+export const voiceAdjustmentResetResponseSchema = strictObject({
+  data: strictObject({
+    projectId: idSchema,
+    resetLineIds: z.array(idSchema)
+  })
 });
 
 export const projectCreateRequestSchema = z
@@ -546,6 +602,24 @@ export type VoiceGenerationJobSummary = z.infer<
 >;
 export type VoiceGenerationStatusData = z.infer<
   typeof voiceGenerationStatusDataSchema
+>;
+export type VoiceAdjustmentStatus = z.infer<
+  typeof voiceAdjustmentStatusSchema
+>;
+export type VoiceAdjustmentSnapshot = z.infer<
+  typeof voiceAdjustmentSnapshotSchema
+>;
+export type VoiceAdjustmentSaveRequest = z.infer<
+  typeof voiceAdjustmentSaveRequestSchema
+>;
+export type VoiceAdjustmentPreviewRequest = z.infer<
+  typeof voiceAdjustmentPreviewRequestSchema
+>;
+export type VoiceAdjustmentPreviewResponse = z.infer<
+  typeof voiceAdjustmentPreviewResponseSchema
+>;
+export type VoiceAdjustmentResetResponse = z.infer<
+  typeof voiceAdjustmentResetResponseSchema
 >;
 export type ProjectCreateRequest = z.infer<typeof projectCreateRequestSchema>;
 export type ProjectSummary = z.infer<typeof projectSummarySchema>;

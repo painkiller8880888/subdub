@@ -36,6 +36,12 @@ import {
   assetDetailResponseSchema,
   visualSuggestionRequestSchema,
   visualSuggestionResponseSchema,
+  voiceAdjustmentMutationResponseSchema,
+  voiceAdjustmentPreviewRequestSchema,
+  voiceAdjustmentPreviewResponseSchema,
+  voiceAdjustmentResetResponseSchema,
+  voiceAdjustmentSaveRequestSchema,
+  voiceAdjustmentSnapshotResponseSchema,
   voiceGenerateRequestSchema,
   voiceGenerationAcceptedResponseSchema,
   voiceGenerationStatusResponseSchema,
@@ -64,6 +70,9 @@ import {
   type VisualAssignmentUpdateRequest,
   type VisualAssignmentDeleteRequest,
   type VisualApprovalRequest,
+  type VoiceAdjustmentPreviewRequest,
+  type VoiceAdjustmentSaveRequest,
+  type VoiceAdjustmentSnapshot,
   type VoiceGenerateRequest,
   type VoiceGenerationAccepted,
   type VoiceGenerationStatusData
@@ -420,6 +429,88 @@ export async function fetchProjectVoiceStatus(
     voiceGenerationStatusResponseSchema
   );
   return response.data;
+}
+
+export async function fetchProjectVoiceAdjustment(
+  projectId: string,
+  lineId: string
+): Promise<VoiceAdjustmentSnapshot> {
+  const response = await fetchApi(
+    `/api/projects/${encodeURIComponent(projectId)}/voice/adjustments/${encodeURIComponent(lineId)}`,
+    voiceAdjustmentSnapshotResponseSchema
+  );
+  return response.data;
+}
+
+export async function saveProjectVoiceAdjustment(
+  projectId: string,
+  lineId: string,
+  input: VoiceAdjustmentSaveRequest
+): Promise<VoiceAdjustmentSnapshot> {
+  const validatedInput = voiceAdjustmentSaveRequestSchema.parse(input);
+  const response = await fetchApi(
+    `/api/projects/${encodeURIComponent(projectId)}/voice/adjustments/${encodeURIComponent(lineId)}`,
+    voiceAdjustmentSnapshotResponseSchema,
+    {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(validatedInput)
+    }
+  );
+  return response.data;
+}
+
+export async function previewProjectVoiceAdjustment(
+  projectId: string,
+  lineId: string,
+  input: VoiceAdjustmentPreviewRequest
+): Promise<{ readonly previewId: string }> {
+  const validatedInput = voiceAdjustmentPreviewRequestSchema.parse(input);
+  const response = await fetchApi(
+    `/api/projects/${encodeURIComponent(projectId)}/voice/adjustments/${encodeURIComponent(lineId)}/preview`,
+    voiceAdjustmentPreviewResponseSchema,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(validatedInput)
+    }
+  );
+  return response.data;
+}
+
+export function projectVoiceAdjustmentPreviewUrl(
+  projectId: string,
+  lineId: string,
+  previewId: string
+): string {
+  return `/api/projects/${encodeURIComponent(projectId)}/voice/adjustments/${encodeURIComponent(lineId)}/preview/${encodeURIComponent(previewId)}`;
+}
+
+export async function discardProjectVoiceAdjustment(
+  projectId: string,
+  lineId: string
+): Promise<string> {
+  const response = await fetchApi(
+    `/api/projects/${encodeURIComponent(projectId)}/voice/adjustments/${encodeURIComponent(lineId)}`,
+    voiceAdjustmentMutationResponseSchema,
+    {
+      method: "DELETE"
+    }
+  );
+  return response.data.lineId;
+}
+
+export async function resetProjectVoiceAdjustments(
+  projectId: string
+): Promise<readonly string[]> {
+  const response = await fetchApi(
+    `/api/projects/${encodeURIComponent(projectId)}/voice/adjustments`,
+    voiceAdjustmentResetResponseSchema,
+    {
+      method: "DELETE"
+    }
+  );
+  return response.data.resetLineIds;
 }
 
 export async function suggestProjectVisuals(

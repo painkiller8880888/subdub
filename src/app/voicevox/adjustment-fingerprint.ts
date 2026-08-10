@@ -2,7 +2,12 @@ import { createHash } from "node:crypto";
 import { promises as fs } from "node:fs";
 import * as path from "node:path";
 
-import { idSchema } from "../../schema/primitives.js";
+import {
+  finiteNumberSchema,
+  idSchema,
+  voiceSchema,
+  type Voice
+} from "../../schema/index.js";
 import type {
   VoicevoxAdjustmentFingerprintInput,
   VoicevoxAdjustmentFingerprintProvider
@@ -10,6 +15,81 @@ import type {
 
 export const VOICEVOX_ADJUSTMENT_RELATIVE_DIRECTORY =
   "voice-adjustments" as const;
+
+export const VOICEVOX_ADJUSTMENT_BASE_HASH_VERSION =
+  "voicevox-adjustment-base-v1" as const;
+
+const VOICE_SETTING_KEYS = [
+  "speedScale",
+  "pitchScale",
+  "intonationScale",
+  "volumeScale",
+  "prePhonemeLength",
+  "postPhonemeLength"
+] as const satisfies ReadonlyArray<keyof Voice>;
+
+type CanonicalValue =
+  | boolean
+  | null
+  | number
+  | string
+  | readonly CanonicalValue[]
+  | { readonly [key: string]: CanonicalValue };
+
+function canonicalJson(value: CanonicalValue): string {
+  if (Array.isArray(value)) {
+    return `[${value.map((entry) => canonicalJson(entry)).join(",")}]`;
+  }
+
+  if (typeof value === "object" && value !== null) {
+    const objectValue = value as {
+      readonly [key: string]: CanonicalValue;
+    };
+    return `{${Object.keys(value)
+      .sort()
+      .map((key) => `${JSON.stringify(key)}:${canonicalJson(objectValue[key])}`)
+      .join(",")}}`;
+  }
+
+  return JSON.stringify(value);
+}
+
+function normalizeVoiceOverrides(voiceOverrides: Partial<Voice>): {
+  readonly [key: string]: number | null;
+} {
+  return Object.fromEntries(
+    VOICE_SETTING_KEYS.map((key) => [key, voiceOverrides[key] ?? null])
+  );
+}
+
+export type VoicevoxAdjustmentBaseHashInput = {
+  readonly resolvedSpokenText: string;
+  readonly speakerUuid: string;
+  readonly styleName: string;
+  readonly resolvedStyleId: number;
+  readonly voicevoxEngineVersion: string;
+  readonly characterVoice: Voice;
+  readonly voiceOverrides: Partial<Voice>;
+};
+
+export function createVoicevoxAdjustmentBaseHash(
+  input: VoicevoxAdjustmentBaseHashInput
+): string {
+  const canonicalInput: CanonicalValue = {
+    baseHashVersion: VOICEVOX_ADJUSTMENT_BASE_HASH_VERSION,
+    resolvedSpokenText: input.resolvedSpokenText.normalize("NFC"),
+    speakerUuid: input.speakerUuid.normalize("NFC"),
+    styleName: input.styleName.normalize("NFC"),
+    resolvedStyleId: finiteNumberSchema.int().parse(input.resolvedStyleId),
+    voicevoxEngineVersion: input.voicevoxEngineVersion.normalize("NFC"),
+    characterVoice: voiceSchema.parse(input.characterVoice),
+    voiceOverrides: normalizeVoiceOverrides(input.voiceOverrides)
+  };
+
+  return createHash("sha256")
+    .update(canonicalJson(canonicalInput), "utf8")
+    .digest("hex");
+}
 
 export type VoicevoxAdjustmentFingerprintFileSystem = {
   readFile(filePath: string): Promise<Uint8Array>;
@@ -109,6 +189,11 @@ export class VoicevoxAdjustmentFingerprint implements VoicevoxAdjustmentFingerpr
       }
       throw new VoicevoxAdjustmentFingerprintError(
         "VOICEVOX_ADJUSTMENT_FINGERPRINT_READ_FAILED"
+      );
+    }
+    if (!isPathInside(this.workspaceRoot, resolvedWorkspaceRoot)) {
+      throw new VoicevoxAdjustmentFingerprintError(
+        "VOICEVOX_ADJUSTMENT_FINGERPRINT_PATH_INVALID"
       );
     }
 
