@@ -175,9 +175,34 @@ export const visualAssignmentInputSchema = strictObject({
   display: displaySchema
 });
 
+export const visualAssignmentCreateInputSchema = strictObject({
+  id: idSchema,
+  startLineId: idSchema,
+  endLineId: idSchema,
+  assetId: idSchema,
+  display: displaySchema.optional()
+});
+
 export const visualAssignmentRequestSchema = strictObject({
   expectedRevision: nonNegativeIntegerSchema,
+  assignment: visualAssignmentCreateInputSchema
+});
+
+export const visualAssignmentUpdateRequestSchema = strictObject({
+  expectedRevision: nonNegativeIntegerSchema,
   assignment: visualAssignmentInputSchema
+});
+
+export const visualAssignmentDeleteRequestSchema = strictObject({
+  expectedRevision: nonNegativeIntegerSchema
+});
+
+export const visualApprovalRequestSchema = strictObject({
+  expectedRevision: nonNegativeIntegerSchema
+});
+
+export const visualAssignmentParamsSchema = strictObject({
+  assignmentId: idSchema
 });
 
 export const visualAssignmentSaveRequestSchema = visualAssignmentRequestSchema;
@@ -402,6 +427,11 @@ export const assetIdParamsSchema = strictObject({
   assetId: idSchema
 });
 
+export const assetThumbnailParamsSchema = strictObject({
+  assetId: idSchema,
+  thumbnailIndex: z.coerce.number().int().nonnegative()
+});
+
 export type ApiErrorDetail = z.infer<typeof apiErrorDetailSchema>;
 export type ApiSuccessResponse<T> = {
   data: T;
@@ -432,9 +462,19 @@ export type ProjectMutationResponse = z.infer<
   typeof projectMutationResponseSchema
 >;
 export type VisualAssignmentInput = z.infer<typeof visualAssignmentInputSchema>;
+export type VisualAssignmentCreateInput = z.infer<
+  typeof visualAssignmentCreateInputSchema
+>;
 export type VisualAssignmentRequest = z.infer<
   typeof visualAssignmentRequestSchema
 >;
+export type VisualAssignmentUpdateRequest = z.infer<
+  typeof visualAssignmentUpdateRequestSchema
+>;
+export type VisualAssignmentDeleteRequest = z.infer<
+  typeof visualAssignmentDeleteRequestSchema
+>;
+export type VisualApprovalRequest = z.infer<typeof visualApprovalRequestSchema>;
 export type VisualAssignmentSaveRequest = z.infer<
   typeof visualAssignmentSaveRequestSchema
 >;
@@ -487,6 +527,10 @@ export type AssetDetailResponse = z.infer<typeof assetDetailResponseSchema>;
 export type AssetListQuery = z.infer<typeof assetListQuerySchema>;
 export type AssetListResponse = z.infer<typeof assetListResponseSchema>;
 export type AssetIdParams = z.infer<typeof assetIdParamsSchema>;
+export type AssetThumbnailParams = z.infer<typeof assetThumbnailParamsSchema>;
+export type VisualAssignmentParams = z.infer<
+  typeof visualAssignmentParamsSchema
+>;
 export {
   visualSuggestionRequestSchema,
   visualSuggestionResponseSchema

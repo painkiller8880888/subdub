@@ -1,4 +1,9 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  useMutation,
+  useQueries,
+  useQuery,
+  useQueryClient
+} from "@tanstack/react-query";
 import {
   type ChangeEvent,
   type FormEvent,
@@ -12,23 +17,37 @@ import { ZodError } from "zod";
 
 import type {
   ProjectSummary,
+  VisualAssignmentRequest,
+  VisualAssignmentUpdateRequest,
+  VisualAssignmentDeleteRequest,
+  VisualApprovalRequest,
   VisualSuggestionResponse
 } from "../schema/api.js";
-import type { AssetListResult } from "../schema/asset.js";
+import type {
+  AssetDetail,
+  AssetListItem,
+  AssetListResult
+} from "../schema/asset.js";
 import {
   type Script,
   type ScriptLine,
-  type VideoProject
+  type VideoProject,
+  type VisualAssignment
 } from "../schema/index.js";
 import {
   ApiClientError,
   ApiClientProtocolError,
+  approveProjectVisuals,
   approveProjectScript,
+  assignProjectVisual,
+  deleteProjectVisualAssignment,
+  fetchAsset,
   fetchProject,
   initializeProjectScript,
   saveProjectScript,
   searchAssets,
-  suggestProjectVisuals
+  suggestProjectVisuals,
+  updateProjectVisualAssignment
 } from "./lib/api-client";
 import {
   AutosaveCoordinator,
@@ -55,6 +74,12 @@ import {
   type VisualSuggestionCurrentContext,
   type VisualSuggestionRequestContext
 } from "./script-editor";
+import { VisualAssignmentPanel } from "./VisualAssignmentPanel";
+import {
+  assignmentInput,
+  defaultDisplayForAsset,
+  nextVisualAssignmentId
+} from "./visual-assignment-editor";
 
 function charactersPath(projectId: string): string {
   return `/projects/${encodeURIComponent(projectId)}/characters`;
@@ -73,6 +98,9 @@ function getErrorMessage(error: unknown, fallback: string): string {
   }
   if (error instanceof ZodError) {
     return "入力内容を確認してください。";
+  }
+  if (error instanceof Error && error.message.length > 0) {
+    return error.message;
   }
   return fallback;
 }
@@ -109,6 +137,14 @@ function projectSummaryFromProject(project: VideoProject): ProjectSummary {
   };
 }
 
+type VisualMutationContext = {
+  readonly projectId: string;
+  readonly projectGeneration: number;
+  readonly expectedRevision: number;
+};
+
+type VisualSaveState = "idle" | "saved";
+
 function lineIssueText(
   issues: readonly ScriptDraftIssue[],
   sectionIndex: number,
@@ -120,6 +156,29 @@ function lineIssueText(
       prefix.every((segment, index) => issue.path[index] === segment)
     )
     .map((issue) => issue.message);
+}
+
+function unassignedLineCount(project: VideoProject): number {
+  let count = 0;
+  for (const section of project.script.sections) {
+    const covered = new Set<number>();
+    for (const assignment of project.visuals.assignments) {
+      const startIndex = section.lines.findIndex(
+        (line) => line.id === assignment.startLineId
+      );
+      const endIndex = section.lines.findIndex(
+        (line) => line.id === assignment.endLineId
+      );
+      if (startIndex < 0 || endIndex < 0 || startIndex > endIndex) {
+        continue;
+      }
+      for (let lineIndex = startIndex; lineIndex <= endIndex; lineIndex += 1) {
+        covered.add(lineIndex);
+      }
+    }
+    count += section.lines.length - covered.size;
+  }
+  return count;
 }
 
 function nextTemporaryLineId(script: Script): string {
@@ -304,6 +363,15 @@ export function ScriptPage() {
     enabled: projectId !== undefined,
     retry: false
   });
+  const assignmentAssetQueries = useQueries({
+    queries: (projectQuery.data?.visuals.assignments ?? []).map(
+      (assignment) => ({
+        queryKey: ["assets", assignment.assetId],
+        queryFn: () => fetchAsset(assignment.assetId),
+        retry: false
+      })
+    )
+  });
   const [draft, setDraft] = useState<Script | null>(null);
   const [autosaveState, setAutosaveState] = useState<AutosaveState>({
     status: "idle",
@@ -326,6 +394,9 @@ export function ScriptPage() {
   const [assetSearchResult, setAssetSearchResult] =
     useState<AssetListResult | null>(null);
   const [assetSearchError, setAssetSearchError] = useState<unknown>(null);
+  const [visualError, setVisualError] = useState<unknown>(null);
+  const [visualSaveState, setVisualSaveState] =
+    useState<VisualSaveState>("idle");
   const projectIdRef = useRef(projectId ?? "");
   const projectGenerationRef = useRef(0);
   const revisionRef = useRef(0);
@@ -427,6 +498,57 @@ export function ScriptPage() {
       setAssetSearchResult(result);
     },
     onError: setAssetSearchError
+  });
+
+  const visualAssignMutation = useMutation({
+    mutationFn: ({
+      projectId,
+      expectedRevision,
+      assignment
+    }: VisualAssignmentRequest & { projectId: string }) =>
+      assignProjectVisual(projectId, { expectedRevision, assignment }),
+    retry: false
+  });
+
+  const visualUpdateMutation = useMutation({
+    mutationFn: ({
+      projectId,
+      assignmentId,
+      expectedRevision,
+      assignment
+    }: VisualAssignmentUpdateRequest & {
+      projectId: string;
+      assignmentId: string;
+    }) =>
+      updateProjectVisualAssignment(projectId, assignmentId, {
+        expectedRevision,
+        assignment
+      }),
+    retry: false
+  });
+
+  const visualDeleteMutation = useMutation({
+    mutationFn: ({
+      projectId,
+      assignmentId,
+      expectedRevision
+    }: VisualAssignmentDeleteRequest & {
+      projectId: string;
+      assignmentId: string;
+    }) =>
+      deleteProjectVisualAssignment(projectId, assignmentId, {
+        expectedRevision
+      }),
+    retry: false
+  });
+
+  const visualApproveMutation = useMutation({
+    mutationFn: ({
+      projectId,
+      expectedRevision
+    }: VisualApprovalRequest & { projectId: string }) =>
+      approveProjectVisuals(projectId, { expectedRevision }),
+    retry: false
   });
 
   function updateMutationCaches(project: VideoProject): void {
@@ -539,6 +661,8 @@ export function ScriptPage() {
     };
     setAssetSearchResult(null);
     setAssetSearchError(null);
+    setVisualError(null);
+    setVisualSaveState("idle");
     coordinator.reset();
   }, [coordinator, projectId]);
 
@@ -795,6 +919,15 @@ export function ScriptPage() {
 
   const isInitializing = initializeMutation.isPending;
   const project = projectQuery.data;
+  const assignmentAssets = new Map<string, AssetDetail | undefined>();
+  (project?.visuals.assignments ?? []).forEach((assignment, index) => {
+    assignmentAssets.set(
+      assignment.assetId,
+      assignmentAssetQueries[index]?.data
+    );
+  });
+  const unassignedLines =
+    project === undefined ? 0 : unassignedLineCount(project);
   const isReadyToInitialize =
     project !== undefined && isScriptInitializationAllowed(project);
   const issues =
@@ -929,6 +1062,192 @@ export function ScriptPage() {
     draft.sections[0];
   const canSuggest =
     project.script.status === "approved" && draft.status === "approved";
+  const canApproveVisuals =
+    project.script.status === "approved" && draft.status === "approved";
+  const visualMutationPending =
+    visualAssignMutation.isPending ||
+    visualUpdateMutation.isPending ||
+    visualDeleteMutation.isPending ||
+    visualApproveMutation.isPending;
+
+  function isVisualMutationCurrent(context: VisualMutationContext): boolean {
+    return (
+      isProjectContextCurrent(
+        projectIdRef.current,
+        projectGenerationRef.current,
+        context.projectId,
+        context.projectGeneration
+      ) && revisionRef.current === context.expectedRevision
+    );
+  }
+
+  function acceptVisualMutationResult(
+    saved: VideoProject,
+    context: VisualMutationContext
+  ): boolean {
+    if (!isVisualMutationCurrent(context)) {
+      return false;
+    }
+    updateMutationCaches(saved);
+    revisionRef.current = saved.revision;
+    setVisualError(null);
+    setVisualSaveState("saved");
+    return true;
+  }
+
+  async function saveVisualAssignment(
+    assignment: VisualAssignment
+  ): Promise<void> {
+    const context: VisualMutationContext = {
+      projectId: projectIdRef.current,
+      projectGeneration: projectGenerationRef.current,
+      expectedRevision: revisionRef.current
+    };
+    setVisualError(null);
+    setVisualSaveState("idle");
+    try {
+      const saved = await visualUpdateMutation.mutateAsync({
+        ...context,
+        assignmentId: assignment.id,
+        assignment: assignmentInput(assignment)
+      });
+      acceptVisualMutationResult(saved, context);
+    } catch (error) {
+      if (isVisualMutationCurrent(context)) {
+        setVisualError(error);
+        setVisualSaveState("idle");
+      }
+    }
+  }
+
+  async function removeVisualAssignment(assignmentId: string): Promise<void> {
+    const context: VisualMutationContext = {
+      projectId: projectIdRef.current,
+      projectGeneration: projectGenerationRef.current,
+      expectedRevision: revisionRef.current
+    };
+    setVisualError(null);
+    setVisualSaveState("idle");
+    try {
+      const saved = await visualDeleteMutation.mutateAsync({
+        ...context,
+        assignmentId
+      });
+      acceptVisualMutationResult(saved, context);
+    } catch (error) {
+      if (isVisualMutationCurrent(context)) {
+        setVisualError(error);
+        setVisualSaveState("idle");
+      }
+    }
+  }
+
+  async function assignVisualCandidate(
+    asset: AssetDetail | AssetListItem
+  ): Promise<void> {
+    if (
+      suggestionSection === undefined ||
+      suggestionStartLineId.length === 0 ||
+      suggestionEndLineId.length === 0
+    ) {
+      setVisualError(
+        new Error("同じセクション内の表示範囲を選択してください。")
+      );
+      setVisualSaveState("idle");
+      return;
+    }
+    const displayResult = defaultDisplayForAsset(asset);
+    if (displayResult.display === undefined) {
+      setVisualError(new Error(displayResult.reason));
+      setVisualSaveState("idle");
+      return;
+    }
+
+    const requestProjectId = projectIdRef.current;
+    const requestGeneration = projectGenerationRef.current;
+    const flushed = await coordinatorRef.current?.flush();
+    if (flushed !== true) {
+      return;
+    }
+    if (
+      !isProjectContextCurrent(
+        projectIdRef.current,
+        projectGenerationRef.current,
+        requestProjectId,
+        requestGeneration
+      )
+    ) {
+      return;
+    }
+    const latestProject =
+      queryClient.getQueryData<VideoProject>(["projects", requestProjectId]) ??
+      project;
+    if (latestProject === undefined) {
+      setVisualError(new Error("プロジェクトを再読み込みしてください。"));
+      setVisualSaveState("idle");
+      return;
+    }
+    const context: VisualMutationContext = {
+      projectId: requestProjectId,
+      projectGeneration: requestGeneration,
+      expectedRevision: revisionRef.current
+    };
+    setVisualError(null);
+    setVisualSaveState("idle");
+    try {
+      const saved = await visualAssignMutation.mutateAsync({
+        ...context,
+        assignment: {
+          id: nextVisualAssignmentId(latestProject.visuals.assignments),
+          startLineId: suggestionStartLineId,
+          endLineId: suggestionEndLineId,
+          assetId: asset.assetId,
+          display: displayResult.display
+        }
+      });
+      acceptVisualMutationResult(saved, context);
+    } catch (error) {
+      if (isVisualMutationCurrent(context)) {
+        setVisualError(error);
+        setVisualSaveState("idle");
+      }
+    }
+  }
+
+  async function approveVisuals(): Promise<void> {
+    const requestProjectId = projectIdRef.current;
+    const requestGeneration = projectGenerationRef.current;
+    setVisualError(null);
+    setVisualSaveState("idle");
+    const flushed = await coordinatorRef.current?.flush();
+    if (flushed !== true) {
+      return;
+    }
+    if (
+      !isProjectContextCurrent(
+        projectIdRef.current,
+        projectGenerationRef.current,
+        requestProjectId,
+        requestGeneration
+      )
+    ) {
+      return;
+    }
+    const context: VisualMutationContext = {
+      projectId: requestProjectId,
+      projectGeneration: requestGeneration,
+      expectedRevision: revisionRef.current
+    };
+    try {
+      const saved = await visualApproveMutation.mutateAsync(context);
+      acceptVisualMutationResult(saved, context);
+    } catch (error) {
+      if (isVisualMutationCurrent(context)) {
+        setVisualError(error);
+        setVisualSaveState("idle");
+      }
+    }
+  }
 
   async function runVisualSuggestion(): Promise<void> {
     if (
@@ -1270,6 +1589,16 @@ export function ScriptPage() {
                         .join("、") || "なし"}
                     </span>
                     <span>{candidate.matchReasons.join(" / ")}</span>
+                    <button
+                      className="button button-small"
+                      type="button"
+                      disabled={visualMutationPending}
+                      onClick={() =>
+                        void assignVisualCandidate(candidate.asset)
+                      }
+                    >
+                      この素材を割り当て
+                    </button>
                   </li>
                 ))}
               </ul>
@@ -1331,11 +1660,95 @@ export function ScriptPage() {
                     {asset.tags.map((tag) => tag.canonicalName).join("、") ||
                       "タグなし"}
                   </span>
+                  <button
+                    className="button button-small"
+                    type="button"
+                    disabled={visualMutationPending}
+                    onClick={() => void assignVisualCandidate(asset)}
+                  >
+                    この素材を割り当て
+                  </button>
                 </li>
               ))}
             </ul>
           )
         ) : null}
+      </section>
+
+      {visualError !== null ? (
+        <section className="message-panel message-panel-error" role="alert">
+          <h2>ビジュアルを保存・承認できません</h2>
+          <p>
+            {getErrorMessage(
+              visualError,
+              "入力内容または素材の状態を確認してください。"
+            )}
+          </p>
+          {errorDetails(visualError).length > 0 ? (
+            <ul>
+              {errorDetails(visualError).map((detail) => (
+                <li key={detail}>{detail}</li>
+              ))}
+            </ul>
+          ) : null}
+          {visualError instanceof ApiClientError &&
+          visualError.status === 409 ? (
+            <p>
+              競合のため、入力中の表示設定は保持しています。最新データで上書きしません。
+            </p>
+          ) : null}
+        </section>
+      ) : null}
+
+      {visualSaveState === "saved" ? (
+        <p className="status-message" role="status">
+          ビジュアル設定を保存済みです（revision {revisionRef.current}）。
+        </p>
+      ) : null}
+
+      <VisualAssignmentPanel
+        project={project}
+        assets={assignmentAssets}
+        onSave={saveVisualAssignment}
+        onRemove={removeVisualAssignment}
+        isMutating={visualMutationPending}
+      />
+
+      <section
+        className="visual-approval-panel"
+        aria-labelledby="visual-approval-title"
+      >
+        <div>
+          <p className="eyebrow">P3-06 ビジュアル承認</p>
+          <h2 id="visual-approval-title">検証済みビジュアル計画を承認</h2>
+          <p>
+            承認時に台本、素材の状態・チェックサム、取り込み済みファイル、動画尺、帳票ページ、表示設定を再検証します。
+          </p>
+          <p className="status-message">
+            機密区分は素材ごとに表示しています。区分の順位や権限判定は行いません。
+          </p>
+        </div>
+        {unassignedLines > 0 ? (
+          <p className="message-panel message-panel-warning">
+            {unassignedLines}
+            件のセリフにはビジュアルが未割当です。未割当区間は承認をブロックせず、警告として表示しています。
+          </p>
+        ) : null}
+        {!canApproveVisuals ? (
+          <p className="message-panel message-panel-warning">
+            ビジュアル承認には、先に台本の承認が必要です。
+          </p>
+        ) : null}
+        <button
+          className="button button-primary"
+          type="button"
+          disabled={!canApproveVisuals || visualMutationPending}
+          onClick={() => void approveVisuals()}
+        >
+          {visualApproveMutation.isPending
+            ? "ビジュアルを検証・承認中…"
+            : "ビジュアルを承認"}
+        </button>
       </section>
 
       <form className="bulk-paste-panel" onSubmit={pasteLines}>

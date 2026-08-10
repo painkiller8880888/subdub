@@ -431,6 +431,64 @@ describe("VisualAssignmentService", () => {
     expect(await fs.readFile(context.projectFile)).toEqual(before);
   });
 
+  it("fills explicit defaults for photo, video, and document assignments", async () => {
+    const withoutDisplay = () => {
+      const { display, ...assignment } = createAssignment();
+      void display;
+      return assignment;
+    };
+
+    const photo = await setup();
+    const photoResult = await photo.service.assign(PROJECT_ID, {
+      expectedRevision: 0,
+      assignment: withoutDisplay()
+    });
+    expect(photoResult.data.visuals.assignments[0]?.display).toMatchObject({
+      kind: "photo",
+      fit: "contain",
+      crop: { x: 0, y: 0, width: 1, height: 1 },
+      scale: 1,
+      position: { x: 0.5, y: 0.5 },
+      prioritizeVisual: false,
+      annotations: []
+    });
+
+    const video = await setup({
+      asset: createAsset({
+        kind: "video",
+        durationMs: 1200,
+        pageCount: null
+      })
+    });
+    const videoResult = await video.service.assign(PROJECT_ID, {
+      expectedRevision: 0,
+      assignment: withoutDisplay()
+    });
+    expect(videoResult.data.visuals.assignments[0]?.display).toMatchObject({
+      kind: "video",
+      startMs: 0,
+      endMs: 1200,
+      playbackRate: 1,
+      muted: true
+    });
+
+    const document = await setup({
+      asset: createAsset({
+        kind: "document_scan",
+        durationMs: null,
+        pageCount: 2
+      })
+    });
+    const documentResult = await document.service.assign(PROJECT_ID, {
+      expectedRevision: 0,
+      assignment: withoutDisplay()
+    });
+    expect(documentResult.data.visuals.assignments[0]?.display).toMatchObject({
+      kind: "document_scan",
+      page: 1
+    });
+  });
+
   it("removes a partially copied temporary file when copy fails", async () => {
     const context = await setup({
       fileSystem: {
@@ -818,4 +876,197 @@ describe("VisualAssignmentService", () => {
       fs.access(await finalPath(context.projectRoot))
     ).rejects.toThrow();
   });
+
+  it("updates and removes an assignment without deleting the imported file", async () => {
+    const context = await setup();
+    const assigned = await context.service.assign(PROJECT_ID, {
+      expectedRevision: 0,
+      assignment: createAssignment()
+    });
+    const assignment = assigned.data.visuals.assignments[0];
+    if (assignment === undefined) {
+      throw new Error("assignment was not created");
+    }
+
+    const updated = await context.service.update(PROJECT_ID, assignment.id, {
+      expectedRevision: assigned.revision,
+      assignment: {
+        id: assignment.id,
+        startLineId: assignment.startLineId,
+        endLineId: assignment.endLineId,
+        assetId: assignment.assetId,
+        display: {
+          ...assignment.display,
+          prioritizeVisual: true,
+          crop: { ...assignment.display.crop, x: 0.1, width: 0.9 }
+        }
+      }
+    });
+    expect(updated.revision).toBe(2);
+    expect(updated.data.visuals.status).toBe("needs_review");
+    expect(updated.data.visuals.assignments[0]?.display.prioritizeVisual).toBe(
+      true
+    );
+
+    const destination = await finalPath(context.projectRoot);
+    const beforeRemove = await fs.readFile(destination);
+    const removed = await context.service.remove(PROJECT_ID, assignment.id, {
+      expectedRevision: updated.revision
+    });
+    expect(removed.revision).toBe(3);
+    expect(removed.data.visuals.assignments).toEqual([]);
+    expect(await fs.readFile(destination)).toEqual(beforeRemove);
+  });
+
+  it("rejects stale, missing, and mismatched assignment updates", async () => {
+    const context = await setup();
+    const assigned = await context.service.assign(PROJECT_ID, {
+      expectedRevision: 0,
+      assignment: createAssignment()
+    });
+    const assignment = assigned.data.visuals.assignments[0];
+    if (assignment === undefined) {
+      throw new Error("assignment was not created");
+    }
+    const input = {
+      expectedRevision: assigned.revision,
+      assignment: {
+        id: assignment.id,
+        startLineId: assignment.startLineId,
+        endLineId: assignment.endLineId,
+        assetId: assignment.assetId,
+        display: assignment.display
+      }
+    };
+
+    await expectError(
+      () =>
+        context.service.update(PROJECT_ID, assignment.id, {
+          ...input,
+          expectedRevision: 0
+        }),
+      "PROJECT_REVISION_CONFLICT"
+    );
+    await expectError(
+      () =>
+        context.service.update(PROJECT_ID, "missing-assignment", {
+          ...input,
+          assignment: { ...input.assignment, id: "missing-assignment" }
+        }),
+      VISUAL_ASSIGNMENT_ERROR_CODE.assignmentNotFound
+    );
+    await expectError(
+      () => context.service.update(PROJECT_ID, "other-assignment", input),
+      VISUAL_ASSIGNMENT_ERROR_CODE.assignmentIdMismatch
+    );
+  });
+
+  it("revalidates imported files and approves a valid visual plan", async () => {
+    const context = await setup();
+    const assigned = await context.service.assign(PROJECT_ID, {
+      expectedRevision: 0,
+      assignment: createAssignment()
+    });
+
+    const approved = await context.service.approve(PROJECT_ID, {
+      expectedRevision: assigned.revision
+    });
+    expect(approved.revision).toBe(2);
+    expect(approved.data.visuals.status).toBe("approved");
+    expect((await readProject(context.projectFile)).visuals.status).toBe(
+      "approved"
+    );
+  });
+
+  it("leaves the project unchanged when the imported checksum is invalid", async () => {
+    const context = await setup();
+    const assigned = await context.service.assign(PROJECT_ID, {
+      expectedRevision: 0,
+      assignment: createAssignment()
+    });
+    await fs.writeFile(
+      await finalPath(context.projectRoot),
+      Buffer.from("changed after assignment", "utf8")
+    );
+    const before = await fs.readFile(context.projectFile);
+
+    await expectError(
+      () =>
+        context.service.approve(PROJECT_ID, {
+          expectedRevision: assigned.revision
+        }),
+      VISUAL_ASSIGNMENT_ERROR_CODE.projectMediaChecksumMismatch
+    );
+    expect(await fs.readFile(context.projectFile)).toEqual(before);
+  });
+
+  it("rejects a missing imported file and missing confidentiality at approval", async () => {
+    const missingFile = await setup();
+    const missingFileAssignment = await missingFile.service.assign(PROJECT_ID, {
+      expectedRevision: 0,
+      assignment: createAssignment()
+    });
+    await fs.rm(await finalPath(missingFile.projectRoot));
+    const beforeMissingFile = await fs.readFile(missingFile.projectFile);
+    await expectError(
+      () =>
+        missingFile.service.approve(PROJECT_ID, {
+          expectedRevision: missingFileAssignment.revision
+        }),
+      VISUAL_ASSIGNMENT_ERROR_CODE.projectMediaFileMissing
+    );
+    expect(await fs.readFile(missingFile.projectFile)).toEqual(
+      beforeMissingFile
+    );
+
+    const missingConfidentiality = await setup({
+      asset: createAsset({ confidentiality: "" })
+    });
+    const missingConfidentialityAssignment =
+      await missingConfidentiality.service.assign(PROJECT_ID, {
+        expectedRevision: 0,
+        assignment: createAssignment()
+      });
+    await expectError(
+      () =>
+        missingConfidentiality.service.approve(PROJECT_ID, {
+          expectedRevision: missingConfidentialityAssignment.revision
+        }),
+      VISUAL_ASSIGNMENT_ERROR_CODE.approvalValidationFailed
+    );
+  });
+
+  it.each([
+    ["video duration", "video", 1000, undefined],
+    ["document page", "document_scan", undefined, 1]
+  ] as const)(
+    "rejects display settings outside %s metadata",
+    async (_label, kind, durationMs, pageCount) => {
+      const context = await setup({
+        asset: createAsset({
+          kind,
+          durationMs: durationMs ?? null,
+          pageCount: pageCount ?? null
+        })
+      });
+      const display =
+        kind === "video"
+          ? clone(videoProjectFixture.visuals.assignments[0].display)
+          : clone(videoProjectFixture.visuals.assignments[2].display);
+      if (display.kind === "video") {
+        display.endMs = 1001;
+      } else if (display.kind === "document_scan") {
+        display.page = 2;
+      }
+
+      await expectError(
+        () =>
+          context.service.assign(PROJECT_ID, {
+            expectedRevision: 0,
+            assignment: createAssignment("out-of-bounds", ASSET_ID, display)
+          }),
+        VISUAL_ASSIGNMENT_ERROR_CODE.candidateInvalid
+      );
+    }
+  );
 });

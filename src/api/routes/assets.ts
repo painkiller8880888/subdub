@@ -1,5 +1,6 @@
 import fastifyMultipart from "@fastify/multipart";
 import type { FastifyInstance } from "fastify";
+import { createReadStream } from "node:fs";
 
 import {
   AssetFieldTooLargeError,
@@ -22,6 +23,7 @@ import {
 import {
   assetDetailResponseSchema,
   assetIdParamsSchema,
+  assetThumbnailParamsSchema,
   assetListQuerySchema,
   assetListResponseSchema,
   assetUploadResponseSchema,
@@ -31,7 +33,8 @@ import {
 export type AssetServicePort = Pick<
   AssetService,
   "stageUpload" | "commitUpload" | "discardStaged" | "findDetail" | "list"
->;
+> &
+  Partial<Pick<AssetService, "getThumbnailPath">>;
 
 const allowedFieldNames = new Set([
   "kind",
@@ -188,4 +191,23 @@ export function registerAssetRoutes(
       );
     }
   );
+
+  if (assetService.getThumbnailPath !== undefined) {
+    app.get<{
+      Params: { assetId: string; thumbnailIndex: string };
+    }>(
+      "/api/assets/:assetId/thumbnails/:thumbnailIndex",
+      async (request, reply) => {
+        const params = assetThumbnailParamsSchema.parse(request.params);
+        const thumbnailPath = assetService.getThumbnailPath?.(
+          params.assetId,
+          params.thumbnailIndex
+        );
+        if (thumbnailPath === undefined) {
+          throw new Error("Asset thumbnail service is unavailable.");
+        }
+        return reply.type("image/png").send(createReadStream(thumbnailPath));
+      }
+    );
+  }
 }

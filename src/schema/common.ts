@@ -78,11 +78,27 @@ export const staticAnnotationSchema = strictObject({
   id: idSchema,
   kind: z.enum(["label", "box", "arrow"]),
   text: z.string().nullable(),
-  x: finiteNumberSchema,
-  y: finiteNumberSchema,
-  width: finiteNumberSchema.nullable(),
-  height: finiteNumberSchema.nullable(),
+  x: unitIntervalSchema,
+  y: unitIntervalSchema,
+  width: unitIntervalSchema.nullable(),
+  height: unitIntervalSchema.nullable(),
   colorToken: z.enum(["accent", "caution", "warning"])
+}).superRefine((annotation, ctx) => {
+  if (annotation.width !== null && annotation.x + annotation.width > 1) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["width"],
+      message: "annotation must fit within the horizontal bounds"
+    });
+  }
+
+  if (annotation.height !== null && annotation.y + annotation.height > 1) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["height"],
+      message: "annotation must fit within the vertical bounds"
+    });
+  }
 });
 
 export const commonDisplaySchema = strictObject({

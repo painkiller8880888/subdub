@@ -3,14 +3,21 @@ import * as path from "node:path";
 
 import {
   visualAssignmentRequestSchema,
+  visualAssignmentUpdateRequestSchema,
+  visualAssignmentDeleteRequestSchema,
+  visualApprovalRequestSchema,
+  type VisualAssignmentUpdateRequest,
   type VisualAssignmentRequest
 } from "../../schema/api.js";
 import {
+  displaySchema,
   idSchema,
   relativePosixPathSchema,
   sha256Schema,
   videoProjectSchema,
+  type Display,
   type AssetDetail,
+  type VisualAssignment,
   type VideoProject
 } from "../../schema/index.js";
 import {
@@ -29,6 +36,7 @@ import {
   VISUAL_ASSIGNMENT_ERROR_CODE,
   VisualAssignmentError
 } from "./visual-assignment-errors.js";
+import { hasMeaningfulVisuals } from "./project-invalidation.js";
 import {
   NodeVisualAssignmentFileSystem,
   type VisualAssignmentFileSystem
@@ -126,6 +134,92 @@ function projectRevisionConflict(): ProjectRepositoryError {
   );
 }
 
+function visualMutationStatus(
+  currentProject: VideoProject,
+  currentAssignments: readonly VisualAssignment[],
+  nextAssignments: readonly VisualAssignment[]
+): VideoProject["visuals"]["status"] {
+  if (JSON.stringify(currentAssignments) === JSON.stringify(nextAssignments)) {
+    return currentProject.visuals.status;
+  }
+
+  return hasMeaningfulVisuals(currentProject)
+    ? "needs_review"
+    : currentProject.visuals.status;
+}
+
+function assignmentDetails(
+  assignmentIndex: number,
+  path: readonly (string | number)[],
+  message: string
+): { path: Array<string | number>; message: string } {
+  return {
+    path: ["visuals", "assignments", assignmentIndex, ...path],
+    message
+  };
+}
+
+type DisplayDomainIssue = {
+  readonly path: readonly (string | number)[];
+  readonly message: string;
+  readonly metadataUnavailable?: boolean;
+};
+
+function displayDomainIssues(
+  asset: AssetDetail,
+  display: Display
+): DisplayDomainIssue[] {
+  if (display.kind === "video") {
+    if (
+      asset.durationMs === null ||
+      !Number.isInteger(asset.durationMs) ||
+      asset.durationMs <= 0
+    ) {
+      return [
+        {
+          path: ["endMs"],
+          message: "video duration is unavailable",
+          metadataUnavailable: true
+        }
+      ];
+    }
+    if (display.endMs > asset.durationMs) {
+      return [
+        {
+          path: ["endMs"],
+          message: "video display range exceeds the asset duration"
+        }
+      ];
+    }
+  }
+
+  if (display.kind === "document_scan") {
+    if (
+      asset.pageCount === null ||
+      !Number.isInteger(asset.pageCount) ||
+      asset.pageCount <= 0
+    ) {
+      return [
+        {
+          path: ["page"],
+          message: "document page count is unavailable",
+          metadataUnavailable: true
+        }
+      ];
+    }
+    if (display.page > asset.pageCount) {
+      return [
+        {
+          path: ["page"],
+          message: "document page is outside the asset page count"
+        }
+      ];
+    }
+  }
+
+  return [];
+}
+
 function formatFromLibraryPath(
   libraryMediaPath: string,
   kind: AssetDetail["kind"]
@@ -221,6 +315,90 @@ export class VisualAssignmentService {
     );
   }
 
+  async update(
+    projectId: unknown,
+    assignmentId: unknown,
+    input: unknown
+  ): Promise<VisualAssignmentServiceResult> {
+    const projectIdResult = idSchema.safeParse(projectId);
+    if (!projectIdResult.success) {
+      throw visualAssignmentError(
+        VISUAL_ASSIGNMENT_ERROR_CODE.projectPathInvalid,
+        400,
+        "The project path is invalid."
+      );
+    }
+    const assignmentIdResult = idSchema.safeParse(assignmentId);
+    if (!assignmentIdResult.success) {
+      throw visualAssignmentError(
+        VISUAL_ASSIGNMENT_ERROR_CODE.assignmentNotFound,
+        404,
+        "The visual assignment does not exist."
+      );
+    }
+    const request = visualAssignmentUpdateRequestSchema.parse(input);
+    return this.repository.withProjectLock(projectIdResult.data, (repository) =>
+      this.updateLocked(
+        assignmentIdResult.data,
+        request,
+        repository
+      )
+    );
+  }
+
+  async remove(
+    projectId: unknown,
+    assignmentId: unknown,
+    input: unknown
+  ): Promise<VisualAssignmentServiceResult> {
+    const projectIdResult = idSchema.safeParse(projectId);
+    if (!projectIdResult.success) {
+      throw visualAssignmentError(
+        VISUAL_ASSIGNMENT_ERROR_CODE.projectPathInvalid,
+        400,
+        "The project path is invalid."
+      );
+    }
+    const assignmentIdResult = idSchema.safeParse(assignmentId);
+    if (!assignmentIdResult.success) {
+      throw visualAssignmentError(
+        VISUAL_ASSIGNMENT_ERROR_CODE.assignmentNotFound,
+        404,
+        "The visual assignment does not exist."
+      );
+    }
+    const request = visualAssignmentDeleteRequestSchema.parse(input);
+    return this.repository.withProjectLock(projectIdResult.data, (repository) =>
+      this.removeLocked(
+        assignmentIdResult.data,
+        request.expectedRevision,
+        repository
+      )
+    );
+  }
+
+  async approve(
+    projectId: unknown,
+    input: unknown
+  ): Promise<VisualAssignmentServiceResult> {
+    const projectIdResult = idSchema.safeParse(projectId);
+    if (!projectIdResult.success) {
+      throw visualAssignmentError(
+        VISUAL_ASSIGNMENT_ERROR_CODE.projectPathInvalid,
+        400,
+        "The project path is invalid."
+      );
+    }
+    const request = visualApprovalRequestSchema.parse(input);
+    return this.repository.withProjectLock(projectIdResult.data, (repository) =>
+      this.approveLocked(
+        projectIdResult.data,
+        request.expectedRevision,
+        repository
+      )
+    );
+  }
+
   private async assignLocked(
     safeProjectId: string,
     request: VisualAssignmentRequest,
@@ -255,7 +433,10 @@ export class VisualAssignmentService {
       );
     }
 
-    this.assertAssetUsable(asset, request.assignment.display.kind);
+    const display =
+      request.assignment.display ?? this.createDefaultDisplay(asset);
+    this.assertAssetUsable(asset, display.kind);
+    this.assertDisplayWithinAsset(asset, display);
     const confirmedChecksum = this.assertChecksum(asset.checksum);
     const checksum = normalizeChecksum(confirmedChecksum);
     const extension = extensionForAsset(asset);
@@ -268,15 +449,22 @@ export class VisualAssignmentService {
     );
     const assignment = {
       ...request.assignment,
+      display,
       assetId: asset.assetId,
       assetChecksum: confirmedChecksum,
       projectMediaPath: projectPaths.projectMediaPath
     };
+    const assignments = [...currentProject.visuals.assignments, assignment];
     const candidate = {
       ...currentProject,
       visuals: {
         ...currentProject.visuals,
-        assignments: [...currentProject.visuals.assignments, assignment]
+        status: visualMutationStatus(
+          currentProject,
+          currentProject.visuals.assignments,
+          assignments
+        ),
+        assignments
       }
     };
     const candidateResult = videoProjectSchema.safeParse(candidate);
@@ -314,9 +502,526 @@ export class VisualAssignmentService {
     }
   }
 
+  private createDefaultDisplay(asset: AssetDetail): Display {
+    const common = {
+      fit: "contain" as const,
+      crop: { x: 0, y: 0, width: 1, height: 1 },
+      scale: 1,
+      position: { x: 0.5, y: 0.5 },
+      prioritizeVisual: false,
+      annotations: []
+    };
+
+    if (asset.kind === "video") {
+      if (
+        asset.durationMs === null ||
+        !Number.isInteger(asset.durationMs) ||
+        asset.durationMs <= 0
+      ) {
+        throw visualAssignmentError(
+          VISUAL_ASSIGNMENT_ERROR_CODE.assetMetadataUnavailable,
+          422,
+          "The selected video does not have a confirmed duration.",
+          [{ path: ["assignment", "display", "endMs"], message: "duration is unavailable" }]
+        );
+      }
+      return {
+        ...common,
+        kind: "video",
+        startMs: 0,
+        endMs: asset.durationMs,
+        playbackRate: 1,
+        muted: true
+      };
+    }
+
+    if (asset.kind === "document_scan") {
+      if (
+        asset.pageCount === null ||
+        !Number.isInteger(asset.pageCount) ||
+        asset.pageCount <= 0
+      ) {
+        throw visualAssignmentError(
+          VISUAL_ASSIGNMENT_ERROR_CODE.assetMetadataUnavailable,
+          422,
+          "The selected document does not have a confirmed page count.",
+          [{ path: ["assignment", "display", "page"], message: "page count is unavailable" }]
+        );
+      }
+      return { ...common, kind: "document_scan", page: 1 };
+    }
+
+    if (asset.kind === "photo") {
+      return { ...common, kind: "photo" };
+    }
+
+    throw visualAssignmentError(
+      VISUAL_ASSIGNMENT_ERROR_CODE.assetKindUnsupported,
+      422,
+      "Sound effects cannot be used as visual assignments."
+    );
+  }
+
+  private assertDisplayWithinAsset(
+    asset: AssetDetail,
+    display: Display
+  ): void {
+    const displayResult = displaySchema.safeParse(display);
+    if (!displayResult.success) {
+      throw visualAssignmentError(
+        VISUAL_ASSIGNMENT_ERROR_CODE.candidateInvalid,
+        422,
+        "The visual display settings are invalid.",
+        validationDetails(displayResult.error.issues).map((issue) => ({
+          path: ["assignment", "display", ...issue.path],
+          message: issue.message
+        }))
+      );
+    }
+
+    const issues = displayDomainIssues(asset, displayResult.data);
+    if (issues.length === 0) {
+      return;
+    }
+    const firstIssue = issues[0];
+    if (firstIssue === undefined) {
+      return;
+    }
+    throw visualAssignmentError(
+      firstIssue.metadataUnavailable
+        ? VISUAL_ASSIGNMENT_ERROR_CODE.assetMetadataUnavailable
+        : VISUAL_ASSIGNMENT_ERROR_CODE.candidateInvalid,
+      422,
+      firstIssue.metadataUnavailable
+        ? "The selected asset is missing required display metadata."
+        : "The visual display range is outside the asset bounds.",
+      [
+        {
+          path: ["assignment", "display", ...firstIssue.path],
+          message: firstIssue.message
+        }
+      ]
+    );
+  }
+
+  private async updateLocked(
+    assignmentId: string,
+    request: VisualAssignmentUpdateRequest,
+    repository: ProjectRepositoryLockedOperations
+  ): Promise<VisualAssignmentServiceResult> {
+    const currentProject = await repository.read();
+    if (currentProject.revision !== request.expectedRevision) {
+      throw projectRevisionConflict();
+    }
+    if (request.assignment.id !== assignmentId) {
+      throw visualAssignmentError(
+        VISUAL_ASSIGNMENT_ERROR_CODE.assignmentIdMismatch,
+        422,
+        "The assignment ID in the URL and body must match.",
+        [{ path: ["assignment", "id"], message: "assignment ID mismatch" }]
+      );
+    }
+
+    const assignmentIndex = currentProject.visuals.assignments.findIndex(
+      (assignment) => assignment.id === assignmentId
+    );
+    const currentAssignment = currentProject.visuals.assignments[assignmentIndex];
+    if (currentAssignment === undefined) {
+      throw visualAssignmentError(
+        VISUAL_ASSIGNMENT_ERROR_CODE.assignmentNotFound,
+        404,
+        "The visual assignment does not exist."
+      );
+    }
+    if (request.assignment.assetId !== currentAssignment.assetId) {
+      throw visualAssignmentError(
+        VISUAL_ASSIGNMENT_ERROR_CODE.assignmentAssetReplacementUnsupported,
+        422,
+        "Replace an asset by creating a new assignment and removing the old one."
+      );
+    }
+
+    const asset = this.assetRepository.findAssetDetail(currentAssignment.assetId);
+    if (asset === undefined) {
+      throw visualAssignmentError(
+        VISUAL_ASSIGNMENT_ERROR_CODE.assetNotFound,
+        404,
+        "The selected asset does not exist.",
+        [{ path: ["assignment", "assetId"], message: "asset not found" }]
+      );
+    }
+    this.assertAssetUsable(asset, request.assignment.display.kind);
+    this.assertDisplayWithinAsset(asset, request.assignment.display);
+    const confirmedChecksum = this.assertChecksum(asset.checksum);
+    if (
+      normalizeChecksum(confirmedChecksum) !==
+      normalizeChecksum(currentAssignment.assetChecksum)
+    ) {
+      throw visualAssignmentError(
+        VISUAL_ASSIGNMENT_ERROR_CODE.checksumMismatch,
+        422,
+        "The current asset checksum no longer matches the assignment.",
+        [{ path: ["assignment", "assetChecksum"], message: "checksum mismatch" }]
+      );
+    }
+
+    const updatedAssignment: VisualAssignment = {
+      ...currentAssignment,
+      startLineId: request.assignment.startLineId,
+      endLineId: request.assignment.endLineId,
+      display: request.assignment.display
+    };
+    const assignments = currentProject.visuals.assignments.map((assignment) =>
+      assignment.id === assignmentId ? updatedAssignment : assignment
+    );
+    const candidate = {
+      ...currentProject,
+      visuals: {
+        ...currentProject.visuals,
+        status: visualMutationStatus(
+          currentProject,
+          currentProject.visuals.assignments,
+          assignments
+        ),
+        assignments
+      }
+    };
+    const candidateResult = videoProjectSchema.safeParse(candidate);
+    if (!candidateResult.success) {
+      throw visualAssignmentError(
+        VISUAL_ASSIGNMENT_ERROR_CODE.candidateInvalid,
+        422,
+        "The visual assignment does not produce a valid project.",
+        validationDetails(candidateResult.error.issues)
+      );
+    }
+    const saved = await repository.save(
+      candidateResult.data,
+      request.expectedRevision
+    );
+    return { data: saved, revision: saved.revision };
+  }
+
+  private async removeLocked(
+    assignmentId: string,
+    expectedRevision: number,
+    repository: ProjectRepositoryLockedOperations
+  ): Promise<VisualAssignmentServiceResult> {
+    const currentProject = await repository.read();
+    if (currentProject.revision !== expectedRevision) {
+      throw projectRevisionConflict();
+    }
+    if (
+      !currentProject.visuals.assignments.some(
+        (assignment) => assignment.id === assignmentId
+      )
+    ) {
+      throw visualAssignmentError(
+        VISUAL_ASSIGNMENT_ERROR_CODE.assignmentNotFound,
+        404,
+        "The visual assignment does not exist."
+      );
+    }
+
+    const assignments = currentProject.visuals.assignments.filter(
+      (assignment) => assignment.id !== assignmentId
+    );
+    const candidate = {
+      ...currentProject,
+      visuals: {
+        ...currentProject.visuals,
+        status: visualMutationStatus(
+          currentProject,
+          currentProject.visuals.assignments,
+          assignments
+        ),
+        assignments
+      }
+    };
+    const candidateResult = videoProjectSchema.safeParse(candidate);
+    if (!candidateResult.success) {
+      throw visualAssignmentError(
+        VISUAL_ASSIGNMENT_ERROR_CODE.candidateInvalid,
+        422,
+        "Removing the visual assignment does not produce a valid project.",
+        validationDetails(candidateResult.error.issues)
+      );
+    }
+    const saved = await repository.save(candidateResult.data, expectedRevision);
+    return { data: saved, revision: saved.revision };
+  }
+
+  private async approveLocked(
+    safeProjectId: string,
+    expectedRevision: number,
+    repository: ProjectRepositoryLockedOperations
+  ): Promise<VisualAssignmentServiceResult> {
+    const currentProject = await repository.read();
+    if (currentProject.revision !== expectedRevision) {
+      throw projectRevisionConflict();
+    }
+    if (currentProject.script.status !== "approved") {
+      throw visualAssignmentError(
+        VISUAL_ASSIGNMENT_ERROR_CODE.scriptNotApproved,
+        422,
+        "The script must be approved before visual approval.",
+        [{ path: ["script", "status"], message: "script is not approved" }]
+      );
+    }
+
+    const linePositions = new Map<
+      string,
+      { sectionId: string; lineIndex: number }
+    >();
+    for (const section of currentProject.script.sections) {
+      for (const [lineIndex, line] of section.lines.entries()) {
+        linePositions.set(line.id, { sectionId: section.id, lineIndex });
+      }
+    }
+
+    const validationIssuesForApproval: Array<{
+      path: Array<string | number>;
+      message: string;
+    }> = [];
+
+    for (const [assignmentIndex, assignment] of currentProject.visuals.assignments.entries()) {
+      const start = linePositions.get(assignment.startLineId);
+      const end = linePositions.get(assignment.endLineId);
+      if (start === undefined) {
+        validationIssuesForApproval.push(
+          assignmentDetails(assignmentIndex, ["startLineId"], "start line not found")
+        );
+      }
+      if (end === undefined) {
+        validationIssuesForApproval.push(
+          assignmentDetails(assignmentIndex, ["endLineId"], "end line not found")
+        );
+      }
+      if (start !== undefined && end !== undefined) {
+        if (start.sectionId !== end.sectionId) {
+          validationIssuesForApproval.push(
+            assignmentDetails(
+              assignmentIndex,
+              ["endLineId"],
+              "visual assignment range crosses script sections"
+            )
+          );
+        } else if (start.lineIndex > end.lineIndex) {
+          validationIssuesForApproval.push(
+            assignmentDetails(
+              assignmentIndex,
+              ["startLineId"],
+              "visual assignment range is reversed"
+            )
+          );
+        }
+      }
+
+      const asset = this.assetRepository.findAssetDetail(assignment.assetId);
+      if (asset === undefined) {
+        throw visualAssignmentError(
+          VISUAL_ASSIGNMENT_ERROR_CODE.assetNotFound,
+          404,
+          "A visual assignment references a missing asset.",
+          [assignmentDetails(assignmentIndex, ["assetId"], "asset not found")]
+        );
+      }
+      if (asset.status !== "active") {
+        validationIssuesForApproval.push(
+          assignmentDetails(assignmentIndex, ["assetId"], "asset is not active")
+        );
+      }
+      if (asset.kind === "sound_effect" || asset.kind !== assignment.display.kind) {
+        validationIssuesForApproval.push(
+          assignmentDetails(
+            assignmentIndex,
+            ["display", "kind"],
+            "asset kind does not match display kind"
+          )
+        );
+      }
+
+      const currentChecksum = sha256Schema.safeParse(asset.checksum);
+      if (!currentChecksum.success) {
+        validationIssuesForApproval.push(
+          assignmentDetails(
+            assignmentIndex,
+            ["assetChecksum"],
+            "asset checksum is unavailable"
+          )
+        );
+      } else if (
+        normalizeChecksum(currentChecksum.data) !==
+        normalizeChecksum(assignment.assetChecksum)
+      ) {
+        validationIssuesForApproval.push(
+          assignmentDetails(
+            assignmentIndex,
+            ["assetChecksum"],
+            "database checksum does not match assignment checksum"
+          )
+        );
+      }
+      if (typeof asset.confidentiality !== "string" || asset.confidentiality.trim().length === 0) {
+        validationIssuesForApproval.push(
+          assignmentDetails(
+            assignmentIndex,
+            ["assetId"],
+            "asset confidentiality is missing"
+          )
+        );
+      }
+
+      const displayResult = displaySchema.safeParse(assignment.display);
+      if (!displayResult.success) {
+        for (const issue of validationDetails(displayResult.error.issues)) {
+          validationIssuesForApproval.push(
+            assignmentDetails(assignmentIndex, ["display", ...issue.path], issue.message)
+          );
+        }
+      } else {
+        for (const issue of displayDomainIssues(asset, displayResult.data)) {
+          validationIssuesForApproval.push(
+            assignmentDetails(assignmentIndex, ["display", ...issue.path], issue.message)
+          );
+        }
+      }
+    }
+
+    if (validationIssuesForApproval.length > 0) {
+      throw visualAssignmentError(
+        VISUAL_ASSIGNMENT_ERROR_CODE.approvalValidationFailed,
+        422,
+        "The visual plan does not meet the approval requirements.",
+        validationIssuesForApproval
+      );
+    }
+
+    const projectRoot = await this.resolveProjectRoot(safeProjectId);
+    for (const [assignmentIndex, assignment] of currentProject.visuals.assignments.entries()) {
+      const mediaPath = await this.resolveProjectMediaFile(
+        projectRoot,
+        assignment.projectMediaPath,
+        assignmentIndex
+      );
+      let actualChecksum: string;
+      try {
+        actualChecksum = normalizeChecksum(await this.fileSystem.hashFile(mediaPath));
+      } catch {
+        throw visualAssignmentError(
+          VISUAL_ASSIGNMENT_ERROR_CODE.projectMediaHashFailed,
+          500,
+          "An imported visual file could not be verified.",
+          [
+            assignmentDetails(
+              assignmentIndex,
+              ["projectMediaPath"],
+              "file hash could not be calculated"
+            )
+          ]
+        );
+      }
+      if (actualChecksum !== normalizeChecksum(assignment.assetChecksum)) {
+        throw visualAssignmentError(
+          VISUAL_ASSIGNMENT_ERROR_CODE.projectMediaChecksumMismatch,
+          422,
+          "An imported visual file checksum does not match the assignment.",
+          [
+            assignmentDetails(
+              assignmentIndex,
+              ["projectMediaPath"],
+              "file checksum does not match assignment checksum"
+            )
+          ]
+        );
+      }
+    }
+
+    const candidate = {
+      ...currentProject,
+      visuals: { ...currentProject.visuals, status: "approved" as const }
+    };
+    const candidateResult = videoProjectSchema.safeParse(candidate);
+    if (!candidateResult.success) {
+      throw visualAssignmentError(
+        VISUAL_ASSIGNMENT_ERROR_CODE.approvalValidationFailed,
+        422,
+        "The visual plan does not produce a valid project.",
+        validationDetails(candidateResult.error.issues)
+      );
+    }
+    const saved = await repository.save(candidateResult.data, expectedRevision);
+    return { data: saved, revision: saved.revision };
+  }
+
+  private async resolveProjectMediaFile(
+    projectRoot: string,
+    projectMediaPath: string,
+    assignmentIndex: number
+  ): Promise<string> {
+    const pathResult = relativePosixPathSchema.safeParse(projectMediaPath);
+    if (!pathResult.success) {
+      throw visualAssignmentError(
+        VISUAL_ASSIGNMENT_ERROR_CODE.mediaPathInvalid,
+        422,
+        "The project media path is invalid.",
+        [assignmentDetails(assignmentIndex, ["projectMediaPath"], "unsafe relative path")]
+      );
+    }
+    const mediaPath = path.resolve(
+      projectRoot,
+      pathResult.data.split("/").join(path.sep)
+    );
+    this.assertInside(
+      projectRoot,
+      mediaPath,
+      VISUAL_ASSIGNMENT_ERROR_CODE.mediaPathInvalid,
+      "The project media path is invalid."
+    );
+
+    let exists: boolean;
+    try {
+      exists = await this.fileSystem.pathExists(mediaPath);
+    } catch {
+      throw visualAssignmentError(
+        VISUAL_ASSIGNMENT_ERROR_CODE.projectMediaFileMissing,
+        500,
+        "An imported visual file could not be found.",
+        [assignmentDetails(assignmentIndex, ["projectMediaPath"], "file check failed")]
+      );
+    }
+    if (!exists) {
+      throw visualAssignmentError(
+        VISUAL_ASSIGNMENT_ERROR_CODE.projectMediaFileMissing,
+        500,
+        "An imported visual file could not be found.",
+        [assignmentDetails(assignmentIndex, ["projectMediaPath"], "file is missing")]
+      );
+    }
+
+    let resolvedMediaPath: string;
+    try {
+      resolvedMediaPath = await this.fileSystem.realpath(mediaPath);
+    } catch {
+      throw visualAssignmentError(
+        VISUAL_ASSIGNMENT_ERROR_CODE.projectMediaFileMissing,
+        500,
+        "An imported visual file could not be found.",
+        [assignmentDetails(assignmentIndex, ["projectMediaPath"], "file cannot be read")]
+      );
+    }
+    this.assertInside(
+      projectRoot,
+      resolvedMediaPath,
+      VISUAL_ASSIGNMENT_ERROR_CODE.mediaPathInvalid,
+      "The project media path is invalid."
+    );
+    return mediaPath;
+  }
+
   private assertAssetUsable(
     asset: AssetDetail,
-    displayKind: VisualAssignmentRequest["assignment"]["display"]["kind"]
+    displayKind: Display["kind"]
   ): void {
     if (asset.status !== "active") {
       throw visualAssignmentError(

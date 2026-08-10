@@ -71,12 +71,20 @@ export const API_ERROR_CODE = {
   visualAssignmentAssetNotActive: VISUAL_ASSIGNMENT_ERROR_CODE.assetNotActive,
   visualAssignmentAssetChecksumUnavailable:
     VISUAL_ASSIGNMENT_ERROR_CODE.assetChecksumUnavailable,
+  visualAssignmentAssetMetadataUnavailable:
+    VISUAL_ASSIGNMENT_ERROR_CODE.assetMetadataUnavailable,
   visualAssignmentAssetKindUnsupported:
     VISUAL_ASSIGNMENT_ERROR_CODE.assetKindUnsupported,
   visualAssignmentDisplayKindMismatch:
     VISUAL_ASSIGNMENT_ERROR_CODE.displayKindMismatch,
   visualAssignmentAssignmentIdConflict:
     VISUAL_ASSIGNMENT_ERROR_CODE.assignmentIdConflict,
+  visualAssignmentAssignmentNotFound:
+    VISUAL_ASSIGNMENT_ERROR_CODE.assignmentNotFound,
+  visualAssignmentAssignmentIdMismatch:
+    VISUAL_ASSIGNMENT_ERROR_CODE.assignmentIdMismatch,
+  visualAssignmentAssetReplacementUnsupported:
+    VISUAL_ASSIGNMENT_ERROR_CODE.assignmentAssetReplacementUnsupported,
   visualAssignmentLibraryPathInvalid:
     VISUAL_ASSIGNMENT_ERROR_CODE.libraryPathInvalid,
   visualAssignmentLibraryFileNotFound:
@@ -93,6 +101,16 @@ export const API_ERROR_CODE = {
   visualAssignmentRenameFailed: VISUAL_ASSIGNMENT_ERROR_CODE.renameFailed,
   visualAssignmentCandidateInvalid:
     VISUAL_ASSIGNMENT_ERROR_CODE.candidateInvalid,
+  visualAssignmentProjectMediaFileMissing:
+    VISUAL_ASSIGNMENT_ERROR_CODE.projectMediaFileMissing,
+  visualAssignmentProjectMediaHashFailed:
+    VISUAL_ASSIGNMENT_ERROR_CODE.projectMediaHashFailed,
+  visualAssignmentProjectMediaChecksumMismatch:
+    VISUAL_ASSIGNMENT_ERROR_CODE.projectMediaChecksumMismatch,
+  visualAssignmentScriptNotApproved:
+    VISUAL_ASSIGNMENT_ERROR_CODE.scriptNotApproved,
+  visualAssignmentApprovalValidationFailed:
+    VISUAL_ASSIGNMENT_ERROR_CODE.approvalValidationFailed,
   visualAssignmentCleanupFailed: VISUAL_ASSIGNMENT_ERROR_CODE.cleanupFailed
 };
 

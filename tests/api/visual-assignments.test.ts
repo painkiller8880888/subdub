@@ -187,6 +187,102 @@ describe("visual assignments API", () => {
     expect(JSON.stringify(error)).not.toContain("internal revision detail");
   });
 
+  it("supports assignment update, removal, and explicit visual approval", async () => {
+    const calls: string[] = [];
+    const app = buildApp({
+      visualAssignmentService: {
+        assign: async () => ({ data: videoProjectFixture, revision: 1 }),
+        update: async (_projectId, assignmentId, input) => {
+          calls.push(
+            `update:${assignmentId}:${(input as { expectedRevision: number }).expectedRevision}`
+          );
+          return { data: videoProjectFixture, revision: 2 };
+        },
+        remove: async (_projectId, assignmentId, input) => {
+          calls.push(
+            `remove:${assignmentId}:${(input as { expectedRevision: number }).expectedRevision}`
+          );
+          return { data: videoProjectFixture, revision: 3 };
+        },
+        approve: async (_projectId, input) => {
+          calls.push(
+            `approve:${(input as { expectedRevision: number }).expectedRevision}`
+          );
+          return { data: videoProjectFixture, revision: 4 };
+        }
+      }
+    });
+    apps.push(app);
+
+    const updateResponse = await app.inject({
+      method: "PUT",
+      url: "/api/projects/api-project/visual-assignments/api-visual-assignment",
+      payload: {
+        expectedRevision: 1,
+        assignment: assignmentPayload()
+      }
+    });
+    const deleteResponse = await app.inject({
+      method: "DELETE",
+      url: "/api/projects/api-project/visual-assignments/api-visual-assignment",
+      payload: { expectedRevision: 2 }
+    });
+    const approveResponse = await app.inject({
+      method: "POST",
+      url: "/api/projects/api-project/visuals/approve",
+      payload: { expectedRevision: 3 }
+    });
+
+    expect(updateResponse.statusCode).toBe(200);
+    expect(deleteResponse.statusCode).toBe(200);
+    expect(approveResponse.statusCode).toBe(200);
+    expect(
+      visualAssignmentResponseSchema.parse(updateResponse.json()).revision
+    ).toBe(2);
+    expect(
+      visualAssignmentResponseSchema.parse(deleteResponse.json()).revision
+    ).toBe(3);
+    expect(
+      visualAssignmentResponseSchema.parse(approveResponse.json()).revision
+    ).toBe(4);
+    expect(calls).toEqual([
+      "update:api-visual-assignment:1",
+      "remove:api-visual-assignment:2",
+      "approve:3"
+    ]);
+  });
+
+  it("returns 422 for an update with an URL/body assignment ID mismatch", async () => {
+    const app = buildApp({
+      visualAssignmentService: {
+        assign: async () => ({ data: videoProjectFixture, revision: 1 }),
+        update: async () => {
+          throw new VisualAssignmentError(
+            VISUAL_ASSIGNMENT_ERROR_CODE.assignmentIdMismatch,
+            422,
+            "safe mismatch message"
+          );
+        },
+        remove: async () => ({ data: videoProjectFixture, revision: 2 }),
+        approve: async () => ({ data: videoProjectFixture, revision: 2 })
+      }
+    });
+    apps.push(app);
+
+    const response = await app.inject({
+      method: "PUT",
+      url: "/api/projects/api-project/visual-assignments/other-assignment",
+      payload: {
+        expectedRevision: 1,
+        assignment: assignmentPayload()
+      }
+    });
+    expect(response.statusCode).toBe(422);
+    expect(apiErrorResponseSchema.parse(response.json()).error.code).toBe(
+      VISUAL_ASSIGNMENT_ERROR_CODE.assignmentIdMismatch
+    );
+  });
+
   it("registers the route when initializeServer supplies the application service", async () => {
     const workspaceRoot = await fs.mkdtemp(
       path.join(tmpdir(), "subdub-visual-assignment-server-")
