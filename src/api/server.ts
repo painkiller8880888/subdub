@@ -32,7 +32,8 @@ import {
 } from "../db/initialize.js";
 import type { MigrationFolder } from "../db/paths.js";
 import { VoicevoxGenerationService } from "../app/voicevox/generation-service.js";
-import { createVoicevoxAdjustmentFingerprintProvider } from "../app/voicevox/adjustment-fingerprint.js";
+import { VoicevoxAdjustmentService } from "../app/voicevox/adjustment-service.js";
+import { VoicevoxClient } from "../voicevox/client.js";
 
 export const SERVER_HOST = API_HOST;
 export const SERVER_PORT = API_PORT;
@@ -87,6 +88,7 @@ export async function initializeServer(
     terminologyService: suppliedTerminologyService,
     projectService: suppliedProjectService,
     visualAssignmentService: suppliedVisualAssignmentService,
+    voiceAdjustmentService: suppliedVoiceAdjustmentService,
     voiceGenerationService: suppliedVoiceGenerationService,
     workspaceRoot = process.cwd(),
     ...appOptions
@@ -142,6 +144,7 @@ export async function initializeServer(
         repository:
           terminologyRepository ?? new TerminologyRepository(database.database)
       });
+    const voicevoxClient = new VoicevoxClient();
     const resolvedAssetService =
       appOptions.assetService ??
       new AssetService({
@@ -154,10 +157,17 @@ export async function initializeServer(
       suppliedVoiceGenerationService ??
       new VoicevoxGenerationService({
         repository: resolvedProjectRepository,
+        client: voicevoxClient,
         terminologyService: resolvedTerminologyService,
-        workspaceRoot,
-        adjustmentFingerprintProvider:
-          createVoicevoxAdjustmentFingerprintProvider({ workspaceRoot })
+        workspaceRoot
+      });
+    const resolvedVoiceAdjustmentService =
+      suppliedVoiceAdjustmentService ??
+      new VoicevoxAdjustmentService({
+        repository: resolvedProjectRepository,
+        client: voicevoxClient,
+        terminologyService: resolvedTerminologyService,
+        workspaceRoot
       });
     const resolvedProcessingService =
       assetProcessingService ??
@@ -180,7 +190,8 @@ export async function initializeServer(
       terminologyService: resolvedTerminologyService,
       assetService: resolvedAssetService,
       assetUploadLimits: options.assetUploadLimits,
-      voiceGenerationService: resolvedVoiceGenerationService
+      voiceGenerationService: resolvedVoiceGenerationService,
+      voiceAdjustmentService: resolvedVoiceAdjustmentService
     });
     resolvedProcessingWorker.start();
     app.addHook("onClose", async () => {

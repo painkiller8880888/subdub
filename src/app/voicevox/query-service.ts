@@ -12,7 +12,8 @@ import {
 } from "../../voicevox/index.js";
 import {
   voicevoxEngineVersionSchema,
-  voicevoxResolvedSpeakerSchema
+  voicevoxResolvedSpeakerSchema,
+  type VoicevoxAdjustmentFile
 } from "../../voicevox/schemas.js";
 import type { TerminologyService } from "../terminology/terminology-service.js";
 import type {
@@ -28,6 +29,14 @@ import {
   type VoicevoxQueryCacheEntry,
   type VoicevoxQueryCacheFileSystem
 } from "./query-cache.js";
+import {
+  createVoicevoxAdjustmentBaseHash,
+  type VoicevoxAdjustmentBaseHashInput
+} from "./adjustment-fingerprint.js";
+import {
+  VoicevoxAdjustmentStore,
+  type VoicevoxAdjustmentStoreFileSystem
+} from "./adjustment-store.js";
 
 export type VoicevoxQueryClientPort = Pick<
   VoicevoxClient,
@@ -62,8 +71,19 @@ export type VoicevoxQueryServiceOptions = {
   readonly cache?: VoicevoxQueryCachePort;
   readonly workspaceRoot?: string;
   readonly fileSystem?: Partial<VoicevoxQueryCacheFileSystem>;
+  readonly adjustmentStore?: VoicevoxQueryAdjustmentStorePort;
+  readonly adjustmentFileSystem?: Partial<VoicevoxAdjustmentStoreFileSystem>;
   readonly adjustmentFingerprintProvider?: VoicevoxAdjustmentFingerprintProvider;
 };
+
+export type VoicevoxQueryAdjustmentStorePort = Pick<
+  VoicevoxAdjustmentStore,
+  "read" | "getChecksum"
+> &
+  Partial<Pick<VoicevoxAdjustmentStore, "readWithChecksum">>;
+
+export type VoicevoxAdjustmentStatus =
+  "current" | "needs_review" | "unsupported";
 
 export type PrepareVoicevoxQueryInput = {
   readonly projectId: unknown;
@@ -82,6 +102,9 @@ export type PreparedVoicevoxQuery = {
   readonly voicevoxEngineVersion: string;
   readonly resolvedSpeaker: VoicevoxResolvedSpeaker;
   readonly adjustmentChecksum?: string | null;
+  readonly baseHash?: string;
+  readonly adjustmentStatus?: VoicevoxAdjustmentStatus;
+  readonly adjustment?: VoicevoxAdjustmentFile | null;
 };
 
 export type ResolveVoicevoxQueryInput = PrepareVoicevoxQueryInput;
@@ -99,14 +122,19 @@ export type ResolvedVoicevoxQueryConditions = {
   readonly appliedTerms: readonly AppliedTerminology[];
   readonly voicevoxEngineVersion: string;
   readonly adjustmentChecksum: string | null;
+  readonly queryCacheKey: string;
   readonly cacheKey: string;
   readonly queryPath: string;
+  readonly baseHash: string;
+  readonly adjustmentStatus: VoicevoxAdjustmentStatus;
+  readonly adjustment: VoicevoxAdjustmentFile | null;
 };
 
 export type VoicevoxQueryServiceErrorCode =
   | "VOICEVOX_QUERY_SERVICE_CACHE_REQUIRED"
   | "VOICEVOX_QUERY_SERVICE_LINE_CHARACTER_MISMATCH"
-  | "VOICEVOX_QUERY_SERVICE_ADJUSTMENT_UNSUPPORTED";
+  | "VOICEVOX_QUERY_SERVICE_ADJUSTMENT_UNSUPPORTED"
+  | "VOICEVOX_QUERY_SERVICE_ADJUSTMENT_NEEDS_REVIEW";
 
 export class VoicevoxQueryServiceError extends Error {
   readonly code: VoicevoxQueryServiceErrorCode;
@@ -148,15 +176,49 @@ function normalizeResolvedText(result: ResolvedSpokenText): ResolvedSpokenText {
   };
 }
 
-const noVoicevoxAdjustments: VoicevoxAdjustmentFingerprintProvider = {
-  getChecksum: () => null
+const noVoicevoxAdjustmentStore: Pick<
+  VoicevoxAdjustmentStore,
+  "read" | "getChecksum"
+> &
+  Partial<Pick<VoicevoxAdjustmentStore, "readWithChecksum">> = {
+  read: async () => null,
+  getChecksum: async () => null
 };
+
+function applyVoiceAdjustment(
+  query: VoicevoxAudioQuery,
+  adjustment: VoicevoxAdjustmentFile
+): VoicevoxAudioQuery {
+  const withScalars = {
+    ...query,
+    ...Object.fromEntries(
+      Object.entries(adjustment.scalarOverrides).filter(
+        ([, value]) => value !== undefined
+      )
+    )
+  } as VoicevoxAudioQuery;
+
+  if (adjustment.accentPhrases === null) {
+    return withScalars;
+  }
+
+  return {
+    ...withScalars,
+    accent_phrases: adjustment.accentPhrases.map((phrase) => ({
+      ...phrase,
+      moras: phrase.moras.map((mora) => ({ ...mora })),
+      pause_mora: phrase.pause_mora === null ? null : { ...phrase.pause_mora }
+    }))
+  };
+}
 
 export class VoicevoxQueryService {
   private readonly client: VoicevoxQueryClientPort;
   private readonly terminologyService: VoicevoxTerminologyServicePort;
   private readonly cache: VoicevoxQueryCachePort;
-  private readonly adjustmentFingerprintProvider: VoicevoxAdjustmentFingerprintProvider;
+  private readonly adjustmentStore: VoicevoxQueryAdjustmentStorePort;
+  private readonly adjustmentFingerprintProvider:
+    VoicevoxAdjustmentFingerprintProvider | undefined;
 
   constructor(options: VoicevoxQueryServiceOptions) {
     this.client = options.client ?? new VoicevoxClient();
@@ -174,8 +236,15 @@ export class VoicevoxQueryService {
       );
     }
 
-    this.adjustmentFingerprintProvider =
-      options.adjustmentFingerprintProvider ?? noVoicevoxAdjustments;
+    this.adjustmentStore =
+      options.adjustmentStore ??
+      (options.workspaceRoot === undefined
+        ? noVoicevoxAdjustmentStore
+        : new VoicevoxAdjustmentStore({
+            workspaceRoot: options.workspaceRoot,
+            fileSystem: options.adjustmentFileSystem
+          }));
+    this.adjustmentFingerprintProvider = options.adjustmentFingerprintProvider;
   }
 
   /**
@@ -211,14 +280,38 @@ export class VoicevoxQueryService {
     }
 
     const resolvedText = normalizeResolvedText(this.resolveSpokenText(line));
-    const adjustmentChecksum = await this.getAdjustmentChecksum({
+    const adjustmentAddress = {
       projectId,
       lineId: line.id
-    });
+    };
+    const adjustmentRead =
+      this.adjustmentStore.readWithChecksum === undefined
+        ? {
+            adjustment: await this.adjustmentStore.read(adjustmentAddress),
+            checksum: await this.adjustmentStore.getChecksum(adjustmentAddress)
+          }
+        : await this.adjustmentStore.readWithChecksum(adjustmentAddress);
+    const adjustment = adjustmentRead?.adjustment ?? null;
+    const providedAdjustmentChecksum =
+      this.adjustmentFingerprintProvider === undefined
+        ? null
+        : await this.getAdjustmentChecksum(adjustmentAddress);
+    const adjustmentChecksum =
+      providedAdjustmentChecksum ?? adjustmentRead?.checksum ?? null;
     const voicevoxEngineVersion =
       context?.voicevoxEngineVersion ??
       (await this.resolveContext()).voicevoxEngineVersion;
-    const cacheKeyInput: VoicevoxQueryCacheKeyInput = {
+    const baseHashInput: VoicevoxAdjustmentBaseHashInput = {
+      resolvedSpokenText: resolvedText.resolvedSpokenText,
+      speakerUuid: resolvedSpeaker.speakerUuid,
+      styleName: resolvedSpeaker.styleName,
+      resolvedStyleId: resolvedSpeaker.resolvedStyleId,
+      voicevoxEngineVersion,
+      characterVoice: character.voice,
+      voiceOverrides: line.voiceOverrides
+    };
+    const baseHash = createVoicevoxAdjustmentBaseHash(baseHashInput);
+    const queryCacheKeyInput: VoicevoxQueryCacheKeyInput = {
       resolvedSpokenText: resolvedText.resolvedSpokenText,
       speakerUuid: resolvedSpeaker.speakerUuid,
       styleName: resolvedSpeaker.styleName,
@@ -227,13 +320,25 @@ export class VoicevoxQueryService {
       voiceOverrides: line.voiceOverrides,
       appliedTerms: resolvedText.appliedTerms,
       voicevoxEngineVersion,
-      adjustmentChecksum
+      adjustmentChecksum: null
     };
-    const cacheKey = createVoicevoxQueryCacheKey(cacheKeyInput);
+    const queryCacheKey = createVoicevoxQueryCacheKey(queryCacheKeyInput);
+    const cacheKey = createVoicevoxQueryCacheKey({
+      ...queryCacheKeyInput,
+      adjustmentChecksum
+    });
+    const adjustmentStatus: VoicevoxAdjustmentStatus =
+      adjustment === null
+        ? adjustmentChecksum === null
+          ? "current"
+          : "unsupported"
+        : adjustment.base.baseHash === baseHash
+          ? "current"
+          : "needs_review";
     const cacheEntry: VoicevoxQueryCacheEntry = {
       projectId,
       lineId: line.id,
-      cacheKey
+      cacheKey: queryCacheKey
     };
 
     return {
@@ -245,8 +350,12 @@ export class VoicevoxQueryService {
       appliedTerms: resolvedText.appliedTerms,
       voicevoxEngineVersion,
       adjustmentChecksum,
+      queryCacheKey,
       cacheKey,
-      queryPath: this.cache.getQueryPath(cacheEntry)
+      queryPath: this.cache.getQueryPath(cacheEntry),
+      baseHash,
+      adjustmentStatus,
+      adjustment
     };
   }
 
@@ -254,12 +363,42 @@ export class VoicevoxQueryService {
     input: PrepareVoicevoxQueryInput
   ): Promise<PreparedVoicevoxQuery> {
     const current = await this.resolveCurrent(input);
-    if (current.adjustmentChecksum !== null) {
+    if (current.adjustmentStatus === "unsupported") {
       throw new VoicevoxQueryServiceError(
         "VOICEVOX_QUERY_SERVICE_ADJUSTMENT_UNSUPPORTED"
       );
     }
+    if (current.adjustmentStatus === "needs_review") {
+      throw new VoicevoxQueryServiceError(
+        "VOICEVOX_QUERY_SERVICE_ADJUSTMENT_NEEDS_REVIEW"
+      );
+    }
+    const prepared = await this.prepareUnadjustedCurrent(current);
+    const adjustment = current.adjustment;
+    if (adjustment === null) {
+      return prepared;
+    }
 
+    return {
+      ...prepared,
+      query: applyVoiceAdjustment(prepared.query, adjustment)
+    };
+  }
+
+  /**
+   * Return the current unedited query. This is used by the editor and by the
+   * stale-adjustment comparison flow; it never applies a saved adjustment.
+   */
+  async prepareUnadjusted(
+    input: PrepareVoicevoxQueryInput
+  ): Promise<PreparedVoicevoxQuery> {
+    const current = await this.resolveCurrent(input);
+    return this.prepareUnadjustedCurrent(current);
+  }
+
+  private async prepareUnadjustedCurrent(
+    current: ResolvedVoicevoxQueryConditions
+  ): Promise<PreparedVoicevoxQuery> {
     const effectiveVoice = voiceSchema.parse({
       ...current.character.voice,
       ...getDefinedVoiceOverrides(current.line.voiceOverrides)
@@ -267,7 +406,7 @@ export class VoicevoxQueryService {
     const cacheEntry: VoicevoxQueryCacheEntry = {
       projectId: current.projectId,
       lineId: current.line.id,
-      cacheKey: current.cacheKey
+      cacheKey: current.queryCacheKey
     };
     const queryPath = current.queryPath;
     const cachedQuery = await this.cache.read(cacheEntry);
@@ -283,7 +422,10 @@ export class VoicevoxQueryService {
         },
         voicevoxEngineVersion: current.voicevoxEngineVersion,
         resolvedSpeaker: current.resolvedSpeaker,
-        adjustmentChecksum: current.adjustmentChecksum
+        adjustmentChecksum: current.adjustmentChecksum,
+        baseHash: current.baseHash,
+        adjustmentStatus: current.adjustmentStatus,
+        adjustment: current.adjustment
       });
     }
 
@@ -305,7 +447,10 @@ export class VoicevoxQueryService {
       },
       voicevoxEngineVersion: current.voicevoxEngineVersion,
       resolvedSpeaker: current.resolvedSpeaker,
-      adjustmentChecksum: current.adjustmentChecksum
+      adjustmentChecksum: current.adjustmentChecksum,
+      baseHash: current.baseHash,
+      adjustmentStatus: current.adjustmentStatus,
+      adjustment: current.adjustment
     });
   }
 
@@ -313,8 +458,11 @@ export class VoicevoxQueryService {
     readonly projectId: string;
     readonly lineId: string;
   }): Promise<string | null> {
-    const checksum =
-      await this.adjustmentFingerprintProvider.getChecksum(input);
+    const provider = this.adjustmentFingerprintProvider;
+    if (provider === undefined) {
+      return null;
+    }
+    const checksum = await provider.getChecksum(input);
     if (checksum === null || checksum === undefined) {
       return null;
     }
@@ -342,6 +490,9 @@ export class VoicevoxQueryService {
     readonly voicevoxEngineVersion: string;
     readonly resolvedSpeaker: VoicevoxResolvedSpeaker;
     readonly adjustmentChecksum: string | null;
+    readonly baseHash: string;
+    readonly adjustmentStatus: VoicevoxAdjustmentStatus;
+    readonly adjustment: VoicevoxAdjustmentFile | null;
   }): PreparedVoicevoxQuery {
     return {
       cached: input.cached,
@@ -352,7 +503,10 @@ export class VoicevoxQueryService {
       appliedTerms: input.resolvedText.appliedTerms,
       voicevoxEngineVersion: input.voicevoxEngineVersion,
       resolvedSpeaker: input.resolvedSpeaker,
-      adjustmentChecksum: input.adjustmentChecksum
+      adjustmentChecksum: input.adjustmentChecksum,
+      baseHash: input.baseHash,
+      adjustmentStatus: input.adjustmentStatus,
+      adjustment: input.adjustment
     };
   }
 }

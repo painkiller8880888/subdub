@@ -79,6 +79,7 @@ import {
   type VisualSuggestionRequestContext
 } from "./script-editor";
 import { VisualAssignmentPanel } from "./VisualAssignmentPanel";
+import { VoiceAdjustmentEditor } from "./VoiceAdjustmentEditor";
 import {
   assignmentInput,
   defaultDisplayForAsset,
@@ -126,6 +127,8 @@ function voiceStatusLabel(status: VoiceLineGenerationStatus["status"]): string {
       return "最新";
     case "stale":
       return "再生成が必要";
+    case "needs_review":
+      return "調整要確認";
     case "generating":
       return "生成中";
     case "failed":
@@ -219,6 +222,8 @@ function ScriptLineCard({
   issues,
   voiceStatus,
   voiceGenerationDisabled,
+  voiceAvailable,
+  projectId,
   onChange,
   onMove,
   onDuplicate,
@@ -232,6 +237,8 @@ function ScriptLineCard({
   readonly issues: readonly ScriptDraftIssue[];
   readonly voiceStatus: VoiceLineGenerationStatus | undefined;
   readonly voiceGenerationDisabled: boolean;
+  readonly voiceAvailable: boolean;
+  readonly projectId: string;
   readonly onChange: (update: Partial<ScriptLine>) => void;
   readonly onMove: (direction: "up" | "down") => void;
   readonly onDuplicate: () => void;
@@ -384,7 +391,8 @@ function ScriptLineCard({
           disabled={
             voiceGenerationDisabled ||
             voiceStatus?.status === "current" ||
-            voiceStatus?.status === "generating"
+            voiceStatus?.status === "generating" ||
+            voiceStatus?.status === "needs_review"
           }
           onClick={onGenerateVoice}
         >
@@ -393,6 +401,11 @@ function ScriptLineCard({
             : "このセリフを生成"}
         </button>
       </div>
+      <VoiceAdjustmentEditor
+        projectId={projectId}
+        line={line}
+        voiceAvailable={voiceAvailable}
+      />
       {lineIssues.length > 0 ? (
         <ul className="form-error script-line-errors" role="alert">
           {lineIssues.map((issue) => (
@@ -2015,6 +2028,8 @@ export function ScriptPage() {
                     voiceGenerationDisabled={
                       voiceGenerationDisabled || issues.length > 0
                     }
+                    voiceAvailable={voiceStatusQuery.data?.available === true}
+                    projectId={project.metadata.id}
                     onChange={(update) =>
                       updateLine(sectionIndex, lineIndex, update)
                     }

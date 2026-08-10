@@ -35,6 +35,12 @@ import {
   VOICEVOX_GENERATION_ERROR_CODE,
   VoicevoxGenerationError
 } from "../../app/voicevox/generation-service.js";
+import {
+  VOICEVOX_ADJUSTMENT_ERROR_CODE,
+  VoicevoxAdjustmentError
+} from "../../app/voicevox/adjustment-service.js";
+import { VoicevoxAdjustmentStoreError } from "../../app/voicevox/adjustment-store.js";
+import { VoicevoxPreviewStoreError } from "../../app/voicevox/preview-store.js";
 
 export class ApiResponseValidationError extends Error {
   constructor(cause: unknown) {
@@ -58,6 +64,8 @@ export const API_ERROR_CODE = {
   openRouterUnavailable: OPENROUTER_ERROR_CODE.unavailable,
   openRouterResponseInvalid: OPENROUTER_ERROR_CODE.responseInvalid,
   voicevoxUnavailable: "VOICEVOX_UNAVAILABLE",
+  voiceAdjustmentInvalid: "VOICEVOX_ADJUSTMENT_INVALID",
+  voiceAdjustmentStorageFailed: "VOICEVOX_ADJUSTMENT_STORAGE_FAILED",
   terminologyNotFound: "TERMINOLOGY_NOT_FOUND",
   terminologyDuplicate: "TERMINOLOGY_DUPLICATE",
   assetFileMissing: "ASSET_FILE_MISSING",
@@ -677,6 +685,85 @@ export function mapApiError(error: unknown): MappedApiError {
       message: "VOICEVOX audio is unavailable.",
       details: [],
       shouldLog: false
+    };
+  }
+
+  if (error instanceof VoicevoxAdjustmentError) {
+    if (error.code === VOICEVOX_ADJUSTMENT_ERROR_CODE.unavailable) {
+      return {
+        code: API_ERROR_CODE.voicevoxUnavailable,
+        status: 503,
+        message: "VOICEVOX audio is unavailable.",
+        details: [],
+        shouldLog: false
+      };
+    }
+    if (error.code === VOICEVOX_ADJUSTMENT_ERROR_CODE.lineNotFound) {
+      return {
+        code: error.code,
+        status: 404,
+        message: "指定されたセリフが見つかりません。",
+        details: [],
+        shouldLog: false
+      };
+    }
+    if (error.code === VOICEVOX_ADJUSTMENT_ERROR_CODE.baseStale) {
+      return {
+        code: error.code,
+        status: 409,
+        message: "現在の読み上げ条件が変わったため、調整を再確認してください。",
+        details: [],
+        shouldLog: false
+      };
+    }
+    if (error.code === VOICEVOX_ADJUSTMENT_ERROR_CODE.previewNotFound) {
+      return {
+        code: error.code,
+        status: 404,
+        message: "試聴データが見つかりません。",
+        details: [],
+        shouldLog: false
+      };
+    }
+    return {
+      code: API_ERROR_CODE.internalServerError,
+      status: 500,
+      message: genericInternalMessage,
+      details: [],
+      shouldLog: true
+    };
+  }
+
+  if (error instanceof VoicevoxAdjustmentStoreError) {
+    if (
+      error.code === "VOICEVOX_ADJUSTMENT_STORE_JSON_INVALID" ||
+      error.code === "VOICEVOX_ADJUSTMENT_STORE_SCHEMA_INVALID" ||
+      error.code === "VOICEVOX_ADJUSTMENT_STORE_LINE_ID_MISMATCH"
+    ) {
+      return {
+        code: API_ERROR_CODE.voiceAdjustmentInvalid,
+        status: 422,
+        message: "音声調整データが不正です。",
+        details: [],
+        shouldLog: false
+      };
+    }
+    return {
+      code: API_ERROR_CODE.voiceAdjustmentStorageFailed,
+      status: 500,
+      message: genericInternalMessage,
+      details: [],
+      shouldLog: true
+    };
+  }
+
+  if (error instanceof VoicevoxPreviewStoreError) {
+    return {
+      code: API_ERROR_CODE.internalServerError,
+      status: 500,
+      message: genericInternalMessage,
+      details: [],
+      shouldLog: true
     };
   }
 

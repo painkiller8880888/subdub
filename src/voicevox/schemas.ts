@@ -1,6 +1,12 @@
 import { z } from "zod";
 
-import { finiteNumberSchema, strictObject } from "../schema/primitives.js";
+import {
+  finiteNumberSchema,
+  idSchema,
+  isoUtcDateTimeSchema,
+  sha256Schema,
+  strictObject
+} from "../schema/primitives.js";
 
 export const voicevoxStyleSchema = z.object({
   name: z.string().min(1),
@@ -15,18 +21,19 @@ export const voicevoxSpeakerSchema = z.object({
 
 export const voicevoxSpeakersResponseSchema = z.array(voicevoxSpeakerSchema);
 
-const voicevoxMoraSchema = z
+export const voicevoxMoraSchema = z
   .object({
     text: z.string(),
     consonant: z.string().nullable(),
     consonant_length: finiteNumberSchema.nullable(),
     vowel: z.string(),
     vowel_length: finiteNumberSchema,
-    pitch: finiteNumberSchema
+    pitch: finiteNumberSchema,
+    is_devoiced: z.boolean().optional()
   })
   .passthrough();
 
-const voicevoxAccentPhraseSchema = z
+export const voicevoxAccentPhraseSchema = z
   .object({
     moras: z.array(voicevoxMoraSchema),
     accent: finiteNumberSchema.int(),
@@ -52,6 +59,33 @@ export const voicevoxAudioQuerySchema = z
   })
   .passthrough();
 
+export const voicevoxAdjustmentScalarOverridesSchema = strictObject({
+  speedScale: finiteNumberSchema.optional(),
+  pitchScale: finiteNumberSchema.optional(),
+  intonationScale: finiteNumberSchema.optional(),
+  volumeScale: finiteNumberSchema.optional(),
+  prePhonemeLength: finiteNumberSchema.optional(),
+  postPhonemeLength: finiteNumberSchema.optional()
+});
+
+export const voicevoxAdjustmentBaseSchema = strictObject({
+  baseHash: sha256Schema,
+  resolvedSpokenText: z.string().min(1),
+  speakerUuid: z.string().min(1),
+  styleName: z.string().min(1),
+  resolvedStyleId: finiteNumberSchema.int(),
+  voicevoxEngineVersion: voicevoxEngineVersionSchema
+});
+
+export const voicevoxAdjustmentFileSchema = strictObject({
+  adjustmentVersion: z.literal("1.0.0"),
+  lineId: idSchema,
+  base: voicevoxAdjustmentBaseSchema,
+  scalarOverrides: voicevoxAdjustmentScalarOverridesSchema,
+  accentPhrases: z.array(voicevoxAccentPhraseSchema).nullable(),
+  editedAt: isoUtcDateTimeSchema
+});
+
 export const voicevoxSpeakerReferenceSchema = strictObject({
   speakerName: z.string().min(1),
   speakerUuid: z.string().min(1).nullable().optional(),
@@ -71,6 +105,17 @@ export type VoicevoxSpeakersResponse = z.infer<
   typeof voicevoxSpeakersResponseSchema
 >;
 export type VoicevoxAudioQuery = z.infer<typeof voicevoxAudioQuerySchema>;
+export type VoicevoxMora = z.infer<typeof voicevoxMoraSchema>;
+export type VoicevoxAccentPhrase = z.infer<typeof voicevoxAccentPhraseSchema>;
+export type VoicevoxAdjustmentScalarOverrides = z.infer<
+  typeof voicevoxAdjustmentScalarOverridesSchema
+>;
+export type VoicevoxAdjustmentBase = z.infer<
+  typeof voicevoxAdjustmentBaseSchema
+>;
+export type VoicevoxAdjustmentFile = z.infer<
+  typeof voicevoxAdjustmentFileSchema
+>;
 export type VoicevoxSpeakerReference = z.infer<
   typeof voicevoxSpeakerReferenceSchema
 >;

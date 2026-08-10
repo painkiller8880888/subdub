@@ -419,6 +419,107 @@ describe("VoicevoxQueryService", () => {
     expect(client.getAudioQuery).toHaveBeenCalledWith("申請", 10_001);
   });
 
+  it("applies only a base-matching saved adjustment to the unedited query", async () => {
+    const { workspaceRoot, client, service } = await makeService();
+    const originalLine = line();
+    if (originalLine === undefined) {
+      throw new Error("fixture line is required");
+    }
+    const current = await service.resolveCurrent(input());
+    const savedPath = path.join(
+      workspaceRoot,
+      "projects",
+      videoProjectFixture.metadata.id,
+      "voice-adjustments",
+      `${originalLine.id}.json`
+    );
+    await fs.mkdir(path.dirname(savedPath), { recursive: true });
+    const savedAccent = createVoicevoxAudioQueryFixture().accent_phrases.map(
+      (phrase) => ({
+        ...phrase,
+        accent: 0,
+        moras: phrase.moras.map((mora) => ({
+          ...mora,
+          pitch: 8.8,
+          future_mora_field: "preserve"
+        }))
+      })
+    );
+    await fs.writeFile(
+      savedPath,
+      JSON.stringify({
+        adjustmentVersion: "1.0.0",
+        lineId: originalLine.id,
+        base: {
+          baseHash: current.baseHash,
+          resolvedSpokenText: current.resolvedSpokenText,
+          speakerUuid: resolvedSpeaker.speakerUuid,
+          styleName: resolvedSpeaker.styleName,
+          resolvedStyleId: resolvedSpeaker.resolvedStyleId,
+          voicevoxEngineVersion: current.voicevoxEngineVersion
+        },
+        scalarOverrides: { speedScale: 1.4 },
+        accentPhrases: savedAccent,
+        editedAt: "2026-08-10T00:00:00.000Z"
+      }),
+      "utf8"
+    );
+
+    const prepared = await service.prepare(input());
+
+    expect(prepared.adjustmentStatus).toBe("current");
+    expect(prepared.query.speedScale).toBe(1.4);
+    expect(prepared.query.accent_phrases).toEqual(savedAccent);
+    expect(prepared.query.future_query_field).toEqual({ preserve: true });
+    expect(prepared.queryPath).toContain("cache/voicevox-query");
+    expect(client.getAudioQuery).toHaveBeenCalledTimes(1);
+  });
+
+  it("reports a stale adjustment and refuses to fetch or apply it", async () => {
+    const { workspaceRoot, client, service } = await makeService();
+    const originalLine = line();
+    if (originalLine === undefined) {
+      throw new Error("fixture line is required");
+    }
+    const current = await service.resolveCurrent(input());
+    const savedPath = path.join(
+      workspaceRoot,
+      "projects",
+      videoProjectFixture.metadata.id,
+      "voice-adjustments",
+      `${originalLine.id}.json`
+    );
+    await fs.mkdir(path.dirname(savedPath), { recursive: true });
+    await fs.writeFile(
+      savedPath,
+      JSON.stringify({
+        adjustmentVersion: "1.0.0",
+        lineId: originalLine.id,
+        base: {
+          baseHash: "f".repeat(64),
+          resolvedSpokenText: current.resolvedSpokenText,
+          speakerUuid: resolvedSpeaker.speakerUuid,
+          styleName: resolvedSpeaker.styleName,
+          resolvedStyleId: resolvedSpeaker.resolvedStyleId,
+          voicevoxEngineVersion: current.voicevoxEngineVersion
+        },
+        scalarOverrides: { speedScale: 1.4 },
+        accentPhrases: null,
+        editedAt: "2026-08-10T00:00:00.000Z"
+      }),
+      "utf8"
+    );
+    client.getAudioQuery.mockClear();
+
+    await expect(service.resolveCurrent(input())).resolves.toMatchObject({
+      adjustmentStatus: "needs_review"
+    });
+    await expect(service.prepare(input())).rejects.toMatchObject({
+      code: "VOICEVOX_QUERY_SERVICE_ADJUSTMENT_NEEDS_REVIEW"
+    });
+    expect(client.getAudioQuery).not.toHaveBeenCalled();
+  });
+
   it("rejects invalid IDs before using the client or an external path", async () => {
     const { client, service } = await makeService();
     await expect(

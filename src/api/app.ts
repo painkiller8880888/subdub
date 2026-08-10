@@ -30,6 +30,10 @@ import {
   registerVoiceGenerationRoutes,
   type VoicevoxGenerationServicePort
 } from "./routes/voice-generation.js";
+import {
+  registerVoiceAdjustmentRoutes,
+  type VoicevoxAdjustmentServicePort
+} from "./routes/voice-adjustments.js";
 import { createVoicevoxStatusService } from "../voicevox/service.js";
 
 export type AppOptions = {
@@ -48,6 +52,7 @@ export type AppOptions = {
   staticRoot?: string;
   voicevoxService?: VoicevoxStatusServicePort;
   voiceGenerationService?: VoicevoxGenerationServicePort;
+  voiceAdjustmentService?: VoicevoxAdjustmentServicePort;
 };
 
 export function buildApp(options: AppOptions = {}): FastifyInstance {
@@ -64,6 +69,10 @@ export function buildApp(options: AppOptions = {}): FastifyInstance {
 
   if (options.voiceGenerationService !== undefined) {
     registerVoiceGenerationRoutes(app, options.voiceGenerationService);
+  }
+
+  if (options.voiceAdjustmentService !== undefined) {
+    registerVoiceAdjustmentRoutes(app, options.voiceAdjustmentService);
   }
 
   app.get("/api/health", async () =>

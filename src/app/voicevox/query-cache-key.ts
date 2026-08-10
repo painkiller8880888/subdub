@@ -27,8 +27,9 @@ export type VoicevoxQueryCacheKeyInput = {
   >[];
   readonly voicevoxEngineVersion: string;
   /**
-   * P4-05 の調整ファイルとの境界。調整の適用自体はまだ実装しないが、
-   * fingerprint が変わったセリフだけを stale にできるよう key に含める。
+   * The adjustment checksum belongs in the generated-audio key. The
+   * unedited query cache uses the same input with this value set to null so a
+   * saved adjustment never replaces the unedited query source.
    */
   readonly adjustmentChecksum?: string | null;
 };
