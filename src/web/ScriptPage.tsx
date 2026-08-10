@@ -10,7 +10,11 @@ import {
 import { Link, Navigate, useNavigate, useParams } from "react-router";
 import { ZodError } from "zod";
 
-import type { ProjectSummary } from "../schema/api.js";
+import type {
+  ProjectSummary,
+  VisualSuggestionResponse
+} from "../schema/api.js";
+import type { AssetListResult } from "../schema/asset.js";
 import {
   type Script,
   type ScriptLine,
@@ -22,7 +26,9 @@ import {
   approveProjectScript,
   fetchProject,
   initializeProjectScript,
-  saveProjectScript
+  saveProjectScript,
+  searchAssets,
+  suggestProjectVisuals
 } from "./lib/api-client";
 import {
   AutosaveCoordinator,
@@ -306,6 +312,15 @@ export function ScriptPage() {
   const [pendingNavigation, setPendingNavigation] = useState(false);
   const [initializationError, setInitializationError] = useState<unknown>(null);
   const [approvalError, setApprovalError] = useState<unknown>(null);
+  const [suggestionSectionId, setSuggestionSectionId] = useState("");
+  const [suggestionStartLineId, setSuggestionStartLineId] = useState("");
+  const [suggestionEndLineId, setSuggestionEndLineId] = useState("");
+  const [suggestionResponse, setSuggestionResponse] =
+    useState<VisualSuggestionResponse | null>(null);
+  const [assetSearchQuery, setAssetSearchQuery] = useState("");
+  const [assetSearchResult, setAssetSearchResult] =
+    useState<AssetListResult | null>(null);
+  const [assetSearchError, setAssetSearchError] = useState<unknown>(null);
   const projectIdRef = useRef(projectId ?? "");
   const projectGenerationRef = useRef(0);
   const revisionRef = useRef(0);
@@ -340,6 +355,39 @@ export function ScriptPage() {
       expectedRevision: number;
     }) => approveProjectScript(projectId, { expectedRevision }),
     retry: false
+  });
+
+  const suggestionMutation = useMutation({
+    mutationFn: ({
+      projectId,
+      startLineId,
+      endLineId,
+      expectedRevision
+    }: {
+      projectId: string;
+      startLineId: string;
+      endLineId: string;
+      expectedRevision: number;
+    }) =>
+      suggestProjectVisuals(projectId, {
+        startLineId,
+        endLineId,
+        expectedRevision
+      }),
+    onSuccess: (response) => {
+      setSuggestionResponse(response);
+      revisionRef.current = response.revision;
+      void projectQuery.refetch();
+    }
+  });
+
+  const assetSearchMutation = useMutation({
+    mutationFn: (query: string) => searchAssets({ q: query, pageSize: 12 }),
+    onSuccess: (result) => {
+      setAssetSearchError(null);
+      setAssetSearchResult(result);
+    },
+    onError: setAssetSearchError
   });
 
   function updateMutationCaches(project: VideoProject): void {
@@ -437,6 +485,12 @@ export function ScriptPage() {
     setBulkText("");
     setBulkErrors([]);
     setInitializationError(null);
+    setSuggestionSectionId("");
+    setSuggestionStartLineId("");
+    setSuggestionEndLineId("");
+    setSuggestionResponse(null);
+    setAssetSearchResult(null);
+    setAssetSearchError(null);
     coordinator.reset();
   }, [coordinator, projectId]);
 
@@ -458,6 +512,34 @@ export function ScriptPage() {
       coordinator.reset();
     }
   }, [coordinator, projectId, projectQuery.data, projectQuery.isError]);
+
+  useEffect(() => {
+    if (draft === null) {
+      return;
+    }
+    const selectedSection =
+      draft.sections.find((section) => section.id === suggestionSectionId) ??
+      draft.sections.find((section) => section.lines.length > 0) ??
+      draft.sections[0];
+    if (selectedSection === undefined) {
+      return;
+    }
+    if (selectedSection.id !== suggestionSectionId) {
+      setSuggestionSectionId(selectedSection.id);
+    }
+    const firstLineId = selectedSection.lines[0]?.id ?? "";
+    const lastLineId = selectedSection.lines.at(-1)?.id ?? "";
+    if (
+      !selectedSection.lines.some((line) => line.id === suggestionStartLineId)
+    ) {
+      setSuggestionStartLineId(firstLineId);
+    }
+    if (
+      !selectedSection.lines.some((line) => line.id === suggestionEndLineId)
+    ) {
+      setSuggestionEndLineId(lastLineId);
+    }
+  }, [draft, suggestionEndLineId, suggestionSectionId, suggestionStartLineId]);
 
   const initializeMutation = useMutation({
     mutationFn: ({
@@ -684,7 +766,6 @@ export function ScriptPage() {
             : autosaveState.status === "pending"
               ? "変更を保存する準備中…"
               : "変更はありません";
-
   if (projectQuery.isError) {
     return (
       <main className="page-shell narrow-shell">
@@ -794,6 +875,42 @@ export function ScriptPage() {
     );
   }
 
+  const suggestionSection =
+    draft.sections.find((section) => section.id === suggestionSectionId) ??
+    draft.sections.find((section) => section.lines.length > 0) ??
+    draft.sections[0];
+  const canSuggest =
+    project.script.status === "approved" && draft.status === "approved";
+
+  async function runVisualSuggestion(): Promise<void> {
+    if (
+      suggestionSection === undefined ||
+      suggestionStartLineId.length === 0 ||
+      suggestionEndLineId.length === 0 ||
+      !canSuggest ||
+      suggestionMutation.isPending
+    ) {
+      return;
+    }
+    const flushed = await coordinatorRef.current?.flush();
+    if (flushed !== true) {
+      return;
+    }
+    setSuggestionResponse(null);
+    suggestionMutation.mutate({
+      projectId: projectIdRef.current,
+      startLineId: suggestionStartLineId,
+      endLineId: suggestionEndLineId,
+      expectedRevision: revisionRef.current
+    });
+  }
+
+  function runAssetSearch(event: FormEvent<HTMLFormElement>): void {
+    event.preventDefault();
+    setAssetSearchError(null);
+    assetSearchMutation.mutate(assetSearchQuery);
+  }
+
   return (
     <main className="page-shell script-editor-page">
       <p className="back-link">
@@ -877,6 +994,263 @@ export function ScriptPage() {
           </p>
         </section>
       ) : null}
+
+      <section
+        className="visual-suggestion-panel"
+        aria-labelledby="visual-suggestion-title"
+      >
+        <div>
+          <p className="eyebrow">P3-04 ビジュアル検索意図</p>
+          <h2 id="visual-suggestion-title">AIに候補を提案させる</h2>
+          <p>
+            AIは検索条件だけを作り、実在するactive素材の候補はバックエンドが検索します。素材の割り当ては行いません。
+          </p>
+        </div>
+        {!canSuggest ? (
+          <p className="message-panel message-panel-warning">
+            台本を承認するとAI検索意図を実行できます。通常の素材検索は利用できます。
+          </p>
+        ) : null}
+        <div className="form-field">
+          <label htmlFor="visual-suggestion-section">対象セクション</label>
+          <select
+            id="visual-suggestion-section"
+            value={suggestionSection?.id ?? ""}
+            onChange={(event) => {
+              const nextSection = draft.sections.find(
+                (section) => section.id === event.target.value
+              );
+              setSuggestionSectionId(event.target.value);
+              setSuggestionStartLineId(nextSection?.lines[0]?.id ?? "");
+              setSuggestionEndLineId(nextSection?.lines.at(-1)?.id ?? "");
+              setSuggestionResponse(null);
+            }}
+          >
+            {draft.sections.map((section) => (
+              <option key={section.id} value={section.id}>
+                {section.name}（{section.lines.length}セリフ）
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="form-field-group">
+          <div className="form-field">
+            <label htmlFor="visual-suggestion-start">開始セリフ</label>
+            <select
+              id="visual-suggestion-start"
+              value={suggestionStartLineId}
+              onChange={(event) => {
+                setSuggestionStartLineId(event.target.value);
+                setSuggestionResponse(null);
+              }}
+              disabled={suggestionSection === undefined}
+            >
+              {suggestionSection?.lines.map((line) => (
+                <option key={line.id} value={line.id}>
+                  {line.id}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="form-field">
+            <label htmlFor="visual-suggestion-end">終了セリフ</label>
+            <select
+              id="visual-suggestion-end"
+              value={suggestionEndLineId}
+              onChange={(event) => {
+                setSuggestionEndLineId(event.target.value);
+                setSuggestionResponse(null);
+              }}
+              disabled={suggestionSection === undefined}
+            >
+              {suggestionSection?.lines.map((line) => (
+                <option key={line.id} value={line.id}>
+                  {line.id}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+        <button
+          className="button button-primary"
+          type="button"
+          onClick={() => void runVisualSuggestion()}
+          disabled={
+            !canSuggest ||
+            suggestionSection === undefined ||
+            suggestionStartLineId.length === 0 ||
+            suggestionEndLineId.length === 0 ||
+            suggestionMutation.isPending
+          }
+        >
+          {suggestionMutation.isPending
+            ? "検索意図を生成中…"
+            : "AIに候補を提案させる"}
+        </button>
+        {suggestionMutation.error !== null ? (
+          <section className="message-panel message-panel-error" role="alert">
+            <p>
+              {getErrorMessage(
+                suggestionMutation.error,
+                "AI検索意図の生成に失敗しました。"
+              )}
+            </p>
+            {errorDetails(suggestionMutation.error).length > 0 ? (
+              <ul>
+                {errorDetails(suggestionMutation.error).map((detail) => (
+                  <li key={detail}>{detail}</li>
+                ))}
+              </ul>
+            ) : null}
+            <p>通常の素材検索は引き続き利用できます。</p>
+          </section>
+        ) : null}
+        {suggestionResponse !== null ? (
+          <div className="visual-suggestion-result">
+            <p className="eyebrow">AIが生成した検索意図</p>
+            <dl className="definition-list">
+              <dt>required tags</dt>
+              <dd>
+                {suggestionResponse.data.aiIntent.requiredTags.join("、") ||
+                  "なし"}
+              </dd>
+              <dt>optional tags</dt>
+              <dd>
+                {suggestionResponse.data.aiIntent.optionalTags.join("、") ||
+                  "なし"}
+              </dd>
+              <dt>excluded tags</dt>
+              <dd>
+                {suggestionResponse.data.aiIntent.excludedTags.join("、") ||
+                  "なし"}
+              </dd>
+              <dt>media kinds</dt>
+              <dd>{suggestionResponse.data.aiIntent.mediaKinds.join("、")}</dd>
+              <dt>free text query</dt>
+              <dd>
+                {suggestionResponse.data.aiIntent.freeTextQuery || "なし"}
+              </dd>
+              <dt>reason</dt>
+              <dd>{suggestionResponse.data.aiIntent.reason}</dd>
+            </dl>
+            <p className="eyebrow">バックエンドで解決された検索条件</p>
+            <dl className="definition-list">
+              <dt>required tags</dt>
+              <dd>
+                {suggestionResponse.data.resolvedSearch.requiredTags
+                  .map((tag) => `${tag.canonicalName}（${tag.tagId}）`)
+                  .join("、") || "なし"}
+              </dd>
+              <dt>optional tags</dt>
+              <dd>
+                {suggestionResponse.data.resolvedSearch.optionalTags
+                  .map((tag) => `${tag.canonicalName}（${tag.tagId}）`)
+                  .join("、") || "なし"}
+              </dd>
+              <dt>excluded tags</dt>
+              <dd>
+                {suggestionResponse.data.resolvedSearch.excludedTags
+                  .map((tag) => `${tag.canonicalName}（${tag.tagId}）`)
+                  .join("、") || "なし"}
+              </dd>
+              <dt>free text query</dt>
+              <dd>
+                {suggestionResponse.data.resolvedSearch.freeTextQuery || "なし"}
+              </dd>
+            </dl>
+            {suggestionResponse.data.diagnostics.unresolvedTags.length > 0 ? (
+              <div className="message-panel message-panel-warning">
+                <h3>未解決条件</h3>
+                <ul>
+                  {suggestionResponse.data.diagnostics.unresolvedTags.map(
+                    (tag) => (
+                      <li key={`${tag.group}-${tag.value}`}>
+                        {tag.group}: {tag.value}（{tag.reason}）
+                      </li>
+                    )
+                  )}
+                </ul>
+                {suggestionResponse.data.diagnostics
+                  .requiredTagResolutionFailed ? (
+                  <p>必須タグを解決できないため候補は返していません。</p>
+                ) : null}
+              </div>
+            ) : null}
+            <p className="eyebrow">
+              実在するactive素材候補（
+              {suggestionResponse.data.diagnostics.candidateCount}件）
+            </p>
+            {suggestionResponse.data.candidates.length === 0 ? (
+              <p className="status-message">候補なし</p>
+            ) : (
+              <ul className="asset-candidate-list">
+                {suggestionResponse.data.candidates.map((candidate) => (
+                  <li key={candidate.asset.assetId}>
+                    <strong>{candidate.asset.title}</strong>（
+                    {candidate.asset.kind}）
+                    <span>
+                      タグ:{" "}
+                      {candidate.asset.tags
+                        .map((tag) => tag.canonicalName)
+                        .join("、") || "なし"}
+                    </span>
+                    <span>{candidate.matchReasons.join(" / ")}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        ) : null}
+      </section>
+
+      <section
+        className="asset-search-panel"
+        aria-labelledby="asset-search-title"
+      >
+        <p className="eyebrow">P3-03 通常検索</p>
+        <h2 id="asset-search-title">素材をキーワード検索</h2>
+        <form onSubmit={runAssetSearch}>
+          <div className="form-field-group">
+            <div className="form-field">
+              <label htmlFor="asset-search-query">キーワード</label>
+              <input
+                id="asset-search-query"
+                value={assetSearchQuery}
+                onChange={(event) => setAssetSearchQuery(event.target.value)}
+              />
+            </div>
+            <button
+              className="button"
+              type="submit"
+              disabled={assetSearchMutation.isPending}
+            >
+              {assetSearchMutation.isPending ? "検索中…" : "通常検索"}
+            </button>
+          </div>
+        </form>
+        {assetSearchError !== null ? (
+          <p className="form-error" role="alert">
+            {getErrorMessage(assetSearchError, "素材検索に失敗しました。")}
+          </p>
+        ) : null}
+        {assetSearchResult !== null ? (
+          assetSearchResult.items.length === 0 ? (
+            <p className="status-message">候補なし</p>
+          ) : (
+            <ul className="asset-candidate-list">
+              {assetSearchResult.items.map((asset) => (
+                <li key={asset.assetId}>
+                  <strong>{asset.title}</strong>（{asset.kind}）
+                  <span>
+                    {asset.tags.map((tag) => tag.canonicalName).join("、") ||
+                      "タグなし"}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )
+        ) : null}
+      </section>
 
       <form className="bulk-paste-panel" onSubmit={pasteLines}>
         <div>

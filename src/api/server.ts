@@ -10,6 +10,7 @@ import {
 } from "../app/projects/project-repository.js";
 import { ProjectService } from "../app/projects/project-service.js";
 import { OutlineGenerationService } from "../app/projects/outline-generation-service.js";
+import { VisualSuggestionService } from "../app/projects/visual-suggestion-service.js";
 import { TerminologyRepository } from "../app/terminology/terminology-repository.js";
 import { TerminologyService } from "../app/terminology/terminology-service.js";
 import { AssetRepository } from "../app/assets/asset-repository.js";
@@ -98,6 +99,9 @@ export async function initializeServer(
       projectRepository ?? new ProjectRepository({ workspaceRoot });
     const resolvedModelService =
       appOptions.modelService ?? createOpenRouterModelService();
+    const resolvedChatAdapter = createOpenRouterChatAdapter();
+    const resolvedAssetRepository =
+      assetRepository ?? new AssetRepository(database.database);
     const resolvedProjectService =
       suppliedProjectService ??
       new ProjectService({
@@ -108,7 +112,15 @@ export async function initializeServer(
       new OutlineGenerationService({
         repository: resolvedProjectRepository,
         modelService: resolvedModelService,
-        chatAdapter: createOpenRouterChatAdapter()
+        chatAdapter: resolvedChatAdapter
+      });
+    const resolvedVisualSuggestionService =
+      appOptions.visualSuggestionService ??
+      new VisualSuggestionService({
+        repository: resolvedProjectRepository,
+        assetRepository: resolvedAssetRepository,
+        modelService: resolvedModelService,
+        chatAdapter: resolvedChatAdapter
       });
     const resolvedTerminologyService =
       suppliedTerminologyService ??
@@ -120,7 +132,7 @@ export async function initializeServer(
       appOptions.assetService ??
       new AssetService({
         repository:
-          assetRepository ?? new AssetRepository(database.database),
+          resolvedAssetRepository,
         managementRoot: path.join(workspaceRoot, "library"),
         limits: options.assetUploadLimits
       });
@@ -128,7 +140,7 @@ export async function initializeServer(
       assetProcessingService ??
       new AssetProcessingService({
         repository:
-          assetRepository ?? new AssetRepository(database.database),
+          resolvedAssetRepository,
         fileStore: new NodeAssetFileStore(path.join(workspaceRoot, "library")),
         processingPort: createLazyMediaProcessingPort()
       });
@@ -139,6 +151,7 @@ export async function initializeServer(
       ...appOptions,
       modelService: resolvedModelService,
       outlineGenerationService: resolvedOutlineGenerationService,
+      visualSuggestionService: resolvedVisualSuggestionService,
       projectService: resolvedProjectService,
       terminologyService: resolvedTerminologyService,
       assetService: resolvedAssetService,

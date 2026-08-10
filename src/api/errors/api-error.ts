@@ -22,6 +22,7 @@ import {
   TerminologyNotFoundError
 } from "../../app/terminology/terminology-errors.js";
 import { AssetError } from "../../app/assets/asset-errors.js";
+import { VisualSuggestionError } from "../../app/projects/visual-suggestion-errors.js";
 
 export class ApiResponseValidationError extends Error {
   constructor(cause: unknown) {
@@ -560,6 +561,16 @@ export function mapApiError(error: unknown): MappedApiError {
   }
 
   if (error instanceof OutlineGenerationError) {
+    return {
+      code: error.code,
+      status: error.status,
+      message: error.message,
+      details: error.details,
+      shouldLog: false
+    };
+  }
+
+  if (error instanceof VisualSuggestionError) {
     return {
       code: error.code,
       status: error.status,

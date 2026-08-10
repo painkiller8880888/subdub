@@ -70,6 +70,7 @@ describe("asset repository search", () => {
       description: string;
       department: string | null;
       system: string | null;
+      kind: "video" | "photo" | "document_scan" | "sound_effect";
       status: "processing" | "active" | "inactive" | "error";
       updatedAt: string;
     }> = {}
@@ -78,7 +79,7 @@ describe("asset repository search", () => {
       .insert(assets)
       .values({
         assetId,
-        kind: "photo",
+        kind: values.kind ?? "photo",
         title: values.title ?? assetId,
         description: values.description ?? "",
         confidentiality: "internal",
@@ -405,5 +406,111 @@ describe("asset repository search", () => {
     expect(
       service.list({ page: 1, pageSize: 20 }).items.map((item) => item.assetId)
     ).toEqual(["asset-a", "asset-b"]);
+  });
+
+  it("resolves active tag aliases and applies visual required, optional, excluded, and kind filters", async () => {
+    const repository = await createRepository();
+    insertTag("tag-required", "required");
+    insertTag("tag-optional", "optional");
+    insertTag("tag-excluded", "excluded");
+    insertTag("tag-inactive", "inactive", "inactive");
+    database!.database
+      .insert(tagAliases)
+      .values({
+        aliasId: "alias-required",
+        tagId: "tag-required",
+        alias: "required alias",
+        normalizedAlias: "required alias",
+        createdAt: NOW
+      })
+      .run();
+
+    insertAsset("asset-best", { title: "visual unique", kind: "photo" });
+    insertAsset("asset-video", { kind: "video" });
+    insertAsset("asset-sound", { kind: "sound_effect" });
+    insertAsset("asset-inactive", { status: "inactive" });
+    insertAsset("asset-error", { status: "error" });
+    insertAsset("asset-excluded");
+    linkAsset("asset-best", "tag-required");
+    linkAsset("asset-best", "tag-optional");
+    linkAsset("asset-video", "tag-required");
+    linkAsset("asset-sound", "tag-required");
+    linkAsset("asset-inactive", "tag-required");
+    linkAsset("asset-error", "tag-required");
+    linkAsset("asset-excluded", "tag-required");
+    linkAsset("asset-excluded", "tag-excluded");
+
+    expect(repository.findActiveTagDictionary()).toEqual([
+      {
+        tagId: "tag-excluded",
+        axis: "task",
+        canonicalName: "excluded",
+        normalizedName: "excluded",
+        aliases: []
+      },
+      {
+        tagId: "tag-optional",
+        axis: "task",
+        canonicalName: "optional",
+        normalizedName: "optional",
+        aliases: []
+      },
+      {
+        tagId: "tag-required",
+        axis: "task",
+        canonicalName: "required",
+        normalizedName: "required",
+        aliases: [
+          {
+            alias: "required alias",
+            normalizedAlias: "required alias"
+          }
+        ]
+      }
+    ]);
+
+    const ranked = repository.searchVisual({
+      requiredTagIds: ["tag-required"],
+      optionalTagIds: ["tag-optional"],
+      excludedTagIds: ["tag-excluded"],
+      kinds: ["photo", "video"] as const,
+      limit: 20
+    });
+    expect(ranked.items.map((item) => item.assetId)).toEqual([
+      "asset-best",
+      "asset-video"
+    ]);
+
+    const first = repository.searchVisual({
+      requiredTagIds: ["tag-required"],
+      optionalTagIds: ["tag-optional"],
+      excludedTagIds: ["tag-excluded"],
+      kinds: ["photo", "video"] as const,
+      q: "visual unique",
+      limit: 20
+    });
+    const second = repository.searchVisual({
+      requiredTagIds: ["tag-required"],
+      optionalTagIds: ["tag-optional"],
+      excludedTagIds: ["tag-excluded"],
+      kinds: ["photo", "video"] as const,
+      q: "visual unique",
+      limit: 20
+    });
+    expect(first.items.map((item) => item.assetId)).toEqual(["asset-best"]);
+    expect(first.items.map((item) => item.assetId)).toEqual(
+      second.items.map((item) => item.assetId)
+    );
+    expect(first.items[0]?.status).toBe("active");
+    expect(first.total).toBe(1);
+    expect(
+      repository.searchVisual({
+        requiredTagIds: ["tag-required"],
+        optionalTagIds: [],
+        excludedTagIds: [],
+        kinds: ["sound_effect"] as never,
+        limit: 20
+      })
+    ).toEqual({ items: [], total: 0 });
   });
 });

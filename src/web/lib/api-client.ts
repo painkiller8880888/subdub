@@ -2,6 +2,8 @@ import { type ZodType } from "zod";
 
 import {
   apiErrorResponseSchema,
+  assetListQuerySchema,
+  assetListResponseSchema,
   outlineApproveRequestSchema,
   outlineGenerateRequestSchema,
   outlineReviewRequestSchema,
@@ -26,6 +28,8 @@ import {
   terminologyTermParamsSchema,
   terminologyTermResponseSchema,
   terminologyUpdateRequestSchema,
+  visualSuggestionRequestSchema,
+  visualSuggestionResponseSchema,
   type ApiErrorDetail,
   type OutlineApproveRequest,
   type OutlineGenerateRequest,
@@ -44,9 +48,12 @@ import {
   type TerminologyListQuery,
   type TerminologyPreviewRequest,
   type TerminologyPreviewResult,
-  type TerminologyUpdateRequest
+  type TerminologyUpdateRequest,
+  type VisualSuggestionRequest,
+  type VisualSuggestionResponse
 } from "../../schema/api.js";
 import type { TerminologyTerm } from "../../schema/terminology.js";
+import type { AssetListResult } from "../../schema/asset.js";
 import type { VideoProject } from "../../schema/video-project.js";
 
 export type ApiClientErrorData = {
@@ -352,6 +359,42 @@ export async function approveProjectScript(
       },
       body: JSON.stringify(validatedInput)
     }
+  );
+  return response.data;
+}
+
+export async function suggestProjectVisuals(
+  projectId: string,
+  input: VisualSuggestionRequest
+): Promise<VisualSuggestionResponse> {
+  const validatedInput = visualSuggestionRequestSchema.parse(input);
+  return fetchApi(
+    `/api/projects/${encodeURIComponent(projectId)}/visual-suggestions`,
+    visualSuggestionResponseSchema,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(validatedInput)
+    }
+  );
+}
+
+export async function searchAssets(
+  input: unknown = {}
+): Promise<AssetListResult> {
+  const query = assetListQuerySchema.parse(input);
+  const searchParams = new URLSearchParams();
+  if (query.q !== undefined) {
+    searchParams.set("q", query.q);
+  }
+  if (query.kind !== undefined) {
+    searchParams.set("kind", query.kind);
+  }
+  searchParams.set("page", String(query.page));
+  searchParams.set("pageSize", String(query.pageSize));
+  const response = await fetchApi(
+    `/api/assets?${searchParams.toString()}`,
+    assetListResponseSchema
   );
   return response.data;
 }

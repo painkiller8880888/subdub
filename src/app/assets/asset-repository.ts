@@ -1,7 +1,13 @@
 import { and, desc, eq, inArray, sql, type SQL } from "drizzle-orm";
 
 import type { WorkspaceDatabase } from "../../db/client.js";
-import { assetTags, assetVersions, assets, tags } from "../../db/schema.js";
+import {
+  assetTags,
+  assetVersions,
+  assets,
+  tagAliases,
+  tags
+} from "../../db/schema.js";
 import {
   assetDetailSchema,
   assetListItemSchema,
@@ -13,7 +19,10 @@ import {
   type AssetStatus,
   type AssetTag
 } from "../../schema/index.js";
-import type { AssetProcessingErrorCode } from "../../schema/asset.js";
+import type {
+  AssetProcessingErrorCode,
+  AssetTagAxis
+} from "../../schema/asset.js";
 import {
   AssetDatabaseError,
   AssetProcessingRaceError
@@ -114,6 +123,31 @@ export type AssetRepositoryListFilters = {
   readonly pageSize: number;
 };
 
+export type AssetTagDictionaryEntry = {
+  readonly tagId: string;
+  readonly axis: AssetTagAxis;
+  readonly canonicalName: string;
+  readonly normalizedName: string;
+  readonly aliases: {
+    readonly alias: string;
+    readonly normalizedAlias: string;
+  }[];
+};
+
+export type AssetRepositoryVisualSearchFilters = {
+  readonly requiredTagIds: readonly string[];
+  readonly optionalTagIds: readonly string[];
+  readonly excludedTagIds: readonly string[];
+  readonly kinds: readonly Exclude<AssetKind, "sound_effect">[];
+  readonly q?: string;
+  readonly limit: number;
+};
+
+export type AssetRepositoryVisualSearchResult = {
+  readonly items: readonly AssetListItem[];
+  readonly total: number;
+};
+
 type AssetListRow = {
   assetId: string;
   version: number | null;
@@ -138,6 +172,19 @@ type AssetListRow = {
   errorMessage: string | null;
   createdAt: string;
   updatedAt: string;
+};
+
+type AssetRepositorySearchFilters = {
+  readonly q?: string;
+  readonly kinds?: readonly AssetKind[];
+  readonly department?: string;
+  readonly system?: string;
+  readonly status: AssetStatus;
+  readonly requiredTagIds: readonly string[];
+  readonly excludedTagIds: readonly string[];
+  readonly optionalTagIds: readonly string[];
+  readonly page: number;
+  readonly pageSize: number;
 };
 
 function toTag(row: typeof tags.$inferSelect): AssetTag {
@@ -310,6 +357,68 @@ export class AssetRepository {
     });
   }
 
+  findActiveTagDictionary(): AssetTagDictionaryEntry[] {
+    return withDatabaseErrors(() => {
+      const rows = this.database
+        .select({
+          tagId: tags.tagId,
+          axis: tags.axis,
+          canonicalName: tags.canonicalName,
+          normalizedName: tags.normalizedName,
+          alias: tagAliases.alias,
+          normalizedAlias: tagAliases.normalizedAlias
+        })
+        .from(tags)
+        .leftJoin(tagAliases, eq(tagAliases.tagId, tags.tagId))
+        .where(eq(tags.status, "active"))
+        .orderBy(
+          tags.canonicalName,
+          tags.tagId,
+          tagAliases.alias,
+          tagAliases.aliasId
+        )
+        .all();
+
+      const byTagId = new Map<string, AssetTagDictionaryEntry>();
+      for (const row of rows) {
+        const existing = byTagId.get(row.tagId);
+        if (existing !== undefined) {
+          if (
+            row.alias !== null &&
+            row.normalizedAlias !== null &&
+            !existing.aliases.some(
+              (alias) => alias.normalizedAlias === row.normalizedAlias
+            )
+          ) {
+            existing.aliases.push({
+              alias: row.alias,
+              normalizedAlias: row.normalizedAlias
+            });
+          }
+          continue;
+        }
+
+        byTagId.set(row.tagId, {
+          tagId: row.tagId,
+          axis: row.axis,
+          canonicalName: row.canonicalName,
+          normalizedName: row.normalizedName,
+          aliases:
+            row.alias === null || row.normalizedAlias === null
+              ? []
+              : [
+                  {
+                    alias: row.alias,
+                    normalizedAlias: row.normalizedAlias
+                  }
+                ]
+        });
+      }
+
+      return [...byTagId.values()];
+    });
+  }
+
   findAsset(assetId: string): AssetRecord | undefined {
     return withDatabaseErrors(() => {
       const row = this.database
@@ -425,10 +534,53 @@ export class AssetRepository {
   }
 
   list(filters: AssetRepositoryListFilters): AssetListResult {
+    return this.listSearch({
+      q: filters.q,
+      kinds: filters.kind === undefined ? undefined : [filters.kind],
+      department: filters.department,
+      system: filters.system,
+      status: filters.status,
+      requiredTagIds: filters.tagIds,
+      excludedTagIds: [],
+      optionalTagIds: [],
+      page: filters.page,
+      pageSize: filters.pageSize
+    });
+  }
+
+  searchVisual(
+    filters: AssetRepositoryVisualSearchFilters
+  ): AssetRepositoryVisualSearchResult {
+    const visualKinds = (filters.kinds as readonly AssetKind[]).filter(
+      (kind): kind is Exclude<AssetKind, "sound_effect"> =>
+        kind !== "sound_effect"
+    );
+    if (visualKinds.length === 0) {
+      return { items: [], total: 0 };
+    }
+    const result = this.listSearch({
+      q: filters.q,
+      kinds: visualKinds,
+      status: "active",
+      requiredTagIds: filters.requiredTagIds,
+      excludedTagIds: filters.excludedTagIds,
+      optionalTagIds: filters.optionalTagIds,
+      page: 1,
+      pageSize: filters.limit
+    });
+    return { items: result.items, total: result.total };
+  }
+
+  private listSearch(filters: AssetRepositorySearchFilters): AssetListResult {
     return withDatabaseErrors(() => {
+      const valueList = (values: readonly string[]) =>
+        sql.join(
+          values.map((value) => sql`${value}`),
+          sql`, `
+        );
       const conditions: SQL[] = [sql`${assets.status} = ${filters.status}`];
-      if (filters.kind !== undefined) {
-        conditions.push(sql`${assets.kind} = ${filters.kind}`);
+      if (filters.kinds !== undefined && filters.kinds.length > 0) {
+        conditions.push(sql`${assets.kind} IN (${valueList(filters.kinds)})`);
       }
       if (filters.department !== undefined) {
         conditions.push(sql`${assets.department} = ${filters.department}`);
@@ -436,33 +588,67 @@ export class AssetRepository {
       if (filters.system !== undefined) {
         conditions.push(sql`${assets.system} = ${filters.system}`);
       }
-      for (const tagId of filters.tagIds) {
+      for (const tagId of filters.requiredTagIds) {
         conditions.push(sql`
           EXISTS (
             SELECT 1
-            FROM asset_tags AS filter_asset_tags
-            INNER JOIN tags AS filter_tags
-              ON filter_tags.tag_id = filter_asset_tags.tag_id
-             AND filter_tags.status = 'active'
-            WHERE filter_asset_tags.asset_id = ${assets.assetId}
-              AND filter_asset_tags.tag_id = ${tagId}
+            FROM asset_tags AS required_asset_tags
+            INNER JOIN tags AS required_tags
+              ON required_tags.tag_id = required_asset_tags.tag_id
+             AND required_tags.status = 'active'
+            WHERE required_asset_tags.asset_id = ${assets.assetId}
+              AND required_asset_tags.tag_id = ${tagId}
+          )
+        `);
+      }
+      if (filters.excludedTagIds.length > 0) {
+        conditions.push(sql`
+          NOT EXISTS (
+            SELECT 1
+            FROM asset_tags AS excluded_asset_tags
+            INNER JOIN tags AS excluded_tags
+              ON excluded_tags.tag_id = excluded_asset_tags.tag_id
+             AND excluded_tags.status = 'active'
+            WHERE excluded_asset_tags.asset_id = ${assets.assetId}
+              AND excluded_asset_tags.tag_id IN (${valueList(filters.excludedTagIds)})
           )
         `);
       }
 
-      const useFts = filters.q !== undefined && canUseFtsQuery(filters.q);
-      const searchJoin =
-        filters.q === undefined
-          ? sql``
-          : sql`INNER JOIN asset_search
-              ON asset_search.asset_id = ${assets.assetId}`;
-      if (filters.q !== undefined) {
+      const hasQuery = filters.q !== undefined && filters.q.length > 0;
+      const useFts = hasQuery && canUseFtsQuery(filters.q);
+      const searchJoin = hasQuery
+        ? sql`INNER JOIN asset_search
+            ON asset_search.asset_id = ${assets.assetId}`
+        : sql``;
+      if (hasQuery) {
         conditions.push(
           useFts
             ? sql`asset_search MATCH ${buildFtsQuery(filters.q)}`
             : substringSearchCondition(filters.q)
         );
       }
+
+      const optionalMatchScore =
+        filters.optionalTagIds.length === 0
+          ? sql`0`
+          : sql`(
+              SELECT COUNT(*)
+              FROM asset_tags AS optional_asset_tags
+              INNER JOIN tags AS optional_tags
+                ON optional_tags.tag_id = optional_asset_tags.tag_id
+               AND optional_tags.status = 'active'
+              WHERE optional_asset_tags.asset_id = ${assets.assetId}
+                AND optional_asset_tags.tag_id IN (${valueList(filters.optionalTagIds)})
+            )`;
+      const orderParts: SQL[] = [];
+      if (useFts) {
+        orderParts.push(sql`asset_search.rank ASC`);
+      }
+      if (filters.optionalTagIds.length > 0) {
+        orderParts.push(sql`${optionalMatchScore} DESC`);
+      }
+      orderParts.push(sql`assets.updated_at DESC`, sql`assets.asset_id ASC`);
 
       const where = sql.join(conditions, sql` AND `);
       const totalRow = this.database.get<{ total: number }>(sql`
@@ -473,9 +659,7 @@ export class AssetRepository {
       `);
       const total = Number(totalRow?.total ?? 0);
       const offset = (filters.page - 1) * filters.pageSize;
-      const orderBy = useFts
-        ? sql`asset_search.rank ASC, assets.updated_at DESC, assets.asset_id ASC`
-        : sql`assets.updated_at DESC, assets.asset_id ASC`;
+      const orderBy = sql.join(orderParts, sql`, `);
 
       const rows = this.database.all<AssetListRow>(sql`
         SELECT
