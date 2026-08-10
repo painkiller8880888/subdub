@@ -46,6 +46,7 @@ import { CharacterAssetsPage } from "./CharacterAssetsPage";
 import { OutlinePage } from "./OutlinePage";
 import { ScriptPage } from "./ScriptPage";
 import { TerminologyPage } from "./TerminologyPage";
+import { PreviewPage } from "./PreviewPage";
 
 function projectBriefPath(projectId: string): string {
   return `/projects/${encodeURIComponent(projectId)}/brief`;
@@ -57,6 +58,10 @@ function projectOutlinePath(projectId: string): string {
 
 function projectScriptPath(projectId: string): string {
   return `/projects/${encodeURIComponent(projectId)}/script`;
+}
+
+function projectPreviewPath(projectId: string): string {
+  return `/projects/${encodeURIComponent(projectId)}/preview`;
 }
 
 function formatDate(value: string): string {
@@ -804,6 +809,9 @@ function ProjectBriefPage() {
           >
             台本を編集
           </Link>
+          <Link className="button" to={projectPreviewPath(projectId)}>
+            プレビューを開く
+          </Link>
         </div>
       </header>
 
@@ -998,6 +1006,10 @@ export function App() {
       <Route
         element={<ScriptPage />}
         path="/projects/:projectId/script"
+      />
+      <Route
+        element={<PreviewPage />}
+        path="/projects/:projectId/preview"
       />
       <Route
         element={<CharacterAssetsPage />}

@@ -3,7 +3,11 @@ import type { ReactNode } from "react";
 import { Img, OffthreadVideo, useCurrentFrame } from "remotion";
 
 import type { RenderVisual } from "../schema/index";
-import { resolveManifestAssetUrl } from "./asset-url";
+import {
+  defaultManifestAssetUrlResolver,
+  resolveManifestAssetUrl,
+  type ManifestAssetUrlResolver
+} from "./asset-url";
 import { MediaFrame, mediaAssetStyle } from "./layout";
 
 type RenderVideo = Extract<RenderVisual, { kind: "video" }>;
@@ -15,16 +19,18 @@ function millisecondsToFrames(milliseconds: number, fps: number): number {
 
 export function VideoVisual({
   visual,
-  fps
+  fps,
+  assetUrlResolver = defaultManifestAssetUrlResolver
 }: {
   visual: RenderVideo;
   fps: number;
+  assetUrlResolver?: ManifestAssetUrlResolver;
 }): ReactNode {
   useCurrentFrame();
   return (
     <MediaFrame display={visual.display}>
       <OffthreadVideo
-        src={resolveManifestAssetUrl(visual.src)}
+        src={resolveManifestAssetUrl(visual.src, assetUrlResolver)}
         trimBefore={millisecondsToFrames(visual.display.startMs, fps)}
         trimAfter={millisecondsToFrames(visual.display.endMs, fps)}
         playbackRate={visual.display.playbackRate}
@@ -38,11 +44,17 @@ export function VideoVisual({
   );
 }
 
-export function PhotoVisual({ visual }: { visual: RenderPhoto }): ReactNode {
+export function PhotoVisual({
+  visual,
+  assetUrlResolver = defaultManifestAssetUrlResolver
+}: {
+  visual: RenderPhoto;
+  assetUrlResolver?: ManifestAssetUrlResolver;
+}): ReactNode {
   return (
     <MediaFrame display={visual.display}>
       <Img
-        src={resolveManifestAssetUrl(visual.src)}
+        src={resolveManifestAssetUrl(visual.src, assetUrlResolver)}
         style={{
           ...mediaAssetStyle,
           objectFit: visual.display.fit

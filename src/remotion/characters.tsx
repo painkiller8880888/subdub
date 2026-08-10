@@ -3,7 +3,11 @@ import type { ReactNode } from "react";
 import { Img } from "remotion";
 
 import type { RenderManifest } from "../schema/index";
-import { resolveManifestAssetUrl } from "./asset-url";
+import {
+  defaultManifestAssetUrlResolver,
+  resolveManifestAssetUrl,
+  type ManifestAssetUrlResolver
+} from "./asset-url";
 import { characterLayerStyle } from "./layout-helpers";
 import {
   selectCharacterImagePathForFrame,
@@ -13,11 +17,13 @@ import {
 export function CharacterLayer({
   manifest,
   frame,
-  prioritizeVisual
+  prioritizeVisual,
+  assetUrlResolver = defaultManifestAssetUrlResolver
 }: {
   manifest: RenderManifest;
   frame: number;
   prioritizeVisual: boolean;
+  assetUrlResolver?: ManifestAssetUrlResolver;
 }): ReactNode {
   const characters = manifest.characters.slice(0, 2);
   return characters.map((character, index) => {
@@ -37,7 +43,7 @@ export function CharacterLayer({
     return (
       <Img
         key={character.characterId}
-        src={resolveManifestAssetUrl(source)}
+        src={resolveManifestAssetUrl(source, assetUrlResolver)}
         alt={character.displayName}
         data-character-id={character.characterId}
         style={characterLayerStyle(

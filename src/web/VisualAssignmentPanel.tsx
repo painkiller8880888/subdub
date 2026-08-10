@@ -658,6 +658,7 @@ export function VisualAssignmentPanel({
 }: VisualAssignmentPanelProps) {
   return (
     <section
+      id="visual-plan"
       className="visual-assignment-panel"
       aria-labelledby="visual-plan-title"
     >

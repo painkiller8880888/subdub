@@ -36,6 +36,7 @@ import {
   assetDetailResponseSchema,
   visualSuggestionRequestSchema,
   visualSuggestionResponseSchema,
+  manifestPreviewResponseSchema,
   voiceAdjustmentMutationResponseSchema,
   voiceAdjustmentPreviewRequestSchema,
   voiceAdjustmentPreviewResponseSchema,
@@ -75,7 +76,8 @@ import {
   type VoiceAdjustmentSnapshot,
   type VoiceGenerateRequest,
   type VoiceGenerationAccepted,
-  type VoiceGenerationStatusData
+  type VoiceGenerationStatusData,
+  type ManifestPreviewData
 } from "../../schema/api.js";
 import type { TerminologyTerm } from "../../schema/terminology.js";
 import type { AssetListResult } from "../../schema/asset.js";
@@ -204,6 +206,16 @@ export async function fetchProject(projectId: string): Promise<VideoProject> {
   const response = await fetchApi(
     `/api/projects/${encodeURIComponent(projectId)}`,
     projectDetailResponseSchema
+  );
+  return response.data;
+}
+
+export async function fetchProjectManifest(
+  projectId: string
+): Promise<ManifestPreviewData> {
+  const response = await fetchApi(
+    `/api/projects/${encodeURIComponent(projectId)}/manifest`,
+    manifestPreviewResponseSchema
   );
   return response.data;
 }

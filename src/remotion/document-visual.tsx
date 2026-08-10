@@ -5,7 +5,11 @@ import { cancelRender, continueRender, delayRender } from "remotion";
 import { getDocument, GlobalWorkerOptions } from "pdfjs-dist";
 
 import type { RenderVisual } from "../schema/index";
-import { resolveManifestAssetUrl } from "./asset-url";
+import {
+  defaultManifestAssetUrlResolver,
+  resolveManifestAssetUrl,
+  type ManifestAssetUrlResolver
+} from "./asset-url";
 import { MediaFrame, mediaAssetStyle } from "./layout";
 
 type RenderDocumentScan = Extract<RenderVisual, { kind: "document_scan" }>;
@@ -16,9 +20,11 @@ GlobalWorkerOptions.workerSrc = new URL(
 ).toString();
 
 export function DocumentVisual({
-  visual
+  visual,
+  assetUrlResolver = defaultManifestAssetUrlResolver
 }: {
   visual: RenderDocumentScan;
+  assetUrlResolver?: ManifestAssetUrlResolver;
 }): ReactNode {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const delayHandleRef = useRef<number | null>(null);
@@ -43,7 +49,7 @@ export function DocumentVisual({
     };
 
     const loadingTask = getDocument({
-      url: resolveManifestAssetUrl(visual.src)
+      url: resolveManifestAssetUrl(visual.src, assetUrlResolver)
     });
 
     void loadingTask.promise
@@ -75,7 +81,7 @@ export function DocumentVisual({
       finishDelay();
       void loadingTask.destroy();
     };
-  }, [visual.display.page, visual.src]);
+  }, [assetUrlResolver, visual.display.page, visual.src]);
 
   return (
     <MediaFrame display={visual.display}>

@@ -1,5 +1,9 @@
 import type { RenderAudioTrack, RenderSoundEffect } from "../schema/index";
-import { resolveManifestAssetUrl } from "./asset-url";
+import {
+  defaultManifestAssetUrlResolver,
+  resolveManifestAssetUrl,
+  type ManifestAssetUrlResolver
+} from "./asset-url";
 
 function clampUnit(value: number): number {
   return Math.min(1, Math.max(0, value));
@@ -25,7 +29,10 @@ export function audioTrackVolumeAtFrame(
   );
 }
 
-export function audioTrackSequenceProps(track: RenderAudioTrack): {
+export function audioTrackSequenceProps(
+  track: RenderAudioTrack,
+  assetUrlResolver: ManifestAssetUrlResolver = defaultManifestAssetUrlResolver
+): {
   readonly from: number;
   readonly durationInFrames: number;
   readonly src: string;
@@ -34,12 +41,15 @@ export function audioTrackSequenceProps(track: RenderAudioTrack): {
   return {
     from: track.from,
     durationInFrames: track.durationInFrames,
-    src: resolveManifestAssetUrl(track.src),
+    src: resolveManifestAssetUrl(track.src, assetUrlResolver),
     loop: track.loop
   };
 }
 
-export function soundEffectSequenceProps(effect: RenderSoundEffect): {
+export function soundEffectSequenceProps(
+  effect: RenderSoundEffect,
+  assetUrlResolver: ManifestAssetUrlResolver = defaultManifestAssetUrlResolver
+): {
   readonly from: number;
   readonly durationInFrames: number;
   readonly src: string;
@@ -48,7 +58,7 @@ export function soundEffectSequenceProps(effect: RenderSoundEffect): {
   return {
     from: effect.from,
     durationInFrames: effect.durationInFrames,
-    src: resolveManifestAssetUrl(effect.src),
+    src: resolveManifestAssetUrl(effect.src, assetUrlResolver),
     volume: effect.volume
   };
 }

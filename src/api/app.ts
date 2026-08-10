@@ -35,6 +35,14 @@ import {
   type VoicevoxAdjustmentServicePort
 } from "./routes/voice-adjustments.js";
 import { createVoicevoxStatusService } from "../voicevox/service.js";
+import {
+  registerManifestPreviewRoutes,
+  type ManifestPreviewServicePort
+} from "./routes/manifest-preview.js";
+import {
+  registerProjectFileRoutes,
+  type ProjectFileServicePort
+} from "./routes/project-files.js";
 
 export type AppOptions = {
   logger?: FastifyServerOptions["logger"];
@@ -53,6 +61,8 @@ export type AppOptions = {
   voicevoxService?: VoicevoxStatusServicePort;
   voiceGenerationService?: VoicevoxGenerationServicePort;
   voiceAdjustmentService?: VoicevoxAdjustmentServicePort;
+  manifestPreviewService?: ManifestPreviewServicePort;
+  projectFileService?: ProjectFileServicePort;
 };
 
 export function buildApp(options: AppOptions = {}): FastifyInstance {
@@ -103,6 +113,14 @@ export function buildApp(options: AppOptions = {}): FastifyInstance {
     registerAssetRoutes(app, options.assetService, {
       limits: options.assetUploadLimits
     });
+  }
+
+  if (options.manifestPreviewService !== undefined) {
+    registerManifestPreviewRoutes(app, options.manifestPreviewService);
+  }
+
+  if (options.projectFileService !== undefined) {
+    registerProjectFileRoutes(app, options.projectFileService);
   }
 
   if (options.staticRoot !== undefined) {

@@ -83,6 +83,12 @@ export type RenderManifestCacheResult =
       readonly warnings: readonly RenderManifestWarning[];
     };
 
+export type RenderManifestReadResult =
+  | { readonly status: "missing"; readonly manifest: null }
+  | { readonly status: "invalid"; readonly manifest: null }
+  | { readonly status: "unreadable"; readonly manifest: null }
+  | { readonly status: "valid"; readonly manifest: RenderManifest };
+
 function errorCode(error: unknown): string | undefined {
   if (typeof error !== "object" || error === null || !("code" in error)) {
     return undefined;
@@ -181,25 +187,35 @@ export class RenderManifestStore {
   }
 
   async read(projectId: unknown): Promise<RenderManifest | null> {
+    const result = await this.readDetailed(projectId);
+    if (result.status === "unreadable") {
+      throw new RenderManifestStoreError("RENDER_MANIFEST_READ_FAILED");
+    }
+    return result.manifest;
+  }
+
+  async readDetailed(projectId: unknown): Promise<RenderManifestReadResult> {
     const manifestPath = this.getManifestPath(projectId);
     let contents: string;
     try {
       contents = await this.fileSystem.readFile(manifestPath);
     } catch (error) {
       if (isMissingPathError(error)) {
-        return null;
+        return { status: "missing", manifest: null };
       }
-      throw new RenderManifestStoreError("RENDER_MANIFEST_READ_FAILED");
+      return { status: "unreadable", manifest: null };
     }
 
     let parsedJson: unknown;
     try {
       parsedJson = JSON.parse(contents);
     } catch {
-      return null;
+      return { status: "invalid", manifest: null };
     }
     const parsedManifest = renderManifestSchema.safeParse(parsedJson);
-    return parsedManifest.success ? parsedManifest.data : null;
+    return parsedManifest.success
+      ? { status: "valid", manifest: parsedManifest.data }
+      : { status: "invalid", manifest: null };
   }
 
   async write(projectId: unknown, manifest: unknown): Promise<void> {

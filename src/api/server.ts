@@ -34,6 +34,10 @@ import type { MigrationFolder } from "../db/paths.js";
 import { VoicevoxGenerationService } from "../app/voicevox/generation-service.js";
 import { VoicevoxAdjustmentService } from "../app/voicevox/adjustment-service.js";
 import { VoicevoxClient } from "../voicevox/client.js";
+import { VoicevoxAudioStore } from "../app/voicevox/audio-store.js";
+import { RenderManifestStore } from "../app/rendering/render-manifest-store.js";
+import { ManifestPreviewService } from "../app/rendering/manifest-preview-service.js";
+import { ProjectFileService } from "../app/projects/project-file-service.js";
 
 export const SERVER_HOST = API_HOST;
 export const SERVER_PORT = API_PORT;
@@ -180,6 +184,17 @@ export async function initializeServer(
     const resolvedProcessingWorker =
       assetProcessingWorker ??
       new AssetProcessingWorker({ service: resolvedProcessingService });
+    const resolvedProjectFileService =
+      appOptions.projectFileService ?? new ProjectFileService({ workspaceRoot });
+    const resolvedManifestPreviewService =
+      appOptions.manifestPreviewService ??
+      new ManifestPreviewService({
+        workspaceRoot,
+        projectRepository: resolvedProjectRepository,
+        manifestStore: new RenderManifestStore({ workspaceRoot }),
+        audioStore: new VoicevoxAudioStore({ workspaceRoot }),
+        projectFileService: resolvedProjectFileService
+      });
     const app = buildApp({
       ...appOptions,
       modelService: resolvedModelService,
@@ -191,7 +206,9 @@ export async function initializeServer(
       assetService: resolvedAssetService,
       assetUploadLimits: options.assetUploadLimits,
       voiceGenerationService: resolvedVoiceGenerationService,
-      voiceAdjustmentService: resolvedVoiceAdjustmentService
+      voiceAdjustmentService: resolvedVoiceAdjustmentService,
+      manifestPreviewService: resolvedManifestPreviewService,
+      projectFileService: resolvedProjectFileService
     });
     resolvedProcessingWorker.start();
     app.addHook("onClose", async () => {

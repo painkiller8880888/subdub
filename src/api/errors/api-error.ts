@@ -41,6 +41,7 @@ import {
 } from "../../app/voicevox/adjustment-service.js";
 import { VoicevoxAdjustmentStoreError } from "../../app/voicevox/adjustment-store.js";
 import { VoicevoxPreviewStoreError } from "../../app/voicevox/preview-store.js";
+import { ProjectFileServiceError } from "../../app/projects/project-file-service.js";
 
 export class ApiResponseValidationError extends Error {
   constructor(cause: unknown) {
@@ -806,6 +807,23 @@ export function mapApiError(error: unknown): MappedApiError {
         genericInternalMessage,
       details: mapProjectValidationDetails(error.code, error.issues),
       shouldLog: status >= 500
+    };
+  }
+
+  if (error instanceof ProjectFileServiceError) {
+    return {
+      code: error.code,
+      status: error.status,
+      message:
+        error.code === "PROJECT_FILE_NOT_FOUND"
+          ? "プロジェクト素材が見つかりません。"
+          : error.code === "PROJECT_FILE_PATH_INVALID"
+            ? "プロジェクト素材の参照先が不正です。"
+            : error.code === "PROJECT_FILE_PROJECT_ID_INVALID"
+              ? "プロジェクトIDが不正です。"
+              : genericInternalMessage,
+      details: [],
+      shouldLog: error.status >= 500
     };
   }
 
