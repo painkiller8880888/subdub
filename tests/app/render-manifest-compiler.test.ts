@@ -189,6 +189,27 @@ describe("compileRenderManifest", () => {
     );
   });
 
+  it("keeps source-valid long subtitles renderable in the derived manifest", () => {
+    const project = structuredClone(videoProjectFixture) as VideoProject;
+    const sourceLine = project.script.sections[0]?.lines[0];
+    if (sourceLine === undefined) {
+      throw new Error("fixture source line is missing");
+    }
+    sourceLine.subtitleText = [
+      "あ".repeat(137),
+      ...Array.from({ length: 12 }, () => "行")
+    ].join("\n");
+
+    const result = compileRenderManifest(validInput(project));
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.manifest.lines[0]?.subtitleText).toBe(
+        sourceLine.subtitleText
+      );
+    }
+  });
+
   it("collects independent approval, stale, audio, and material diagnostics", () => {
     const project = structuredClone(videoProjectFixture) as VideoProject;
     project.outline.status = "draft";

@@ -550,11 +550,11 @@ describe("basic Remotion composition", () => {
       throw new Error("subtitle boundary fixture line is missing");
     }
     boundaryLine.subtitleText = [
-      "あ".repeat(138),
-      ...Array.from({ length: 11 }, () => "行")
+      "あ".repeat(137),
+      ...Array.from({ length: 12 }, () => "行")
     ].join("\n");
-    expect(boundaryLine.subtitleText.length).toBe(160);
-    expect(boundaryLine.subtitleText.split("\n")).toHaveLength(12);
+    expect(boundaryLine.subtitleText.length).toBe(161);
+    expect(boundaryLine.subtitleText.split("\n")).toHaveLength(13);
     expect(renderManifestSchema.safeParse(boundaryManifest).success).toBe(true);
     const noSubtitleManifest = structuredClone(
       boundaryManifest

@@ -68,17 +68,16 @@ describe("renderManifestSchema", () => {
     expectInvalid(unknownCharacterKey, ["characters", 0]);
   });
 
-  it("limits subtitle text length and explicit line count", () => {
-    const tooLong = clone(renderManifestFixture);
-    tooLong.lines[0].subtitleText = "あ".repeat(161);
-    expectInvalid(tooLong, ["lines", 0, "subtitleText"]);
+  it("accepts long non-blank subtitle text from the source project", () => {
+    const longSubtitle = clone(renderManifestFixture);
+    longSubtitle.lines[0].subtitleText = [
+      "あ".repeat(137),
+      ...Array.from({ length: 12 }, () => "行")
+    ].join("\n");
 
-    const tooManyLines = clone(renderManifestFixture);
-    tooManyLines.lines[0].subtitleText = Array.from(
-      { length: 13 },
-      (_, index) => `行${index + 1}`
-    ).join("\n");
-    expectInvalid(tooManyLines, ["lines", 0, "subtitleText"]);
+    expect(longSubtitle.lines[0].subtitleText.length).toBe(161);
+    expect(longSubtitle.lines[0].subtitleText.split("\n")).toHaveLength(13);
+    expect(renderManifestSchema.safeParse(longSubtitle).success).toBe(true);
   });
 
   it("does not accept the previous render manifest version", () => {
