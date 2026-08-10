@@ -132,6 +132,8 @@ type AudioPaths = {
   readonly indexFilePath: string;
 };
 
+const projectAudioUpdateLocks = new Map<string, Promise<void>>();
+
 function getFileSystemErrorCode(error: unknown): string | undefined {
   if (typeof error !== "object" || error === null || !("code" in error)) {
     return undefined;
@@ -280,6 +282,15 @@ export class VoicevoxAudioStore {
   async save(input: VoicevoxAudioStoreInput): Promise<VoicevoxAudioIndexEntry> {
     const parsed = this.parseInput(input);
     const wavMetadata = inspectVoicevoxWav(parsed.audioBytes);
+    return this.withProjectAudioUpdateLock(parsed.projectId, () =>
+      this.saveLocked(parsed, wavMetadata)
+    );
+  }
+
+  private async saveLocked(
+    parsed: ParsedInput,
+    wavMetadata: ReturnType<typeof inspectVoicevoxWav>
+  ): Promise<VoicevoxAudioIndexEntry> {
     const paths = await this.resolvePaths(parsed);
     const generatedAt = isoUtcDateTimeSchema.parse(this.now().toISOString());
     const entry = voicevoxAudioIndexEntrySchema.parse({
@@ -355,6 +366,32 @@ export class VoicevoxAudioStore {
         await this.removeTemporaryFile(newlyCreatedAudioPath);
       }
       throw error;
+    }
+  }
+
+  private async withProjectAudioUpdateLock<T>(
+    projectId: string,
+    operation: () => Promise<T>
+  ): Promise<T> {
+    const lockKey = `${this.workspaceRoot}\u0000${projectId}`;
+    const previous = projectAudioUpdateLocks.get(lockKey);
+    const waitForPrevious =
+      previous?.catch(() => undefined) ?? Promise.resolve();
+    let release: (() => void) | undefined;
+    const hold = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const tail = waitForPrevious.then(() => hold);
+    projectAudioUpdateLocks.set(lockKey, tail);
+
+    await waitForPrevious;
+    try {
+      return await operation();
+    } finally {
+      release?.();
+      if (projectAudioUpdateLocks.get(lockKey) === tail) {
+        projectAudioUpdateLocks.delete(lockKey);
+      }
     }
   }
 

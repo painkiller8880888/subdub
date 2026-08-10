@@ -1,5 +1,8 @@
 import { createHash } from "node:crypto";
 
+const PCM_WAVE_FORMAT = 1;
+const SUPPORTED_PCM_BITS_PER_SAMPLE = new Set([8, 16, 24, 32]);
+
 export type VoicevoxWavMetadata = {
   readonly durationMs: number;
   readonly audioSha256: string;
@@ -118,12 +121,13 @@ export function inspectVoicevoxWav(audio: Uint8Array): VoicevoxWavMetadata {
   }
 
   if (
-    fmt.audioFormat <= 0 ||
+    fmt.audioFormat !== PCM_WAVE_FORMAT ||
     fmt.channels <= 0 ||
     fmt.sampleRate <= 0 ||
     fmt.byteRate <= 0 ||
     fmt.blockAlign <= 0 ||
-    fmt.bitsPerSample <= 0 ||
+    !SUPPORTED_PCM_BITS_PER_SAMPLE.has(fmt.bitsPerSample) ||
+    fmt.blockAlign !== fmt.channels * (fmt.bitsPerSample / 8) ||
     fmt.byteRate !== fmt.sampleRate * fmt.blockAlign ||
     dataBytes % fmt.blockAlign !== 0
   ) {

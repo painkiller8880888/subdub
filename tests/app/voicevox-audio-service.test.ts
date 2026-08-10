@@ -272,6 +272,49 @@ describe("VoicevoxAudioService", () => {
     ).toBeDefined();
   });
 
+  it("serializes concurrent saves for a project and keeps both line entries", async () => {
+    const root = await createRoot();
+    const baseFileSystem = createNodeFileSystem();
+    const fileSystem: VoicevoxAudioStoreFileSystem = {
+      ...baseFileSystem,
+      readTextFile: async (filePath) => {
+        if (filePath.endsWith("audio-index.json")) {
+          await new Promise((resolve) => setTimeout(resolve, 25));
+        }
+        return baseFileSystem.readTextFile(filePath);
+      }
+    };
+    const store = new VoicevoxAudioStore({
+      workspaceRoot: root,
+      fileSystem,
+      now: () => fixedNow
+    });
+    const first = createService(
+      store,
+      createPrepared(firstLine, firstSpeaker, "a".repeat(64)),
+      createVoicevoxWavFixture()
+    );
+    const second = createService(
+      store,
+      createPrepared(secondLine, secondSpeaker, "b".repeat(64)),
+      createVoicevoxWavFixture({ durationMs: 750 })
+    );
+
+    await expect(
+      Promise.all([
+        first.service.generate(
+          createInput(firstLine, firstCharacter, firstSpeaker)
+        ),
+        second.service.generate(
+          createInput(secondLine, secondCharacter, secondSpeaker, 2, 15)
+        )
+      ])
+    ).resolves.toHaveLength(2);
+    expect(Object.keys(JSON.parse(await readIndexRaw(root))).sort()).toEqual(
+      [firstLine.id, secondLine.id].sort()
+    );
+  });
+
   it.each([
     [
       "connection failure",

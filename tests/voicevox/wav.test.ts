@@ -78,4 +78,13 @@ describe("VOICEVOX WAV metadata", () => {
     const wav = createVoicevoxWavFixture({ durationMs: 0 });
     expect(() => inspectVoicevoxWav(wav)).toThrow(VoicevoxWavError);
   });
+
+  it("rejects PCM headers whose block alignment disagrees with channels and bit depth", () => {
+    const wav = createVoicevoxWavFixture({ durationMs: 1_000 });
+    const view = new DataView(wav.buffer);
+    view.setUint16(32, 1, true);
+    view.setUint32(28, 24_000, true);
+
+    expect(() => inspectVoicevoxWav(wav)).toThrow(VoicevoxWavError);
+  });
 });
