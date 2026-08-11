@@ -74,11 +74,29 @@ import { compareRepresentativeImages } from "../helpers/image-comparison.js";
 registerMediabunnyServer();
 
 const repositoryRoot = fileURLToPath(new URL("../../", import.meta.url));
+type RepresentativeFrameGoldenPlatform = "linux" | "windows";
+
+function resolveRepresentativeFrameGoldenPlatform(): RepresentativeFrameGoldenPlatform {
+  if (process.platform === "linux") {
+    return "linux";
+  }
+  if (process.platform === "win32") {
+    return "windows";
+  }
+  throw new Error(
+    `Representative frame goldens are not available for ${process.platform}; ` +
+      "add a checked-in baseline for this renderer platform before running the E2E."
+  );
+}
+
+const representativeFrameGoldenPlatform =
+  resolveRepresentativeFrameGoldenPlatform();
 const goldenRoot = path.join(
   repositoryRoot,
   "tests",
   "fixtures",
-  "representative-frames"
+  "representative-frames",
+  representativeFrameGoldenPlatform
 );
 const E2E_TIMEOUT_MS = 420_000;
 const ASSET_PROCESSING_TIMEOUT_MS = 30_000;
@@ -539,7 +557,8 @@ async function writeOrRequireGolden(
   }
   if (!(await pathExists(goldenPath))) {
     throw new Error(
-      `Golden image is missing for ${frameName}. Run ` +
+      `Golden image is missing for ${frameName} in the ` +
+        `${representativeFrameGoldenPlatform} baseline. Run ` +
         "$env:UPDATE_REPRESENTATIVE_GOLDENS='1'; pnpm test -- tests/e2e/project-rendering.e2e.test.ts " +
         "once to update the explicit baseline."
     );
