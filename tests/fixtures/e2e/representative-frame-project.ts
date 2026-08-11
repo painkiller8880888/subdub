@@ -4,6 +4,7 @@ import {
   type ScriptLine,
   type ScriptSection
 } from "../../../src/schema/index.js";
+import type { OutlineGenerationCandidate } from "../../../src/schema/outline-generation.js";
 
 export const representativeFrameMarkdown = [
   "# SubDub fixture guide",
@@ -89,6 +90,26 @@ export function createRepresentativeFrameOutline(sourceHash: string): Outline {
         lockedFields: []
       }
     ]
+  };
+}
+
+export function createRepresentativeFrameOutlineCandidate(): OutlineGenerationCandidate {
+  const outline = createRepresentativeFrameOutline("0".repeat(64));
+  return {
+    openQuestions: [],
+    sections: outline.sections.map((section) => ({
+      role: section.role,
+      title: section.title,
+      overview: section.overview,
+      keyPoints: [...section.keyPoints],
+      targetDurationSec: section.targetDurationSec,
+      sourceRefs: section.sourceRefs.map((sourceRef) => ({
+        headingPath: ["SubDub fixture guide", ...sourceRef.headingPath]
+      })),
+      openQuestions: section.openQuestions.map((question) => ({
+        question: question.question
+      }))
+    }))
   };
 }
 

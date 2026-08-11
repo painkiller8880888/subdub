@@ -9,10 +9,10 @@ import { bundle } from "@remotion/bundler";
 import { renderStill, selectComposition } from "@remotion/renderer";
 import { ALL_FORMATS, FilePathSource, Input } from "mediabunny";
 import sharp from "sharp";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { initializeServer } from "../../src/api/server.js";
-import type { VoicevoxGenerationServicePort } from "../../src/api/routes/voice-generation.js";
+import { OutlineGenerationService } from "../../src/app/projects/outline-generation-service.js";
 import { ProjectRepository } from "../../src/app/projects/project-repository.js";
 import { computeOutlineHash } from "../../src/app/projects/script-domain.js";
 import {
@@ -24,8 +24,11 @@ import {
   serializeRenderManifest,
   type RenderManifestAssetMetadata
 } from "../../src/app/rendering/render-manifest-compiler.js";
+import { computeRenderInputHash } from "../../src/app/rendering/render-job-worker.js";
 import { RenderManifestStore } from "../../src/app/rendering/render-manifest-store.js";
+import { RunLogStore } from "../../src/app/run-log-store.js";
 import { VoicevoxAudioStore } from "../../src/app/voicevox/audio-store.js";
+import { VoicevoxClient } from "../../src/voicevox/client.js";
 import {
   characterVariantCatalog,
   characterVariantMapping
@@ -36,13 +39,14 @@ import {
   assetUploadResponseSchema,
   manifestPreviewResponseSchema,
   projectCreateResponseSchema,
+  projectDetailResponseSchema,
   projectMutationResponseSchema,
   renderAcceptedResponseSchema,
   renderRunStatusResponseSchema,
   terminologyPreviewResponseSchema,
   terminologyTermResponseSchema,
-  voiceGenerateRequestSchema,
-  type VoiceGenerationStatusData
+  voiceGenerationAcceptedResponseSchema,
+  voiceGenerationStatusResponseSchema
 } from "../../src/schema/api.js";
 import {
   renderManifestSchema,
@@ -55,13 +59,14 @@ import {
   buildMultipartBody,
   type MultipartPart
 } from "../fixtures/asset-fixtures.js";
-import { mediaFixture } from "../fixtures/media-fixtures.js";
+import { mediaFixture, mediaFixturePath } from "../fixtures/media-fixtures.js";
 import {
   createVoicevoxAudioQueryFixture,
+  createVoicevoxSpeakersFixture,
   createVoicevoxWavFixture
 } from "../fixtures/voicevox.js";
 import {
-  createRepresentativeFrameOutline,
+  createRepresentativeFrameOutlineCandidate,
   createRepresentativeFrameScript,
   representativeFrameBrief,
   representativeFrameMarkdown
@@ -181,44 +186,83 @@ function allProjectLines(
   return project.script.sections.flatMap((section) => section.lines);
 }
 
-function createFixtureVoiceGenerationService(
-  repository: Pick<ProjectRepository, "read">
-): VoicevoxGenerationServicePort {
-  const lineIds = async (projectId: unknown): Promise<string[]> => {
-    const project = await repository.read(projectId);
-    return allProjectLines(project).map((line) => line.id);
-  };
+function createFixtureOutlineGenerationService(
+  repository: ProjectRepository
+): OutlineGenerationService {
+  const model = {
+    id: "google/gemma-4-31b-it",
+    displayName: "MVP final fixture model",
+    contextLength: 131_072,
+    inputPrice: "0",
+    outputPrice: "0",
+    outputModalities: ["text"],
+    supportedParameters: ["structured_outputs"],
+    expirationDate: null,
+    structuredOutputs: true,
+    zdrAvailable: true
+  } as const;
 
-  return {
-    async generate(projectId: unknown, input: unknown) {
-      const request = voiceGenerateRequestSchema.parse(input);
-      const availableLineIds = await lineIds(projectId);
-      return {
-        runId: "fixture-voice-run",
-        status: "queued" as const,
-        lineIds: request.lineIds.filter((lineId) =>
-          availableLineIds.includes(lineId)
-        )
-      };
+  return new OutlineGenerationService({
+    repository,
+    modelService: {
+      // The service remains production code; only the model-list adapter is
+      // local and deterministic for this E2E.
+      listModels: async () => ({
+        models: [model],
+        fetchedAt: "2026-08-11T00:00:00.000Z",
+        cached: false
+      })
     },
-    async generateAll(projectId: unknown) {
-      return {
-        runId: "fixture-voice-run-all",
-        status: "queued" as const,
-        lineIds: await lineIds(projectId)
-      };
+    chatAdapter: {
+      // Do not replace the generation service: this is the external adapter
+      // boundary that the test stubs to avoid OpenRouter network access.
+      complete: async () => ({
+        candidate: createRepresentativeFrameOutlineCandidate(),
+        responseModel: model.id,
+        provider: "MVP fixture provider",
+        usage: {
+          promptTokens: 128,
+          completionTokens: 96,
+          totalTokens: 224,
+          costCredits: 0
+        },
+        attempts: 1
+      })
     },
-    async getStatus(projectId: unknown): Promise<VoiceGenerationStatusData> {
-      return {
-        available: true,
-        lines: (await lineIds(projectId)).map((lineId) => ({
-          lineId,
-          status: "current" as const
-        })),
-        jobs: []
-      };
+    createId: () => "fixture-ai-outline-run"
+  });
+}
+
+async function waitForVoiceJob(
+  server: InitializedServer,
+  projectId: string,
+  runId: string,
+  timeoutMs = 30_000
+): Promise<void> {
+  const startedAt = Date.now();
+  let lastStatus: string | undefined;
+  while (Date.now() - startedAt < timeoutMs) {
+    const response = await server.app.inject({
+      method: "GET",
+      url: `/api/projects/${projectId}/voice/status`
+    });
+    expect(response.statusCode).toBe(200);
+    const status = voiceGenerationStatusResponseSchema.parse(
+      response.json()
+    ).data;
+    const job = status.jobs.find((candidate) => candidate.runId === runId);
+    lastStatus = job?.status;
+    if (job?.status === "succeeded") {
+      return;
     }
-  };
+    if (job?.status === "failed") {
+      throw new Error(`Voice run ${runId} failed.`);
+    }
+    await yieldToEventLoop();
+  }
+  throw new Error(
+    `Voice run ${runId} timed out after ${timeoutMs}ms; last status=${lastStatus ?? "unknown"}`
+  );
 }
 
 async function insertConfirmTag(server: InitializedServer): Promise<void> {
@@ -308,7 +352,7 @@ async function uploadAsset(
     payload: body,
     headers: { "content-type": contentType }
   });
-  expect(response.statusCode).toBe(200);
+  expect(response.statusCode, response.body).toBe(200);
   const receipt = assetUploadResponseSchema.parse(response.json()).data;
   expect(receipt.status).toBe("processing");
   const detail = await waitForActiveAsset(server, receipt.assetId);
@@ -676,92 +720,16 @@ async function buildAssetMetadata(
   return metadata;
 }
 
-async function saveFixtureAudio(
-  workspaceRoot: string,
-  project: VideoProject,
-  termId: string,
-  previewByLineId: ReadonlyMap<
-    string,
-    ReturnType<typeof terminologyPreviewResponseSchema.parse>["data"]
-  >
-): Promise<VoicevoxAudioStore> {
-  const audioStore = new VoicevoxAudioStore({ workspaceRoot });
-  const wavBytes = createVoicevoxWavFixture({ durationMs: 1_000 });
-  const query = JSON.stringify(createVoicevoxAudioQueryFixture(), null, 2);
-  const mentor = project.characters.find(
-    (character) => character.id === "character-mentor"
-  );
-  const learner = project.characters.find(
-    (character) => character.id === "character-learner"
-  );
-  if (mentor === undefined || learner === undefined) {
-    throw new Error("Fixture characters are missing.");
-  }
-
-  for (const [sectionIndex, section] of project.script.sections.entries()) {
-    for (const [lineIndex, line] of section.lines.entries()) {
-      const queryPath = `projects/${project.metadata.id}/cache/voicevox-query/${line.id}.json`;
-      const queryFilePath = resolvePosixPath(workspaceRoot, queryPath);
-      await fs.mkdir(path.dirname(queryFilePath), { recursive: true });
-      await fs.writeFile(queryFilePath, query, "utf8");
-      const preview = previewByLineId.get(line.id);
-      if (preview === undefined) {
-        throw new Error(`Missing terminology preview for ${line.id}`);
-      }
-      const character = line.speakerId === mentor.id ? mentor : learner;
-      const cacheKey = `${String(sectionIndex + 1).padStart(2, "0")}${String(
-        lineIndex + 1
-      ).padStart(2, "0")}${"a".repeat(60)}`;
-      await audioStore.save({
-        projectId: project.metadata.id,
-        lineId: line.id,
-        sectionOrder: sectionIndex + 1,
-        lineOrder: lineIndex + 1,
-        prepared: {
-          cacheKey,
-          queryPath,
-          resolvedSpokenText: preview.resolvedSpokenText,
-          appliedTerms: preview.appliedTerms,
-          voicevoxEngineVersion: "fixture-voicevox-1",
-          resolvedSpeaker: {
-            speakerName: character.voicevox.speakerName,
-            speakerUuid: `${character.id}-fixture-uuid`,
-            styleName: character.voicevox.styleName,
-            resolvedStyleId: line.speakerId === mentor.id ? 10_001 : 10_002
-          }
-        },
-        audioBytes: wavBytes
-      });
-      expect(preview.appliedTerms.every((term) => term.termId === termId)).toBe(
-        true
-      );
-    }
-  }
-  const index = await audioStore.readIndex(project.metadata.id);
-  expect(Object.keys(index)).toHaveLength(allProjectLines(project).length);
-  for (const line of allProjectLines(project)) {
-    const entry = index[line.id];
-    expect(entry).toBeDefined();
-    expect(entry?.durationMs).toBe(1_000);
-    expect(entry?.audioSha256).toBe(sha256Bytes(wavBytes));
-    expect(entry?.resolvedSpokenText).toBe(
-      previewByLineId.get(line.id)?.resolvedSpokenText
-    );
-    expect(entry?.appliedTerms).toEqual(
-      previewByLineId.get(line.id)?.appliedTerms
-    );
-  }
-  return audioStore;
-}
-
-describe("P5-09 representative frame and render E2E", () => {
+describe("MVP final verification E2E", () => {
   it(
-    "recreates one fixture through manifest, representative frames, MP4, and thumbnail",
+    "recreates the Phase 0-6 MVP fixture through all 11 final-check operations",
     async () => {
       const workspaceRoot = await fs.mkdtemp(
-        path.join(tmpdir(), "subdub-p5-09-e2e-")
+        path.join(tmpdir(), "subdub-mvp-final-e2e-")
       );
       let server: InitializedServer | undefined;
+      let restartedServer: InitializedServer | undefined;
+      const voicevoxSpies: Array<{ mockRestore: () => void }> = [];
       let cleanupVerified: boolean;
       try {
         await fs.cp(
@@ -770,18 +738,39 @@ describe("P5-09 representative frame and render E2E", () => {
           { recursive: true }
         );
         const projectRepository = new ProjectRepository({ workspaceRoot });
+        const outlineGenerationService =
+          createFixtureOutlineGenerationService(projectRepository);
         server = await initializeServer({
           workspaceRoot,
           projectRepository,
-          voiceGenerationService:
-            createFixtureVoiceGenerationService(projectRepository)
+          outlineGenerationService
         });
+
+        const metanStyleId = 10_001;
+        const zundamonStyleId = 10_002;
+        voicevoxSpies.push(
+          vi.spyOn(VoicevoxClient.prototype, "getSpeakers").mockResolvedValue(
+            createVoicevoxSpeakersFixture({
+              metanStyleId,
+              zundamonStyleId
+            })
+          ),
+          vi
+            .spyOn(VoicevoxClient.prototype, "getVersion")
+            .mockResolvedValue("mvp-final-voicevox-1"),
+          vi
+            .spyOn(VoicevoxClient.prototype, "getAudioQuery")
+            .mockResolvedValue(createVoicevoxAudioQueryFixture()),
+          vi
+            .spyOn(VoicevoxClient.prototype, "synthesize")
+            .mockResolvedValue(createVoicevoxWavFixture({ durationMs: 1_000 }))
+        );
 
         const createResponse = await server.app.inject({
           method: "POST",
           url: "/api/projects",
           payload: {
-            title: "P5-09 representative frame fixture",
+            title: "MVP final verification fixture",
             department: "Operations",
             manualVersion: "2026.08"
           }
@@ -792,6 +781,7 @@ describe("P5-09 representative frame and render E2E", () => {
         ).data;
         const projectId = project.metadata.id;
         expect(project.revision).toBe(0);
+        expect(project.characters).toHaveLength(2);
 
         const sourceResponse = await server.app.inject({
           method: "PUT",
@@ -826,20 +816,56 @@ describe("P5-09 representative frame and render E2E", () => {
         expect(project.revision).toBe(2);
         expect(project.brief).toEqual(representativeFrameBrief);
 
-        const outlineResponse = await server.app.inject({
-          method: "PUT",
-          url: `/api/projects/${projectId}/outline`,
+        const aiOutlineResponse = await server.app.inject({
+          method: "POST",
+          url: `/api/projects/${projectId}/outline/generate`,
           payload: {
-            outline: createRepresentativeFrameOutline(sourceHash),
-            expectedRevision: project.revision
+            expectedRevision: project.revision,
+            modelId: "google/gemma-4-31b-it"
           }
         });
-        expect(outlineResponse.statusCode).toBe(200);
+        expect(aiOutlineResponse.statusCode, aiOutlineResponse.body).toBe(200);
         project = projectMutationResponseSchema.parse(
-          outlineResponse.json()
+          aiOutlineResponse.json()
         ).data;
         expect(project.revision).toBe(3);
         expect(project.outline.status).toBe("needs_review");
+
+        const aiGeneratedTitle = project.outline.sections[0]?.title;
+        if (aiGeneratedTitle === undefined) {
+          throw new Error(
+            "The AI outline fixture did not contain a first section."
+          );
+        }
+        const humanOutline = structuredClone(project.outline);
+        const firstHumanSection = humanOutline.sections[0];
+        if (firstHumanSection === undefined) {
+          throw new Error(
+            "The human outline fixture did not contain a first section."
+          );
+        }
+        firstHumanSection.title = `${aiGeneratedTitle} (human revised)`;
+        firstHumanSection.humanDirectives = {
+          ...firstHumanSection.humanDirectives,
+          requiredItems: ["Human-approved purpose"]
+        };
+        expect(firstHumanSection.title).not.toBe(aiGeneratedTitle);
+        const humanOutlineResponse = await server.app.inject({
+          method: "PUT",
+          url: `/api/projects/${projectId}/outline`,
+          payload: {
+            outline: humanOutline,
+            expectedRevision: project.revision
+          }
+        });
+        expect(humanOutlineResponse.statusCode).toBe(200);
+        project = projectMutationResponseSchema.parse(
+          humanOutlineResponse.json()
+        ).data;
+        expect(project.outline.sections[0]?.title).toBe(
+          firstHumanSection.title
+        );
+        expect(project.outline.sections[0]?.title).not.toBe(aiGeneratedTitle);
         const outlineApprovalResponse = await server.app.inject({
           method: "POST",
           url: `/api/projects/${projectId}/outline/approve`,
@@ -1050,6 +1076,20 @@ describe("P5-09 representative frame and render E2E", () => {
           /^audio\/wav/
         );
 
+        const bgmProjectMediaPath = "media/fixture-section-bgm.wav";
+        // BGM is part of VideoProject.audio, but the current asset API only
+        // exposes the sound_effect kind and requires a usage tag. Copy the
+        // checked-in BGM fixture at the existing project-media boundary rather
+        // than misclassifying it as a sound effect or adding a new API.
+        const bgmSourcePath = mediaFixturePath("effect-2s.wav");
+        const bgmTargetPath = resolvePosixPath(
+          path.join(workspaceRoot, "projects", projectId),
+          bgmProjectMediaPath
+        );
+        await fs.copyFile(bgmSourcePath, bgmTargetPath);
+        const bgmChecksum = await sha256File(bgmSourcePath);
+        expect(await sha256File(bgmTargetPath)).toBe(bgmChecksum);
+
         const currentProject = await projectRepository.read(projectId);
         const mainSectionId = currentProject.script.sections[1]?.id;
         const effectLineId = currentProject.script.sections[1]?.lines[1]?.id;
@@ -1058,12 +1098,25 @@ describe("P5-09 representative frame and render E2E", () => {
         if (mainSectionId === undefined || effectLineId === undefined) {
           throw new Error("The fixture main section is missing.");
         }
+        // The current API has no project-level audio/inserts/thumbnail mutation
+        // route, so this fixture-only configuration uses the existing validated
+        // repository boundary instead of inventing an E2E-only endpoint.
         project = await projectRepository.save(
           projectId,
           {
             ...currentProject,
             audio: {
-              sectionBgms: [],
+              sectionBgms: [
+                {
+                  id: "bgm-fixture-main",
+                  sectionId: mainSectionId,
+                  path: bgmProjectMediaPath,
+                  volume: 0.1,
+                  loop: true,
+                  fadeInMs: 100,
+                  fadeOutMs: 100
+                }
+              ],
               soundEffects: [
                 {
                   id: "effect-fixture-confirm",
@@ -1102,6 +1155,12 @@ describe("P5-09 representative frame and render E2E", () => {
           },
           currentProject.revision
         );
+        expect(project.audio.sectionBgms).toHaveLength(1);
+        expect(project.audio.sectionBgms[0]).toMatchObject({
+          sectionId: mainSectionId,
+          path: bgmProjectMediaPath,
+          loop: true
+        });
         expect(project.audio.soundEffects).toHaveLength(1);
         expect(project.audio.soundEffects[0]).toMatchObject({
           soundEffectAssetId: soundEffectAsset.receipt.assetId,
@@ -1112,20 +1171,53 @@ describe("P5-09 representative frame and render E2E", () => {
           representativeVisualPath
         );
 
-        const audioStore = await saveFixtureAudio(
-          workspaceRoot,
-          project,
-          terminology.termId,
-          previewByLineId
+        const voiceAcceptedResponse = await server.app.inject({
+          method: "POST",
+          url: `/api/projects/${projectId}/voice/generate-all`,
+          payload: {}
+        });
+        expect(voiceAcceptedResponse.statusCode).toBe(202);
+        const voiceAccepted = voiceGenerationAcceptedResponseSchema.parse(
+          voiceAcceptedResponse.json()
+        ).data;
+        expect(voiceAccepted).toMatchObject({ status: "queued" });
+        expect(voiceAccepted.lineIds).toHaveLength(
+          allProjectLines(project).length
         );
+        await waitForVoiceJob(server, projectId, voiceAccepted.runId);
+
+        const audioStore = new VoicevoxAudioStore({ workspaceRoot });
         const audioIndex = await audioStore.readIndex(projectId);
-        const assetMetadata = await buildAssetMetadata(
-          workspaceRoot,
-          projectId,
-          project,
-          audioStore,
-          assetDetails
+        expect(Object.keys(audioIndex)).toHaveLength(
+          allProjectLines(project).length
         );
+        for (const line of allProjectLines(project)) {
+          const entry = audioIndex[line.id];
+          expect(entry).toBeDefined();
+          expect(entry?.durationMs).toBe(1_000);
+          if (line.spokenText.includes("SubDub")) {
+            expect(entry?.appliedTerms).toEqual(
+              expect.arrayContaining([
+                expect.objectContaining({ termId: terminology.termId })
+              ])
+            );
+          }
+        }
+        const assetMetadata: RenderManifestAssetMetadata[] = [
+          ...(await buildAssetMetadata(
+            workspaceRoot,
+            projectId,
+            project,
+            audioStore,
+            assetDetails
+          )),
+          {
+            path: bgmProjectMediaPath,
+            kind: "bgm",
+            sha256: bgmChecksum,
+            durationMs: 2_000
+          }
+        ];
         const manifestStore = new RenderManifestStore({ workspaceRoot });
         const compilerInput = {
           project,
@@ -1167,9 +1259,24 @@ describe("P5-09 representative frame and render E2E", () => {
             (visual) => visual.id === "visual-fixture-document"
           )?.display
         ).toMatchObject({ page: 2 });
+        expect(manifest.audioTracks).toHaveLength(1);
+        expect(manifest.audioTracks[0]).toMatchObject({
+          sectionId: mainSectionId,
+          src: bgmProjectMediaPath,
+          loop: true
+        });
         expect(manifest.soundEffects).toHaveLength(1);
+        const requiredPlaceholderInserts = manifest.inserts.filter(
+          (insert) =>
+            insert.slot === "opening" ||
+            insert.slot === "ending" ||
+            insert.slot === "eye_catch"
+        );
+        expect(requiredPlaceholderInserts).toHaveLength(3);
         expect(
-          manifest.inserts.some((insert) => insert.slot === "eye_catch")
+          requiredPlaceholderInserts.every(
+            (insert) => insert.durationInFrames === 60
+          )
         ).toBe(true);
 
         const storedManifestResponse = await server.app.inject({
@@ -1184,6 +1291,13 @@ describe("P5-09 representative frame and render E2E", () => {
         expect(preview.canPlay).toBe(true);
         expect(preview.blockers).toEqual([]);
         expect(preview.manifest).toEqual(manifest);
+        if (preview.manifest === null) {
+          throw new Error("The preview did not return the stored manifest.");
+        }
+        const previewManifest = renderManifestSchema.parse(preview.manifest);
+        expect(serializeRenderManifest(previewManifest)).toBe(
+          serializeRenderManifest(manifest)
+        );
 
         const secondCompile = await manifestStore.compileAndStore(
           projectId,
@@ -1201,6 +1315,29 @@ describe("P5-09 representative frame and render E2E", () => {
         expect(secondCompile.manifest.compilerInputHash).toBe(
           manifest.compilerInputHash
         );
+
+        const runLogStore = new RunLogStore({ workspaceRoot });
+        const manifestRunLog = await runLogStore.read(
+          projectId,
+          firstCompile.runId
+        );
+        expect(manifestRunLog).toMatchObject({
+          kind: "manifest",
+          projectId,
+          status: "succeeded",
+          projectRevision: project.revision
+        });
+        expect(manifestRunLog.inputHash).toMatch(/^[0-9a-f]{64}$/);
+        const manifestOutput = manifestRunLog.outputs.find(
+          (output) => output.path !== undefined
+        );
+        expect(manifestOutput?.path).toBe(
+          `projects/${projectId}/cache/render-manifest.json`
+        );
+        expect(manifestOutput?.checksum).toMatch(/^[0-9a-f]{64}$/);
+        const manifestPath = manifestStore.getManifestPath(projectId);
+        const manifestFileChecksum = await sha256File(manifestPath);
+        expect(manifestFileChecksum).toBe(manifestOutput?.checksum);
 
         const videoVisual = manifest.visuals.find(
           (visual) => visual.id === "visual-fixture-video"
@@ -1328,6 +1465,18 @@ describe("P5-09 representative frame and render E2E", () => {
         const mp4Bytes = await fs.readFile(mp4Path);
         expect(mp4Bytes.length).toBeGreaterThan(0);
         expect(sha256Bytes(mp4Bytes)).toBe(mp4Run.log.outputChecksum);
+        const mp4RunLog = await runLogStore.read(projectId, mp4Accepted.runId);
+        expect(mp4RunLog).toMatchObject({
+          kind: "render",
+          renderKind: "mp4",
+          projectId,
+          status: "succeeded",
+          projectRevision: project.revision
+        });
+        expect(mp4RunLog.inputHash).toBe(
+          computeRenderInputHash(previewManifest, "mp4")
+        );
+        const mp4OutputChecksum = mp4Run.log.outputChecksum;
         await validateMp4Output(mp4Path, manifest);
 
         const thumbnailAcceptedResponse = await server.app.inject({
@@ -1362,6 +1511,21 @@ describe("P5-09 representative frame and render E2E", () => {
         expect(sha256Bytes(thumbnailBytes)).toBe(
           thumbnailRun.log.outputChecksum
         );
+        const thumbnailRunLog = await runLogStore.read(
+          projectId,
+          thumbnailAccepted.runId
+        );
+        expect(thumbnailRunLog).toMatchObject({
+          kind: "render",
+          renderKind: "thumbnail",
+          projectId,
+          status: "succeeded",
+          projectRevision: project.revision
+        });
+        expect(thumbnailRunLog.inputHash).toBe(
+          computeRenderInputHash(previewManifest, "thumbnail")
+        );
+        const thumbnailOutputChecksum = thumbnailRun.log.outputChecksum;
         await validateThumbnailOutput(thumbnailPath);
         const thumbnailGoldenPath = path.join(goldenRoot, "thumbnail.png");
         await writeOrRequireGolden(
@@ -1377,6 +1541,151 @@ describe("P5-09 representative frame and render E2E", () => {
         expect(thumbnailStats.width).toBe(1280);
         expect(thumbnailStats.height).toBe(720);
 
+        const aiRunId = project.outline.generationRunId;
+        if (aiRunId === null) {
+          throw new Error("The approved outline did not retain its AI run ID.");
+        }
+        const aiRunLog = await runLogStore.read(projectId, aiRunId);
+        expect(aiRunLog).toMatchObject({
+          kind: "ai",
+          taskKind: "outline_generation",
+          projectId,
+          status: "succeeded",
+          schemaValidation: "passed"
+        });
+        expect(aiRunLog.projectRevision).toBeLessThan(project.revision);
+        expect(aiRunLog.inputHash).toMatch(/^[0-9a-f]{64}$/);
+        expect(aiRunLog.outputs[0]?.checksum).toMatch(/^[0-9a-f]{64}$/);
+
+        const voiceRunLog = await runLogStore.read(
+          projectId,
+          voiceAccepted.runId
+        );
+        expect(voiceRunLog).toMatchObject({
+          kind: "voice",
+          projectId,
+          status: "succeeded",
+          engine: "VOICEVOX",
+          generatedCount: allProjectLines(project).length,
+          targetCount: allProjectLines(project).length
+        });
+        expect(voiceRunLog.inputHash).toMatch(/^[0-9a-f]{64}$/);
+        expect(voiceRunLog.outputs).toHaveLength(
+          allProjectLines(project).length
+        );
+        expect(
+          voiceRunLog.outputs.every(
+            (output) =>
+              output.path !== undefined &&
+              output.checksum !== undefined &&
+              /^[0-9a-f]{64}$/.test(output.checksum)
+          )
+        ).toBe(true);
+
+        const runKinds = (await runLogStore.list(projectId)).map(
+          (runLog) => runLog.kind
+        );
+        expect(runKinds).toEqual(
+          expect.arrayContaining(["ai", "voice", "manifest", "render"])
+        );
+
+        // Cross-layer failure case: an invalid derived-input snapshot is
+        // rejected after the normal manifest and both outputs exist. This
+        // exercises the manifest store's existing atomic/cache boundary while
+        // proving the already-approved project and artifacts remain intact.
+        const normalProject = await projectRepository.read(projectId);
+        const firstLineId = allProjectLines(project)[0]?.id;
+        if (firstLineId === undefined) {
+          throw new Error("The fixture has no line for failure injection.");
+        }
+        const brokenAudioIndex = { ...audioIndex };
+        delete brokenAudioIndex[firstLineId];
+        const failedCompile = await manifestStore.compileAndStore(projectId, {
+          ...compilerInput,
+          audioIndex: brokenAudioIndex
+        });
+        expect(failedCompile.status).toBe("failed");
+        expect(failedCompile.manifest).toBeNull();
+        expect(failedCompile.diagnostics.length).toBeGreaterThan(0);
+        const failureRunLog = await runLogStore.read(
+          projectId,
+          failedCompile.runId
+        );
+        expect(failureRunLog).toMatchObject({
+          kind: "manifest",
+          projectId,
+          status: "failed"
+        });
+        expect(failureRunLog.errorCode).toMatch(/^[A-Z][A-Z0-9_]*$/);
+        expect(failureRunLog.outputs).toEqual([]);
+        expect(await projectRepository.read(projectId)).toEqual(normalProject);
+        expect(await sha256File(manifestPath)).toBe(manifestFileChecksum);
+        expect(await sha256File(mp4Path)).toBe(mp4OutputChecksum);
+        expect(await sha256File(thumbnailPath)).toBe(thumbnailOutputChecksum);
+
+        // Close the first Fastify app (which closes its worker and database)
+        // before opening a fresh app against the same workspace root.
+        if (server === undefined) {
+          throw new Error("The initial server was not initialized.");
+        }
+        await server.app.close();
+        server = undefined;
+        restartedServer = await initializeServer({ workspaceRoot });
+
+        const reloadedProjectResponse = await restartedServer.app.inject({
+          method: "GET",
+          url: `/api/projects/${projectId}`
+        });
+        expect(reloadedProjectResponse.statusCode).toBe(200);
+        const reloadedProject = projectDetailResponseSchema.parse(
+          reloadedProjectResponse.json()
+        ).data;
+        expect(reloadedProject.metadata.id).toBe(projectId);
+        expect(reloadedProject.source.sha256).toBe(sourceHash);
+        expect(reloadedProject.outline.status).toBe("approved");
+        expect(reloadedProject.script.status).toBe("approved");
+        expect(reloadedProject.script.origin).toBe("manual");
+        expect(reloadedProject.visuals.status).toBe("approved");
+        expect(reloadedProject.audio.sectionBgms).toEqual(
+          project.audio.sectionBgms
+        );
+        expect(reloadedProject.thumbnail).toEqual(project.thumbnail);
+
+        const reloadedPreviewResponse = await restartedServer.app.inject({
+          method: "GET",
+          url: `/api/projects/${projectId}/manifest`
+        });
+        expect(reloadedPreviewResponse.statusCode).toBe(200);
+        const reloadedPreview = manifestPreviewResponseSchema.parse(
+          reloadedPreviewResponse.json()
+        ).data;
+        expect(reloadedPreview.state).toBe("current");
+        expect(reloadedPreview.canPlay).toBe(true);
+        expect(reloadedPreview.manifest).not.toBeNull();
+        expect(serializeRenderManifest(reloadedPreview.manifest!)).toBe(
+          serializeRenderManifest(previewManifest)
+        );
+
+        expect(await pathExists(manifestPath)).toBe(true);
+        expect(await pathExists(mp4Path)).toBe(true);
+        expect(await pathExists(thumbnailPath)).toBe(true);
+        expect(await sha256File(manifestPath)).toBe(manifestFileChecksum);
+        expect(await sha256File(mp4Path)).toBe(mp4OutputChecksum);
+        expect(await sha256File(thumbnailPath)).toBe(thumbnailOutputChecksum);
+
+        for (const runId of [
+          aiRunId,
+          voiceAccepted.runId,
+          firstCompile.runId,
+          mp4Accepted.runId,
+          thumbnailAccepted.runId
+        ]) {
+          const persistedRun = await runLogStore.read(projectId, runId);
+          expect(persistedRun.projectId).toBe(projectId);
+          expect(persistedRun.status).toBe("succeeded");
+          expect(persistedRun.projectRevision).toBeGreaterThanOrEqual(0);
+        }
+
         const stagingEntries = (await fs.readdir(workspaceRoot)).filter(
           (entry) =>
             entry.startsWith(".subdub-render-") ||
@@ -1384,8 +1693,14 @@ describe("P5-09 representative frame and render E2E", () => {
         );
         expect(stagingEntries).toEqual([]);
       } finally {
+        if (restartedServer !== undefined) {
+          await restartedServer.app.close();
+        }
         if (server !== undefined) {
           await server.app.close();
+        }
+        for (const spy of voicevoxSpies) {
+          spy.mockRestore();
         }
         await fs.rm(workspaceRoot, { recursive: true, force: true });
         cleanupVerified = !(await pathExists(workspaceRoot));
