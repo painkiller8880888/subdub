@@ -29,7 +29,7 @@ import {
 } from "./render-run-log-store.js";
 import {
   createLazyMp4Renderer,
-  UnavailableThumbnailRenderer,
+  createLazyThumbnailRenderer,
   type Mp4RendererPort,
   type ThumbnailRendererPort
 } from "./renderers.js";
@@ -130,7 +130,8 @@ export class RenderJobService {
           options.mp4Renderer ??
           createLazyMp4Renderer({ workspaceRoot: options.workspaceRoot }),
         thumbnailRenderer:
-          options.thumbnailRenderer ?? new UnavailableThumbnailRenderer(),
+          options.thumbnailRenderer ??
+          createLazyThumbnailRenderer({ workspaceRoot: options.workspaceRoot }),
         now: this.now
       });
     }

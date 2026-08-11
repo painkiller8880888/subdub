@@ -31,6 +31,23 @@ export function createLazyMp4Renderer(options: {
   };
 }
 
+export function createLazyThumbnailRenderer(options: {
+  readonly workspaceRoot: string;
+}): ThumbnailRendererPort {
+  let rendererPromise: Promise<RenderRendererPort> | undefined;
+  return {
+    async render(input) {
+      rendererPromise ??= import("./remotion-thumbnail-renderer.js").then(
+        ({ RemotionThumbnailRenderer }) =>
+          new RemotionThumbnailRenderer({
+            workspaceRoot: options.workspaceRoot
+          })
+      );
+      return (await rendererPromise).render(input);
+    }
+  };
+}
+
 export class UnavailableThumbnailRenderer implements ThumbnailRendererPort {
   async render(): Promise<void> {
     throw new RenderJobError(
