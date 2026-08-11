@@ -1368,7 +1368,10 @@ export function ScriptPage() {
         setCandidateDecisionByAssetId((current) => {
           const next = { ...current, [asset.assetId]: "accepted" as const };
           for (const candidate of suggestionResponse?.data.candidates ?? []) {
-            if (candidate.asset.assetId !== asset.assetId) {
+            if (
+              candidate.asset.assetId !== asset.assetId &&
+              current[candidate.asset.assetId] === undefined
+            ) {
               next[candidate.asset.assetId] = "stale";
             }
           }
