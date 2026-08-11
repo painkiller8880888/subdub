@@ -46,6 +46,11 @@ import {
   ImprovementLogRepository,
   type ImprovementLogRepositoryPort
 } from "../app/projects/improvement-log-repository.js";
+import {
+  AiRunSearchService,
+  type AiRunSearchImprovementLogRepositoryPort
+} from "../app/ai-run-search-service.js";
+import { RunLogStore } from "../app/run-log-store.js";
 
 export const SERVER_HOST = API_HOST;
 export const SERVER_PORT = API_PORT;
@@ -55,7 +60,8 @@ export type ServerOptions = AppOptions & {
   databasePath?: string;
   migrationsFolder?: MigrationFolder;
   projectRepository?: ProjectRepository;
-  improvementLogRepository?: ImprovementLogRepositoryPort;
+  improvementLogRepository?: ImprovementLogRepositoryPort &
+    AiRunSearchImprovementLogRepositoryPort;
   terminologyRepository?: TerminologyRepository;
   assetRepository?: AssetRepository;
   assetProcessingService?: AssetProcessingService;
@@ -123,6 +129,13 @@ export async function initializeServer(
       projectRepository ?? new ProjectRepository({ workspaceRoot });
     const resolvedImprovementLogRepository =
       improvementLogRepository ?? new ImprovementLogRepository(database.database);
+    const resolvedAiRunSearchService =
+      appOptions.aiRunSearchService ??
+      new AiRunSearchService({
+        projectRepository: resolvedProjectRepository,
+        runLogStore: new RunLogStore({ workspaceRoot }),
+        improvementLogRepository: resolvedImprovementLogRepository
+      });
     const resolvedModelService =
       appOptions.modelService ?? createOpenRouterModelService();
     const resolvedChatAdapter = createOpenRouterChatAdapter();
@@ -236,7 +249,8 @@ export async function initializeServer(
       voiceAdjustmentService: resolvedVoiceAdjustmentService,
       manifestPreviewService: resolvedManifestPreviewService,
       projectFileService: resolvedProjectFileService,
-      renderJobService: resolvedRenderJobService
+      renderJobService: resolvedRenderJobService,
+      aiRunSearchService: resolvedAiRunSearchService
     });
     resolvedProcessingWorker.start();
     resolvedRenderJobService.start();

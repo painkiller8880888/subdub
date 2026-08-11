@@ -23,9 +23,11 @@ import {
   updateTerminology,
   deactivateTerminology,
   activateTerminology,
-  previewTerminology
+  previewTerminology,
+  searchAiRuns
 } from "../../src/web/lib/api-client.js";
 import {
+  aiRunSearchResponseSchema,
   healthResponseSchema,
   projectListResponseSchema,
   terminologyPreviewResponseSchema,
@@ -114,6 +116,70 @@ describe("web API client", () => {
         status: "ok"
       }
     });
+  });
+
+  it("serializes AI run filters and validates the response schema", async () => {
+    let requestUrl = "";
+    globalThis.fetch = async (input) => {
+      requestUrl = String(input);
+      return jsonResponse(
+        {
+          data: {
+            items: [],
+            summary: {
+              totalCount: 0,
+              validationPassedCount: 0,
+              validationEvaluatedCount: 0,
+              validationPassRate: null,
+              responseTimeMeasuredCount: 0,
+              averageResponseTimeMs: null,
+              modifiedRunCount: 0,
+              modificationEvaluatedCount: 0
+            },
+            limit: 7,
+            offset: 14,
+            hasNextPage: false
+          }
+        },
+        200
+      );
+    };
+
+    await expect(
+      searchAiRuns({
+        from: "2026-08-10T00:00:00.000Z",
+        to: "2026-08-12T00:00:00.000Z",
+        taskKind: "outline_generation",
+        modelId: "google/gemma-4-31b-it",
+        status: "failed",
+        decision: "undecided",
+        errorCode: "OPENROUTER_TIMEOUT",
+        limit: 7,
+        offset: 14
+      })
+    ).resolves.toMatchObject({ offset: 14 });
+
+    const query = new URLSearchParams(requestUrl.split("?", 2)[1]);
+    expect(query.get("from")).toBe("2026-08-10T00:00:00.000Z");
+    expect(query.get("to")).toBe("2026-08-12T00:00:00.000Z");
+    expect(query.get("taskKind")).toBe("outline_generation");
+    expect(query.get("modelId")).toBe("google/gemma-4-31b-it");
+    expect(query.get("status")).toBe("failed");
+    expect(query.get("decision")).toBe("undecided");
+    expect(query.get("errorCode")).toBe("OPENROUTER_TIMEOUT");
+    expect(query.get("limit")).toBe("7");
+    expect(query.get("offset")).toBe("14");
+    expect(
+      aiRunSearchResponseSchema.safeParse({
+        data: {
+          items: [],
+          summary: {},
+          limit: 7,
+          offset: 14,
+          hasNextPage: false
+        }
+      }).success
+    ).toBe(false);
   });
 
   it("uses a protocol error when a model success response is malformed", async () => {

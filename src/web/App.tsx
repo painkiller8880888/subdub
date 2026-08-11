@@ -47,6 +47,7 @@ import { OutlinePage } from "./OutlinePage";
 import { ScriptPage } from "./ScriptPage";
 import { TerminologyPage } from "./TerminologyPage";
 import { PreviewPage } from "./PreviewPage";
+import { AiRunsPage } from "./AiRunsPage";
 
 function projectBriefPath(projectId: string): string {
   return `/projects/${encodeURIComponent(projectId)}/brief`;
@@ -129,6 +130,9 @@ function ProjectsPage() {
         </Link>
         <Link className="button" to="/terminology">
           用語管理
+        </Link>
+        <Link className="button" to="/ai-runs">
+          AI実行ログ
         </Link>
       </header>
 
@@ -1016,6 +1020,7 @@ export function App() {
         path="/projects/:projectId/characters"
       />
       <Route element={<TerminologyPage />} path="/terminology" />
+      <Route element={<AiRunsPage />} path="/ai-runs" />
       <Route element={<NotFoundPage />} path="*" />
     </Routes>
   );
