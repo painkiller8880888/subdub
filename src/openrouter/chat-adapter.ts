@@ -27,6 +27,7 @@ export type ChatTokenUsage = {
   readonly promptTokens: number | null;
   readonly completionTokens: number | null;
   readonly totalTokens: number | null;
+  readonly costCredits?: number | null;
 };
 
 export type OutlineChatResult = {
@@ -49,6 +50,18 @@ export type OpenRouterChatAdapterOptions = {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
+}
+
+function parseCostCredits(value: unknown): number | null {
+  const numericValue =
+    typeof value === "number"
+      ? value
+      : typeof value === "string" && value.trim().length > 0
+        ? Number(value)
+        : Number.NaN;
+  return Number.isFinite(numericValue) && numericValue >= 0
+    ? numericValue
+    : null;
 }
 
 function getProvider(value: unknown): string | null {
@@ -256,7 +269,8 @@ export class OpenRouterChatAdapter {
       usage: {
         promptTokens: parsed.data.usage?.prompt_tokens ?? null,
         completionTokens: parsed.data.usage?.completion_tokens ?? null,
-        totalTokens: parsed.data.usage?.total_tokens ?? null
+        totalTokens: parsed.data.usage?.total_tokens ?? null,
+        costCredits: parseCostCredits(parsed.data.usage?.cost)
       },
       attempts
     };

@@ -81,7 +81,8 @@ export const openRouterChatCompletionResponseSchema = z
       .object({
         prompt_tokens: z.number().int().nonnegative().optional(),
         completion_tokens: z.number().int().nonnegative().optional(),
-        total_tokens: z.number().int().nonnegative().optional()
+        total_tokens: z.number().int().nonnegative().optional(),
+        cost: z.unknown().optional()
       })
       .passthrough()
       .optional(),

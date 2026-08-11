@@ -92,13 +92,18 @@ async function setupProject() {
   return { workspaceRoot, repository, project: saved };
 }
 
-function fakeChat(candidateValue: unknown) {
+function fakeChat(candidateValue: unknown, costCredits?: number) {
   return {
     complete: vi.fn(async () => ({
       candidate: candidateValue,
       responseModel: "provider/model",
       provider: "Fixture Provider",
-      usage: { promptTokens: 100, completionTokens: 50, totalTokens: 150 },
+      usage: {
+        promptTokens: 100,
+        completionTokens: 50,
+        totalTokens: 150,
+        ...(costCredits === undefined ? {} : { costCredits })
+      },
       attempts: 1
     }))
   };
@@ -118,7 +123,7 @@ describe("OutlineGenerationService", () => {
   it("saves a backend-owned needs_review outline and an AI run log", async () => {
     const { workspaceRoot, repository, project } = await setupProject();
     roots.push(workspaceRoot);
-    const chat = fakeChat(candidate());
+    const chat = fakeChat(candidate(), 0.125);
     const modelService = {
       listModels: vi.fn(async () => ({
         models: [model()],
@@ -184,6 +189,7 @@ describe("OutlineGenerationService", () => {
       promptTokens: 100,
       completionTokens: 50,
       totalTokens: 150,
+      costCredits: 0.125,
       imageInput: false,
       tools: false
     });
