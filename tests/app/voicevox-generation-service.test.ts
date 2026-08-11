@@ -9,6 +9,7 @@ import { VoicevoxAudioStore } from "../../src/app/voicevox/audio-store.js";
 import { VoicevoxGenerationService } from "../../src/app/voicevox/generation-service.js";
 import { VoicevoxQueryService } from "../../src/app/voicevox/query-service.js";
 import { runLogSchema } from "../../src/schema/index.js";
+import { VoicevoxAdapterError } from "../../src/voicevox/errors.js";
 import {
   createVoicevoxSpeakersFixture,
   createVoicevoxAudioQueryFixture,
@@ -114,6 +115,39 @@ afterEach(async () => {
 });
 
 describe("VoicevoxGenerationService", () => {
+  it("persists a failed run when VOICEVOX context resolution fails", async () => {
+    const harness = await createHarness({ persistLogs: true });
+    harness.client.getVersion.mockRejectedValueOnce(
+      new VoicevoxAdapterError("VOICEVOX_CONNECTION_FAILED")
+    );
+
+    await expect(harness.service.generateAll(projectId)).rejects.toMatchObject({
+      code: "VOICEVOX_CONNECTION_FAILED"
+    });
+
+    const raw = await fs.readFile(
+      path.join(
+        harness.workspaceRoot,
+        "projects",
+        projectId,
+        "runs",
+        "voice-run-1.json"
+      ),
+      "utf8"
+    );
+    const run = runLogSchema.parse(JSON.parse(raw));
+    expect(run).toMatchObject({
+      kind: "voice",
+      status: "failed",
+      startedAt: null,
+      engine: "VOICEVOX",
+      engineVersion: "unknown",
+      errorCode: "VOICEVOX_CONNECTION_FAILED",
+      outputs: []
+    });
+    expect(run.inputHash).toMatch(/^[0-9a-f]{64}$/);
+  });
+
   it("persists a common run with deterministic multi-WAV outputs and no spoken text", async () => {
     const harness = await createHarness({ persistLogs: true });
     const accepted = await harness.service.generateAll(projectId);

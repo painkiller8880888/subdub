@@ -3,7 +3,7 @@ import { promises as fs } from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 
-import { describe, expect, it, afterEach } from "vitest";
+import { describe, expect, it, afterEach, vi } from "vitest";
 
 import { type RenderManifestAssetMetadata } from "../../src/app/rendering/render-manifest-compiler.js";
 import {
@@ -222,6 +222,48 @@ describe("RenderManifestStore", () => {
     expect(run.outputs[0]?.checksum).toBe(
       createHash("sha256").update(serialized, "utf8").digest("hex")
     );
+  });
+
+  it("records running before compilation and failed when the compiler throws", async () => {
+    const root = await createRoot();
+    const writes: unknown[] = [];
+    const compile = vi.fn(() => {
+      expect(writes).toHaveLength(1);
+      expect(writes[0]).toMatchObject({ status: "running" });
+      throw new Error("compiler sentinel");
+    });
+    const store = new RenderManifestStore({
+      workspaceRoot: root,
+      createRunId: () => "compiler-throws-run",
+      compile,
+      runLogStore: {
+        read: async () => {
+          throw new Error("read is not used");
+        },
+        write: async (_projectId, runLog) => {
+          writes.push(runLog);
+        }
+      }
+    });
+
+    await expect(
+      store.compileAndStore(projectId, cacheInput())
+    ).rejects.toThrow("compiler sentinel");
+    expect(compile).toHaveBeenCalledOnce();
+    expect(writes).toHaveLength(2);
+    expect(writes[0]).toMatchObject({
+      status: "running",
+      startedAt: expect.any(String),
+      finishedAt: null,
+      outputs: []
+    });
+    expect(writes[1]).toMatchObject({
+      status: "failed",
+      startedAt: expect.any(String),
+      finishedAt: expect.any(String),
+      errorCode: "RENDER_MANIFEST_COMPILE_FAILED",
+      outputs: []
+    });
   });
 
   it("treats malformed, 2.0.0, and 1.0.0 caches as misses", async () => {

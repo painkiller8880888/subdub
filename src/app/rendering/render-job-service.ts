@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 
 import {
   idSchema,
@@ -13,6 +13,7 @@ import type { ManifestPreviewService } from "./manifest-preview-service.js";
 import { RENDER_JOB_ERROR_CODE, RenderJobError } from "./render-job-errors.js";
 import {
   RenderJobWorker,
+  computeRenderInputHash,
   type RenderJobQueueItem,
   type RenderRunLogPersistencePort,
   type RenderJobWorkerPort
@@ -81,12 +82,6 @@ function safeRunId(runId: unknown): string {
 
 function isoNow(now: () => Date): string {
   return now().toISOString();
-}
-
-function inputHash(manifest: unknown, kind: RenderJobKind): string {
-  return createHash("sha256")
-    .update(JSON.stringify({ manifest, renderKind: kind }), "utf8")
-    .digest("hex");
 }
 
 function failedPreflightCode(error: unknown): string {
@@ -240,7 +235,7 @@ export class RenderJobService {
         startedAt: null,
         finishedAt: isoNow(this.now),
         status: "failed" as const,
-        inputHash: inputHash(
+        inputHash: computeRenderInputHash(
           { projectRevision: project.revision, manifest: null },
           parsedKind
         ),
@@ -273,7 +268,7 @@ export class RenderJobService {
       startedAt: null,
       finishedAt: null,
       status: "queued" as const,
-      inputHash: inputHash(preflight.manifest, parsedKind),
+      inputHash: computeRenderInputHash(preflight.manifest, parsedKind),
       model: null,
       engine: "Remotion",
       privacy: {

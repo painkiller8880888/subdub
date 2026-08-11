@@ -6,13 +6,15 @@ import * as path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { RenderJobService } from "../../src/app/rendering/render-job-service.js";
-import { RenderJobWorker } from "../../src/app/rendering/render-job-worker.js";
+import {
+  computeRenderInputHash,
+  RenderJobWorker
+} from "../../src/app/rendering/render-job-worker.js";
 import {
   RENDER_JOB_ERROR_CODE,
   RenderJobError
 } from "../../src/app/rendering/render-job-errors.js";
 import { RenderOutputStore } from "../../src/app/rendering/render-output-store.js";
-import { RenderRunLogStore } from "../../src/app/rendering/render-run-log-store.js";
 import { RunLogStore } from "../../src/app/run-log-store.js";
 import type {
   Mp4RendererPort,
@@ -106,19 +108,31 @@ function createService(
 }
 
 async function writeQueuedLog(
-  store: RenderRunLogStore,
+  store: RunLogStore,
   runId: string,
   kind: "mp4" | "thumbnail" = "mp4"
 ): Promise<void> {
   await store.write(projectId, {
     runId,
     projectId,
-    kind,
+    kind: "render",
+    renderKind: kind,
     projectRevision: project.revision,
     queuedAt: "2026-08-11T00:00:00.000Z",
-    status: "queued",
     startedAt: null,
-    completedAt: null
+    finishedAt: null,
+    status: "queued",
+    inputHash: computeRenderInputHash(manifest, kind),
+    model: null,
+    engine: "Remotion",
+    privacy: {
+      execution: "local",
+      dataCollection: null,
+      zdr: null,
+      providerFallbacks: null
+    },
+    outputs: [],
+    errorCode: null
   });
 }
 
@@ -315,9 +329,48 @@ describe("RenderJobWorker and RenderJobService", () => {
     await service.stop();
   });
 
+  it("fails before rendering when the manifest changes without a revision change", async () => {
+    const root = await createRoot();
+    const render = vi.fn(async (input: RenderRendererInput) => {
+      await fs.writeFile(input.outputPath, "must not render");
+    });
+    const changedManifest = {
+      ...manifest,
+      compilerInputHash: "a".repeat(64)
+    };
+    const preflight = {
+      validate: vi
+        .fn()
+        .mockResolvedValueOnce({ project, manifest })
+        .mockResolvedValueOnce({ project, manifest: changedManifest })
+    };
+    const service = new RenderJobService({
+      workspaceRoot: root,
+      projectRepository: { read: vi.fn(async () => project) },
+      preflight,
+      mp4Renderer: { render },
+      thumbnailRenderer: { render },
+      createId: () => "manifest-changed-run"
+    });
+
+    service.start();
+    await service.enqueueMp4(projectId);
+    await expect(
+      waitFor(
+        () => service.getStatus(projectId, "manifest-changed-run"),
+        (status) => status.status === "failed"
+      )
+    ).resolves.toMatchObject({
+      status: "failed",
+      errorCode: RENDER_JOB_ERROR_CODE.manifestStale
+    });
+    expect(render).not.toHaveBeenCalled();
+    await service.stop();
+  });
+
   it("processes multiple jobs FIFO and does not execute a duplicate queue item", async () => {
     const root = await createRoot();
-    const runLogStore = new RenderRunLogStore({ workspaceRoot: root });
+    const runLogStore = new RunLogStore({ workspaceRoot: root });
     await writeQueuedLog(runLogStore, "run-a");
     await writeQueuedLog(runLogStore, "run-b");
     const calls: string[] = [];
@@ -349,7 +402,7 @@ describe("RenderJobWorker and RenderJobService", () => {
 
   it("marks queued and running jobs failed during stop without succeeding either", async () => {
     const root = await createRoot();
-    const runLogStore = new RenderRunLogStore({ workspaceRoot: root });
+    const runLogStore = new RunLogStore({ workspaceRoot: root });
     await writeQueuedLog(runLogStore, "run-a");
     await writeQueuedLog(runLogStore, "run-b");
     const started = deferred<void>();

@@ -67,6 +67,7 @@ export class RenderManifestStoreError extends Error {
 export type RenderManifestStoreOptions = {
   readonly workspaceRoot: string;
   readonly fileSystem?: Partial<RenderManifestStoreFileSystem>;
+  readonly compile?: typeof compileRenderManifest;
   readonly createId?: () => string;
   readonly createRunId?: () => string;
   readonly now?: () => Date;
@@ -162,6 +163,7 @@ export function isCurrentRenderManifestCache(
 export class RenderManifestStore {
   private readonly workspaceRoot: string;
   private readonly fileSystem: RenderManifestStoreFileSystem;
+  private readonly compile: typeof compileRenderManifest;
   private readonly createId: () => string;
   private readonly createRunId: () => string;
   private readonly now: () => Date;
@@ -174,6 +176,7 @@ export class RenderManifestStore {
       ...defaultFileSystem,
       ...options.fileSystem
     };
+    this.compile = options.compile ?? compileRenderManifest;
     this.createId = options.createId ?? (() => randomUUID().toLowerCase());
     this.createRunId =
       options.createRunId ?? (() => randomUUID().toLowerCase());
@@ -310,11 +313,8 @@ export class RenderManifestStore {
     if (!idSchema.safeParse(runId).success) {
       throw new RenderManifestStoreError("RENDER_MANIFEST_WRITE_FAILED");
     }
-    const result = compileRenderManifest(input);
     const startedAt = this.now().toISOString();
-    const inputHash = result.success
-      ? result.manifest.compilerInputHash
-      : this.safeInputHash(input, safeProjectId);
+    const inputHash = this.safeInputHash(input, safeProjectId);
     const projectRevision = this.projectRevision(input);
     const runningRun: ManifestRunLog = {
       runId,
@@ -339,6 +339,24 @@ export class RenderManifestStore {
       reused: false
     };
     await this.runLogStore.write(safeProjectId, runningRun);
+
+    let result: ReturnType<typeof compileRenderManifest>;
+    try {
+      result = this.compile(input);
+    } catch (error) {
+      await this.tryWriteRunLog(
+        safeProjectId,
+        this.finishRun(
+          runningRun,
+          "failed",
+          this.now().toISOString(),
+          "RENDER_MANIFEST_COMPILE_FAILED",
+          inputHash,
+          []
+        )
+      );
+      throw error;
+    }
 
     if (!result.success) {
       const failedRun = this.finishRun(

@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import {
   normalizeRunLog,
   runLogSchema,
@@ -43,6 +45,15 @@ export type RenderJobWorkerPort = Pick<
   RenderJobWorker,
   "enqueue" | "start" | "stop"
 >;
+
+export function computeRenderInputHash(
+  manifest: unknown,
+  kind: RenderJobKind
+): string {
+  return createHash("sha256")
+    .update(JSON.stringify({ manifest, renderKind: kind }), "utf8")
+    .digest("hex");
+}
 
 function asRenderLog(log: unknown): CommonRenderRunLog {
   const normalized = normalizeRunLog(log);
@@ -246,6 +257,16 @@ export class RenderJobWorker implements RenderJobWorkerPort {
           RENDER_JOB_ERROR_CODE.manifestStale,
           422,
           "The project changed after the render was queued."
+        );
+      }
+      if (
+        computeRenderInputHash(preflight.manifest, item.kind) !==
+        queued.inputHash
+      ) {
+        throw new RenderJobError(
+          RENDER_JOB_ERROR_CODE.manifestStale,
+          422,
+          "The render manifest changed after the render was queued."
         );
       }
       outputTarget = await this.outputStore.prepare(
