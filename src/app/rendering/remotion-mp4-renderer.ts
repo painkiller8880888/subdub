@@ -47,7 +47,7 @@ function isMissingPathError(error: unknown): boolean {
   );
 }
 
-function browserExecutable(): BrowserExecutable | undefined {
+export function browserExecutable(): BrowserExecutable | undefined {
   const candidates = [
     process.env.CHROME_BIN,
     "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
@@ -69,7 +69,10 @@ function normalizeManifestPath(projectId: string, value: string): string {
   return value;
 }
 
-function validateRelativePath(projectId: string, value: string): string {
+export function normalizeRenderAssetPath(
+  projectId: string,
+  value: string
+): string {
   const normalized = normalizeManifestPath(projectId, value);
   const result = relativePosixPathSchema.safeParse(normalized);
   if (!result.success || normalized.includes("%")) {
@@ -184,7 +187,7 @@ async function copyReferencedAsset(
   relativePath: string,
   publicRoot: string
 ): Promise<void> {
-  const safePath = validateRelativePath(projectId, relativePath);
+  const safePath = normalizeRenderAssetPath(projectId, relativePath);
   const isSharedAsset = safePath.startsWith("shared-assets/");
   const sourceRoot = isSharedAsset
     ? path.join(workspaceRoot, "public", "shared-assets")
@@ -254,7 +257,10 @@ export async function stagePublicDirectory(
   workspaceRoot: string,
   projectId: string,
   manifest: RenderManifest,
-  stagingRoot: string
+  stagingRoot: string,
+  options: {
+    readonly additionalAssetPaths?: readonly string[];
+  } = {}
 ): Promise<string> {
   const publicRoot = path.join(stagingRoot, "public");
   await mkdir(publicRoot, { recursive: true });
@@ -288,6 +294,9 @@ export async function stagePublicDirectory(
   );
   for (const asset of manifest.sourceAssetChecksums) {
     await copyReferencedAsset(workspaceRoot, projectId, asset.path, publicRoot);
+  }
+  for (const assetPath of options.additionalAssetPaths ?? []) {
+    await copyReferencedAsset(workspaceRoot, projectId, assetPath, publicRoot);
   }
   return publicRoot;
 }
