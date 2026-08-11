@@ -134,9 +134,12 @@ export class RenderOutputStore implements RenderOutputStorePort {
       outputRoot,
       `${names.prefix}-${safeRunId}.${names.extension}`
     );
+    // Remotion validates the container from the filename extension before it
+    // renders. Keep the format suffix on the temporary path while retaining
+    // the hidden, non-final staging name.
     const temporaryPath = path.join(
       outputRoot,
-      `.${names.prefix}-${safeRunId}.${names.extension}.tmp`
+      `.${names.prefix}-${safeRunId}.tmp.${names.extension}`
     );
     return { temporaryPath, finalPath, outputPath };
   }
