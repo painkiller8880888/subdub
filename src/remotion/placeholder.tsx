@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import { AbsoluteFill } from "remotion";
 
 import type { RenderInsert } from "../schema/index";
+import { REMOTION_FONT_FAMILY } from "./font";
 import { DESIGN_COLORS } from "./layout-helpers";
 
 export function PlaceholderLayer({
@@ -18,7 +19,7 @@ export function PlaceholderLayer({
         justifyContent: "center",
         backgroundColor: DESIGN_COLORS.background,
         color: DESIGN_COLORS.card,
-        fontFamily: "Noto Sans JP, Arial, sans-serif"
+        fontFamily: REMOTION_FONT_FAMILY
       }}
     >
       <div

@@ -11,6 +11,7 @@ import { ManifestAudioLayer } from "./audio-layer";
 import { BackgroundVisual } from "./background";
 import { CharacterLayer } from "./characters";
 import { DocumentVisual } from "./document-visual";
+import { REMOTION_FONT_FAMILY, RemotionFontLoader } from "./font";
 import { DESIGN_COLORS } from "./layout";
 import { PlaceholderLayer } from "./placeholder";
 import {
@@ -89,9 +90,10 @@ export function RenderManifestComposition(
         style={{
           backgroundColor: DESIGN_COLORS.background,
           overflow: "hidden",
-          fontFamily: "Noto Sans JP, Arial, sans-serif"
+          fontFamily: REMOTION_FONT_FAMILY
         }}
       >
+        <RemotionFontLoader />
         <PlaceholderLayer insert={activeInsert} />
       </AbsoluteFill>
     );
@@ -109,9 +111,10 @@ export function RenderManifestComposition(
       style={{
         backgroundColor: DESIGN_COLORS.background,
         overflow: "hidden",
-        fontFamily: "Noto Sans JP, Arial, sans-serif"
+        fontFamily: REMOTION_FONT_FAMILY
       }}
     >
+      <RemotionFontLoader />
       <ManifestAudioLayer
         manifest={manifest}
         assetUrlResolver={assetUrlResolver}

@@ -2,6 +2,7 @@ import type { CSSProperties, ReactNode } from "react";
 
 import { AbsoluteFill, Img, staticFile } from "remotion";
 
+import { REMOTION_FONT_FAMILY, RemotionFontLoader } from "./font";
 import { DESIGN_COLORS } from "./layout-helpers";
 import type { StandardThumbnailCompositionInput } from "./thumbnail-spec";
 
@@ -47,9 +48,10 @@ export function StandardThumbnailComposition({
         backgroundColor: DESIGN_COLORS.background,
         color: DESIGN_COLORS.card,
         overflow: "hidden",
-        fontFamily: "Noto Sans JP, Arial, sans-serif"
+        fontFamily: REMOTION_FONT_FAMILY
       }}
     >
+      <RemotionFontLoader />
       <AbsoluteFill
         style={{
           background:

@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 
 import type { RenderLine, RenderManifest } from "../schema/index";
+import { REMOTION_FONT_FAMILY } from "./font";
 import { DESIGN_COLORS } from "./layout";
 import {
   resolveSubtitleContent,
@@ -37,7 +38,7 @@ export function SubtitleLayer({
           borderRadius: 16,
           backgroundColor: DESIGN_COLORS.subtitleBackground,
           color: DESIGN_COLORS.card,
-          fontFamily: "Noto Sans JP, Arial, sans-serif",
+          fontFamily: REMOTION_FONT_FAMILY,
           fontWeight: 700,
           lineHeight: 1.4,
           textAlign: side === "left" ? "left" : "right",
