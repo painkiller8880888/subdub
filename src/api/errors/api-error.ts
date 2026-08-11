@@ -42,6 +42,8 @@ import {
 import { VoicevoxAdjustmentStoreError } from "../../app/voicevox/adjustment-store.js";
 import { VoicevoxPreviewStoreError } from "../../app/voicevox/preview-store.js";
 import { ProjectFileServiceError } from "../../app/projects/project-file-service.js";
+import { RenderJobError } from "../../app/rendering/render-job-errors.js";
+import { RenderRunLogStoreError } from "../../app/rendering/render-run-log-store.js";
 
 export class ApiResponseValidationError extends Error {
   constructor(cause: unknown) {
@@ -807,6 +809,33 @@ export function mapApiError(error: unknown): MappedApiError {
         genericInternalMessage,
       details: mapProjectValidationDetails(error.code, error.issues),
       shouldLog: status >= 500
+    };
+  }
+
+  if (error instanceof RenderJobError) {
+    return {
+      code: error.code,
+      status: error.status,
+      message: error.message,
+      details: [],
+      shouldLog: error.status >= 500
+    };
+  }
+
+  if (error instanceof RenderRunLogStoreError) {
+    return {
+      code: error.code,
+      status: error.status,
+      message:
+        error.code === "RENDER_RUN_NOT_FOUND"
+          ? "The render run does not exist."
+          : error.code === "RENDER_PROJECT_ID_INVALID"
+            ? "The project ID is invalid."
+            : error.code === "RENDER_RUN_ID_INVALID"
+              ? "The render run ID is invalid."
+              : genericInternalMessage,
+      details: [],
+      shouldLog: error.status >= 500
     };
   }
 

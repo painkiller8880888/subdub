@@ -48,6 +48,10 @@ import {
   voicevoxResolvedSpeakerSchema
 } from "../voicevox/schemas.js";
 import { renderManifestSchema } from "./render-manifest.js";
+import {
+  renderJobKindSchema,
+  renderRunLogSchema
+} from "./render-run-log.js";
 
 const apiErrorPathSegmentSchema = z.union([z.string(), z.number().int()]);
 
@@ -324,6 +328,29 @@ export const manifestPreviewResponseSchema = strictObject({
 
 export const manifestPreviewParamsSchema = strictObject({
   projectId: idSchema
+});
+
+export const renderProjectParamsSchema = strictObject({
+  projectId: idSchema
+});
+
+export const renderRunParamsSchema = strictObject({
+  projectId: idSchema,
+  runId: idSchema
+});
+
+export const renderAcceptedDataSchema = strictObject({
+  runId: idSchema,
+  status: z.literal("queued"),
+  kind: renderJobKindSchema
+});
+
+export const renderAcceptedResponseSchema = strictObject({
+  data: renderAcceptedDataSchema
+});
+
+export const renderRunStatusResponseSchema = strictObject({
+  data: renderRunLogSchema
 });
 
 export const projectSourceContentSchema = z
@@ -767,6 +794,15 @@ export type ManifestPreviewResponse = z.infer<
 >;
 export type ManifestPreviewParams = z.infer<
   typeof manifestPreviewParamsSchema
+>;
+export type RenderProjectParams = z.infer<typeof renderProjectParamsSchema>;
+export type RenderRunParams = z.infer<typeof renderRunParamsSchema>;
+export type RenderAcceptedData = z.infer<typeof renderAcceptedDataSchema>;
+export type RenderAcceptedResponse = z.infer<
+  typeof renderAcceptedResponseSchema
+>;
+export type RenderRunStatusResponse = z.infer<
+  typeof renderRunStatusResponseSchema
 >;
 export type AssetIdParams = z.infer<typeof assetIdParamsSchema>;
 export type AssetThumbnailParams = z.infer<typeof assetThumbnailParamsSchema>;

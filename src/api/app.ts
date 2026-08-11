@@ -43,6 +43,10 @@ import {
   registerProjectFileRoutes,
   type ProjectFileServicePort
 } from "./routes/project-files.js";
+import {
+  registerRenderRoutes,
+  type RenderJobServicePort
+} from "./routes/render.js";
 
 export type AppOptions = {
   logger?: FastifyServerOptions["logger"];
@@ -63,6 +67,7 @@ export type AppOptions = {
   voiceAdjustmentService?: VoicevoxAdjustmentServicePort;
   manifestPreviewService?: ManifestPreviewServicePort;
   projectFileService?: ProjectFileServicePort;
+  renderJobService?: RenderJobServicePort;
 };
 
 export function buildApp(options: AppOptions = {}): FastifyInstance {
@@ -121,6 +126,10 @@ export function buildApp(options: AppOptions = {}): FastifyInstance {
 
   if (options.projectFileService !== undefined) {
     registerProjectFileRoutes(app, options.projectFileService);
+  }
+
+  if (options.renderJobService !== undefined) {
+    registerRenderRoutes(app, options.renderJobService);
   }
 
   if (options.staticRoot !== undefined) {

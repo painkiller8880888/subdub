@@ -37,6 +37,10 @@ import { VoicevoxClient } from "../voicevox/client.js";
 import { VoicevoxAudioStore } from "../app/voicevox/audio-store.js";
 import { RenderManifestStore } from "../app/rendering/render-manifest-store.js";
 import { ManifestPreviewService } from "../app/rendering/manifest-preview-service.js";
+import {
+  RenderJobService,
+  type RenderJobLifecyclePort
+} from "../app/rendering/render-job-service.js";
 import { ProjectFileService } from "../app/projects/project-file-service.js";
 
 export const SERVER_HOST = API_HOST;
@@ -54,6 +58,7 @@ export type ServerOptions = AppOptions & {
   visualAssignmentService?: import("./routes/visual-assignments.js").VisualAssignmentServicePort;
   assetUploadLimits?: AssetUploadLimits;
   workspaceRoot?: string;
+  renderJobService?: RenderJobLifecyclePort;
 };
 
 export type InitializedServer = {
@@ -94,6 +99,7 @@ export async function initializeServer(
     visualAssignmentService: suppliedVisualAssignmentService,
     voiceAdjustmentService: suppliedVoiceAdjustmentService,
     voiceGenerationService: suppliedVoiceGenerationService,
+    renderJobService: suppliedRenderJobService,
     workspaceRoot = process.cwd(),
     ...appOptions
   } = options;
@@ -186,15 +192,23 @@ export async function initializeServer(
       new AssetProcessingWorker({ service: resolvedProcessingService });
     const resolvedProjectFileService =
       appOptions.projectFileService ?? new ProjectFileService({ workspaceRoot });
+    const renderManifestStore = new RenderManifestStore({ workspaceRoot });
     const resolvedManifestPreviewService =
       appOptions.manifestPreviewService ??
       new ManifestPreviewService({
         workspaceRoot,
         projectRepository: resolvedProjectRepository,
-        manifestStore: new RenderManifestStore({ workspaceRoot }),
+        manifestStore: renderManifestStore,
         audioStore: new VoicevoxAudioStore({ workspaceRoot }),
         voiceGenerationService: resolvedVoiceGenerationService,
         projectFileService: resolvedProjectFileService
+      });
+    const resolvedRenderJobService: RenderJobLifecyclePort =
+      suppliedRenderJobService ??
+      new RenderJobService({
+        workspaceRoot,
+        projectRepository: resolvedProjectRepository,
+        manifestPreviewService: resolvedManifestPreviewService
       });
     const app = buildApp({
       ...appOptions,
@@ -209,10 +223,13 @@ export async function initializeServer(
       voiceGenerationService: resolvedVoiceGenerationService,
       voiceAdjustmentService: resolvedVoiceAdjustmentService,
       manifestPreviewService: resolvedManifestPreviewService,
-      projectFileService: resolvedProjectFileService
+      projectFileService: resolvedProjectFileService,
+      renderJobService: resolvedRenderJobService
     });
     resolvedProcessingWorker.start();
+    resolvedRenderJobService.start();
     app.addHook("onClose", async () => {
+      await resolvedRenderJobService.stop();
       await resolvedProcessingWorker.stop();
       database.close();
     });
