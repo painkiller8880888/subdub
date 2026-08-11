@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 
 import {
   voiceGenerateRequestSchema,
@@ -9,10 +9,20 @@ import {
 } from "../../schema/api.js";
 import {
   idSchema,
+  type VoiceRunLog,
   type Character,
   type ScriptLine,
   type VideoProject
 } from "../../schema/index.js";
+import {
+  voicevoxAudioIndexEntrySchema,
+  type VoicevoxAudioIndexEntry
+} from "./audio-index.js";
+import {
+  RunLogStore,
+  RunLogStoreError,
+  type RunLogStorePort
+} from "../run-log-store.js";
 import {
   VoicevoxAdapterError,
   VoicevoxResolutionError
@@ -52,8 +62,11 @@ import { VoicevoxWavError } from "../../voicevox/wav.js";
 export const VOICEVOX_GENERATION_ERROR_CODE = {
   unavailable: "VOICEVOX_UNAVAILABLE",
   lineNotFound: "VOICE_LINE_NOT_FOUND",
-  dependencyRequired: "VOICEVOX_GENERATION_DEPENDENCY_REQUIRED"
+  dependencyRequired: "VOICEVOX_GENERATION_DEPENDENCY_REQUIRED",
+  runLogWriteFailed: "VOICEVOX_RUN_LOG_WRITE_FAILED"
 } as const;
+
+const UNKNOWN_VOICEVOX_ENGINE_VERSION = "unknown";
 
 export type VoicevoxGenerationErrorCode =
   (typeof VOICEVOX_GENERATION_ERROR_CODE)[keyof typeof VOICEVOX_GENERATION_ERROR_CODE];
@@ -108,6 +121,8 @@ export type VoicevoxGenerationServiceOptions = {
   readonly queryCacheFileSystem?: Partial<VoicevoxQueryCacheFileSystem>;
   readonly adjustmentFingerprintProvider?: VoicevoxAdjustmentFingerprintProvider;
   readonly createId?: () => string;
+  readonly now?: () => Date;
+  readonly runLogStore?: RunLogStorePort;
 };
 
 type RuntimeLineState = {
@@ -122,7 +137,21 @@ type JobRecord = {
   readonly projectId: string;
   readonly lineIds: readonly string[];
   status: "queued" | "running" | "succeeded" | "failed";
+  readonly projectRevision: number;
+  readonly inputHash: string;
+  readonly engineVersion: string;
+  readonly targetCount: number;
+  readonly queuedAt: string;
+  startedAt: string | null;
   readonly failedLineIds: Set<string>;
+};
+
+type VoiceRunContext = {
+  readonly projectRevision: number;
+  readonly inputHash: string;
+  readonly engineVersion: string;
+  readonly targetCount: number;
+  readonly queuedAt: string;
 };
 
 class VoicevoxJobRegistry {
@@ -132,13 +161,20 @@ class VoicevoxJobRegistry {
   create(
     projectId: string,
     lineIds: readonly string[],
-    runId: string
+    runId: string,
+    context: VoiceRunContext
   ): JobRecord {
     const job: JobRecord = {
       runId,
       projectId,
       lineIds: [...lineIds],
       status: "queued",
+      projectRevision: context.projectRevision,
+      inputHash: context.inputHash,
+      engineVersion: context.engineVersion,
+      targetCount: context.targetCount,
+      queuedAt: context.queuedAt,
+      startedAt: null,
       failedLineIds: new Set()
     };
     this.jobs.set(runId, job);
@@ -245,6 +281,9 @@ function allLines(project: VideoProject): Array<{
 }
 
 function safeFailureCode(error: unknown): string {
+  if (error instanceof VoicevoxGenerationError) {
+    return error.code;
+  }
   if (error instanceof VoicevoxAdapterError) {
     return error.code;
   }
@@ -264,6 +303,47 @@ function safeFailureCode(error: unknown): string {
     return error.code;
   }
   return "VOICEVOX_GENERATION_FAILED";
+}
+
+function voiceInputHash(inspections: readonly LineInspection[]): string {
+  const input = inspections
+    .map((inspection) => ({
+      lineId: inspection.line.id,
+      cacheKey: inspection.conditions.cacheKey
+    }))
+    .sort((left, right) =>
+      left.lineId === right.lineId
+        ? left.cacheKey.localeCompare(right.cacheKey)
+        : left.lineId.localeCompare(right.lineId)
+    );
+  return createHash("sha256")
+    .update(JSON.stringify(input), "utf8")
+    .digest("hex");
+}
+
+function fallbackVoiceInputHash(
+  projectId: string,
+  lineIds: readonly string[]
+): string {
+  return createHash("sha256")
+    .update(
+      JSON.stringify({
+        projectId,
+        lineIds: [...new Set(lineIds)].sort((left, right) =>
+          left.localeCompare(right)
+        )
+      }),
+      "utf8"
+    )
+    .digest("hex");
+}
+
+function runOutput(entry: VoicevoxAudioIndexEntry) {
+  return {
+    path: entry.audioPath,
+    checksum: entry.audioSha256.toLowerCase(),
+    targetId: entry.lineId
+  };
 }
 
 function isVoicevoxUnavailable(error: unknown): boolean {
@@ -290,6 +370,8 @@ export class VoicevoxGenerationService {
   private readonly audioService: VoicevoxAudioGenerationServicePort;
   private readonly audioStore: VoicevoxGenerationStorePort;
   private readonly createId: () => string;
+  private readonly now: () => Date;
+  private readonly runLogStore: RunLogStorePort | undefined;
   private readonly jobs = new VoicevoxJobRegistry();
 
   constructor(options: VoicevoxGenerationServiceOptions) {
@@ -345,6 +427,12 @@ export class VoicevoxGenerationService {
       });
     }
     this.createId = options.createId ?? randomUUID;
+    this.now = options.now ?? (() => new Date());
+    this.runLogStore =
+      options.runLogStore ??
+      (options.workspaceRoot === undefined
+        ? undefined
+        : new RunLogStore({ workspaceRoot: options.workspaceRoot }));
   }
 
   async generate(
@@ -412,32 +500,75 @@ export class VoicevoxGenerationService {
       );
     }
 
-    const inspections = await this.inspectProject(
-      project,
-      projectLines
-        .filter(({ line }) => requested.has(line.id))
-        .map(({ line }) => line.id)
-    );
-    const targets = inspections.filter(
-      (inspection) =>
-        !inspection.current &&
-        this.jobs.getLineState(projectId, inspection.line.id)?.state !==
-          "generating"
-    );
     const runId = idSchema.parse(this.createId());
-    const job = this.jobs.create(
-      projectId,
-      targets.map((target) => target.line.id),
-      runId
+    const queuedAt = this.now().toISOString();
+    let failureContext: VoiceRunContext = {
+      projectRevision: project.revision,
+      inputHash: fallbackVoiceInputHash(projectId, requestedLineIds),
+      engineVersion: UNKNOWN_VOICEVOX_ENGINE_VERSION,
+      targetCount: requestedLineIds.length,
+      queuedAt
+    };
+    let targetLineIds: string[];
+    await this.persistRunLog(
+      this.buildContextRunLog(runId, projectId, failureContext, "queued", null)
     );
-    void this.runJob(job, targets, projectId).catch(() => {
-      this.jobs.failUnexpected(job, "VOICEVOX_GENERATION_FAILED");
-    });
+
+    try {
+      const queryContext = await this.queryService.resolveContext();
+      failureContext = {
+        ...failureContext,
+        engineVersion: queryContext.voicevoxEngineVersion
+      };
+      const inspections = await this.inspectProject(
+        project,
+        projectLines
+          .filter(({ line }) => requested.has(line.id))
+          .map(({ line }) => line.id),
+        queryContext
+      );
+      const targets = inspections.filter(
+        (inspection) =>
+          !inspection.current &&
+          this.jobs.getLineState(projectId, inspection.line.id)?.state !==
+            "generating"
+      );
+      const context: VoiceRunContext = {
+        projectRevision: project.revision,
+        inputHash: voiceInputHash(inspections),
+        engineVersion: queryContext.voicevoxEngineVersion,
+        targetCount: targets.length,
+        queuedAt
+      };
+      targetLineIds = targets.map((target) => target.line.id);
+      failureContext = context;
+      await this.persistRunLog(
+        this.buildContextRunLog(runId, projectId, context, "queued", null)
+      );
+      const job = this.jobs.create(
+        projectId,
+        targets.map((target) => target.line.id),
+        runId,
+        context
+      );
+      void this.runJob(job, targets, projectId).catch(async () => {
+        this.jobs.failUnexpected(job, "VOICEVOX_GENERATION_FAILED");
+        await this.tryPersistFailure(job);
+      });
+    } catch (error) {
+      await this.tryPersistPreflightFailure(
+        projectId,
+        runId,
+        failureContext,
+        safeFailureCode(error)
+      );
+      throw error;
+    }
 
     return {
       runId,
       status: "queued",
-      lineIds: targets.map((target) => target.line.id)
+      lineIds: targetLineIds
     };
   }
 
@@ -446,7 +577,10 @@ export class VoicevoxGenerationService {
     targets: readonly GenerationTarget[],
     projectId: string
   ): Promise<void> {
+    job.startedAt = this.now().toISOString();
     this.jobs.start(job, targets);
+    await this.persistRunLog(this.buildRunLog(job, "running", null, [], []));
+    const outputs: ReturnType<typeof runOutput>[] = [];
     for (const target of targets) {
       const input: GenerateVoicevoxAudioInput = {
         projectId,
@@ -457,7 +591,17 @@ export class VoicevoxGenerationService {
         lineOrder: target.lineOrder
       };
       try {
-        await this.audioService.generate(input);
+        const generated = await this.audioService.generate(input);
+        const entryResult = voicevoxAudioIndexEntrySchema.safeParse(generated);
+        if (
+          !entryResult.success ||
+          entryResult.data.lineId !== target.line.id
+        ) {
+          throw new Error(
+            "VOICEVOX audio generation returned an invalid entry"
+          );
+        }
+        outputs.push(runOutput(entryResult.data));
         this.jobs.markSucceeded(projectId, target.line.id, job.runId);
       } catch (error) {
         this.jobs.markFailed(
@@ -468,17 +612,39 @@ export class VoicevoxGenerationService {
         );
       }
     }
+    outputs.sort((left, right) =>
+      (left.targetId ?? "").localeCompare(right.targetId ?? "")
+    );
+    const lineFailures = [...job.failedLineIds]
+      .sort((left, right) => left.localeCompare(right))
+      .map((lineId) => ({
+        lineId,
+        errorCode:
+          this.jobs.getLineState(projectId, lineId)?.errorCode ??
+          "VOICEVOX_GENERATION_FAILED"
+      }));
+    const status = lineFailures.length === 0 ? "succeeded" : "failed";
+    await this.persistRunLog(
+      this.buildRunLog(
+        job,
+        status,
+        status === "failed" ? "VOICEVOX_GENERATION_FAILED" : null,
+        outputs,
+        lineFailures
+      )
+    );
     this.jobs.finish(job);
   }
 
   private async inspectProject(
     project: VideoProject,
-    lineIds?: readonly string[]
+    lineIds?: readonly string[],
+    providedContext?: VoicevoxQueryResolutionContext
   ): Promise<LineInspection[]> {
     const index = await this.readIndex(project.metadata.id);
     const speakers = await this.resolveProjectSpeakers(project);
     const queryContext: VoicevoxQueryResolutionContext =
-      await this.queryService.resolveContext();
+      providedContext ?? (await this.queryService.resolveContext());
     const requested = lineIds === undefined ? undefined : new Set(lineIds);
     const inspections: LineInspection[] = [];
 
@@ -525,6 +691,133 @@ export class VoicevoxGenerationService {
       });
     }
     return inspections;
+  }
+
+  private buildRunLog(
+    job: JobRecord,
+    status: "running" | "succeeded" | "failed",
+    errorCode: string | null,
+    outputs: VoiceRunLog["outputs"],
+    lineFailures: VoiceRunLog["lineFailures"]
+  ): VoiceRunLog {
+    return {
+      runId: job.runId,
+      kind: "voice",
+      projectId: job.projectId,
+      projectRevision: job.projectRevision,
+      queuedAt: job.queuedAt,
+      startedAt: job.startedAt,
+      finishedAt: status === "running" ? null : this.now().toISOString(),
+      status,
+      inputHash: job.inputHash,
+      model: null,
+      engine: "VOICEVOX",
+      privacy: {
+        execution: "local",
+        dataCollection: null,
+        zdr: null,
+        providerFallbacks: null
+      },
+      outputs,
+      errorCode,
+      engineVersion: job.engineVersion,
+      targetCount: job.targetCount,
+      generatedCount: outputs.length,
+      noOp: job.targetCount === 0,
+      lineFailures
+    };
+  }
+
+  private buildContextRunLog(
+    runId: string,
+    projectId: string,
+    context: VoiceRunContext,
+    status: "queued" | "failed",
+    errorCode: string | null
+  ): VoiceRunLog {
+    return {
+      runId,
+      kind: "voice",
+      projectId,
+      projectRevision: context.projectRevision,
+      queuedAt: context.queuedAt,
+      startedAt: null,
+      finishedAt: status === "queued" ? null : this.now().toISOString(),
+      status,
+      inputHash: context.inputHash,
+      model: null,
+      engine: "VOICEVOX",
+      privacy: {
+        execution: "local",
+        dataCollection: null,
+        zdr: null,
+        providerFallbacks: null
+      },
+      outputs: [],
+      errorCode,
+      engineVersion: context.engineVersion,
+      targetCount: context.targetCount,
+      generatedCount: 0,
+      noOp: context.targetCount === 0,
+      lineFailures: []
+    };
+  }
+
+  private async tryPersistPreflightFailure(
+    projectId: string,
+    runId: string,
+    context: VoiceRunContext,
+    errorCode: string
+  ): Promise<void> {
+    try {
+      await this.persistRunLog(
+        this.buildContextRunLog(runId, projectId, context, "failed", errorCode)
+      );
+    } catch {
+      // Preserve the original preflight error when terminal persistence fails.
+    }
+  }
+
+  private async persistRunLog(runLog: VoiceRunLog): Promise<void> {
+    if (this.runLogStore === undefined) {
+      return;
+    }
+    try {
+      await this.runLogStore.write(runLog.projectId, runLog);
+    } catch (error) {
+      if (error instanceof RunLogStoreError) {
+        throw new VoicevoxGenerationError(
+          VOICEVOX_GENERATION_ERROR_CODE.runLogWriteFailed,
+          500,
+          "The VOICEVOX run log could not be written."
+        );
+      }
+      throw error;
+    }
+  }
+
+  private async tryPersistFailure(job: JobRecord): Promise<void> {
+    const lineFailures = [...job.failedLineIds]
+      .sort((left, right) => left.localeCompare(right))
+      .map((lineId) => ({
+        lineId,
+        errorCode:
+          this.jobs.getLineState(job.projectId, lineId)?.errorCode ??
+          "VOICEVOX_GENERATION_FAILED"
+      }));
+    try {
+      await this.persistRunLog(
+        this.buildRunLog(
+          job,
+          "failed",
+          "VOICEVOX_GENERATION_FAILED",
+          [],
+          lineFailures
+        )
+      );
+    } catch {
+      // The job remains failed in memory when terminal persistence fails.
+    }
   }
 
   private async readIndex(projectId: string) {

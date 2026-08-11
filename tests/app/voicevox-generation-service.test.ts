@@ -8,6 +8,8 @@ import { resolveSpokenText } from "../../src/app/terminology/spoken-text-resolve
 import { VoicevoxAudioStore } from "../../src/app/voicevox/audio-store.js";
 import { VoicevoxGenerationService } from "../../src/app/voicevox/generation-service.js";
 import { VoicevoxQueryService } from "../../src/app/voicevox/query-service.js";
+import { runLogSchema } from "../../src/schema/index.js";
+import { VoicevoxAdapterError } from "../../src/voicevox/errors.js";
 import {
   createVoicevoxSpeakersFixture,
   createVoicevoxAudioQueryFixture,
@@ -40,6 +42,7 @@ async function waitForJob(
 async function createHarness(
   options: {
     readonly adjustmentChecksums?: Map<string, string>;
+    readonly persistLogs?: boolean;
   } = {}
 ) {
   const workspaceRoot = await fs.mkdtemp(
@@ -86,6 +89,7 @@ async function createHarness(
     client,
     queryService,
     audioStore,
+    workspaceRoot: options.persistLogs ? workspaceRoot : undefined,
     createId: () => {
       nextRunId += 1;
       return `voice-run-${nextRunId}`;
@@ -111,6 +115,103 @@ afterEach(async () => {
 });
 
 describe("VoicevoxGenerationService", () => {
+  it("persists a failed run when VOICEVOX context resolution fails", async () => {
+    const harness = await createHarness({ persistLogs: true });
+    harness.client.getVersion.mockRejectedValueOnce(
+      new VoicevoxAdapterError("VOICEVOX_CONNECTION_FAILED")
+    );
+
+    await expect(harness.service.generateAll(projectId)).rejects.toMatchObject({
+      code: "VOICEVOX_CONNECTION_FAILED"
+    });
+
+    const raw = await fs.readFile(
+      path.join(
+        harness.workspaceRoot,
+        "projects",
+        projectId,
+        "runs",
+        "voice-run-1.json"
+      ),
+      "utf8"
+    );
+    const run = runLogSchema.parse(JSON.parse(raw));
+    expect(run).toMatchObject({
+      kind: "voice",
+      status: "failed",
+      startedAt: null,
+      engine: "VOICEVOX",
+      engineVersion: "unknown",
+      errorCode: "VOICEVOX_CONNECTION_FAILED",
+      outputs: []
+    });
+    expect(run.inputHash).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it("persists a common run with deterministic multi-WAV outputs and no spoken text", async () => {
+    const harness = await createHarness({ persistLogs: true });
+    const accepted = await harness.service.generateAll(projectId);
+    await expect(waitForJob(harness.service, accepted.runId)).resolves.toBe(
+      "succeeded"
+    );
+
+    const raw = await fs.readFile(
+      path.join(
+        harness.workspaceRoot,
+        "projects",
+        projectId,
+        "runs",
+        `${accepted.runId}.json`
+      ),
+      "utf8"
+    );
+    const run = runLogSchema.parse(JSON.parse(raw));
+    expect(run).toMatchObject({
+      kind: "voice",
+      status: "succeeded",
+      projectRevision: videoProjectFixture.revision,
+      engine: "VOICEVOX",
+      engineVersion: "engine-fixture-1",
+      targetCount: accepted.lineIds.length,
+      generatedCount: accepted.lineIds.length,
+      noOp: false
+    });
+    expect(run.outputs).toHaveLength(accepted.lineIds.length);
+    expect(raw).not.toContain(
+      videoProjectFixture.script.sections[0]!.lines[0]!.spokenText
+    );
+    expect(raw).not.toContain("Error");
+  });
+
+  it("records an all-current no-op as a terminal run", async () => {
+    const harness = await createHarness({ persistLogs: true });
+    const first = await harness.service.generateAll(projectId);
+    await waitForJob(harness.service, first.runId);
+    const accepted = await harness.service.generateAll(projectId);
+    await expect(waitForJob(harness.service, accepted.runId)).resolves.toBe(
+      "succeeded"
+    );
+
+    const raw = await fs.readFile(
+      path.join(
+        harness.workspaceRoot,
+        "projects",
+        projectId,
+        "runs",
+        `${accepted.runId}.json`
+      ),
+      "utf8"
+    );
+    expect(runLogSchema.parse(JSON.parse(raw))).toMatchObject({
+      kind: "voice",
+      status: "succeeded",
+      targetCount: 0,
+      generatedCount: 0,
+      noOp: true,
+      outputs: []
+    });
+  });
+
   it("reports current lines without calling audio_query or synthesis", async () => {
     const harness = await createHarness();
     const accepted = await harness.service.generateAll(projectId);

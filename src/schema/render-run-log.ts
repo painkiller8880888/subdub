@@ -1,6 +1,12 @@
 import { z } from "zod";
 
 import {
+  legacyRenderRunLogSchema,
+  runLogSchema,
+  type LegacyRenderRunLog,
+  type RunLog
+} from "./run-log.js";
+import {
   idSchema,
   isoUtcDateTimeSchema,
   relativePosixPathSchema,
@@ -57,17 +63,111 @@ export const renderRunLogFailedSchema = strictObject({
   errorCode: z.string().min(1)
 });
 
-export const renderRunLogSchema = z.discriminatedUnion("status", [
-  renderRunLogQueuedSchema,
-  renderRunLogRunningSchema,
-  renderRunLogSucceededSchema,
-  renderRunLogFailedSchema
-]);
-
-export type RenderJobKind = z.infer<typeof renderJobKindSchema>;
-export type RenderRunStatus = z.infer<typeof renderRunStatusSchema>;
 export type RenderRunLogQueued = z.infer<typeof renderRunLogQueuedSchema>;
 export type RenderRunLogRunning = z.infer<typeof renderRunLogRunningSchema>;
 export type RenderRunLogSucceeded = z.infer<typeof renderRunLogSucceededSchema>;
 export type RenderRunLogFailed = z.infer<typeof renderRunLogFailedSchema>;
+
+function publicOutputPath(path: string, projectId: string): string {
+  const projectPrefix = `projects/${projectId}/`;
+  return path.startsWith(projectPrefix)
+    ? path.slice(projectPrefix.length)
+    : path;
+}
+
+function toCompatibilityView(
+  value: LegacyRenderRunLog | RunLog
+):
+  | RenderRunLogQueued
+  | RenderRunLogRunning
+  | RenderRunLogSucceeded
+  | RenderRunLogFailed {
+  if (value.kind !== "render") {
+    return value as never;
+  }
+
+  if (value.status === "succeeded") {
+    if (value.startedAt === null || value.finishedAt === null) {
+      throw new Error("succeeded render run is missing timestamps");
+    }
+    const output = value.outputs.find(
+      (candidate) => candidate.path !== undefined
+    );
+    if (output?.path === undefined || output.checksum === undefined) {
+      throw new Error("succeeded render run is missing its output artifact");
+    }
+    return {
+      runId: value.runId,
+      projectId: value.projectId,
+      kind: value.renderKind,
+      projectRevision: value.projectRevision,
+      queuedAt: value.queuedAt,
+      status: value.status,
+      startedAt: value.startedAt,
+      completedAt: value.finishedAt,
+      outputPath: publicOutputPath(output.path, value.projectId),
+      outputChecksum: output.checksum
+    };
+  }
+
+  if (value.status === "failed") {
+    if (value.finishedAt === null || value.errorCode === null) {
+      throw new Error("failed render run is missing terminal fields");
+    }
+    return {
+      runId: value.runId,
+      projectId: value.projectId,
+      kind: value.renderKind,
+      projectRevision: value.projectRevision,
+      queuedAt: value.queuedAt,
+      status: value.status,
+      startedAt: value.startedAt,
+      completedAt: value.finishedAt,
+      errorCode: value.errorCode
+    };
+  }
+
+  return {
+    runId: value.runId,
+    projectId: value.projectId,
+    kind: value.renderKind,
+    projectRevision: value.projectRevision,
+    queuedAt: value.queuedAt,
+    status: value.status,
+    startedAt: value.startedAt,
+    completedAt: null
+  } as RenderRunLogQueued | RenderRunLogRunning;
+}
+
+const compatibleInputSchema = z
+  .union([legacyRenderRunLogSchema, runLogSchema])
+  .superRefine((value, ctx) => {
+    const isLegacyRender =
+      "kind" in value && (value.kind === "mp4" || value.kind === "thumbnail");
+    const isCommonRender = value.kind === "render";
+    if (!isLegacyRender && !isCommonRender) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["kind"],
+        message: "expected a render run log"
+      });
+    }
+  });
+
+/**
+ * Compatibility reader for the public/API render contract. The persisted
+ * representation is the common run-log contract; old files remain readable.
+ */
+export const renderRunLogSchema = compatibleInputSchema.transform((value) => {
+  if (value.kind === "render") {
+    return toCompatibilityView(value);
+  }
+  if (value.kind === "mp4" || value.kind === "thumbnail") {
+    return value;
+  }
+  throw new Error("expected a render run log");
+});
+
+export type RenderJobKind = z.infer<typeof renderJobKindSchema>;
+export type RenderRunStatus = z.infer<typeof renderRunStatusSchema>;
 export type RenderRunLog = z.infer<typeof renderRunLogSchema>;

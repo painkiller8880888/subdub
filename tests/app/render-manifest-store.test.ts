@@ -1,8 +1,9 @@
+import { createHash } from "node:crypto";
 import { promises as fs } from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 
-import { describe, expect, it, afterEach } from "vitest";
+import { describe, expect, it, afterEach, vi } from "vitest";
 
 import { type RenderManifestAssetMetadata } from "../../src/app/rendering/render-manifest-compiler.js";
 import {
@@ -11,7 +12,7 @@ import {
   RenderManifestStoreError
 } from "../../src/app/rendering/render-manifest-store.js";
 import type { VoicevoxAudioIndex } from "../../src/app/voicevox/audio-index.js";
-import type { VideoProject } from "../../src/schema/index.js";
+import { runLogSchema, type VideoProject } from "../../src/schema/index.js";
 import { renderManifestFixture } from "../fixtures/render-manifest.js";
 import { createRenderManifestInput } from "../fixtures/render-manifest-input.js";
 
@@ -181,6 +182,88 @@ describe("RenderManifestStore", () => {
         characterMappingVersion: "1.0.1"
       })
     ).resolves.toMatchObject({ status: "compiled", reused: false });
+  });
+
+  it("records compiled and reused results as manifest runs with the serialized artifact checksum", async () => {
+    const root = await createRoot();
+    let nextRunId = 0;
+    const store = new RenderManifestStore({
+      workspaceRoot: root,
+      createRunId: () => `manifest-run-${++nextRunId}`,
+      now: () => new Date("2026-08-11T00:00:00.000Z")
+    });
+    const input = cacheInput();
+
+    const compiled = await store.compileAndStore(projectId, input);
+    expect(compiled.status).toBe("compiled");
+    const reused = await store.compileAndStore(projectId, input);
+    expect(reused.status).toBe("reused");
+
+    const raw = JSON.parse(
+      await fs.readFile(
+        path.join(root, "projects", projectId, "runs", `${reused.runId}.json`),
+        "utf8"
+      )
+    ) as unknown;
+    const run = runLogSchema.parse(raw);
+    expect(run).toMatchObject({
+      kind: "manifest",
+      status: "succeeded",
+      reused: true,
+      inputHash: expect.stringMatching(/^[0-9a-f]{64}$/),
+      outputs: [
+        {
+          path: `projects/${projectId}/cache/render-manifest.json`,
+          checksum: expect.stringMatching(/^[0-9a-f]{64}$/)
+        }
+      ]
+    });
+    const serialized = `${JSON.stringify(reused.manifest, null, 2)}\n`;
+    expect(run.outputs[0]?.checksum).toBe(
+      createHash("sha256").update(serialized, "utf8").digest("hex")
+    );
+  });
+
+  it("records running before compilation and failed when the compiler throws", async () => {
+    const root = await createRoot();
+    const writes: unknown[] = [];
+    const compile = vi.fn(() => {
+      expect(writes).toHaveLength(1);
+      expect(writes[0]).toMatchObject({ status: "running" });
+      throw new Error("compiler sentinel");
+    });
+    const store = new RenderManifestStore({
+      workspaceRoot: root,
+      createRunId: () => "compiler-throws-run",
+      compile,
+      runLogStore: {
+        read: async () => {
+          throw new Error("read is not used");
+        },
+        write: async (_projectId, runLog) => {
+          writes.push(runLog);
+        }
+      }
+    });
+
+    await expect(
+      store.compileAndStore(projectId, cacheInput())
+    ).rejects.toThrow("compiler sentinel");
+    expect(compile).toHaveBeenCalledOnce();
+    expect(writes).toHaveLength(2);
+    expect(writes[0]).toMatchObject({
+      status: "running",
+      startedAt: expect.any(String),
+      finishedAt: null,
+      outputs: []
+    });
+    expect(writes[1]).toMatchObject({
+      status: "failed",
+      startedAt: expect.any(String),
+      finishedAt: expect.any(String),
+      errorCode: "RENDER_MANIFEST_COMPILE_FAILED",
+      outputs: []
+    });
   });
 
   it("treats malformed, 2.0.0, and 1.0.0 caches as misses", async () => {

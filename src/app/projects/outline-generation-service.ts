@@ -6,7 +6,7 @@ import {
   outlineGenerationJsonSchema,
   outlineSchema,
   videoProjectSchema,
-  type AiRunLog,
+  type CommonAiRunLog,
   type Outline,
   type VideoProject
 } from "../../schema/index.js";
@@ -48,7 +48,11 @@ type RunState = {
   inputHash: string;
   startedAt: string;
   modelId: string | null;
-  modelSelectionSource: AiRunLog["modelSelectionSource"];
+  modelSelectionSource:
+    | "run_override"
+    | "task_override"
+    | "default"
+    | null;
   zdr: boolean;
   dataCollection: "deny";
   providerFallbacks: true;
@@ -59,8 +63,9 @@ type RunState = {
   promptTokens: number | null;
   completionTokens: number | null;
   totalTokens: number | null;
-  schemaValidation: AiRunLog["schemaValidation"];
+  schemaValidation: CommonAiRunLog["schemaValidation"];
   outputChecksum: string | null;
+  costCredits: number | null;
 };
 
 function sha256(value: string): string {
@@ -252,7 +257,8 @@ function responseDetails(result: OutlineChatResult): Partial<RunState> {
     httpAttemptCount: result.attempts,
     promptTokens: result.usage.promptTokens,
     completionTokens: result.usage.completionTokens,
-    totalTokens: result.usage.totalTokens
+    totalTokens: result.usage.totalTokens,
+    costCredits: result.usage.costCredits ?? null
   };
 }
 
@@ -305,7 +311,8 @@ export class OutlineGenerationService {
       completionTokens: null,
       totalTokens: null,
       schemaValidation: "not_run",
-      outputChecksum: null
+      outputChecksum: null,
+      costCredits: null
     };
 
     let runStarted = false;
@@ -479,21 +486,35 @@ export class OutlineGenerationService {
   private async writeRunLog(
     project: VideoProject,
     run: RunState,
-    status: AiRunLog["status"],
+    status: "running" | "succeeded" | "failed",
     failureCode: string | null
   ): Promise<void> {
     const completedAt = this.now().toISOString();
-    const runLog: AiRunLog = {
+    const runLog: CommonAiRunLog = {
       runId: run.runId,
       kind: "ai",
       taskKind: "outline_generation",
       projectId: project.metadata.id,
-      startRevision: run.startRevision,
+      projectRevision: run.startRevision,
+      queuedAt: run.startedAt,
+      startedAt: run.startedAt,
+      finishedAt: status === "running" ? null : completedAt,
+      status,
       sourceHash: run.sourceHash,
       inputHash: run.inputHash,
-      startedAt: run.startedAt,
-      completedAt: status === "running" ? null : completedAt,
-      status,
+      model: run.modelId ?? run.responseModel,
+      engine: null,
+      privacy: {
+        execution: "external",
+        dataCollection: run.dataCollection,
+        zdr: run.zdr,
+        providerFallbacks: run.providerFallbacks
+      },
+      outputs:
+        status === "succeeded" && run.outputChecksum !== null
+          ? [{ checksum: run.outputChecksum }]
+          : [],
+      errorCode: failureCode,
       modelId: run.modelId,
       modelSelectionSource: run.modelSelectionSource,
       responseModel: run.responseModel,
@@ -506,9 +527,8 @@ export class OutlineGenerationService {
       promptTokens: run.promptTokens,
       completionTokens: run.completionTokens,
       totalTokens: run.totalTokens,
+      costCredits: run.costCredits,
       schemaValidation: run.schemaValidation,
-      outputChecksum: status === "succeeded" ? run.outputChecksum : null,
-      errorCode: failureCode,
       imageInput: false,
       tools: false
     };

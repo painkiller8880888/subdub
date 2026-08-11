@@ -1,39 +1,73 @@
 import { z } from "zod";
 
-import { isoUtcDateTimeSchema } from "./primitives.js";
-import { sha256Schema, strictObject } from "./primitives.js";
-import { aiTaskKindSchema } from "./video-project.js";
+import {
+  legacyAiRunLogSchema,
+  runLogSchema,
+  type LegacyAiRunLog,
+  type RunLog
+} from "./run-log.js";
 
-export const aiRunLogSchema = strictObject({
-  runId: z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/),
-  kind: z.literal("ai"),
-  taskKind: aiTaskKindSchema,
-  projectId: z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/),
-  startRevision: z.number().int().nonnegative(),
-  sourceHash: sha256Schema,
-  inputHash: sha256Schema,
-  startedAt: isoUtcDateTimeSchema,
-  completedAt: isoUtcDateTimeSchema.nullable(),
-  status: z.enum(["running", "succeeded", "failed"]),
-  modelId: z.string().min(1).nullable(),
-  modelSelectionSource: z
-    .enum(["run_override", "task_override", "default"])
-    .nullable(),
-  responseModel: z.string().min(1).nullable(),
-  provider: z.string().min(1).nullable(),
-  zdr: z.boolean(),
-  dataCollection: z.literal("deny"),
-  providerFallbacks: z.literal(true),
-  responseTimeMs: z.number().int().nonnegative().nullable(),
-  httpAttemptCount: z.number().int().nonnegative(),
-  promptTokens: z.number().int().nonnegative().nullable(),
-  completionTokens: z.number().int().nonnegative().nullable(),
-  totalTokens: z.number().int().nonnegative().nullable(),
-  schemaValidation: z.enum(["passed", "failed", "not_run"]),
-  outputChecksum: sha256Schema.nullable(),
-  errorCode: z.string().min(1).nullable(),
-  imageInput: z.literal(false),
-  tools: z.literal(false)
-});
+/**
+ * Compatibility view for callers that still use the pre-P6-01 AI shape.
+ * New files are validated and written using runLogSchema; this parser also
+ * accepts those files so existing readers do not break during the transition.
+ */
+const compatibleInputSchema = z
+  .union([legacyAiRunLogSchema, runLogSchema])
+  .superRefine((value, ctx) => {
+    if (value.kind !== "ai") {
+      ctx.addIssue({
+        code: "custom",
+        path: ["kind"],
+        message: "expected an AI run log"
+      });
+    }
+  });
+
+function toCompatibilityView(value: LegacyAiRunLog | RunLog) {
+  if (value.kind === "ai" && "projectRevision" in value) {
+    return {
+      runId: value.runId,
+      kind: "ai" as const,
+      taskKind: value.taskKind,
+      projectId: value.projectId,
+      startRevision: value.projectRevision,
+      sourceHash: value.sourceHash,
+      inputHash: value.inputHash,
+      startedAt: value.startedAt,
+      completedAt: value.finishedAt,
+      status: value.status,
+      modelId: value.modelId,
+      modelSelectionSource: value.modelSelectionSource,
+      responseModel: value.responseModel,
+      provider: value.provider,
+      zdr: value.zdr,
+      dataCollection: value.dataCollection,
+      providerFallbacks: value.providerFallbacks,
+      responseTimeMs: value.responseTimeMs,
+      httpAttemptCount: value.httpAttemptCount,
+      promptTokens: value.promptTokens,
+      completionTokens: value.completionTokens,
+      totalTokens: value.totalTokens,
+      costCredits: value.costCredits,
+      schemaValidation: value.schemaValidation,
+      outputChecksum:
+        value.outputs.find((output) => output.checksum !== undefined)
+          ?.checksum ?? null,
+      errorCode: value.errorCode,
+      imageInput: value.imageInput,
+      tools: value.tools
+    };
+  }
+
+  if (value.kind === "ai") {
+    return value;
+  }
+
+  throw new Error("expected an AI run log");
+}
+
+export const aiRunLogSchema =
+  compatibleInputSchema.transform(toCompatibilityView);
 
 export type AiRunLog = z.infer<typeof aiRunLogSchema>;

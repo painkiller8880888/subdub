@@ -5,6 +5,7 @@ export * from "./common.js";
 export * from "./primitives.js";
 export * from "./render-manifest.js";
 export * from "./render-run-log.js";
+export * from "./run-log.js";
 export * from "./outline-generation.js";
 export * from "./video-project.js";
 export * from "./terminology.js";

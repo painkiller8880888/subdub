@@ -3,7 +3,6 @@ import { promises as fs, type Dirent } from "node:fs";
 import * as path from "node:path";
 
 import {
-  aiRunLogSchema,
   idSchema,
   nonNegativeIntegerSchema,
   projectBriefSchema,
@@ -12,6 +11,11 @@ import {
   videoProjectSchema,
   type VideoProject
 } from "../../schema/index.js";
+import {
+  RunLogStore,
+  RunLogStoreError,
+  type RunLogStorePort
+} from "../run-log-store.js";
 import { invalidateForUpstreamChange } from "./project-invalidation.js";
 
 export type ProjectRepositoryErrorCode =
@@ -103,6 +107,7 @@ export type ProjectRepositoryOptions = {
   workspaceRoot: string;
   fileSystem?: Partial<ProjectRepositoryFileSystem>;
   now?: () => Date;
+  runLogStore?: RunLogStorePort;
 };
 
 export type ProjectRepositoryLockedOperations = {
@@ -365,7 +370,7 @@ function runLogInvalidError(): ProjectRepositoryError {
   return new ProjectRepositoryError(
     "PROJECT_RUN_LOG_INVALID",
     500,
-    "The AI run log is invalid."
+    "The run log is invalid."
   );
 }
 
@@ -373,7 +378,7 @@ function runLogWriteFailedError(): ProjectRepositoryError {
   return new ProjectRepositoryError(
     "PROJECT_RUN_LOG_WRITE_FAILED",
     500,
-    "The AI run log could not be written."
+    "The run log could not be written."
   );
 }
 
@@ -409,12 +414,17 @@ export class ProjectRepository {
   private readonly workspaceRoot: string;
   private readonly fileSystem: ProjectRepositoryFileSystem;
   private readonly now: () => Date;
+  private readonly runLogStore: RunLogStorePort;
 
   constructor(options: ProjectRepositoryOptions | string) {
     if (typeof options === "string") {
       this.workspaceRoot = path.resolve(options);
       this.fileSystem = defaultFileSystem;
       this.now = () => new Date();
+      this.runLogStore = new RunLogStore({
+        workspaceRoot: this.workspaceRoot,
+        fileSystem: this.fileSystem
+      });
       return;
     }
 
@@ -424,6 +434,12 @@ export class ProjectRepository {
       ...options.fileSystem
     };
     this.now = options.now ?? (() => new Date());
+    this.runLogStore =
+      options.runLogStore ??
+      new RunLogStore({
+        workspaceRoot: this.workspaceRoot,
+        fileSystem: this.fileSystem
+      });
   }
 
   private async readUnlocked(projectId: string): Promise<VideoProject> {
@@ -673,34 +689,15 @@ export class ProjectRepository {
     if (!safeRunIdResult.success) {
       throw runLogInvalidError();
     }
-    const runLogResult = aiRunLogSchema.safeParse(runLog);
-    if (!runLogResult.success) {
-      throw runLogInvalidError();
-    }
-    if (
-      runLogResult.data.projectId !== safeProjectId ||
-      runLogResult.data.runId !== safeRunIdResult.data
-    ) {
-      throw runLogInvalidError();
-    }
-
-    const paths = await this.resolveProjectPaths(safeProjectId);
-    const runsDirectoryPath = path.join(paths.projectDirectoryPath, "runs");
-    const runFilePath = path.join(runsDirectoryPath, `${safeRunIdResult.data}.json`);
-    const temporaryFilePath = path.join(
-      runsDirectoryPath,
-      `${safeRunIdResult.data}.${randomUUID()}.tmp`
-    );
-
     try {
-      await this.fileSystem.mkdir(runsDirectoryPath, { recursive: true });
-      await this.fileSystem.writeFile(
-        temporaryFilePath,
-        `${JSON.stringify(runLogResult.data, null, 2)}\n`
-      );
-      await this.fileSystem.rename(temporaryFilePath, runFilePath);
-    } catch {
-      await this.removeTemporaryFile(temporaryFilePath);
+      await this.runLogStore.write(safeProjectId, runLog, safeRunIdResult.data);
+    } catch (error) {
+      if (
+        error instanceof RunLogStoreError &&
+        error.code === "RUN_LOG_INVALID"
+      ) {
+        throw runLogInvalidError();
+      }
       throw runLogWriteFailedError();
     }
   }

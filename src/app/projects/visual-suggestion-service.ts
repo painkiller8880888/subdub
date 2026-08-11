@@ -7,7 +7,7 @@ import {
   visualSearchIntentSchema,
   visualSuggestionRequestSchema,
   visualSuggestionResultSchema,
-  type AiRunLog,
+  type CommonAiRunLog,
   type AssetTagAxis,
   type VisualSearchIntent,
   type VisualSuggestionResult,
@@ -79,7 +79,11 @@ type RunState = {
   readonly inputHash: string;
   readonly startedAt: string;
   modelId: string | null;
-  modelSelectionSource: AiRunLog["modelSelectionSource"];
+  modelSelectionSource:
+    | "run_override"
+    | "task_override"
+    | "default"
+    | null;
   readonly zdr: boolean;
   readonly dataCollection: "deny";
   readonly providerFallbacks: true;
@@ -90,8 +94,9 @@ type RunState = {
   promptTokens: number | null;
   completionTokens: number | null;
   totalTokens: number | null;
-  schemaValidation: AiRunLog["schemaValidation"];
+  schemaValidation: CommonAiRunLog["schemaValidation"];
   outputChecksum: string | null;
+  costCredits: number | null;
 };
 
 type ResolvedTag = VisualSuggestionResult["resolvedSearch"]["requiredTags"][number];
@@ -175,7 +180,8 @@ function responseDetails(result: OutlineChatResult): Partial<RunState> {
     httpAttemptCount: result.attempts,
     promptTokens: result.usage.promptTokens,
     completionTokens: result.usage.completionTokens,
-    totalTokens: result.usage.totalTokens
+    totalTokens: result.usage.totalTokens,
+    costCredits: result.usage.costCredits ?? null
   };
 }
 
@@ -382,7 +388,8 @@ function buildRunState(
     completionTokens: null,
     totalTokens: null,
     schemaValidation: "not_run",
-    outputChecksum: null
+    outputChecksum: null,
+    costCredits: null
   };
 }
 
@@ -638,20 +645,34 @@ export class VisualSuggestionService {
   private async writeRunLog(
     project: VideoProject,
     run: RunState,
-    status: AiRunLog["status"],
+    status: "running" | "succeeded" | "failed",
     failureCode: string | null
   ): Promise<void> {
-    const runLog: AiRunLog = {
+    const runLog: CommonAiRunLog = {
       runId: run.runId,
       kind: "ai",
       taskKind: "visual_search_intent",
       projectId: project.metadata.id,
-      startRevision: run.startRevision,
+      projectRevision: run.startRevision,
+      queuedAt: run.startedAt,
+      startedAt: run.startedAt,
+      finishedAt: status === "running" ? null : this.now().toISOString(),
+      status,
       sourceHash: run.sourceHash,
       inputHash: run.inputHash,
-      startedAt: run.startedAt,
-      completedAt: status === "running" ? null : this.now().toISOString(),
-      status,
+      model: run.modelId ?? run.responseModel,
+      engine: null,
+      privacy: {
+        execution: "external",
+        dataCollection: run.dataCollection,
+        zdr: run.zdr,
+        providerFallbacks: run.providerFallbacks
+      },
+      outputs:
+        status === "succeeded" && run.outputChecksum !== null
+          ? [{ checksum: run.outputChecksum }]
+          : [],
+      errorCode: failureCode,
       modelId: run.modelId,
       modelSelectionSource: run.modelSelectionSource,
       responseModel: run.responseModel,
@@ -664,9 +685,8 @@ export class VisualSuggestionService {
       promptTokens: run.promptTokens,
       completionTokens: run.completionTokens,
       totalTokens: run.totalTokens,
+      costCredits: run.costCredits,
       schemaValidation: run.schemaValidation,
-      outputChecksum: status === "succeeded" ? run.outputChecksum : null,
-      errorCode: failureCode,
       imageInput: false,
       tools: false
     };

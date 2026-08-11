@@ -16,7 +16,7 @@ const request = {
   allowProviderFallbacks: true as const
 };
 
-function successResponse() {
+function successResponse(cost?: unknown) {
   return new Response(
     JSON.stringify({
       model: "provider/model",
@@ -26,7 +26,12 @@ function successResponse() {
           message: { content: '{"sections":[],"openQuestions":[]}' }
         }
       ],
-      usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
+      usage: {
+        prompt_tokens: 10,
+        completion_tokens: 5,
+        total_tokens: 15,
+        ...(cost === undefined ? {} : { cost })
+      },
       openrouter_metadata: {
         endpoints: { available: [{ provider: "Provider A", selected: true }] }
       }
@@ -145,6 +150,25 @@ describe("OpenRouterChatAdapter", () => {
     await expect(unauthorized.complete(request)).rejects.toBeInstanceOf(
       OpenRouterAdapterError
     );
+  });
+
+  it("returns OpenRouter usage.cost without estimating missing or invalid prices", async () => {
+    const costs: unknown[] = ["0.125", undefined, "not-a-cost"];
+    const fetch = vi.fn(async () => successResponse(costs.shift()));
+    const adapter = new OpenRouterChatAdapter({
+      apiKey: "fixture-key",
+      fetch: fetch as unknown as typeof globalThis.fetch
+    });
+
+    await expect(adapter.complete(request)).resolves.toMatchObject({
+      usage: { costCredits: 0.125 }
+    });
+    await expect(adapter.complete(request)).resolves.toMatchObject({
+      usage: { costCredits: null }
+    });
+    await expect(adapter.complete(request)).resolves.toMatchObject({
+      usage: { costCredits: null }
+    });
   });
 
   it.each([

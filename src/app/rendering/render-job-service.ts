@@ -8,11 +8,14 @@ import {
   type RenderJobKind,
   type RenderRunLog
 } from "../../schema/index.js";
+import { RunLogStore, RunLogStoreError } from "../run-log-store.js";
 import type { ManifestPreviewService } from "./manifest-preview-service.js";
 import { RENDER_JOB_ERROR_CODE, RenderJobError } from "./render-job-errors.js";
 import {
   RenderJobWorker,
+  computeRenderInputHash,
   type RenderJobQueueItem,
+  type RenderRunLogPersistencePort,
   type RenderJobWorkerPort
 } from "./render-job-worker.js";
 import {
@@ -23,10 +26,6 @@ import {
   RenderOutputStore,
   type RenderOutputStorePort
 } from "./render-output-store.js";
-import {
-  RenderRunLogStore,
-  type RenderRunLogStorePort
-} from "./render-run-log-store.js";
 import {
   createLazyMp4Renderer,
   createLazyThumbnailRenderer,
@@ -40,7 +39,7 @@ export type RenderJobServiceOptions = {
   readonly projectRepository: Pick<ProjectRepository, "read">;
   readonly manifestPreviewService?: Pick<ManifestPreviewService, "get">;
   readonly preflight?: RenderPreflightServicePort;
-  readonly runLogStore?: RenderRunLogStorePort;
+  readonly runLogStore?: RenderRunLogPersistencePort;
   readonly outputStore?: RenderOutputStorePort;
   readonly mp4Renderer?: Mp4RendererPort;
   readonly thumbnailRenderer?: ThumbnailRendererPort;
@@ -85,9 +84,40 @@ function isoNow(now: () => Date): string {
   return now().toISOString();
 }
 
+function failedPreflightCode(error: unknown): string {
+  return error instanceof RenderJobError
+    ? error.code
+    : RENDER_JOB_ERROR_CODE.enqueueFailed;
+}
+
+function normalizeRunLogStoreError(error: unknown): RenderJobError | undefined {
+  if (!(error instanceof RunLogStoreError)) {
+    return undefined;
+  }
+  if (error.code === "RUN_LOG_NOT_FOUND") {
+    return new RenderJobError(
+      RENDER_JOB_ERROR_CODE.runNotFound,
+      404,
+      "The render run does not exist."
+    );
+  }
+  if (error.code === "RUN_LOG_WRITE_FAILED") {
+    return new RenderJobError(
+      RENDER_JOB_ERROR_CODE.runLogWriteFailed,
+      500,
+      "The render run log could not be written."
+    );
+  }
+  return new RenderJobError(
+    RENDER_JOB_ERROR_CODE.runLogReadFailed,
+    500,
+    "The render run log could not be read."
+  );
+}
+
 export class RenderJobService {
   private readonly projectRepository: Pick<ProjectRepository, "read">;
-  private readonly runLogStore: RenderRunLogStorePort;
+  private readonly runLogStore: RenderRunLogPersistencePort;
   private readonly preflight: RenderPreflightServicePort;
   private readonly worker: RenderJobWorkerPort;
   private readonly createId: () => string;
@@ -97,7 +127,7 @@ export class RenderJobService {
     this.projectRepository = options.projectRepository;
     this.runLogStore =
       options.runLogStore ??
-      new RenderRunLogStore({ workspaceRoot: options.workspaceRoot });
+      new RunLogStore({ workspaceRoot: options.workspaceRoot });
     this.createId = options.createId ?? randomUUID;
     this.now = options.now ?? (() => new Date());
 
@@ -157,7 +187,21 @@ export class RenderJobService {
     const safeProject = safeProjectId(projectId);
     const safeRun = safeRunId(runId);
     await this.projectRepository.read(safeProject);
-    return this.runLogStore.read(safeProject, safeRun);
+    let rawLog: unknown;
+    try {
+      rawLog = await this.runLogStore.read(safeProject, safeRun);
+    } catch (error) {
+      throw normalizeRunLogStoreError(error) ?? error;
+    }
+    const parsed = renderRunLogSchema.safeParse(rawLog);
+    if (!parsed.success) {
+      throw new RenderJobError(
+        RENDER_JOB_ERROR_CODE.runLogReadFailed,
+        500,
+        "The render run log is invalid."
+      );
+    }
+    return parsed.data;
   }
 
   private async enqueue(
@@ -166,7 +210,7 @@ export class RenderJobService {
   ): Promise<RenderAcceptedData> {
     const safeProject = safeProjectId(projectId);
     const parsedKind = renderJobKindSchema.parse(kind);
-    const preflight = await this.preflight.validate(safeProject);
+    const project = await this.projectRepository.read(safeProject);
     const runIdResult = idSchema.safeParse(this.createId());
     if (!runIdResult.success) {
       throw new RenderJobError(
@@ -176,27 +220,83 @@ export class RenderJobService {
       );
     }
     const runId = runIdResult.data;
-    const queued = renderRunLogSchema.parse({
+
+    let preflight: Awaited<ReturnType<RenderPreflightServicePort["validate"]>>;
+    try {
+      preflight = await this.preflight.validate(safeProject);
+    } catch (error) {
+      const failed = {
+        runId,
+        projectId: safeProject,
+        kind: "render" as const,
+        renderKind: parsedKind,
+        projectRevision: project.revision,
+        queuedAt: isoNow(this.now),
+        startedAt: null,
+        finishedAt: isoNow(this.now),
+        status: "failed" as const,
+        inputHash: computeRenderInputHash(
+          { projectRevision: project.revision, manifest: null },
+          parsedKind
+        ),
+        model: null,
+        engine: "Remotion",
+        privacy: {
+          execution: "local" as const,
+          dataCollection: null,
+          zdr: null,
+          providerFallbacks: null
+        },
+        outputs: [],
+        errorCode: failedPreflightCode(error)
+      };
+      try {
+        await this.runLogStore.write(safeProject, failed);
+      } catch {
+        // Preserve the preflight error if the diagnostic write also fails.
+      }
+      throw error;
+    }
+
+    const queued = {
       runId,
       projectId: safeProject,
-      kind: parsedKind,
+      kind: "render" as const,
+      renderKind: parsedKind,
       projectRevision: preflight.project.revision,
       queuedAt: isoNow(this.now),
-      status: "queued",
       startedAt: null,
-      completedAt: null
-    });
-    await this.runLogStore.write(safeProject, queued);
+      finishedAt: null,
+      status: "queued" as const,
+      inputHash: computeRenderInputHash(preflight.manifest, parsedKind),
+      model: null,
+      engine: "Remotion",
+      privacy: {
+        execution: "local" as const,
+        dataCollection: null,
+        zdr: null,
+        providerFallbacks: null
+      },
+      outputs: [],
+      errorCode: null
+    };
+    try {
+      await this.runLogStore.write(safeProject, queued);
+    } catch (error) {
+      throw normalizeRunLogStoreError(error) ?? error;
+    }
     const item: RenderJobQueueItem = { projectId: safeProject, runId, kind };
     try {
       this.worker.enqueue(item);
     } catch {
-      const failed = renderRunLogSchema.parse({
+      const failed = {
         ...queued,
         status: "failed",
-        completedAt: isoNow(this.now),
+        finishedAt: isoNow(this.now),
+        startedAt: null,
+        outputs: [],
         errorCode: RENDER_JOB_ERROR_CODE.enqueueFailed
-      });
+      } as const;
       try {
         await this.runLogStore.write(safeProject, failed);
       } catch {
