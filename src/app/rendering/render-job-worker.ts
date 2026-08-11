@@ -1,14 +1,12 @@
 import {
-  renderRunLogSchema,
+  normalizeRunLog,
+  runLogSchema,
   type RenderJobKind,
-  type RenderRunLog,
-  type RenderRunLogQueued
+  type CommonRenderRunLog
 } from "../../schema/index.js";
+import { RunLogStoreError } from "../run-log-store.js";
 import { ProjectRepositoryError } from "../projects/project-repository.js";
-import {
-  RenderRunLogStoreError,
-  type RenderRunLogStorePort
-} from "./render-run-log-store.js";
+import { RenderRunLogStoreError } from "./render-run-log-store.js";
 import {
   RENDER_JOB_ERROR_CODE,
   RenderJobError,
@@ -28,7 +26,7 @@ export type RenderJobQueueItem = {
 };
 
 export type RenderJobWorkerOptions = {
-  readonly runLogStore: RenderRunLogStorePort;
+  readonly runLogStore: RenderRunLogPersistencePort;
   readonly preflight: RenderPreflightServicePort;
   readonly outputStore: RenderOutputStorePort;
   readonly mp4Renderer: Mp4RendererPort;
@@ -36,20 +34,50 @@ export type RenderJobWorkerOptions = {
   readonly now?: () => Date;
 };
 
+export type RenderRunLogPersistencePort = {
+  read(projectId: unknown, runId: unknown): Promise<unknown>;
+  write(projectId: unknown, runLog: unknown): Promise<void>;
+};
+
 export type RenderJobWorkerPort = Pick<
   RenderJobWorker,
   "enqueue" | "start" | "stop"
 >;
 
-function asQueuedLog(log: RenderRunLog): RenderRunLogQueued {
-  if (log.status !== "queued") {
+function asRenderLog(log: unknown): CommonRenderRunLog {
+  const normalized = normalizeRunLog(log);
+  if (normalized?.kind !== "render") {
+    throw new RenderJobError(
+      RENDER_JOB_ERROR_CODE.runLogReadFailed,
+      500,
+      "The render run is invalid."
+    );
+  }
+  return normalized;
+}
+
+function asQueuedLog(log: unknown): CommonRenderRunLog {
+  const renderLog = asRenderLog(log);
+  if (renderLog.status !== "queued") {
     throw new RenderJobError(
       RENDER_JOB_ERROR_CODE.runLogReadFailed,
       500,
       "The render run is not queued."
     );
   }
-  return log;
+  return renderLog;
+}
+
+function parseRenderLog(value: unknown): CommonRenderRunLog {
+  const parsed = runLogSchema.parse(value);
+  if (parsed.kind !== "render") {
+    throw new RenderJobError(
+      RENDER_JOB_ERROR_CODE.runLogReadFailed,
+      500,
+      "The render run is invalid."
+    );
+  }
+  return parsed;
 }
 
 function normalizeFailureCode(
@@ -76,6 +104,21 @@ function normalizeFailureCode(
       return RENDER_JOB_ERROR_CODE.runLogReadFailed;
     }
   }
+  if (error instanceof RunLogStoreError) {
+    if (error.code === "RUN_LOG_NOT_FOUND") {
+      return RENDER_JOB_ERROR_CODE.runNotFound;
+    }
+    if (
+      error.code === "RUN_LOG_READ_FAILED" ||
+      error.code === "RUN_LOG_INVALID" ||
+      error.code === "RUN_LOG_PATH_INVALID"
+    ) {
+      return RENDER_JOB_ERROR_CODE.runLogReadFailed;
+    }
+    if (error.code === "RUN_LOG_WRITE_FAILED") {
+      return RENDER_JOB_ERROR_CODE.runLogWriteFailed;
+    }
+  }
   if (error instanceof ProjectRepositoryError) {
     if (error.code === "PROJECT_NOT_FOUND") {
       return RENDER_JOB_ERROR_CODE.projectNotFound;
@@ -94,7 +137,7 @@ function isoNow(now: () => Date): string {
 }
 
 export class RenderJobWorker implements RenderJobWorkerPort {
-  private readonly runLogStore: RenderRunLogStorePort;
+  private readonly runLogStore: RenderRunLogPersistencePort;
   private readonly preflight: RenderPreflightServicePort;
   private readonly outputStore: RenderOutputStorePort;
   private readonly mp4Renderer: Mp4RendererPort;
@@ -170,10 +213,11 @@ export class RenderJobWorker implements RenderJobWorkerPort {
   }
 
   private async processItem(item: RenderJobQueueItem): Promise<void> {
-    let queuedLog: RenderRunLog;
+    let queuedLog: CommonRenderRunLog;
     try {
-      queuedLog = await this.runLogStore.read(item.projectId, item.runId);
-      asQueuedLog(queuedLog);
+      queuedLog = asQueuedLog(
+        await this.runLogStore.read(item.projectId, item.runId)
+      );
     } catch (error) {
       console.error(
         "render job could not be loaded",
@@ -182,15 +226,17 @@ export class RenderJobWorker implements RenderJobWorkerPort {
       return;
     }
 
-    let runningLog: RenderRunLog | undefined;
+    let runningLog: CommonRenderRunLog | undefined;
     let outputTarget: RenderOutputTarget | undefined;
     try {
       const queued = asQueuedLog(queuedLog);
-      runningLog = renderRunLogSchema.parse({
+      runningLog = parseRenderLog({
         ...queued,
         status: "running",
         startedAt: isoNow(this.now),
-        completedAt: null
+        finishedAt: null,
+        outputs: [],
+        errorCode: null
       });
       await this.runLogStore.write(item.projectId, runningLog);
 
@@ -224,12 +270,17 @@ export class RenderJobWorker implements RenderJobWorkerPort {
         );
       }
       const promotion = await this.outputStore.promote(outputTarget);
-      const succeeded = renderRunLogSchema.parse({
+      const succeeded = parseRenderLog({
         ...runningLog,
         status: "succeeded",
-        completedAt: isoNow(this.now),
-        outputPath: promotion.outputPath,
-        outputChecksum: promotion.outputChecksum
+        finishedAt: isoNow(this.now),
+        outputs: [
+          {
+            path: `projects/${item.projectId}/${promotion.outputPath}`,
+            checksum: promotion.outputChecksum.toLowerCase()
+          }
+        ],
+        errorCode: null
       });
       await this.runLogStore.write(item.projectId, succeeded);
     } catch (error) {
@@ -248,9 +299,11 @@ export class RenderJobWorker implements RenderJobWorkerPort {
     item: RenderJobQueueItem,
     errorCode: RenderJobErrorCode
   ): Promise<void> {
-    let current: RenderRunLog;
+    let current: CommonRenderRunLog;
     try {
-      current = await this.runLogStore.read(item.projectId, item.runId);
+      current = asRenderLog(
+        await this.runLogStore.read(item.projectId, item.runId)
+      );
     } catch (error) {
       console.error(
         "queued render job could not be stopped",
@@ -266,22 +319,28 @@ export class RenderJobWorker implements RenderJobWorkerPort {
 
   private async persistFailure(
     item: RenderJobQueueItem,
-    base: RenderRunLog,
+    base: CommonRenderRunLog,
     errorCode: RenderJobErrorCode
   ): Promise<void> {
     if (base.status === "succeeded" || base.status === "failed") {
       return;
     }
-    const failed = renderRunLogSchema.parse({
+    const failed = parseRenderLog({
       runId: base.runId,
       projectId: base.projectId,
-      kind: base.kind,
+      kind: "render",
       projectRevision: base.projectRevision,
       queuedAt: base.queuedAt,
-      status: "failed",
       startedAt: base.status === "running" ? base.startedAt : null,
-      completedAt: isoNow(this.now),
-      errorCode
+      finishedAt: isoNow(this.now),
+      status: "failed",
+      inputHash: base.inputHash,
+      model: base.model,
+      engine: base.engine,
+      privacy: base.privacy,
+      outputs: [],
+      errorCode,
+      renderKind: base.renderKind
     });
     try {
       await this.runLogStore.write(item.projectId, failed);

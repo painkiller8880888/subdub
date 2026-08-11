@@ -13,6 +13,7 @@ import {
 } from "../../src/app/rendering/render-job-errors.js";
 import { RenderOutputStore } from "../../src/app/rendering/render-output-store.js";
 import { RenderRunLogStore } from "../../src/app/rendering/render-run-log-store.js";
+import { RunLogStore } from "../../src/app/run-log-store.js";
 import type {
   Mp4RendererPort,
   RenderRendererInput,
@@ -20,6 +21,7 @@ import type {
 } from "../../src/app/rendering/renderers.js";
 import {
   renderManifestSchema,
+  runLogSchema,
   videoProjectSchema
 } from "../../src/schema/index.js";
 import { renderManifestFixture } from "../fixtures/render-manifest.js";
@@ -123,6 +125,44 @@ async function writeQueuedLog(
 describe("RenderJobWorker and RenderJobService", () => {
   afterEach(removeRoot);
 
+  it("persists a failed run when preflight rejects an otherwise valid request", async () => {
+    const root = await createRoot();
+    const service = new RenderJobService({
+      workspaceRoot: root,
+      projectRepository: { read: vi.fn(async () => project) },
+      preflight: {
+        validate: vi.fn(async () => {
+          throw new RenderJobError(
+            RENDER_JOB_ERROR_CODE.sourceAssetMissing,
+            422,
+            "the asset is missing"
+          );
+        })
+      },
+      worker: {
+        enqueue: vi.fn(),
+        start: vi.fn(),
+        stop: vi.fn(async () => undefined)
+      },
+      createId: () => "preflight-failed"
+    });
+
+    await expect(service.enqueueMp4(projectId)).rejects.toMatchObject({
+      code: RENDER_JOB_ERROR_CODE.sourceAssetMissing
+    });
+    await expect(
+      new RunLogStore({ workspaceRoot: root }).read(
+        projectId,
+        "preflight-failed"
+      )
+    ).resolves.toMatchObject({
+      kind: "render",
+      status: "failed",
+      errorCode: RENDER_JOB_ERROR_CODE.sourceAssetMissing,
+      outputs: []
+    });
+  });
+
   it("exposes queued before starting the worker, then records running and succeeded", async () => {
     const root = await createRoot();
     const started = deferred<void>();
@@ -168,6 +208,26 @@ describe("RenderJobWorker and RenderJobService", () => {
     expect(succeeded.outputChecksum).toBe(
       createHash("sha256").update("rendered mp4").digest("hex")
     );
+    const persisted = runLogSchema.parse(
+      JSON.parse(
+        await fs.readFile(
+          path.join(root, "projects", projectId, "runs", "run-1.json"),
+          "utf8"
+        )
+      )
+    );
+    expect(persisted).toMatchObject({
+      kind: "render",
+      renderKind: "mp4",
+      engine: "Remotion",
+      status: "succeeded",
+      outputs: [
+        {
+          path: "projects/manual-video-project/output/render-run-1.mp4",
+          checksum: succeeded.outputChecksum
+        }
+      ]
+    });
     await expect(
       fs.readFile(
         path.join(root, "projects", projectId, succeeded.outputPath),

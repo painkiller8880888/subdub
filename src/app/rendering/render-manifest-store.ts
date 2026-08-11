@@ -1,14 +1,18 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
 import * as path from "node:path";
 
 import {
   idSchema,
   renderManifestSchema,
-  type RenderManifest
+  type ManifestRunLog,
+  type RenderManifest,
+  videoProjectSchema
 } from "../../schema/index.js";
+import { RunLogStore, type RunLogStorePort } from "../run-log-store.js";
 import {
   compileRenderManifest,
+  computeCompilerInputHash,
   RENDER_MANIFEST_VERSION,
   serializeRenderManifest,
   type RenderManifestCompilerInput,
@@ -64,7 +68,10 @@ export type RenderManifestStoreOptions = {
   readonly workspaceRoot: string;
   readonly fileSystem?: Partial<RenderManifestStoreFileSystem>;
   readonly createId?: () => string;
+  readonly createRunId?: () => string;
+  readonly now?: () => Date;
   readonly maxTemporaryFileAttempts?: number;
+  readonly runLogStore?: RunLogStorePort;
 };
 
 export type RenderManifestCacheResult =
@@ -74,6 +81,7 @@ export type RenderManifestCacheResult =
       readonly manifest: RenderManifest;
       readonly diagnostics: readonly [];
       readonly warnings: readonly RenderManifestWarning[];
+      readonly runId: string;
     }
   | {
       readonly status: "failed";
@@ -81,6 +89,7 @@ export type RenderManifestCacheResult =
       readonly manifest: null;
       readonly diagnostics: readonly RenderManifestDiagnostic[];
       readonly warnings: readonly RenderManifestWarning[];
+      readonly runId: string;
     };
 
 export type RenderManifestReadResult =
@@ -154,7 +163,10 @@ export class RenderManifestStore {
   private readonly workspaceRoot: string;
   private readonly fileSystem: RenderManifestStoreFileSystem;
   private readonly createId: () => string;
+  private readonly createRunId: () => string;
+  private readonly now: () => Date;
   private readonly maxTemporaryFileAttempts: number;
+  private readonly runLogStore: RunLogStorePort;
 
   constructor(options: RenderManifestStoreOptions) {
     this.workspaceRoot = path.resolve(options.workspaceRoot);
@@ -163,6 +175,15 @@ export class RenderManifestStore {
       ...options.fileSystem
     };
     this.createId = options.createId ?? (() => randomUUID().toLowerCase());
+    this.createRunId =
+      options.createRunId ?? (() => randomUUID().toLowerCase());
+    this.now = options.now ?? (() => new Date());
+    this.runLogStore =
+      options.runLogStore ??
+      new RunLogStore({
+        workspaceRoot: this.workspaceRoot,
+        createId: this.createId
+      });
     this.maxTemporaryFileAttempts = Math.max(
       1,
       Math.floor(options.maxTemporaryFileAttempts ?? 8)
@@ -284,35 +305,128 @@ export class RenderManifestStore {
     projectId: unknown,
     input: RenderManifestCompilerInput
   ): Promise<RenderManifestCacheResult> {
+    const safeProjectId = normalizeProjectId(projectId);
+    const runId = this.createRunId();
+    if (!idSchema.safeParse(runId).success) {
+      throw new RenderManifestStoreError("RENDER_MANIFEST_WRITE_FAILED");
+    }
     const result = compileRenderManifest(input);
+    const startedAt = this.now().toISOString();
+    const inputHash = result.success
+      ? result.manifest.compilerInputHash
+      : this.safeInputHash(input, safeProjectId);
+    const projectRevision = this.projectRevision(input);
+    const runningRun: ManifestRunLog = {
+      runId,
+      kind: "manifest",
+      projectId: safeProjectId,
+      projectRevision,
+      queuedAt: startedAt,
+      startedAt,
+      finishedAt: null,
+      status: "running",
+      inputHash,
+      model: null,
+      engine: "RenderManifestCompiler",
+      privacy: {
+        execution: "local",
+        dataCollection: null,
+        zdr: null,
+        providerFallbacks: null
+      },
+      outputs: [],
+      errorCode: null,
+      reused: false
+    };
+    await this.runLogStore.write(safeProjectId, runningRun);
+
     if (!result.success) {
+      const failedRun = this.finishRun(
+        runningRun,
+        "failed",
+        this.now().toISOString(),
+        result.diagnostics[0]?.code ?? "RENDER_MANIFEST_COMPILE_FAILED",
+        inputHash,
+        []
+      );
+      await this.tryWriteRunLog(safeProjectId, failedRun);
       return {
         status: "failed",
         reused: false,
         manifest: null,
         diagnostics: result.diagnostics,
-        warnings: result.warnings
+        warnings: result.warnings,
+        runId
       };
     }
 
-    const current = await this.read(projectId);
-    if (current !== null && cacheMatches(current, result.manifest)) {
-      return {
-        status: "reused",
-        reused: true,
-        manifest: current,
-        diagnostics: [],
-        warnings: result.warnings
-      };
+    let current: RenderManifest | null;
+    try {
+      current = await this.read(safeProjectId);
+    } catch (error) {
+      await this.tryWriteRunLog(
+        safeProjectId,
+        this.finishRun(
+          runningRun,
+          "failed",
+          this.now().toISOString(),
+          "RENDER_MANIFEST_READ_FAILED",
+          result.manifest.compilerInputHash,
+          []
+        )
+      );
+      throw error;
     }
 
-    await this.write(projectId, result.manifest);
+    const reused = current !== null && cacheMatches(current, result.manifest);
+    const manifest: RenderManifest = reused ? current! : result.manifest;
+    if (!reused) {
+      try {
+        await this.write(safeProjectId, result.manifest);
+      } catch (error) {
+        await this.tryWriteRunLog(
+          safeProjectId,
+          this.finishRun(
+            runningRun,
+            "failed",
+            this.now().toISOString(),
+            "RENDER_MANIFEST_WRITE_FAILED",
+            result.manifest.compilerInputHash,
+            []
+          )
+        );
+        throw error;
+      }
+    }
+
+    const serialized = serializeRenderManifest(manifest);
+    const output = {
+      path: `projects/${safeProjectId}/${RENDER_MANIFEST_RELATIVE_PATH}`,
+      checksum: createHash("sha256").update(serialized, "utf8").digest("hex")
+    };
+    const succeededRun = this.finishRun(
+      runningRun,
+      "succeeded",
+      this.now().toISOString(),
+      null,
+      manifest.compilerInputHash,
+      [output],
+      reused
+    );
+    try {
+      await this.runLogStore.write(safeProjectId, succeededRun);
+    } catch {
+      // A successful compiler result must not be returned when its terminal
+      // run state cannot be persisted.
+      throw new RenderManifestStoreError("RENDER_MANIFEST_WRITE_FAILED");
+    }
     return {
-      status: "compiled",
-      reused: false,
-      manifest: result.manifest,
+      status: reused ? "reused" : "compiled",
+      reused,
+      manifest,
       diagnostics: [],
-      warnings: result.warnings
+      warnings: result.warnings,
+      runId
     };
   }
 
@@ -328,6 +442,56 @@ export class RenderManifestStore {
       await this.fileSystem.unlink(filePath);
     } catch {
       // Best-effort cleanup must not replace the original write or rename error.
+    }
+  }
+
+  private projectRevision(input: RenderManifestCompilerInput): number {
+    const rawProject = input.project ?? input.videoProject;
+    const parsed = videoProjectSchema.safeParse(rawProject);
+    return parsed.success ? parsed.data.revision : 0;
+  }
+
+  private safeInputHash(
+    input: RenderManifestCompilerInput,
+    projectId: string
+  ): string {
+    try {
+      return computeCompilerInputHash(input);
+    } catch {
+      return createHash("sha256")
+        .update(`${projectId}\u0000manifest`, "utf8")
+        .digest("hex");
+    }
+  }
+
+  private finishRun(
+    base: ManifestRunLog,
+    status: "succeeded" | "failed",
+    finishedAt: string,
+    errorCode: string | null,
+    inputHash: string,
+    outputs: ManifestRunLog["outputs"],
+    reused = false
+  ): ManifestRunLog {
+    return {
+      ...base,
+      status,
+      finishedAt,
+      inputHash,
+      outputs,
+      errorCode,
+      reused
+    };
+  }
+
+  private async tryWriteRunLog(
+    projectId: string,
+    runLog: ManifestRunLog
+  ): Promise<void> {
+    try {
+      await this.runLogStore.write(projectId, runLog);
+    } catch {
+      // Preserve the compiler/store failure that caused this terminal state.
     }
   }
 }
