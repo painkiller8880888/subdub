@@ -2,8 +2,11 @@ import type { FC } from "react";
 
 import { Composition, registerRoot } from "remotion";
 
-import type { RenderManifest } from "../schema/index";
-import { RenderManifestComposition } from "./composition";
+import {
+  RenderManifestComposition,
+  renderManifestFromInput,
+  type RenderManifestCompositionInput
+} from "./composition";
 import { defaultRenderManifest } from "./default-manifest";
 
 const RemotionRoot: FC = () => (
@@ -12,7 +15,9 @@ const RemotionRoot: FC = () => (
     component={RenderManifestComposition}
     defaultProps={defaultRenderManifest}
     calculateMetadata={({ props }) => {
-      const manifest = props as RenderManifest;
+      const manifest = renderManifestFromInput(
+        props as RenderManifestCompositionInput
+      );
       return {
         durationInFrames: manifest.durationInFrames,
         fps: manifest.fps,

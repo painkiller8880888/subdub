@@ -12,9 +12,19 @@ import {
   audioTrackVolumeAtFrame,
   soundEffectSequenceProps
 } from "./audio";
+import {
+  defaultManifestAssetUrlResolver,
+  type ManifestAssetUrlResolver
+} from "./asset-url";
 
-function AudioTrackSequence({ track }: { track: RenderAudioTrack }): ReactNode {
-  const sequence = audioTrackSequenceProps(track);
+function AudioTrackSequence({
+  track,
+  assetUrlResolver
+}: {
+  track: RenderAudioTrack;
+  assetUrlResolver: ManifestAssetUrlResolver;
+}): ReactNode {
+  const sequence = audioTrackSequenceProps(track, assetUrlResolver);
   return (
     <Sequence
       from={sequence.from}
@@ -32,11 +42,13 @@ function AudioTrackSequence({ track }: { track: RenderAudioTrack }): ReactNode {
 }
 
 function SoundEffectSequence({
-  effect
+  effect,
+  assetUrlResolver
 }: {
   effect: RenderSoundEffect;
+  assetUrlResolver: ManifestAssetUrlResolver;
 }): ReactNode {
-  const sequence = soundEffectSequenceProps(effect);
+  const sequence = soundEffectSequenceProps(effect, assetUrlResolver);
   return (
     <Sequence
       from={sequence.from}
@@ -50,17 +62,27 @@ function SoundEffectSequence({
 }
 
 export function ManifestAudioLayer({
-  manifest
+  manifest,
+  assetUrlResolver = defaultManifestAssetUrlResolver
 }: {
   manifest: RenderManifest;
+  assetUrlResolver?: ManifestAssetUrlResolver;
 }): ReactNode {
   return (
     <>
       {manifest.audioTracks.map((track) => (
-        <AudioTrackSequence key={track.id} track={track} />
+        <AudioTrackSequence
+          key={track.id}
+          track={track}
+          assetUrlResolver={assetUrlResolver}
+        />
       ))}
       {manifest.soundEffects.map((effect) => (
-        <SoundEffectSequence key={effect.id} effect={effect} />
+        <SoundEffectSequence
+          key={effect.id}
+          effect={effect}
+          assetUrlResolver={assetUrlResolver}
+        />
       ))}
     </>
   );

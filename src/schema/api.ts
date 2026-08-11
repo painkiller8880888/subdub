@@ -4,6 +4,7 @@ import {
   idSchema,
   isoUtcDateTimeSchema,
   nonNegativeIntegerSchema,
+  relativePosixPathSchema,
   sha256Schema,
   finiteNumberSchema,
   strictObject
@@ -46,6 +47,7 @@ import {
   voicevoxAudioQuerySchema,
   voicevoxResolvedSpeakerSchema
 } from "../voicevox/schemas.js";
+import { renderManifestSchema } from "./render-manifest.js";
 
 const apiErrorPathSegmentSchema = z.union([z.string(), z.number().int()]);
 
@@ -276,6 +278,53 @@ export const projectDetailResponseSchema = z
     revision: nonNegativeIntegerSchema.optional()
   })
   .strict();
+
+export const manifestPreviewStateSchema = z.enum([
+  "current",
+  "stale",
+  "missing",
+  "invalid"
+]);
+
+export const manifestPreviewBlockerTargetSchema = strictObject({
+  kind: z.enum([
+    "outline",
+    "script",
+    "visuals",
+    "voice",
+    "asset",
+    "manifest"
+  ]),
+  path: relativePosixPathSchema.optional(),
+  lineId: idSchema.optional(),
+  assignmentId: idSchema.optional(),
+  sectionId: idSchema.optional()
+});
+
+export const manifestPreviewBlockerSchema = strictObject({
+  code: z.string().min(1),
+  message: z.string().min(1),
+  target: manifestPreviewBlockerTargetSchema
+});
+
+export const manifestPreviewDataSchema = strictObject({
+  project: strictObject({
+    id: idSchema,
+    title: z.string()
+  }),
+  state: manifestPreviewStateSchema,
+  canPlay: z.boolean(),
+  manifest: renderManifestSchema.nullable(),
+  blockers: z.array(manifestPreviewBlockerSchema)
+});
+
+export const manifestPreviewResponseSchema = strictObject({
+  data: manifestPreviewDataSchema
+});
+
+export const manifestPreviewParamsSchema = strictObject({
+  projectId: idSchema
+});
 
 export const projectSourceContentSchema = z
   .object({
@@ -708,6 +757,17 @@ export type AssetUploadResponse = z.infer<typeof assetUploadResponseSchema>;
 export type AssetDetailResponse = z.infer<typeof assetDetailResponseSchema>;
 export type AssetListQuery = z.infer<typeof assetListQuerySchema>;
 export type AssetListResponse = z.infer<typeof assetListResponseSchema>;
+export type ManifestPreviewState = z.infer<typeof manifestPreviewStateSchema>;
+export type ManifestPreviewBlocker = z.infer<
+  typeof manifestPreviewBlockerSchema
+>;
+export type ManifestPreviewData = z.infer<typeof manifestPreviewDataSchema>;
+export type ManifestPreviewResponse = z.infer<
+  typeof manifestPreviewResponseSchema
+>;
+export type ManifestPreviewParams = z.infer<
+  typeof manifestPreviewParamsSchema
+>;
 export type AssetIdParams = z.infer<typeof assetIdParamsSchema>;
 export type AssetThumbnailParams = z.infer<typeof assetThumbnailParamsSchema>;
 export type VisualAssignmentParams = z.infer<

@@ -3,6 +3,10 @@ import type { ReactNode } from "react";
 import { AbsoluteFill, Sequence, useCurrentFrame } from "remotion";
 
 import type { RenderManifest } from "../schema/index";
+import {
+  defaultManifestAssetUrlResolver,
+  type ManifestAssetUrlResolver
+} from "./asset-url";
 import { ManifestAudioLayer } from "./audio-layer";
 import { BackgroundVisual } from "./background";
 import { CharacterLayer } from "./characters";
@@ -20,21 +24,63 @@ import { PhotoVisual, VideoVisual } from "./visuals";
 
 function RenderVisual({
   manifest,
-  visual
+  visual,
+  assetUrlResolver
 }: {
   manifest: RenderManifest;
   visual: RenderManifest["visuals"][number];
+  assetUrlResolver: ManifestAssetUrlResolver;
 }): ReactNode {
   if (visual.kind === "video") {
-    return <VideoVisual visual={visual} fps={manifest.fps} />;
+    return (
+      <VideoVisual
+        visual={visual}
+        fps={manifest.fps}
+        assetUrlResolver={assetUrlResolver}
+      />
+    );
   }
   if (visual.kind === "photo") {
-    return <PhotoVisual visual={visual} />;
+    return <PhotoVisual visual={visual} assetUrlResolver={assetUrlResolver} />;
   }
-  return <DocumentVisual visual={visual} />;
+  return <DocumentVisual visual={visual} assetUrlResolver={assetUrlResolver} />;
 }
 
-export function RenderManifestComposition(manifest: RenderManifest): ReactNode {
+export type RenderManifestCompositionInput =
+  | RenderManifest
+  | {
+      readonly manifest: RenderManifest;
+      readonly assetUrlResolver?: ManifestAssetUrlResolver;
+    };
+
+function isCompositionInput(
+  input: RenderManifestCompositionInput
+): input is Extract<
+  RenderManifestCompositionInput,
+  { manifest: RenderManifest }
+> {
+  return "manifest" in input;
+}
+
+export function renderManifestFromInput(
+  input: RenderManifestCompositionInput
+): RenderManifest {
+  return isCompositionInput(input) ? input.manifest : input;
+}
+
+function assetResolverFromInput(
+  input: RenderManifestCompositionInput
+): ManifestAssetUrlResolver {
+  return isCompositionInput(input)
+    ? (input.assetUrlResolver ?? defaultManifestAssetUrlResolver)
+    : defaultManifestAssetUrlResolver;
+}
+
+export function RenderManifestComposition(
+  input: RenderManifestCompositionInput
+): ReactNode {
+  const manifest = renderManifestFromInput(input);
+  const assetUrlResolver = assetResolverFromInput(input);
   const frame = useCurrentFrame();
   const activeInsert = selectActiveInsert(manifest, frame);
   if (activeInsert !== undefined) {
@@ -66,8 +112,14 @@ export function RenderManifestComposition(manifest: RenderManifest): ReactNode {
         fontFamily: "Noto Sans JP, Arial, sans-serif"
       }}
     >
-      <ManifestAudioLayer manifest={manifest} />
-      <BackgroundVisual background={background?.background} />
+      <ManifestAudioLayer
+        manifest={manifest}
+        assetUrlResolver={assetUrlResolver}
+      />
+      <BackgroundVisual
+        background={background?.background}
+        assetUrlResolver={assetUrlResolver}
+      />
       {activeVisuals.map((visual) => (
         <Sequence
           key={visual.id}
@@ -76,13 +128,18 @@ export function RenderManifestComposition(manifest: RenderManifest): ReactNode {
           layout="none"
           name={visual.id}
         >
-          <RenderVisual manifest={manifest} visual={visual} />
+          <RenderVisual
+            manifest={manifest}
+            visual={visual}
+            assetUrlResolver={assetUrlResolver}
+          />
         </Sequence>
       ))}
       <CharacterLayer
         manifest={manifest}
         frame={frame}
         prioritizeVisual={prioritizeVisual}
+        assetUrlResolver={assetUrlResolver}
       />
       <SubtitleLayer manifest={manifest} lines={activeLines} />
     </AbsoluteFill>
