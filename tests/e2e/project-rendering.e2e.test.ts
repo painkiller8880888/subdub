@@ -3,13 +3,21 @@ import { promises as fs } from "node:fs";
 import { tmpdir } from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
+import type { AddressInfo } from "node:net";
 
 import { registerMediabunnyServer } from "@mediabunny/server";
+import { chromium, type Browser } from "@playwright/test";
 import { bundle } from "@remotion/bundler";
 import { renderStill, selectComposition } from "@remotion/renderer";
-import { ALL_FORMATS, FilePathSource, Input } from "mediabunny";
+import {
+  ALL_FORMATS,
+  AudioSampleSink,
+  FilePathSource,
+  Input
+} from "mediabunny";
 import sharp from "sharp";
 import { describe, expect, it, vi } from "vitest";
+import { createServer, type ViteDevServer } from "vite";
 
 import { initializeServer } from "../../src/api/server.js";
 import { OutlineGenerationService } from "../../src/app/projects/outline-generation-service.js";
@@ -80,6 +88,71 @@ registerMediabunnyServer();
 
 const repositoryRoot = fileURLToPath(new URL("../../", import.meta.url));
 type RepresentativeFrameGoldenPlatform = "linux" | "windows";
+const BGM_MARKER_FREQUENCY_HZ = 440;
+const SFX_MARKER_FREQUENCY_HZ = 880;
+
+function listeningPort(server: {
+  address(): string | AddressInfo | null;
+}): number {
+  const address = server.address();
+  if (address === null || typeof address === "string") {
+    throw new Error("The local test server did not expose a TCP port.");
+  }
+  return address.port;
+}
+
+function createDistinctSoundEffectFixture(source: Buffer): Buffer {
+  const output = Buffer.from(source);
+  let sampleRate: number | undefined;
+  let channels: number | undefined;
+  let bitsPerSample: number | undefined;
+  let dataOffset: number | undefined;
+  let dataLength: number | undefined;
+  let offset = 12;
+  while (offset + 8 <= output.length) {
+    const chunkId = output.toString("ascii", offset, offset + 4);
+    const chunkLength = output.readUInt32LE(offset + 4);
+    const chunkDataOffset = offset + 8;
+    if (chunkDataOffset + chunkLength > output.length) {
+      throw new Error(
+        "The checked-in sound-effect fixture has invalid chunks."
+      );
+    }
+    if (chunkId === "fmt ") {
+      channels = output.readUInt16LE(chunkDataOffset + 2);
+      sampleRate = output.readUInt32LE(chunkDataOffset + 4);
+      bitsPerSample = output.readUInt16LE(chunkDataOffset + 14);
+    } else if (chunkId === "data") {
+      dataOffset = chunkDataOffset;
+      dataLength = chunkLength;
+    }
+    offset += 8 + chunkLength + (chunkLength % 2);
+  }
+  if (
+    sampleRate === undefined ||
+    channels === undefined ||
+    bitsPerSample !== 16 ||
+    dataOffset === undefined ||
+    dataLength === undefined ||
+    channels <= 0
+  ) {
+    throw new Error("The checked-in sound-effect fixture is not 16-bit PCM.");
+  }
+  const frameCount = Math.floor(dataLength / (channels * 2));
+  for (let frame = 0; frame < frameCount; frame += 1) {
+    const sample = Math.round(
+      Math.sin((2 * Math.PI * SFX_MARKER_FREQUENCY_HZ * frame) / sampleRate) *
+        16_384
+    );
+    for (let channel = 0; channel < channels; channel += 1) {
+      output.writeInt16LE(
+        sample,
+        dataOffset + (frame * channels + channel) * 2
+      );
+    }
+  }
+  return output;
+}
 
 // Remotion uses the browser's installed fonts, whose glyph rasterization and
 // fallback selection differ between Ubuntu CI and Windows development runs.
@@ -326,6 +399,7 @@ async function uploadAsset(
     readonly mimeType: string;
     readonly title: string;
     readonly tagIds?: readonly string[];
+    readonly data?: Buffer;
   }
 ): Promise<UploadedAsset> {
   const parts: MultipartPart[] = [
@@ -342,7 +416,7 @@ async function uploadAsset(
     name: "file",
     filename: input.fileName,
     mimeType: input.mimeType,
-    data: await mediaFixture(input.fileName)
+    data: input.data ?? (await mediaFixture(input.fileName))
   });
 
   const { body, contentType } = buildMultipartBody(parts);
@@ -646,6 +720,228 @@ async function validateMp4Output(
   } finally {
     input.dispose();
   }
+}
+
+async function validateWebPreviewPath(
+  server: InitializedServer,
+  projectId: string,
+  manifest: RenderManifest,
+  expectedAssetPaths: readonly string[]
+): Promise<void> {
+  const executable = browserExecutable();
+  if (typeof executable !== "string") {
+    throw new Error(
+      "A local Chrome/Edge executable is required for the Web preview E2E."
+    );
+  }
+
+  await server.app.listen({ host: "127.0.0.1", port: 0 });
+  const apiPort = listeningPort(server.app.server);
+  let webServer: ViteDevServer | undefined;
+  let browser: Browser | undefined;
+  try {
+    webServer = await createServer({
+      configFile: path.join(repositoryRoot, "vite.config.ts"),
+      logLevel: "error",
+      server: {
+        host: "127.0.0.1",
+        port: 0,
+        strictPort: false,
+        proxy: {
+          "/api": {
+            target: `http://127.0.0.1:${apiPort}`
+          }
+        }
+      }
+    });
+    await webServer.listen();
+    if (webServer.httpServer === null) {
+      throw new Error("The Vite preview server did not start.");
+    }
+    const webPort = listeningPort(webServer.httpServer);
+    browser = await chromium.launch({
+      executablePath: executable,
+      headless: true
+    });
+    const page = await browser.newPage();
+    const requestedAssetPaths = new Set<string>();
+    page.on("request", (request) => {
+      const url = new URL(request.url());
+      const projectFilePrefix = `/api/projects/${encodeURIComponent(
+        projectId
+      )}/files/`;
+      if (url.pathname.startsWith(projectFilePrefix)) {
+        requestedAssetPaths.add(url.pathname.slice(projectFilePrefix.length));
+      }
+    });
+
+    const encodedProjectId = encodeURIComponent(projectId);
+    const manifestResponsePromise = page.waitForResponse((response) => {
+      const url = new URL(response.url());
+      return (
+        response.request().method() === "GET" &&
+        url.pathname === `/api/projects/${encodedProjectId}/manifest`
+      );
+    });
+    const pageResponse = await page.goto(
+      `http://127.0.0.1:${webPort}/projects/${encodedProjectId}/preview`,
+      { waitUntil: "domcontentloaded" }
+    );
+    expect(pageResponse?.status()).toBe(200);
+    const manifestResponse = await manifestResponsePromise;
+    expect(manifestResponse.status()).toBe(200);
+    const webPreview = manifestPreviewResponseSchema.parse(
+      await manifestResponse.json()
+    ).data;
+    expect(webPreview.manifest).not.toBeNull();
+    if (webPreview.manifest === null) {
+      throw new Error("The Web preview response did not contain a manifest.");
+    }
+    expect(serializeRenderManifest(webPreview.manifest)).toBe(
+      serializeRenderManifest(manifest)
+    );
+
+    const playerPanel = page.locator(".preview-player-panel");
+    await playerPanel.waitFor({ state: "visible", timeout: 30_000 });
+    expect(await playerPanel.locator('[role="alert"]').count()).toBe(0);
+    const playButton = page.getByRole("button", { name: "Play video" });
+    await playButton.waitFor({ state: "visible", timeout: 30_000 });
+    await playButton.click();
+    await page
+      .getByRole("button", { name: "Pause video" })
+      .waitFor({ state: "visible", timeout: 5_000 });
+
+    const startedAt = Date.now();
+    while (
+      Date.now() - startedAt < 15_000 &&
+      expectedAssetPaths.some(
+        (assetPath) => !requestedAssetPaths.has(assetPath)
+      )
+    ) {
+      await page.waitForTimeout(100);
+    }
+    for (const assetPath of expectedAssetPaths) {
+      expect([...requestedAssetPaths]).toContain(assetPath);
+    }
+  } finally {
+    if (browser !== undefined) {
+      await browser.close();
+    }
+    if (webServer !== undefined) {
+      await webServer.close();
+    }
+  }
+}
+
+async function readMp4MonoPcm(outputPath: string): Promise<{
+  readonly sampleRate: number;
+  readonly samples: Float32Array;
+}> {
+  const input = new Input({
+    source: new FilePathSource(outputPath),
+    formats: ALL_FORMATS
+  });
+  try {
+    const audioTrack = await input.getPrimaryAudioTrack();
+    if (audioTrack === null) {
+      throw new Error("Rendered MP4 is missing its audio track.");
+    }
+    const sampleRate = await audioTrack.getSampleRate();
+    const durationSeconds = await input.computeDuration();
+    const samples = new Float32Array(
+      Math.ceil(durationSeconds * sampleRate) + sampleRate
+    );
+    const sink = new AudioSampleSink(audioTrack);
+    for await (const sample of sink.samples(0, durationSeconds + 0.25)) {
+      try {
+        const mono = new Float32Array(sample.numberOfFrames);
+        sample.copyTo(mono, { format: "f32-planar", planeIndex: 0 });
+        const startFrame = Math.max(
+          0,
+          Math.round(sample.timestamp * sampleRate)
+        );
+        if (startFrame >= samples.length) {
+          continue;
+        }
+        samples.set(
+          mono.subarray(0, Math.min(mono.length, samples.length - startFrame)),
+          startFrame
+        );
+      } finally {
+        sample.close();
+      }
+    }
+    return { sampleRate, samples };
+  } finally {
+    input.dispose();
+  }
+}
+
+function pcmToneMagnitude(
+  samples: Float32Array,
+  sampleRate: number,
+  startSeconds: number,
+  durationSeconds: number,
+  frequencyHz: number
+): number {
+  const startFrame = Math.max(0, Math.floor(startSeconds * sampleRate));
+  const endFrame = Math.min(
+    samples.length,
+    Math.ceil((startSeconds + durationSeconds) * sampleRate)
+  );
+  const count = endFrame - startFrame;
+  if (count <= 0) {
+    return 0;
+  }
+  let real = 0;
+  let imaginary = 0;
+  for (let frame = startFrame; frame < endFrame; frame += 1) {
+    const sample = samples[frame] ?? 0;
+    const angle = (2 * Math.PI * frequencyHz * frame) / sampleRate;
+    real += sample * Math.cos(angle);
+    imaginary -= sample * Math.sin(angle);
+  }
+  return (2 * Math.hypot(real, imaginary)) / count;
+}
+
+function assertRenderedTone(
+  pcm: Awaited<ReturnType<typeof readMp4MonoPcm>>,
+  input: {
+    readonly fromFrame: number;
+    readonly durationInFrames: number;
+    readonly fps: number;
+    readonly frequencyHz: number;
+    readonly label: string;
+  }
+): void {
+  const startSeconds =
+    (input.fromFrame + Math.min(15, input.durationInFrames / 2)) / input.fps;
+  const durationSeconds = Math.min(
+    0.4,
+    Math.max(0.2, (input.durationInFrames - input.fps) / input.fps)
+  );
+  const targetMagnitude = pcmToneMagnitude(
+    pcm.samples,
+    pcm.sampleRate,
+    startSeconds,
+    durationSeconds,
+    input.frequencyHz
+  );
+  const controlMagnitude = pcmToneMagnitude(
+    pcm.samples,
+    pcm.sampleRate,
+    startSeconds,
+    durationSeconds,
+    input.frequencyHz + 317
+  );
+  expect(
+    targetMagnitude,
+    `${input.label} marker was not present in the rendered MP4 PCM output`
+  ).toBeGreaterThan(0.01);
+  expect(
+    targetMagnitude,
+    `${input.label} marker was not distinguishable from the control frequency`
+  ).toBeGreaterThan(controlMagnitude * 1.5);
 }
 
 async function validateThumbnailOutput(outputPath: string): Promise<void> {
@@ -979,12 +1275,19 @@ describe("MVP final verification E2E", () => {
           mimeType: "application/pdf",
           title: "Fixture completion report"
         });
+        // Derive a second deterministic tone from the checked-in WAV fixture.
+        // Distinct markers let the final MP4 PCM assertion distinguish BGM
+        // from SFX instead of accepting one shared audio stream.
+        const soundEffectFixture = createDistinctSoundEffectFixture(
+          await mediaFixture("effect-1s.wav")
+        );
         const soundEffectAsset = await uploadAsset(server, workspaceRoot, {
           fileName: "effect-1s.wav",
           kind: "sound_effect",
           mimeType: "audio/wav",
           title: "Fixture confirmation effect",
-          tagIds: ["confirm"]
+          tagIds: ["confirm"],
+          data: soundEffectFixture
         });
         const assetDetails = new Map<string, AssetDetail>([
           [videoAsset.receipt.assetId, videoAsset.detail],
@@ -1092,11 +1395,11 @@ describe("MVP final verification E2E", () => {
 
         const currentProject = await projectRepository.read(projectId);
         const mainSectionId = currentProject.script.sections[1]?.id;
-        const effectLineId = currentProject.script.sections[1]?.lines[1]?.id;
+        const effectLineId = currentProject.script.sections[2]?.lines[0]?.id;
         const representativeVisualPath =
           photoAssignment.assignment.projectMediaPath;
         if (mainSectionId === undefined || effectLineId === undefined) {
-          throw new Error("The fixture main section is missing.");
+          throw new Error("The fixture main/outro section is missing.");
         }
         // The current API has no project-level audio/inserts/thumbnail mutation
         // route, so this fixture-only configuration uses the existing validated
@@ -1298,6 +1601,10 @@ describe("MVP final verification E2E", () => {
         expect(serializeRenderManifest(previewManifest)).toBe(
           serializeRenderManifest(manifest)
         );
+        await validateWebPreviewPath(server, projectId, previewManifest, [
+          bgmProjectMediaPath,
+          effectProjectMediaPath
+        ]);
 
         const secondCompile = await manifestStore.compileAndStore(
           projectId,
@@ -1478,6 +1785,26 @@ describe("MVP final verification E2E", () => {
         );
         const mp4OutputChecksum = mp4Run.log.outputChecksum;
         await validateMp4Output(mp4Path, manifest);
+        const renderedPcm = await readMp4MonoPcm(mp4Path);
+        const renderedBgm = manifest.audioTracks[0];
+        const renderedSoundEffect = manifest.soundEffects[0];
+        if (renderedBgm === undefined || renderedSoundEffect === undefined) {
+          throw new Error("The manifest audio markers are incomplete.");
+        }
+        assertRenderedTone(renderedPcm, {
+          fromFrame: renderedBgm.from,
+          durationInFrames: renderedBgm.durationInFrames,
+          fps: manifest.fps,
+          frequencyHz: BGM_MARKER_FREQUENCY_HZ,
+          label: "BGM"
+        });
+        assertRenderedTone(renderedPcm, {
+          fromFrame: renderedSoundEffect.from,
+          durationInFrames: renderedSoundEffect.durationInFrames,
+          fps: manifest.fps,
+          frequencyHz: SFX_MARKER_FREQUENCY_HZ,
+          label: "SFX"
+        });
 
         const thumbnailAcceptedResponse = await server.app.inject({
           method: "POST",
