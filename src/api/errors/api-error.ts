@@ -45,6 +45,7 @@ import { ProjectFileServiceError } from "../../app/projects/project-file-service
 import { RenderJobError } from "../../app/rendering/render-job-errors.js";
 import { RenderRunLogStoreError } from "../../app/rendering/render-run-log-store.js";
 import { ImprovementLogError } from "../../app/projects/improvement-log-errors.js";
+import { RunLogStoreError } from "../../app/run-log-store.js";
 
 export class ApiResponseValidationError extends Error {
   constructor(cause: unknown) {
@@ -826,6 +827,24 @@ export function mapApiError(error: unknown): MappedApiError {
         projectRepositoryMessages[error.code] ??
         genericInternalMessage,
       details: mapProjectValidationDetails(error.code, error.issues),
+      shouldLog: status >= 500
+    };
+  }
+
+  if (error instanceof RunLogStoreError) {
+    const status = isSupportedStatus(error.status) ? error.status : 500;
+    return {
+      code: error.code,
+      status,
+      message:
+        error.code === "RUN_LOG_PROJECT_ID_INVALID"
+          ? "プロジェクトIDが不正です。"
+          : error.code === "RUN_LOG_ID_INVALID"
+            ? "実行ログIDが不正です。"
+            : error.code === "RUN_LOG_NOT_FOUND"
+              ? "実行ログが見つかりません。"
+              : genericInternalMessage,
+      details: [],
       shouldLog: status >= 500
     };
   }

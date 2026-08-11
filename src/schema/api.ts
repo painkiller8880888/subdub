@@ -14,7 +14,8 @@ import {
   projectBriefSchema,
   pronunciationSchema,
   scriptSchema,
-  videoProjectSchema
+  videoProjectSchema,
+  aiTaskKindSchema
 } from "./video-project.js";
 import { displaySchema } from "./common.js";
 import {
@@ -52,6 +53,10 @@ import {
   renderJobKindSchema,
   renderRunLogSchema
 } from "./render-run-log.js";
+import {
+  runErrorCodeSchema,
+  runStatusSchema
+} from "./run-log.js";
 import {
   improvementDecisionSummarySchema,
   improvementReasonSchema
@@ -359,6 +364,80 @@ export const renderAcceptedResponseSchema = strictObject({
 
 export const renderRunStatusResponseSchema = strictObject({
   data: renderRunLogSchema
+});
+
+export const aiRunDecisionFilterSchema = z.enum([
+  "accepted",
+  "rejected",
+  "undecided"
+]);
+
+export const aiRunStatusFilterSchema = z.enum(["succeeded", "failed"]);
+
+export const aiRunSearchQuerySchema = strictObject({
+  from: isoUtcDateTimeSchema.optional(),
+  to: isoUtcDateTimeSchema.optional(),
+  taskKind: aiTaskKindSchema.optional(),
+  modelId: z.string().min(1).optional(),
+  status: aiRunStatusFilterSchema.optional(),
+  decision: aiRunDecisionFilterSchema.optional(),
+  errorCode: runErrorCodeSchema.optional(),
+  limit: z.coerce.number().int().min(1).max(100).optional().default(50),
+  offset: z.coerce.number().int().nonnegative().optional().default(0)
+}).superRefine((query, ctx) => {
+  if (
+    query.from !== undefined &&
+    query.to !== undefined &&
+    Date.parse(query.from) >= Date.parse(query.to)
+  ) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["from"],
+      message: "from must be earlier than to"
+    });
+  }
+});
+
+export const aiRunSearchItemSchema = strictObject({
+  runId: idSchema,
+  projectId: idSchema,
+  taskKind: aiTaskKindSchema,
+  modelId: z.string().min(1).nullable(),
+  responseModel: z.string().min(1).nullable(),
+  status: runStatusSchema,
+  queuedAt: isoUtcDateTimeSchema,
+  finishedAt: isoUtcDateTimeSchema.nullable(),
+  schemaValidation: z.enum(["passed", "failed", "not_run"]),
+  responseTimeMs: z.number().int().nonnegative().nullable(),
+  errorCode: runErrorCodeSchema.nullable(),
+  candidateCount: nonNegativeIntegerSchema,
+  acceptedCount: nonNegativeIntegerSchema,
+  rejectedCount: nonNegativeIntegerSchema,
+  undecidedCount: nonNegativeIntegerSchema,
+  modified: z.boolean().nullable()
+});
+
+export const aiRunSearchSummarySchema = strictObject({
+  totalCount: nonNegativeIntegerSchema,
+  validationPassedCount: nonNegativeIntegerSchema,
+  validationEvaluatedCount: nonNegativeIntegerSchema,
+  validationPassRate: z.number().finite().min(0).max(1).nullable(),
+  responseTimeMeasuredCount: nonNegativeIntegerSchema,
+  averageResponseTimeMs: z.number().finite().nonnegative().nullable(),
+  modifiedRunCount: nonNegativeIntegerSchema,
+  modificationEvaluatedCount: nonNegativeIntegerSchema
+});
+
+export const aiRunSearchDataSchema = strictObject({
+  items: z.array(aiRunSearchItemSchema),
+  summary: aiRunSearchSummarySchema,
+  limit: z.number().int().min(1).max(100),
+  offset: nonNegativeIntegerSchema,
+  hasNextPage: z.boolean()
+});
+
+export const aiRunSearchResponseSchema = strictObject({
+  data: aiRunSearchDataSchema
 });
 
 export const projectSourceContentSchema = z
@@ -847,6 +926,13 @@ export type RenderAcceptedResponse = z.infer<
 export type RenderRunStatusResponse = z.infer<
   typeof renderRunStatusResponseSchema
 >;
+export type AiRunDecisionFilter = z.infer<typeof aiRunDecisionFilterSchema>;
+export type AiRunStatusFilter = z.infer<typeof aiRunStatusFilterSchema>;
+export type AiRunSearchQuery = z.infer<typeof aiRunSearchQuerySchema>;
+export type AiRunSearchItem = z.infer<typeof aiRunSearchItemSchema>;
+export type AiRunSearchSummary = z.infer<typeof aiRunSearchSummarySchema>;
+export type AiRunSearchData = z.infer<typeof aiRunSearchDataSchema>;
+export type AiRunSearchResponse = z.infer<typeof aiRunSearchResponseSchema>;
 export type AssetIdParams = z.infer<typeof assetIdParamsSchema>;
 export type AssetThumbnailParams = z.infer<typeof assetThumbnailParamsSchema>;
 export type VisualAssignmentParams = z.infer<

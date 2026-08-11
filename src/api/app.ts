@@ -47,6 +47,10 @@ import {
   registerRenderRoutes,
   type RenderJobServicePort
 } from "./routes/render.js";
+import {
+  registerAiRunRoutes,
+  type AiRunSearchServicePort
+} from "./routes/ai-runs.js";
 
 export type AppOptions = {
   logger?: FastifyServerOptions["logger"];
@@ -69,6 +73,7 @@ export type AppOptions = {
   manifestPreviewService?: ManifestPreviewServicePort;
   projectFileService?: ProjectFileServicePort;
   renderJobService?: RenderJobServicePort;
+  aiRunSearchService?: AiRunSearchServicePort;
 };
 
 export function buildApp(options: AppOptions = {}): FastifyInstance {
@@ -131,6 +136,10 @@ export function buildApp(options: AppOptions = {}): FastifyInstance {
 
   if (options.renderJobService !== undefined) {
     registerRenderRoutes(app, options.renderJobService);
+  }
+
+  if (options.aiRunSearchService !== undefined) {
+    registerAiRunRoutes(app, options.aiRunSearchService);
   }
 
   if (options.staticRoot !== undefined) {

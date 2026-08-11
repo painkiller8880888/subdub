@@ -2,6 +2,8 @@ import { type ZodType } from "zod";
 
 import {
   apiErrorResponseSchema,
+  aiRunSearchQuerySchema,
+  aiRunSearchResponseSchema,
   assetListQuerySchema,
   assetListResponseSchema,
   outlineApproveRequestSchema,
@@ -51,6 +53,8 @@ import {
   voiceGenerationAcceptedResponseSchema,
   voiceGenerationStatusResponseSchema,
   type ApiErrorDetail,
+  type AiRunSearchData,
+  type AiRunSearchQuery,
   type OutlineApproveRequest,
   type OutlineRejectRequest,
   type OutlineGenerateRequest,
@@ -180,6 +184,42 @@ export async function fetchApi<T>(
 
 export async function fetchProjects(): Promise<ProjectSummary[]> {
   const response = await fetchApi("/api/projects", projectListResponseSchema);
+  return response.data;
+}
+
+export async function searchAiRuns(
+  input: AiRunSearchQuery = { limit: 50, offset: 0 }
+): Promise<AiRunSearchData> {
+  const query = aiRunSearchQuerySchema.parse(input);
+  const params = new URLSearchParams();
+  if (query.from !== undefined) {
+    params.set("from", query.from);
+  }
+  if (query.to !== undefined) {
+    params.set("to", query.to);
+  }
+  if (query.taskKind !== undefined) {
+    params.set("taskKind", query.taskKind);
+  }
+  if (query.modelId !== undefined) {
+    params.set("modelId", query.modelId);
+  }
+  if (query.status !== undefined) {
+    params.set("status", query.status);
+  }
+  if (query.decision !== undefined) {
+    params.set("decision", query.decision);
+  }
+  if (query.errorCode !== undefined) {
+    params.set("errorCode", query.errorCode);
+  }
+  params.set("limit", String(query.limit));
+  params.set("offset", String(query.offset));
+
+  const response = await fetchApi(
+    `/api/ai-runs?${params.toString()}`,
+    aiRunSearchResponseSchema
+  );
   return response.data;
 }
 
