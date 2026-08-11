@@ -4,10 +4,14 @@ import {
   type ImprovementDecisionRecord,
   type RunLog
 } from "../schema/index.js";
-import type {
-  AiRunSearchData,
-  AiRunSearchItem,
-  AiRunSearchQuery
+import {
+  AI_RUN_EXPORT_VERSION,
+  aiRunExportRecordSchema,
+  type AiRunExportQuery,
+  type AiRunExportRecord,
+  type AiRunSearchData,
+  type AiRunSearchItem,
+  type AiRunSearchQuery
 } from "../schema/api.js";
 import type { RunLogStoreListPort } from "./run-log-store.js";
 
@@ -128,9 +132,31 @@ function toSearchItem(
   };
 }
 
+function toExportRecord(item: AiRunSearchItem): AiRunExportRecord {
+  return aiRunExportRecordSchema.parse({
+    exportVersion: AI_RUN_EXPORT_VERSION,
+    runId: item.runId,
+    projectId: item.projectId,
+    taskKind: item.taskKind,
+    modelId: item.modelId,
+    responseModel: item.responseModel,
+    status: item.status,
+    queuedAt: item.queuedAt,
+    finishedAt: item.finishedAt,
+    schemaValidation: item.schemaValidation,
+    responseTimeMs: item.responseTimeMs,
+    errorCode: item.errorCode,
+    candidateCount: item.candidateCount,
+    acceptedCount: item.acceptedCount,
+    rejectedCount: item.rejectedCount,
+    undecidedCount: item.undecidedCount,
+    modified: item.modified
+  });
+}
+
 function matchesQuery(
   item: AiRunSearchItem,
-  query: AiRunSearchQuery,
+  query: AiRunSearchQuery | AiRunExportQuery,
   fromMs: number | undefined,
   toMs: number | undefined
 ): boolean {
@@ -227,8 +253,9 @@ export class AiRunSearchService {
     this.improvementLogRepository = options.improvementLogRepository;
   }
 
-  async search(input: AiRunSearchQuery): Promise<AiRunSearchData> {
-    const query = input;
+  private async collectRows(
+    query: AiRunSearchQuery | AiRunExportQuery
+  ): Promise<AiRunSearchItem[]> {
     const fromMs =
       query.from === undefined ? undefined : Date.parse(query.from);
     const toMs = query.to === undefined ? undefined : Date.parse(query.to);
@@ -277,15 +304,29 @@ export class AiRunSearchService {
     }
 
     rows.sort(compareRuns);
+    return rows;
+  }
+
+  async search(input: AiRunSearchQuery): Promise<AiRunSearchData> {
+    const rows = await this.collectRows(input);
     const summary = summarize(rows);
-    const items = rows.slice(query.offset, query.offset + query.limit);
+    const items = rows.slice(input.offset, input.offset + input.limit);
 
     return {
       items,
       summary,
-      limit: query.limit,
-      offset: query.offset,
-      hasNextPage: query.offset + query.limit < rows.length
+      limit: input.limit,
+      offset: input.offset,
+      hasNextPage: input.offset + input.limit < rows.length
     };
+  }
+
+  async exportJsonLines(input: AiRunExportQuery): Promise<string> {
+    const rows = await this.collectRows(input);
+    if (rows.length === 0) {
+      return "";
+    }
+
+    return `${rows.map((item) => JSON.stringify(toExportRecord(item))).join("\n")}\n`;
   }
 }

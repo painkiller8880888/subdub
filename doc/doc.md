@@ -945,7 +945,7 @@ WebUI は Vite + React SPA、画面ルーティングは React Router、サー�
 - 完成動画とサムネイルは `projects/{projectId}/output/` へ保存する。
 - 生成途中の音声・プレビューは `cache/` と `audio/` へ分離する。
 - プロジェクト JSON とプロンプトは Git で履歴管理する。
-- SQLite ファイルはバイナリで差分確認に適さないため、Git 履歴の正本にはしない。素材メタデータ、タグ辞書、改善ログを JSON Lines または CSV へエクスポートできるようにする。
+- SQLite ファイルはバイナリで差分確認に適さないため、Git 履歴の正本にはしない。素材メタデータ、タグ辞書、改善ログは、UTF-8 の JSON Lines（拡張子 `.jsonl`）へエクスポートできるようにする。
 - 大容量の素材動画・写真・帳票、音声、完成 MP4 は原則として Git の対象外にする。
 
 ### 17.6 VOICEVOX
@@ -1275,7 +1275,7 @@ BGM と挿入プレースホルダー:
 - 生成ルール候補には、根拠となった修正イベントとタグを関連付け、採用、保留、却下を区別できるようにする。
 - AI 生成および動画生成 1 回ごとの実行情報は `runs/{runId}.json` へ分離する。
 - AI の全プロンプト・全応答を常に保存するのではなく、再現と改善に必要な情報を保存する。
-- SQLite は better-sqlite3、Drizzle ORM、Drizzle Kit を使用し、`src/db/schema.ts` を正本として生成 SQL を Git 管理し、起動時に migration を適用する。バックアップ周期と標準エクスポート形式は実装時に決定する。
+- SQLite は better-sqlite3、Drizzle ORM、Drizzle Kit を使用し、`src/db/schema.ts` を正本として生成 SQL を Git 管理し、起動時に migration を適用する。バックアップ周期を運用し、標準エクスポート形式には UTF-8 の JSON Lines（拡張子 `.jsonl`）を使用する。
 
 ### 17.16 現時点で判断を保留する項目
 

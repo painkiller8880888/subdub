@@ -2,6 +2,8 @@ import { describe, expect, it, vi } from "vitest";
 
 import { AiRunSearchService } from "../../src/app/ai-run-search-service.js";
 import {
+  aiRunExportQuerySchema,
+  aiRunExportRecordSchema,
   aiRunSearchQuerySchema,
   type AiRunSearchQuery
 } from "../../src/schema/api.js";
@@ -123,7 +125,13 @@ function makeCandidate(options: {
     targetKind: "outline",
     targetId: "outline",
     candidateKey: options.candidateId,
-    candidateJson: { candidateId: options.candidateId },
+    candidateJson: {
+      candidateId: options.candidateId,
+      sourceMarkdown: "SOURCE_MARKDOWN_SECRET",
+      apiKey: "API_KEY_SECRET",
+      windowsPath: "C:\\private\\source.md",
+      posixPath: "/private/source.md"
+    },
     candidateChecksum: hash,
     modelId: "google/gemma-4-31b-it",
     responseModel: "provider/gemma",
@@ -149,9 +157,15 @@ function makeDecision(options: {
     targetKind: "outline",
     targetId: "outline",
     decision: options.decision,
-    beforeJson: { fixture: "before" },
-    afterJson: { fixture: "after" },
-    reason: null,
+    beforeJson: {
+      fixture: "before",
+      goldenPayload: "GOLDEN_PAYLOAD_SECRET"
+    },
+    afterJson: {
+      fixture: "after",
+      sourceMarkdown: "SOURCE_MARKDOWN_SECRET"
+    },
+    reason: "DECISION_REASON_SECRET",
     modelId: "google/gemma-4-31b-it",
     promptVersion: "fixture-v1",
     createdAt: "2026-08-11T00:00:01.000Z"
@@ -311,7 +325,8 @@ function createFixture() {
     }),
     projectRepository,
     runLogStore,
-    improvementLogRepository
+    improvementLogRepository,
+    runsByProject
   };
 }
 
@@ -411,5 +426,94 @@ describe("AiRunSearchService", () => {
     await expect(
       search({ taskKind: "outline_generation", modelId: "other/model" })
     ).resolves.toEqual(["run-false"]);
+  });
+
+  it("exports the same filtered, sorted rows without pagination", async () => {
+    const fixture = createFixture();
+    const exportIds = async (query: Record<string, unknown> = {}) => {
+      const body = await fixture.service.exportJsonLines(
+        aiRunExportQuerySchema.parse(query)
+      );
+      return body
+        .trimEnd()
+        .split("\n")
+        .filter((line) => line.length > 0)
+        .map((line) => aiRunExportRecordSchema.parse(JSON.parse(line)).runId);
+    };
+
+    await expect(
+      exportIds({
+        from: "2026-08-11T03:00:00.000Z",
+        to: "2026-08-11T05:00:00.000Z"
+      })
+    ).resolves.toEqual(["run-undecided"]);
+    await expect(exportIds({ taskKind: "script_generation" })).resolves.toEqual(
+      ["run-empty"]
+    );
+    await expect(
+      exportIds({ modelId: "google/gemma-4-31b-it" })
+    ).resolves.toEqual(["run-mixed", "run-empty"]);
+    await expect(exportIds({ status: "failed" })).resolves.toEqual([
+      "run-undecided"
+    ]);
+    await expect(
+      exportIds({ errorCode: "OPENROUTER_TIMEOUT" })
+    ).resolves.toEqual(["run-undecided"]);
+    await expect(exportIds({ decision: "accepted" })).resolves.toEqual([
+      "run-false",
+      "run-mixed"
+    ]);
+    await expect(
+      exportIds({ taskKind: "outline_generation", modelId: "other/model" })
+    ).resolves.toEqual(["run-false"]);
+  });
+
+  it("exports more than one search page and excludes sensitive joined payloads", async () => {
+    const fixture = createFixture();
+    const runs = fixture.runsByProject.get("project-one");
+    if (runs === undefined) {
+      throw new Error("expected project-one fixture");
+    }
+    for (let index = 0; index < 101; index += 1) {
+      runs.push(
+        makeRun({
+          runId: `run-many-${String(index).padStart(3, "0")}`,
+          projectId: "project-one",
+          queuedAt: "2026-08-10T00:00:00.000Z"
+        })
+      );
+    }
+
+    const body = await fixture.service.exportJsonLines(
+      aiRunExportQuerySchema.parse({})
+    );
+    const lines = body.split("\n");
+    expect(lines.at(-1)).toBe("");
+    const records = lines
+      .slice(0, -1)
+      .map((line) => aiRunExportRecordSchema.parse(JSON.parse(line)));
+
+    expect(records).toHaveLength(105);
+    expect(body).not.toContain("candidateJson");
+    expect(body).not.toContain("beforeJson");
+    expect(body).not.toContain("afterJson");
+    expect(body).not.toContain("GOLDEN_PAYLOAD_SECRET");
+    expect(body).not.toContain("SOURCE_MARKDOWN_SECRET");
+    expect(body).not.toContain("DECISION_REASON_SECRET");
+    expect(body).not.toContain("API_KEY_SECRET");
+    expect(body).not.toContain("C:\\private");
+    expect(body).not.toContain("/private");
+    expect(records[0]?.runId).toBe("run-false");
+    expect(records.at(-1)?.runId).toBe("run-many-100");
+  });
+
+  it("returns an empty body for an empty export", async () => {
+    const fixture = createFixture();
+
+    await expect(
+      fixture.service.exportJsonLines(
+        aiRunExportQuerySchema.parse({ modelId: "missing/model" })
+      )
+    ).resolves.toBe("");
   });
 });

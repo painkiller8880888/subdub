@@ -374,17 +374,20 @@ export const aiRunDecisionFilterSchema = z.enum([
 
 export const aiRunStatusFilterSchema = z.enum(["succeeded", "failed"]);
 
-export const aiRunSearchQuerySchema = strictObject({
+const aiRunFilterQueryShape = {
   from: isoUtcDateTimeSchema.optional(),
   to: isoUtcDateTimeSchema.optional(),
   taskKind: aiTaskKindSchema.optional(),
   modelId: z.string().min(1).optional(),
   status: aiRunStatusFilterSchema.optional(),
   decision: aiRunDecisionFilterSchema.optional(),
-  errorCode: runErrorCodeSchema.optional(),
-  limit: z.coerce.number().int().min(1).max(100).optional().default(50),
-  offset: z.coerce.number().int().nonnegative().optional().default(0)
-}).superRefine((query, ctx) => {
+  errorCode: runErrorCodeSchema.optional()
+};
+
+function validateAiRunDateRange(
+  query: { readonly from?: string; readonly to?: string },
+  ctx: z.RefinementCtx
+): void {
   if (
     query.from !== undefined &&
     query.to !== undefined &&
@@ -396,9 +399,41 @@ export const aiRunSearchQuerySchema = strictObject({
       message: "from must be earlier than to"
     });
   }
-});
+}
+
+export const aiRunExportQuerySchema = strictObject(
+  aiRunFilterQueryShape
+).superRefine(validateAiRunDateRange);
+
+export const aiRunSearchQuerySchema = strictObject({
+  ...aiRunFilterQueryShape,
+  limit: z.coerce.number().int().min(1).max(100).optional().default(50),
+  offset: z.coerce.number().int().nonnegative().optional().default(0)
+}).superRefine(validateAiRunDateRange);
 
 export const aiRunSearchItemSchema = strictObject({
+  runId: idSchema,
+  projectId: idSchema,
+  taskKind: aiTaskKindSchema,
+  modelId: z.string().min(1).nullable(),
+  responseModel: z.string().min(1).nullable(),
+  status: runStatusSchema,
+  queuedAt: isoUtcDateTimeSchema,
+  finishedAt: isoUtcDateTimeSchema.nullable(),
+  schemaValidation: z.enum(["passed", "failed", "not_run"]),
+  responseTimeMs: z.number().int().nonnegative().nullable(),
+  errorCode: runErrorCodeSchema.nullable(),
+  candidateCount: nonNegativeIntegerSchema,
+  acceptedCount: nonNegativeIntegerSchema,
+  rejectedCount: nonNegativeIntegerSchema,
+  undecidedCount: nonNegativeIntegerSchema,
+  modified: z.boolean().nullable()
+});
+
+export const AI_RUN_EXPORT_VERSION = "1.0.0" as const;
+
+export const aiRunExportRecordSchema = strictObject({
+  exportVersion: z.literal(AI_RUN_EXPORT_VERSION),
   runId: idSchema,
   projectId: idSchema,
   taskKind: aiTaskKindSchema,
@@ -928,8 +963,10 @@ export type RenderRunStatusResponse = z.infer<
 >;
 export type AiRunDecisionFilter = z.infer<typeof aiRunDecisionFilterSchema>;
 export type AiRunStatusFilter = z.infer<typeof aiRunStatusFilterSchema>;
+export type AiRunExportQuery = z.infer<typeof aiRunExportQuerySchema>;
 export type AiRunSearchQuery = z.infer<typeof aiRunSearchQuerySchema>;
 export type AiRunSearchItem = z.infer<typeof aiRunSearchItemSchema>;
+export type AiRunExportRecord = z.infer<typeof aiRunExportRecordSchema>;
 export type AiRunSearchSummary = z.infer<typeof aiRunSearchSummarySchema>;
 export type AiRunSearchData = z.infer<typeof aiRunSearchDataSchema>;
 export type AiRunSearchResponse = z.infer<typeof aiRunSearchResponseSchema>;

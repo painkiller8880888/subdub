@@ -24,6 +24,7 @@ import {
   deactivateTerminology,
   activateTerminology,
   previewTerminology,
+  exportAiRuns,
   searchAiRuns
 } from "../../src/web/lib/api-client.js";
 import {
@@ -180,6 +181,77 @@ describe("web API client", () => {
         }
       }).success
     ).toBe(false);
+  });
+
+  it("exports applied AI run filters without pagination and reads the filename", async () => {
+    let requestUrl = "";
+    globalThis.fetch = async (input) => {
+      requestUrl = String(input);
+      return new Response('{"exportVersion":"1.0.0"}\n', {
+        status: 200,
+        headers: {
+          "content-type": "application/x-ndjson; charset=utf-8",
+          "content-disposition": 'attachment; filename="subdub-ai-runs.jsonl"'
+        }
+      });
+    };
+
+    const result = await exportAiRuns({
+      from: "2026-08-10T00:00:00.000Z",
+      to: "2026-08-12T00:00:00.000Z",
+      taskKind: "outline_generation",
+      modelId: "google/gemma-4-31b-it",
+      status: "failed",
+      decision: "undecided",
+      errorCode: "OPENROUTER_TIMEOUT"
+    });
+
+    expect(result.filename).toBe("subdub-ai-runs.jsonl");
+    expect(await result.blob.text()).toBe('{"exportVersion":"1.0.0"}\n');
+    const queryString = requestUrl.split("?", 2)[1] ?? "";
+    const query = new URLSearchParams(queryString);
+    expect(query.get("from")).toBe("2026-08-10T00:00:00.000Z");
+    expect(query.get("to")).toBe("2026-08-12T00:00:00.000Z");
+    expect(query.get("taskKind")).toBe("outline_generation");
+    expect(query.get("modelId")).toBe("google/gemma-4-31b-it");
+    expect(query.get("status")).toBe("failed");
+    expect(query.get("decision")).toBe("undecided");
+    expect(query.get("errorCode")).toBe("OPENROUTER_TIMEOUT");
+    expect(query.has("limit")).toBe(false);
+    expect(query.has("offset")).toBe(false);
+  });
+
+  it("supports an empty export body and the default filename", async () => {
+    globalThis.fetch = async () =>
+      new Response("", {
+        status: 200,
+        headers: { "content-type": "application/x-ndjson; charset=utf-8" }
+      });
+
+    const result = await exportAiRuns();
+
+    expect(result.filename).toBe("subdub-ai-runs.jsonl");
+    expect(result.blob.size).toBe(0);
+  });
+
+  it("preserves the common error contract for export failures", async () => {
+    globalThis.fetch = async () =>
+      jsonResponse(
+        {
+          error: {
+            code: "RUN_LOG_READ_FAILED",
+            message: "サーバーで予期しないエラーが発生しました。",
+            details: [],
+            requestId: "req-export-error"
+          }
+        },
+        500
+      );
+
+    await expect(exportAiRuns()).rejects.toMatchObject({
+      code: "RUN_LOG_READ_FAILED",
+      requestId: "req-export-error"
+    });
   });
 
   it("uses a protocol error when a model success response is malformed", async () => {

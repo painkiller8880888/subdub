@@ -2,6 +2,7 @@ import { type ZodType } from "zod";
 
 import {
   apiErrorResponseSchema,
+  aiRunExportQuerySchema,
   aiRunSearchQuerySchema,
   aiRunSearchResponseSchema,
   assetListQuerySchema,
@@ -53,6 +54,7 @@ import {
   voiceGenerationAcceptedResponseSchema,
   voiceGenerationStatusResponseSchema,
   type ApiErrorDetail,
+  type AiRunExportQuery,
   type AiRunSearchData,
   type AiRunSearchQuery,
   type OutlineApproveRequest,
@@ -137,6 +139,8 @@ export class ApiClientProtocolError extends Error {
 type FetchInit = Parameters<typeof fetch>[1];
 type FetchResponse = Awaited<ReturnType<typeof fetch>>;
 
+export const defaultAiRunExportFilename = "subdub-ai-runs.jsonl";
+
 async function readJson(response: FetchResponse): Promise<unknown> {
   try {
     return await response.json();
@@ -145,52 +149,24 @@ async function readJson(response: FetchResponse): Promise<unknown> {
   }
 }
 
-export async function fetchApi<T>(
-  input: string,
-  responseSchema: ZodType<T>,
-  init?: FetchInit
-): Promise<T> {
-  let response: FetchResponse;
-  try {
-    response = await fetch(input, init);
-  } catch {
+function throwApiClientError(response: FetchResponse, body: unknown): never {
+  const parsedError = apiErrorResponseSchema.safeParse(body);
+  if (!parsedError.success) {
     throw new ApiClientProtocolError();
   }
 
-  const body = await readJson(response);
-
-  if (!response.ok) {
-    const parsedError = apiErrorResponseSchema.safeParse(body);
-    if (!parsedError.success) {
-      throw new ApiClientProtocolError();
-    }
-
-    throw new ApiClientError({
-      status: response.status,
-      code: parsedError.data.error.code,
-      message: parsedError.data.error.message,
-      details: parsedError.data.error.details,
-      requestId: parsedError.data.error.requestId
-    });
-  }
-
-  const parsedResponse = responseSchema.safeParse(body);
-  if (!parsedResponse.success) {
-    throw new ApiClientProtocolError();
-  }
-
-  return parsedResponse.data;
+  throw new ApiClientError({
+    status: response.status,
+    code: parsedError.data.error.code,
+    message: parsedError.data.error.message,
+    details: parsedError.data.error.details,
+    requestId: parsedError.data.error.requestId
+  });
 }
 
-export async function fetchProjects(): Promise<ProjectSummary[]> {
-  const response = await fetchApi("/api/projects", projectListResponseSchema);
-  return response.data;
-}
-
-export async function searchAiRuns(
-  input: AiRunSearchQuery = { limit: 50, offset: 0 }
-): Promise<AiRunSearchData> {
-  const query = aiRunSearchQuerySchema.parse(input);
+function createAiRunFilterParams(
+  query: AiRunSearchQuery | AiRunExportQuery
+): URLSearchParams {
   const params = new URLSearchParams();
   if (query.from !== undefined) {
     params.set("from", query.from);
@@ -213,6 +189,62 @@ export async function searchAiRuns(
   if (query.errorCode !== undefined) {
     params.set("errorCode", query.errorCode);
   }
+  return params;
+}
+
+function parseExportFilename(contentDisposition: string | null): string {
+  const match = contentDisposition?.match(
+    /(?:^|;)\s*filename=(?:"([^"]+)"|([^;]+))/i
+  );
+  const filename = (match?.[1] ?? match?.[2] ?? "").trim();
+  const hasUnsafeFilenameCharacter = [...filename].some((character) => {
+    const code = character.charCodeAt(0);
+    return (
+      character === "\\" || character === "/" || code <= 0x1f || code === 0x7f
+    );
+  });
+  if (filename.length === 0 || hasUnsafeFilenameCharacter) {
+    return defaultAiRunExportFilename;
+  }
+  return filename;
+}
+
+export async function fetchApi<T>(
+  input: string,
+  responseSchema: ZodType<T>,
+  init?: FetchInit
+): Promise<T> {
+  let response: FetchResponse;
+  try {
+    response = await fetch(input, init);
+  } catch {
+    throw new ApiClientProtocolError();
+  }
+
+  const body = await readJson(response);
+
+  if (!response.ok) {
+    throwApiClientError(response, body);
+  }
+
+  const parsedResponse = responseSchema.safeParse(body);
+  if (!parsedResponse.success) {
+    throw new ApiClientProtocolError();
+  }
+
+  return parsedResponse.data;
+}
+
+export async function fetchProjects(): Promise<ProjectSummary[]> {
+  const response = await fetchApi("/api/projects", projectListResponseSchema);
+  return response.data;
+}
+
+export async function searchAiRuns(
+  input: AiRunSearchQuery = { limit: 50, offset: 0 }
+): Promise<AiRunSearchData> {
+  const query = aiRunSearchQuerySchema.parse(input);
+  const params = createAiRunFilterParams(query);
   params.set("limit", String(query.limit));
   params.set("offset", String(query.offset));
 
@@ -221,6 +253,45 @@ export async function searchAiRuns(
     aiRunSearchResponseSchema
   );
   return response.data;
+}
+
+export type AiRunExportDownload = {
+  readonly blob: Blob;
+  readonly filename: string;
+};
+
+export async function exportAiRuns(
+  input: AiRunExportQuery = {}
+): Promise<AiRunExportDownload> {
+  const query = aiRunExportQuerySchema.parse(input);
+  const params = createAiRunFilterParams(query);
+
+  let response: FetchResponse;
+  try {
+    const queryString = params.toString();
+    response = await fetch(
+      `/api/ai-runs/export${queryString.length > 0 ? `?${queryString}` : ""}`
+    );
+  } catch {
+    throw new ApiClientProtocolError();
+  }
+
+  if (!response.ok) {
+    const body = await readJson(response);
+    throwApiClientError(response, body);
+  }
+
+  let blob: Blob;
+  try {
+    blob = await response.blob();
+  } catch {
+    throw new ApiClientProtocolError();
+  }
+
+  return {
+    blob,
+    filename: parseExportFilename(response.headers.get("content-disposition"))
+  };
 }
 
 export async function fetchModels(

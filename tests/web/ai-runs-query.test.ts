@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  buildAiRunExportQuery,
   buildAiRunSearchQuery,
   localDateToUtcBoundary,
   type AiRunFilterDraft
@@ -43,5 +44,19 @@ describe("AI run search query conversion", () => {
 
   it("rejects a non-existent local calendar date", () => {
     expect(() => localDateToUtcBoundary("2026-02-30")).toThrow();
+  });
+
+  it("builds export filters from the applied search without pagination", () => {
+    const searchQuery = buildAiRunSearchQuery(draft, 50);
+
+    expect(buildAiRunExportQuery(searchQuery)).toEqual({
+      from: new Date(2026, 7, 11).toISOString(),
+      to: new Date(2026, 7, 13).toISOString(),
+      taskKind: "visual_search_intent",
+      modelId: "google/gemma-4-31b-it",
+      status: "failed",
+      decision: "rejected",
+      errorCode: "OPENROUTER_TIMEOUT"
+    });
   });
 });
