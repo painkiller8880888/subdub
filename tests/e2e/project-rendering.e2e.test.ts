@@ -765,13 +765,26 @@ async function validateWebPreviewPath(
     });
     const page = await browser.newPage();
     const requestedAssetPaths = new Set<string>();
+    const assetResponses = new Map<
+      string,
+      { readonly status: number; readonly contentType: string | undefined }
+    >();
+    const projectFilePrefix = `/api/projects/${encodeURIComponent(
+      projectId
+    )}/files/`;
     page.on("request", (request) => {
       const url = new URL(request.url());
-      const projectFilePrefix = `/api/projects/${encodeURIComponent(
-        projectId
-      )}/files/`;
       if (url.pathname.startsWith(projectFilePrefix)) {
         requestedAssetPaths.add(url.pathname.slice(projectFilePrefix.length));
+      }
+    });
+    page.on("response", (response) => {
+      const url = new URL(response.url());
+      if (url.pathname.startsWith(projectFilePrefix)) {
+        assetResponses.set(url.pathname.slice(projectFilePrefix.length), {
+          status: response.status(),
+          contentType: response.headers()["content-type"]
+        });
       }
     });
 
@@ -815,14 +828,30 @@ async function validateWebPreviewPath(
     while (
       Date.now() - startedAt < 15_000 &&
       expectedAssetPaths.some(
-        (assetPath) => !requestedAssetPaths.has(assetPath)
+        (assetPath) =>
+          !requestedAssetPaths.has(assetPath) || !assetResponses.has(assetPath)
       )
     ) {
       await page.waitForTimeout(100);
     }
     for (const assetPath of expectedAssetPaths) {
       expect([...requestedAssetPaths]).toContain(assetPath);
+      const assetResponse = assetResponses.get(assetPath);
+      expect(assetResponse).toBeDefined();
+      if (assetResponse === undefined) {
+        throw new Error(
+          `No response was observed for preview asset ${assetPath}.`
+        );
+      }
+      expect(
+        assetResponse.status,
+        `Preview asset ${assetPath} did not load successfully`
+      ).toBeGreaterThanOrEqual(200);
+      expect(assetResponse.status).toBeLessThan(300);
+      expect(assetResponse.contentType).toMatch(/^audio\//i);
     }
+    await page.waitForTimeout(500);
+    expect(await playerPanel.locator('[role="alert"]').count()).toBe(0);
   } finally {
     if (browser !== undefined) {
       await browser.close();
