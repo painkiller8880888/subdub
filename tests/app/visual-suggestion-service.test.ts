@@ -9,6 +9,7 @@ import { computeOutlineHash } from "../../src/app/projects/script-domain.js";
 import { createEmptyVideoProject } from "../../src/app/projects/empty-video-project.js";
 import { ProjectRepository } from "../../src/app/projects/project-repository.js";
 import { VisualSuggestionService } from "../../src/app/projects/visual-suggestion-service.js";
+import { ImprovementLogRepository } from "../../src/app/projects/improvement-log-repository.js";
 import { initializeWorkspaceDatabase } from "../../src/db/initialize.js";
 import {
   assetTags,
@@ -210,6 +211,7 @@ function createService(
     readonly modelIds?: readonly string[];
     readonly createId?: () => string;
     readonly chatError?: unknown;
+    readonly withImprovementLog?: boolean;
     readonly modelOptions?: Record<
       string,
       { structuredOutputs?: boolean; zdrAvailable?: boolean }
@@ -250,7 +252,14 @@ function createService(
     modelService,
     chatAdapter,
     now: () => NOW,
-    createId: options.createId ?? (() => "visual-suggestion-run")
+    createId: options.createId ?? (() => "visual-suggestion-run"),
+    ...(options.withImprovementLog
+      ? {
+          improvementLogRepository: new ImprovementLogRepository(
+            setup.database.database
+          )
+        }
+      : {})
   });
   return { service, modelService, chatAdapter, requests };
 }
@@ -395,6 +404,92 @@ describe("VisualSuggestionService", () => {
     expect(runJson).not.toContain("unique visual");
   });
 
+  it("stores each successful backend candidate with its run, model, and prompt version", async () => {
+    const setup = await readySetup();
+    insertDatabaseAsset(setup.database, "asset-candidate", {
+      title: "unique visual"
+    });
+    insertDatabaseTag(setup.database, "tag-candidate", "must-have");
+    linkDatabaseAsset(setup.database, "asset-candidate", "tag-candidate");
+    const chat = createService(setup, intent(), { withImprovementLog: true });
+
+    const result = await chat.service.generate(setup.project.metadata.id, {
+      startLineId: "main-mentor-1",
+      endLineId: "main-learner-1",
+      expectedRevision: setup.project.revision
+    });
+    const candidates = await new ImprovementLogRepository(
+      setup.database.database
+    ).listGenerationCandidates(setup.project.metadata.id);
+
+    expect(result.data.candidates).toHaveLength(1);
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0]).toMatchObject({
+      generationRunId: result.data.runId,
+      projectRevision: result.revision,
+      taskKind: "visual_search_intent",
+      targetKind: "visual_line_range",
+      targetId: "main-mentor-1:main-learner-1",
+      candidateKey: "asset:asset-candidate",
+      modelId: "task-model",
+      responseModel: "provider/model",
+      promptVersion: "1.0.0"
+    });
+  });
+
+  it("records an explicit visual candidate rejection without changing the project", async () => {
+    const setup = await readySetup();
+    insertDatabaseAsset(setup.database, "asset-rejected", {
+      title: "unique visual"
+    });
+    insertDatabaseTag(setup.database, "tag-rejected", "must-have");
+    linkDatabaseAsset(setup.database, "asset-rejected", "tag-rejected");
+    setup.database.connection
+      .prepare(
+        "UPDATE asset_versions SET checksum = ? WHERE asset_id = ? AND version = 1"
+      )
+      .run("c".repeat(64), "asset-rejected");
+    const chat = createService(setup, intent(), { withImprovementLog: true });
+    const generated = await chat.service.generate(setup.project.metadata.id, {
+      startLineId: "main-mentor-1",
+      endLineId: "main-learner-1",
+      expectedRevision: setup.project.revision
+    });
+    expect(generated.data.candidates).toHaveLength(1);
+
+    const rejected = await chat.service.rejectCandidate(
+      setup.project.metadata.id,
+      generated.data.runId,
+      "asset-rejected",
+      { expectedRevision: generated.revision, reason: "   " }
+    );
+    const decisions = await new ImprovementLogRepository(
+      setup.database.database
+    ).listDecisions(setup.project.metadata.id);
+
+    expect(rejected.revision).toBe(generated.revision);
+    expect(rejected.data).toMatchObject({ decision: "rejected" });
+    expect(decisions).toHaveLength(1);
+    expect(decisions[0]?.reason).toBeNull();
+    expect(
+      (await setup.repository.read(setup.project.metadata.id)).revision
+    ).toBe(generated.revision);
+
+    await expect(
+      chat.service.rejectCandidate(
+        setup.project.metadata.id,
+        generated.data.runId,
+        "asset-rejected",
+        { expectedRevision: generated.revision, reason: "再送" }
+      )
+    ).resolves.toMatchObject({ data: { decision: "rejected" } });
+    expect(
+      await new ImprovementLogRepository(setup.database.database).listDecisions(
+        setup.project.metadata.id
+      )
+    ).toHaveLength(1);
+  });
+
   it("keeps run override, task override, and default model priority", async () => {
     const setup = await readySetup();
     const chat = createService(setup, intent(), {
@@ -451,7 +546,8 @@ describe("VisualSuggestionService", () => {
         requiredTags: ["asset-best"],
         optionalTags: ["unknown-optional"],
         excludedTags: []
-      })
+      }),
+      { withImprovementLog: true }
     );
 
     const result = await chat.service.generate(setup.project.metadata.id, {
@@ -466,6 +562,11 @@ describe("VisualSuggestionService", () => {
       { group: "requiredTags", value: "asset-best", reason: "unknown" },
       { group: "optionalTags", value: "unknown-optional", reason: "unknown" }
     ]);
+    expect(
+      await new ImprovementLogRepository(
+        setup.database.database
+      ).listGenerationCandidates(setup.project.metadata.id)
+    ).toHaveLength(0);
   });
 
   it("does not change project state on malformed intent and normal asset search remains available", async () => {

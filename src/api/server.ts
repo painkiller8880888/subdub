@@ -42,6 +42,10 @@ import {
   type RenderJobLifecyclePort
 } from "../app/rendering/render-job-service.js";
 import { ProjectFileService } from "../app/projects/project-file-service.js";
+import {
+  ImprovementLogRepository,
+  type ImprovementLogRepositoryPort
+} from "../app/projects/improvement-log-repository.js";
 
 export const SERVER_HOST = API_HOST;
 export const SERVER_PORT = API_PORT;
@@ -51,6 +55,7 @@ export type ServerOptions = AppOptions & {
   databasePath?: string;
   migrationsFolder?: MigrationFolder;
   projectRepository?: ProjectRepository;
+  improvementLogRepository?: ImprovementLogRepositoryPort;
   terminologyRepository?: TerminologyRepository;
   assetRepository?: AssetRepository;
   assetProcessingService?: AssetProcessingService;
@@ -90,6 +95,7 @@ export async function initializeServer(
     databasePath,
     migrationsFolder,
     projectRepository,
+    improvementLogRepository,
     terminologyRepository,
     assetRepository,
     assetProcessingService,
@@ -115,6 +121,8 @@ export async function initializeServer(
   try {
     const resolvedProjectRepository =
       projectRepository ?? new ProjectRepository({ workspaceRoot });
+    const resolvedImprovementLogRepository =
+      improvementLogRepository ?? new ImprovementLogRepository(database.database);
     const resolvedModelService =
       appOptions.modelService ?? createOpenRouterModelService();
     const resolvedChatAdapter = createOpenRouterChatAdapter();
@@ -123,14 +131,16 @@ export async function initializeServer(
     const resolvedProjectService =
       suppliedProjectService ??
       new ProjectService({
-        repository: resolvedProjectRepository
+        repository: resolvedProjectRepository,
+        improvementLogRepository: resolvedImprovementLogRepository
       });
     const resolvedOutlineGenerationService =
       appOptions.outlineGenerationService ??
       new OutlineGenerationService({
         repository: resolvedProjectRepository,
         modelService: resolvedModelService,
-        chatAdapter: resolvedChatAdapter
+        chatAdapter: resolvedChatAdapter,
+        improvementLogRepository: resolvedImprovementLogRepository
       });
     const resolvedVisualSuggestionService =
       appOptions.visualSuggestionService ??
@@ -138,7 +148,8 @@ export async function initializeServer(
         repository: resolvedProjectRepository,
         assetRepository: resolvedAssetRepository,
         modelService: resolvedModelService,
-        chatAdapter: resolvedChatAdapter
+        chatAdapter: resolvedChatAdapter,
+        improvementLogRepository: resolvedImprovementLogRepository
       });
     const resolvedVisualAssignmentService =
       suppliedVisualAssignmentService ??
@@ -146,7 +157,8 @@ export async function initializeServer(
         repository: resolvedProjectRepository,
         assetRepository: resolvedAssetRepository,
         workspaceRoot,
-        libraryRoot: path.join(workspaceRoot, "library")
+        libraryRoot: path.join(workspaceRoot, "library"),
+        improvementLogRepository: resolvedImprovementLogRepository
       });
     const resolvedTerminologyService =
       suppliedTerminologyService ??

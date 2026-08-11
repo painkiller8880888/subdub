@@ -56,7 +56,8 @@ export type AppOptions = {
   >;
   projectService?: ProjectService;
   outlineGenerationService?: Pick<OutlineGenerationService, "generate">;
-  visualSuggestionService?: Pick<VisualSuggestionService, "generate">;
+  visualSuggestionService?: Pick<VisualSuggestionService, "generate"> &
+    Partial<Pick<VisualSuggestionService, "rejectCandidate">>;
   visualAssignmentService?: import("./routes/visual-assignments.js").VisualAssignmentServicePort;
   terminologyService?: TerminologyServicePort;
   assetService?: AssetServicePort;

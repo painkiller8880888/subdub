@@ -107,7 +107,7 @@ describe("workspace SQLite", () => {
     const first = await initializeWorkspaceDatabase({ workspaceRoot });
     const firstHistory = migrationHistory(first.connection);
     expect(first.migrationResult.applied).toBe(true);
-    expect(firstHistory).toHaveLength(5);
+    expect(firstHistory).toHaveLength(6);
     first.close();
 
     const second = await initializeWorkspaceDatabase({ workspaceRoot });
@@ -118,6 +118,74 @@ describe("workspace SQLite", () => {
     await expect(
       fs.stat(path.join(workspaceRoot, "library", "workspace.sqlite"))
     ).resolves.toBeDefined();
+  });
+
+  it("creates the decision log tables with constraints and reporting indexes", async () => {
+    const workspaceRoot = await makeWorkspace();
+    const initialized = await initializeWorkspaceDatabase({ workspaceRoot });
+    const connection = initialized.connection;
+    const tableSql = (name: string): string => {
+      const row = connection
+        .prepare(
+          "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?"
+        )
+        .get(name) as { sql: string } | undefined;
+      expect(row, `table ${name}`).toBeDefined();
+      return row!.sql;
+    };
+
+    expect(tableSql("ai_generation_candidates")).toContain(
+      "ai_generation_candidates_task_kind_check"
+    );
+    expect(tableSql("improvement_decisions")).toContain(
+      "improvement_decisions_after_json_check"
+    );
+    expect(tableSql("golden_examples")).toContain(
+      "golden_examples_generation_metadata_check"
+    );
+    const indexes = connection
+      .prepare(
+        "SELECT name FROM sqlite_master WHERE type = 'index' AND (tbl_name = 'ai_generation_candidates' OR tbl_name = 'improvement_decisions' OR tbl_name = 'golden_examples') ORDER BY name"
+      )
+      .all() as Array<{ name: string }>;
+    expect(indexes.map((index) => index.name)).toEqual(
+      expect.arrayContaining([
+        "ai_generation_candidates_run_key_uq",
+        "ai_generation_candidates_project_task_model_run_idx",
+        "improvement_decisions_candidate_decision_uq",
+        "improvement_decisions_project_task_idx",
+        "golden_examples_project_kind_payload_uq",
+        "golden_examples_project_kind_revision_idx"
+      ])
+    );
+
+    const now = "2026-08-11T00:00:00.000Z";
+    const candidateJson = JSON.stringify({ ok: true });
+    connection
+      .prepare(
+        `INSERT INTO ai_generation_candidates
+          (candidate_id, generation_run_id, project_id, project_revision, task_kind, target_kind, target_id, candidate_key, candidate_json, candidate_checksum, model_id, response_model, prompt_version, created_at)
+         VALUES (?, ?, ?, 1, 'outline_generation', 'outline', 'outline', 'outline', ?, ?, ?, NULL, '1.0.0', ?)`
+      )
+      .run(
+        "candidate-check",
+        "run-check",
+        "project-check",
+        candidateJson,
+        "a".repeat(64),
+        "model-check",
+        now
+      );
+    expect(() =>
+      connection
+        .prepare(
+          `INSERT INTO improvement_decisions
+            (decision_id, candidate_id, project_id, project_revision_before, project_revision_after, task_kind, target_kind, target_id, decision, before_json, after_json, reason, model_id, prompt_version, created_at)
+           VALUES ('decision-invalid', 'candidate-check', 'project-check', 1, 1, 'outline_generation', 'outline', 'outline', 'rejected', ?, ?, NULL, 'model-check', '1.0.0', ?)`
+        )
+        .run(candidateJson, candidateJson, now)
+    ).toThrow();
+    initialized.close();
   });
 
   it("applies the terminology migration with its table, indexes, and status check", async () => {
@@ -296,7 +364,8 @@ describe("workspace SQLite", () => {
       "0001_curved_colleen_wing",
       "0002_asset-library",
       "0003_asset-processing-metadata",
-      "0004_asset-search"
+      "0004_asset-search",
+      "0005_decision-log-golden-examples"
     ];
     const definitions: MigrationDefinition[] = [];
     for (let index = 0; index < migrationTags.length; index++) {
@@ -370,6 +439,74 @@ describe("workspace SQLite", () => {
     third.close();
   });
 
+  it("applies the decision log migration to a database at 0004 exactly once", async () => {
+    const workspaceRoot = await makeWorkspace();
+    const migrationsRoot = path.join(process.cwd(), "src", "db", "migrations");
+    const migrationTags = [
+      "0000_baseline",
+      "0001_curved_colleen_wing",
+      "0002_asset-library",
+      "0003_asset-processing-metadata",
+      "0004_asset-search",
+      "0005_decision-log-golden-examples"
+    ];
+    const definitions: MigrationDefinition[] = [];
+    for (let index = 0; index < migrationTags.length; index += 1) {
+      definitions.push({
+        sql: await fs.readFile(
+          path.join(migrationsRoot, `${migrationTags[index]}.sql`),
+          "utf8"
+        ),
+        tag: migrationTags[index]!,
+        when: BASE_MIGRATION_TIME + index
+      });
+    }
+    const beforeDecisionLogFolder = await makeMigrationFolder(
+      workspaceRoot,
+      definitions.slice(0, 5)
+    );
+    const before = await initializeWorkspaceDatabase({
+      migrationsFolder: beforeDecisionLogFolder,
+      workspaceRoot
+    });
+    expect(
+      before.connection
+        .prepare(
+          "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'golden_examples'"
+        )
+        .get()
+    ).toBeUndefined();
+    before.close();
+
+    const allMigrationsFolder = await makeMigrationFolder(
+      workspaceRoot,
+      definitions
+    );
+    const first = await initializeWorkspaceDatabase({
+      migrationsFolder: allMigrationsFolder,
+      workspaceRoot
+    });
+    expect(first.migrationResult.applied).toBe(true);
+    expect(migrationHistory(first.connection)).toHaveLength(6);
+    expect(
+      first.connection
+        .prepare(
+          "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'golden_examples'"
+        )
+        .get()
+    ).toEqual({ 1: 1 });
+    const history = migrationHistory(first.connection);
+    first.close();
+
+    const second = await initializeWorkspaceDatabase({
+      migrationsFolder: allMigrationsFolder,
+      workspaceRoot
+    });
+    expect(second.migrationResult.applied).toBe(false);
+    expect(migrationHistory(second.connection)).toEqual(history);
+    second.close();
+  });
+
   it("applies the new migration to an already-baselined database only once", async () => {
     const workspaceRoot = await makeWorkspace();
     const terminologyMigration = await fs.readFile(
@@ -429,7 +566,8 @@ describe("workspace SQLite", () => {
       "0001_curved_colleen_wing",
       "0002_asset-library",
       "0003_asset-processing-metadata",
-      "0004_asset-search"
+      "0004_asset-search",
+      "0005_decision-log-golden-examples"
     ];
     const definitions: MigrationDefinition[] = [];
     for (let index = 0; index < migrationTags.length; index++) {

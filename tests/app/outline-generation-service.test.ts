@@ -6,7 +6,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createEmptyVideoProject } from "../../src/app/projects/empty-video-project.js";
 import { OutlineGenerationService } from "../../src/app/projects/outline-generation-service.js";
+import { ImprovementLogRepository } from "../../src/app/projects/improvement-log-repository.js";
 import { ProjectRepository } from "../../src/app/projects/project-repository.js";
+import { initializeWorkspaceDatabase } from "../../src/db/initialize.js";
 import { OpenRouterAdapterError } from "../../src/openrouter/errors.js";
 import { OpenRouterChatAdapter } from "../../src/openrouter/chat-adapter.js";
 import { aiRunLogSchema } from "../../src/schema/index.js";
@@ -195,6 +197,53 @@ describe("OutlineGenerationService", () => {
     });
     expect(rawRunLog).not.toContain("本文");
     expect(rawRunLog).not.toContain("OPENROUTER_API_KEY");
+  });
+
+  it("stores a successful outline candidate only after the project save", async () => {
+    const { workspaceRoot, repository, project } = await setupProject();
+    roots.push(workspaceRoot);
+    await fs.mkdir(path.join(workspaceRoot, "library"), { recursive: true });
+    const database = await initializeWorkspaceDatabase({ workspaceRoot });
+    const improvementLogRepository = new ImprovementLogRepository(
+      database.database
+    );
+    const service = new OutlineGenerationService({
+      repository,
+      modelService: {
+        listModels: async () => ({
+          models: [model()],
+          fetchedAt: NOW.toISOString(),
+          cached: false
+        })
+      },
+      chatAdapter: fakeChat(candidate()),
+      now: () => NOW,
+      createId: () => "run-outline-candidate",
+      improvementLogRepository
+    });
+
+    try {
+      const saved = await service.generate(project.metadata.id, {
+        expectedRevision: project.revision
+      });
+      const candidates =
+        await improvementLogRepository.listGenerationCandidates(
+          project.metadata.id
+        );
+      expect(candidates).toHaveLength(1);
+      expect(candidates[0]).toMatchObject({
+        generationRunId: "run-outline-candidate",
+        projectRevision: saved.revision,
+        taskKind: "outline_generation",
+        targetKind: "outline",
+        candidateKey: "outline",
+        modelId: "google/gemma-4-31b-it",
+        responseModel: "provider/model",
+        promptVersion: "1.0.0"
+      });
+    } finally {
+      database.close();
+    }
   });
 
   it("does not change outline or revision for invalid order and preserves a failed log", async () => {

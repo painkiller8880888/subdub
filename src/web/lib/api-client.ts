@@ -5,6 +5,7 @@ import {
   assetListQuerySchema,
   assetListResponseSchema,
   outlineApproveRequestSchema,
+  outlineRejectRequestSchema,
   outlineGenerateRequestSchema,
   outlineReviewRequestSchema,
   outlineSaveRequestSchema,
@@ -36,6 +37,9 @@ import {
   assetDetailResponseSchema,
   visualSuggestionRequestSchema,
   visualSuggestionResponseSchema,
+  visualSuggestionCandidateRejectRequestSchema,
+  visualSuggestionCandidateRejectParamsSchema,
+  improvementDecisionResponseSchema,
   manifestPreviewResponseSchema,
   voiceAdjustmentMutationResponseSchema,
   voiceAdjustmentPreviewRequestSchema,
@@ -48,6 +52,7 @@ import {
   voiceGenerationStatusResponseSchema,
   type ApiErrorDetail,
   type OutlineApproveRequest,
+  type OutlineRejectRequest,
   type OutlineGenerateRequest,
   type OutlineReviewRequest,
   type OutlineSaveRequest,
@@ -67,6 +72,8 @@ import {
   type TerminologyUpdateRequest,
   type VisualSuggestionRequest,
   type VisualSuggestionResponse,
+  type VisualSuggestionCandidateRejectRequest,
+  type ImprovementDecisionResponse,
   type VisualAssignmentRequest,
   type VisualAssignmentUpdateRequest,
   type VisualAssignmentDeleteRequest,
@@ -325,6 +332,25 @@ export async function approveProjectOutline(
   return response.data;
 }
 
+export async function rejectProjectOutline(
+  projectId: string,
+  input: OutlineRejectRequest
+): Promise<VideoProject> {
+  const validatedInput = outlineRejectRequestSchema.parse(input);
+  const response = await fetchApi(
+    `/api/projects/${encodeURIComponent(projectId)}/outline/reject`,
+    projectMutationResponseSchema,
+    {
+      method: "POST",
+      headers: {
+        "content-type": "application/json"
+      },
+      body: JSON.stringify(validatedInput)
+    }
+  );
+  return response.data;
+}
+
 export async function reviewProjectOutline(
   projectId: string,
   input: OutlineReviewRequest
@@ -556,6 +582,29 @@ export async function assignProjectVisual(
     }
   );
   return response.data;
+}
+
+export async function rejectProjectVisualSuggestionCandidate(
+  projectId: string,
+  runId: string,
+  assetId: string,
+  input: VisualSuggestionCandidateRejectRequest
+): Promise<ImprovementDecisionResponse> {
+  const params = visualSuggestionCandidateRejectParamsSchema.parse({
+    runId,
+    assetId
+  });
+  const validatedInput =
+    visualSuggestionCandidateRejectRequestSchema.parse(input);
+  return fetchApi(
+    `/api/projects/${encodeURIComponent(projectId)}/visual-suggestions/${encodeURIComponent(params.runId)}/candidates/${encodeURIComponent(params.assetId)}/reject`,
+    improvementDecisionResponseSchema,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(validatedInput)
+    }
+  );
 }
 
 export async function updateProjectVisualAssignment(

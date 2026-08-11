@@ -52,6 +52,14 @@ import {
   renderJobKindSchema,
   renderRunLogSchema
 } from "./render-run-log.js";
+import {
+  improvementDecisionSummarySchema,
+  improvementReasonSchema
+} from "./improvement-log.js";
+
+const optionalImprovementReasonSchema = improvementReasonSchema
+  .nullable()
+  .optional();
 
 const apiErrorPathSegmentSchema = z.union([z.string(), z.number().int()]);
 
@@ -406,7 +414,9 @@ export const visualAssignmentCreateInputSchema = strictObject({
 
 export const visualAssignmentRequestSchema = strictObject({
   expectedRevision: nonNegativeIntegerSchema,
-  assignment: visualAssignmentCreateInputSchema
+  assignment: visualAssignmentCreateInputSchema,
+  suggestionRunId: idSchema.optional(),
+  reason: optionalImprovementReasonSchema
 });
 
 export const visualAssignmentUpdateRequestSchema = strictObject({
@@ -446,9 +456,32 @@ export const outlineSaveRequestSchema = z
 
 export const outlineApproveRequestSchema = z
   .object({
-    expectedRevision: nonNegativeIntegerSchema
+    expectedRevision: nonNegativeIntegerSchema,
+    reason: optionalImprovementReasonSchema
   })
   .strict();
+
+export const outlineRejectRequestSchema = z
+  .object({
+    expectedRevision: nonNegativeIntegerSchema,
+    reason: optionalImprovementReasonSchema
+  })
+  .strict();
+
+export const visualSuggestionCandidateRejectRequestSchema = strictObject({
+  expectedRevision: nonNegativeIntegerSchema,
+  reason: optionalImprovementReasonSchema
+});
+
+export const visualSuggestionCandidateRejectParamsSchema = strictObject({
+  runId: idSchema,
+  assetId: idSchema
+});
+
+export const improvementDecisionResponseSchema = strictObject({
+  data: improvementDecisionSummarySchema,
+  revision: nonNegativeIntegerSchema
+});
 
 export const outlineReviewRequestSchema = z
   .object({
@@ -744,12 +777,22 @@ export type OutlineGenerateRequest = z.infer<
 >;
 export type OutlineSaveRequest = z.infer<typeof outlineSaveRequestSchema>;
 export type OutlineApproveRequest = z.infer<typeof outlineApproveRequestSchema>;
+export type OutlineRejectRequest = z.infer<typeof outlineRejectRequestSchema>;
 export type OutlineReviewRequest = z.infer<typeof outlineReviewRequestSchema>;
 export type ScriptInitializeRequest = z.infer<
   typeof scriptInitializeRequestSchema
 >;
 export type ScriptApproveRequest = z.infer<typeof scriptApproveRequestSchema>;
 export type ScriptSaveRequest = z.infer<typeof scriptSaveRequestSchema>;
+export type VisualSuggestionCandidateRejectRequest = z.infer<
+  typeof visualSuggestionCandidateRejectRequestSchema
+>;
+export type VisualSuggestionCandidateRejectParams = z.infer<
+  typeof visualSuggestionCandidateRejectParamsSchema
+>;
+export type ImprovementDecisionResponse = z.infer<
+  typeof improvementDecisionResponseSchema
+>;
 export type ModelsQuery = z.infer<typeof modelsQuerySchema>;
 export type ModelSummary = z.infer<typeof modelSummarySchema>;
 export type ModelsResponse = z.infer<typeof modelsResponseSchema>;

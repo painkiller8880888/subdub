@@ -3,6 +3,7 @@ import type { FastifyInstance } from "fastify";
 import {
   createApiSuccessResponse,
   outlineApproveRequestSchema,
+  outlineRejectRequestSchema,
   outlineReviewRequestSchema,
   outlineSaveRequestSchema,
   projectBriefSaveRequestSchema,
@@ -148,6 +149,20 @@ export function registerProjectRoutes(
     async (request) => {
       const input = outlineApproveRequestSchema.parse(request.body);
       const project = await projectService.approveOutline(
+        request.params.projectId,
+        input
+      );
+      return projectMutationResponseSchema.parse(
+        createApiSuccessResponse(project, project.revision)
+      );
+    }
+  );
+
+  app.post<{ Params: { projectId: string } }>(
+    "/api/projects/:projectId/outline/reject",
+    async (request) => {
+      const input = outlineRejectRequestSchema.parse(request.body);
+      const project = await projectService.rejectOutline(
         request.params.projectId,
         input
       );

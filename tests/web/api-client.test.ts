@@ -5,7 +5,9 @@ import {
   ApiClientError,
   ApiClientProtocolError,
   approveProjectOutline,
+  rejectProjectOutline,
   approveProjectScript,
+  assignProjectVisual,
   createProject,
   fetchModels,
   fetchProject,
@@ -14,6 +16,7 @@ import {
   generateProjectOutline,
   reviewProjectOutline,
   saveProjectOutline,
+  rejectProjectVisualSuggestionCandidate,
   searchAssets,
   fetchTerminology,
   createTerminology,
@@ -304,6 +307,104 @@ describe("web API client", () => {
     });
     expect(JSON.parse(String(calls[0]?.init?.body))).toEqual({
       expectedRevision: project.revision
+    });
+  });
+
+  it("sends AI candidate metadata only when assigning a suggested visual", async () => {
+    const project = createEmptyVideoProject({
+      projectId: "visual-assignment-client-project",
+      createdAt: "2026-08-04T00:00:00.000Z"
+    });
+    const calls: Array<{ input: string; init: RequestInit | undefined }> = [];
+    globalThis.fetch = async (input, init) => {
+      calls.push({ input: String(input), init });
+      return jsonResponse({ data: project, revision: project.revision }, 200);
+    };
+    const assignment = {
+      id: "assignment-client",
+      startLineId: "line-start",
+      endLineId: "line-end",
+      assetId: "asset-photo"
+    };
+
+    await assignProjectVisual(project.metadata.id, {
+      expectedRevision: project.revision,
+      assignment,
+      suggestionRunId: "suggestion-client",
+      reason: "candidate reason"
+    });
+    await assignProjectVisual(project.metadata.id, {
+      expectedRevision: project.revision,
+      assignment
+    });
+
+    expect(calls.map((call) => call.input)).toEqual([
+      "/api/projects/visual-assignment-client-project/visual-assignments",
+      "/api/projects/visual-assignment-client-project/visual-assignments"
+    ]);
+    expect(JSON.parse(String(calls[0]?.init?.body))).toEqual({
+      expectedRevision: project.revision,
+      assignment,
+      suggestionRunId: "suggestion-client",
+      reason: "candidate reason"
+    });
+    expect(JSON.parse(String(calls[1]?.init?.body))).toEqual({
+      expectedRevision: project.revision,
+      assignment
+    });
+  });
+
+  it("encodes outline and visual candidate rejection endpoints with validated bodies", async () => {
+    const project = createEmptyVideoProject({
+      projectId: "decision-client-project",
+      createdAt: "2026-08-04T00:00:00.000Z"
+    });
+    const calls: Array<{ input: string; init: RequestInit | undefined }> = [];
+    globalThis.fetch = async (input, init) => {
+      calls.push({ input: String(input), init });
+      if (String(input).includes("candidates")) {
+        return jsonResponse(
+          {
+            data: {
+              decisionId: "decision-client",
+              candidateId: "candidate-client",
+              decision: "rejected",
+              createdAt: "2026-08-04T00:00:00.000Z"
+            },
+            revision: 3
+          },
+          200
+        );
+      }
+      return jsonResponse({ data: project, revision: 2 }, 200);
+    };
+
+    await expect(
+      rejectProjectOutline(project.metadata.id, {
+        expectedRevision: 1,
+        reason: " "
+      })
+    ).resolves.toEqual(project);
+    await expect(
+      rejectProjectVisualSuggestionCandidate(
+        project.metadata.id,
+        "suggestion-run",
+        "asset-photo",
+        { expectedRevision: 2, reason: "候補不一致" }
+      )
+    ).resolves.toMatchObject({ revision: 3 });
+
+    expect(calls.map((call) => call.input)).toEqual([
+      "/api/projects/decision-client-project/outline/reject",
+      "/api/projects/decision-client-project/visual-suggestions/suggestion-run/candidates/asset-photo/reject"
+    ]);
+    expect(JSON.parse(String(calls[0]?.init?.body))).toEqual({
+      expectedRevision: 1,
+      reason: " "
+    });
+    expect(JSON.parse(String(calls[1]?.init?.body))).toEqual({
+      expectedRevision: 2,
+      reason: "候補不一致"
     });
   });
 

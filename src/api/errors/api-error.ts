@@ -44,6 +44,7 @@ import { VoicevoxPreviewStoreError } from "../../app/voicevox/preview-store.js";
 import { ProjectFileServiceError } from "../../app/projects/project-file-service.js";
 import { RenderJobError } from "../../app/rendering/render-job-errors.js";
 import { RenderRunLogStoreError } from "../../app/rendering/render-run-log-store.js";
+import { ImprovementLogError } from "../../app/projects/improvement-log-errors.js";
 
 export class ApiResponseValidationError extends Error {
   constructor(cause: unknown) {
@@ -131,7 +132,14 @@ export const API_ERROR_CODE = {
     VISUAL_ASSIGNMENT_ERROR_CODE.scriptNotApproved,
   visualAssignmentApprovalValidationFailed:
     VISUAL_ASSIGNMENT_ERROR_CODE.approvalValidationFailed,
-  visualAssignmentCleanupFailed: VISUAL_ASSIGNMENT_ERROR_CODE.cleanupFailed
+  visualAssignmentCleanupFailed: VISUAL_ASSIGNMENT_ERROR_CODE.cleanupFailed,
+  improvementCandidateNotFound: "IMPROVEMENT_CANDIDATE_NOT_FOUND",
+  improvementCandidateDuplicate: "IMPROVEMENT_CANDIDATE_DUPLICATE",
+  improvementDecisionConflict: "IMPROVEMENT_DECISION_CONFLICT",
+  improvementRelationInvalid: "IMPROVEMENT_RELATION_INVALID",
+  improvementRejectionNotAllowed: "IMPROVEMENT_REJECTION_NOT_ALLOWED",
+  improvementPayloadInvalid: "IMPROVEMENT_PAYLOAD_INVALID",
+  improvementDatabaseFailed: "IMPROVEMENT_DATABASE_FAILED"
 };
 
 export type ApiErrorStatus =
@@ -652,6 +660,16 @@ export function mapApiError(error: unknown): MappedApiError {
   }
 
   if (error instanceof VisualAssignmentError) {
+    return {
+      code: error.code,
+      status: error.status,
+      message: error.message,
+      details: error.details,
+      shouldLog: error.status >= 500
+    };
+  }
+
+  if (error instanceof ImprovementLogError) {
     return {
       code: error.code,
       status: error.status,

@@ -14,6 +14,7 @@ import {
   ApiClientError,
   ApiClientProtocolError,
   approveProjectOutline,
+  rejectProjectOutline,
   fetchModels,
   fetchProject,
   generateProjectOutline,
@@ -438,6 +439,7 @@ export function OutlinePage() {
   });
   const [pendingNavigation, setPendingNavigation] = useState(false);
   const [approvalError, setApprovalError] = useState<unknown>(null);
+  const [decisionReason, setDecisionReason] = useState("");
   const revisionRef = useRef(0);
   const draftRef = useRef<Outline | null>(null);
   const lastSavedRef = useRef<Outline | null>(null);
@@ -451,8 +453,23 @@ export function OutlinePage() {
   const saveMutationRef = useRef(saveMutation);
   saveMutationRef.current = saveMutation;
   const approveMutation = useMutation({
-    mutationFn: (expectedRevision: number) =>
-      approveProjectOutline(projectId ?? "", { expectedRevision }),
+    mutationFn: ({
+      expectedRevision,
+      reason
+    }: {
+      expectedRevision: number;
+      reason: string;
+    }) => approveProjectOutline(projectId ?? "", { expectedRevision, reason }),
+    retry: false
+  });
+  const rejectMutation = useMutation({
+    mutationFn: ({
+      expectedRevision,
+      reason
+    }: {
+      expectedRevision: number;
+      reason: string;
+    }) => rejectProjectOutline(projectId ?? "", { expectedRevision, reason }),
     retry: false
   });
   const reviewMutation = useMutation({
@@ -637,6 +654,7 @@ export function OutlinePage() {
       setDraft(nextDraft);
       coordinatorRef.current?.reset();
       setApprovalError(null);
+      setDecisionReason("");
     });
   }
 
@@ -678,7 +696,10 @@ export function OutlinePage() {
       return;
     }
     try {
-      const saved = await approveMutation.mutateAsync(revisionRef.current);
+      const saved = await approveMutation.mutateAsync({
+        expectedRevision: revisionRef.current,
+        reason: decisionReason
+      });
       revisionRef.current = saved.revision;
       queryClient.setQueryData(["projects", projectId], saved);
       const nextDraft = cloneOutline(saved.outline);
@@ -686,6 +707,28 @@ export function OutlinePage() {
       lastSavedRef.current = cloneOutline(nextDraft);
       setDraft(nextDraft);
       coordinatorRef.current.reset();
+      setDecisionReason("");
+    } catch (error) {
+      setApprovalError(error);
+    }
+  }
+
+  async function reject(): Promise<void> {
+    if (coordinatorRef.current === null || draft?.generationRunId === null) {
+      return;
+    }
+    setApprovalError(null);
+    const flushed = await coordinatorRef.current.flush();
+    if (!flushed) {
+      return;
+    }
+    try {
+      const saved = await rejectMutation.mutateAsync({
+        expectedRevision: revisionRef.current,
+        reason: decisionReason
+      });
+      applyProjectResult(saved);
+      setDecisionReason("");
     } catch (error) {
       setApprovalError(error);
     }
@@ -1028,6 +1071,18 @@ export function OutlinePage() {
             </section>
           ) : null}
           <div className="form-actions outline-actions">
+            <div className="form-field">
+              <label htmlFor="outline-decision-reason">採否理由（任意）</label>
+              <textarea
+                id="outline-decision-reason"
+                rows={3}
+                value={decisionReason}
+                onChange={(event) => setDecisionReason(event.target.value)}
+                placeholder="理由を入力しなくても採用・却下の事実は記録されます。"
+                maxLength={2000}
+              />
+              <small>理由未入力でも採用・却下の事実は記録されます。</small>
+            </div>
             <button
               className="button button-primary"
               type="button"
@@ -1035,11 +1090,27 @@ export function OutlinePage() {
               disabled={
                 stale ||
                 approveMutation.isPending ||
+                rejectMutation.isPending ||
                 autosaveState.status === "conflict"
               }
             >
               {approveMutation.isPending ? "承認中…" : "構成案を承認"}
             </button>
+            {draft.generationRunId !== null ? (
+              <button
+                className="button"
+                type="button"
+                onClick={() => void reject()}
+                disabled={
+                  stale ||
+                  approveMutation.isPending ||
+                  rejectMutation.isPending ||
+                  autosaveState.status === "conflict"
+                }
+              >
+                {rejectMutation.isPending ? "却下中…" : "AI構成案を却下"}
+              </button>
+            ) : null}
           </div>
         </>
       )}
