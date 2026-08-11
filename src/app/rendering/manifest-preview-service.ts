@@ -1,11 +1,13 @@
 import { createHash } from "node:crypto";
+import { createReadStream } from "node:fs";
 import { promises as fs } from "node:fs";
 import * as path from "node:path";
 
 import {
   manifestPreviewDataSchema,
   type ManifestPreviewBlocker,
-  type ManifestPreviewData
+  type ManifestPreviewData,
+  type VoiceLineGenerationStatus
 } from "../../schema/api.js";
 import {
   idSchema,
@@ -21,6 +23,7 @@ import {
 } from "../projects/project-file-service.js";
 import type { ProjectRepository } from "../projects/project-repository.js";
 import { computeOutlineHash } from "../projects/script-domain.js";
+import type { VoicevoxGenerationService } from "../voicevox/generation-service.js";
 import { VoicevoxAudioStore } from "../voicevox/audio-store.js";
 import type { VoicevoxAudioIndex } from "../voicevox/audio-index.js";
 
@@ -28,7 +31,8 @@ export type ManifestPreviewServiceOptions = {
   readonly workspaceRoot: string;
   readonly projectRepository: Pick<ProjectRepository, "read">;
   readonly manifestStore?: Pick<RenderManifestStore, "readDetailed">;
-  readonly audioStore?: Pick<VoicevoxAudioStore, "readIndex" | "isEntryUsable">;
+  readonly audioStore?: Pick<VoicevoxAudioStore, "readIndex">;
+  readonly voiceGenerationService: Pick<VoicevoxGenerationService, "getStatus">;
   readonly projectFileService?: Pick<ProjectFileService, "resolveFile">;
 };
 
@@ -179,17 +183,21 @@ function isMissingPathError(error: unknown): boolean {
 }
 
 async function sha256File(filePath: string): Promise<string> {
-  const bytes = await fs.readFile(filePath);
-  return createHash("sha256").update(bytes).digest("hex");
+  const hash = createHash("sha256");
+  for await (const chunk of createReadStream(filePath)) {
+    hash.update(chunk);
+  }
+  return hash.digest("hex");
 }
 
 export class ManifestPreviewService {
   private readonly workspaceRoot: string;
   private readonly projectRepository: Pick<ProjectRepository, "read">;
   private readonly manifestStore: Pick<RenderManifestStore, "readDetailed">;
-  private readonly audioStore: Pick<
-    VoicevoxAudioStore,
-    "readIndex" | "isEntryUsable"
+  private readonly audioStore: Pick<VoicevoxAudioStore, "readIndex">;
+  private readonly voiceGenerationService: Pick<
+    VoicevoxGenerationService,
+    "getStatus"
   >;
   private readonly projectFileService: Pick<ProjectFileService, "resolveFile">;
 
@@ -206,6 +214,7 @@ export class ManifestPreviewService {
       new VoicevoxAudioStore({
         workspaceRoot: this.workspaceRoot
       });
+    this.voiceGenerationService = options.voiceGenerationService;
     this.projectFileService =
       options.projectFileService ??
       new ProjectFileService({ workspaceRoot: this.workspaceRoot });
@@ -227,13 +236,17 @@ export class ManifestPreviewService {
     }
     const manifest =
       manifestResult.status === "valid" ? manifestResult.manifest : null;
+    const voiceLineStatuses = await this.readVoiceLineStatuses(
+      safeProjectId,
+      audioIndex
+    );
 
     if (audioIndex !== undefined) {
       await this.addAudioBlockers(
-        safeProjectId,
         project,
         manifest,
         audioIndex,
+        voiceLineStatuses,
         blockers
       );
     }
@@ -310,10 +323,10 @@ export class ManifestPreviewService {
   }
 
   private async addAudioBlockers(
-    projectId: string,
     project: VideoProject,
     manifest: RenderManifest | null,
     audioIndex: VoicevoxAudioIndex,
+    voiceLineStatuses: ReadonlyMap<string, VoiceLineGenerationStatus["status"]>,
     blockers: ManifestPreviewBlocker[]
   ): Promise<void> {
     const manifestLines = new Map(
@@ -332,13 +345,7 @@ export class ManifestPreviewService {
         continue;
       }
 
-      let usable: boolean;
-      try {
-        usable = await this.audioStore.isEntryUsable(projectId, entry);
-      } catch {
-        usable = false;
-      }
-      if (!usable) {
+      if (voiceLineStatuses.get(line.id) !== "current") {
         addBlocker(blockers, "AUDIO_ENTRY_STALE", target);
       }
 
@@ -354,6 +361,25 @@ export class ManifestPreviewService {
       ) {
         addBlocker(blockers, "AUDIO_MANIFEST_STALE", target);
       }
+    }
+  }
+
+  private async readVoiceLineStatuses(
+    projectId: string,
+    audioIndex: VoicevoxAudioIndex | undefined
+  ): Promise<ReadonlyMap<string, VoiceLineGenerationStatus["status"]>> {
+    if (audioIndex === undefined || Object.keys(audioIndex).length === 0) {
+      return new Map();
+    }
+    try {
+      const status = await this.voiceGenerationService.getStatus(projectId);
+      return new Map(
+        status.lines.map((line) => [line.lineId, line.status] as const)
+      );
+    } catch {
+      // If current voice conditions cannot be resolved, existing entries must
+      // remain blocked rather than being treated as current by integrity alone.
+      return new Map();
     }
   }
 

@@ -9,6 +9,7 @@ import { ManifestPreviewService } from "../../src/app/rendering/manifest-preview
 import { RenderManifestStore } from "../../src/app/rendering/render-manifest-store.js";
 import { computeOutlineHash } from "../../src/app/projects/script-domain.js";
 import type { VoicevoxAudioIndex } from "../../src/app/voicevox/audio-index.js";
+import type { VoiceGenerationStatusData } from "../../src/schema/api.js";
 import type { RenderManifest, VideoProject } from "../../src/schema/index.js";
 import { renderManifestFixture } from "../fixtures/render-manifest.js";
 import { createRenderManifestAudioIndex } from "../fixtures/render-manifest-input.js";
@@ -43,8 +44,17 @@ function createManifest(project: VideoProject): RenderManifest {
 
 function audioStore(audioIndex: VoicevoxAudioIndex) {
   return {
-    readIndex: async () => audioIndex,
-    isEntryUsable: async () => true
+    readIndex: async () => audioIndex
+  };
+}
+
+function currentVoiceStatus(project: VideoProject): VoiceGenerationStatusData {
+  return {
+    available: true,
+    lines: project.script.sections.flatMap((section) =>
+      section.lines.map((line) => ({ lineId: line.id, status: "current" }))
+    ),
+    jobs: []
   };
 }
 
@@ -64,6 +74,9 @@ async function createService(
         contentType: string;
       }>;
     };
+    voiceGenerationService?: {
+      getStatus: (projectId: unknown) => Promise<VoiceGenerationStatusData>;
+    };
   } = {}
 ): Promise<ManifestPreviewService> {
   const manifestStore = new RenderManifestStore({ workspaceRoot: root });
@@ -77,6 +90,9 @@ async function createService(
     audioStore: audioStore(
       options.audioIndex ?? createRenderManifestAudioIndex(project)
     ),
+    voiceGenerationService: options.voiceGenerationService ?? {
+      getStatus: async () => currentVoiceStatus(project)
+    },
     projectFileService: options.projectFileService
   });
 }
@@ -133,6 +149,43 @@ describe("ManifestPreviewService", () => {
     expect(result.blockers.map((blocker) => blocker.code)).toContain(
       "MANIFEST_PROJECT_STALE"
     );
+  });
+
+  it("uses the voice current-status result instead of audio integrity alone", async () => {
+    const root = await createRoot();
+    const project = createProject();
+    const manifest = createManifest(project);
+    const staleLineId = project.script.sections[0]?.lines[0]?.id;
+    if (staleLineId === undefined) {
+      throw new Error("a voice line is required");
+    }
+    const status: VoiceGenerationStatusData = {
+      available: true,
+      lines: project.script.sections.flatMap((section) =>
+        section.lines.map((line) => ({
+          lineId: line.id,
+          status: line.id === staleLineId ? "stale" : "current"
+        }))
+      ),
+      jobs: []
+    };
+    const service = await createService(root, project, {
+      manifest,
+      voiceGenerationService: {
+        getStatus: async () => status
+      }
+    });
+
+    const result = await service.get(projectId);
+
+    expect(result.canPlay).toBe(false);
+    expect(
+      result.blockers.some(
+        (blocker) =>
+          blocker.code === "AUDIO_ENTRY_STALE" &&
+          blocker.target.lineId === staleLineId
+      )
+    ).toBe(true);
   });
 
   it.each([

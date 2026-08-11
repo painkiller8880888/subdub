@@ -193,6 +193,7 @@ export async function initializeServer(
         projectRepository: resolvedProjectRepository,
         manifestStore: new RenderManifestStore({ workspaceRoot }),
         audioStore: new VoicevoxAudioStore({ workspaceRoot }),
+        voiceGenerationService: resolvedVoiceGenerationService,
         projectFileService: resolvedProjectFileService
       });
     const app = buildApp({
