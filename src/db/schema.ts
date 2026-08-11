@@ -239,10 +239,7 @@ export const improvementDecisions = sqliteTable(
     createdAt: text("created_at").notNull()
   },
   (table) => [
-    uniqueIndex("improvement_decisions_candidate_decision_uq").on(
-      table.candidateId,
-      table.decision
-    ),
+    uniqueIndex("improvement_decisions_candidate_uq").on(table.candidateId),
     index("improvement_decisions_project_task_idx").on(
       table.projectId,
       table.taskKind,

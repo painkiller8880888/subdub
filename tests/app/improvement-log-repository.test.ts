@@ -141,6 +141,20 @@ describe("ImprovementLogRepository", () => {
     });
     expect(resend.decisionId).toBe(decision.decisionId);
     expect(await repository.listDecisions("project-log")).toHaveLength(1);
+
+    await expect(
+      repository.insertDecision({
+        decisionId: "run-outline-decision-accepted",
+        candidateId: candidate.candidateId,
+        projectId: "project-log",
+        projectRevisionBefore: 3,
+        projectRevisionAfter: 4,
+        decision: "accepted",
+        after: videoProjectFixture.outline,
+        reason: null,
+        createdAt: NOW
+      })
+    ).rejects.toMatchObject({ code: "IMPROVEMENT_DECISION_CONFLICT" });
   });
 
   it("keeps accepted before/after payloads and deduplicates golden examples", async () => {

@@ -107,7 +107,7 @@ describe("workspace SQLite", () => {
     const first = await initializeWorkspaceDatabase({ workspaceRoot });
     const firstHistory = migrationHistory(first.connection);
     expect(first.migrationResult.applied).toBe(true);
-    expect(firstHistory).toHaveLength(6);
+    expect(firstHistory).toHaveLength(7);
     first.close();
 
     const second = await initializeWorkspaceDatabase({ workspaceRoot });
@@ -152,7 +152,7 @@ describe("workspace SQLite", () => {
       expect.arrayContaining([
         "ai_generation_candidates_run_key_uq",
         "ai_generation_candidates_project_task_model_run_idx",
-        "improvement_decisions_candidate_decision_uq",
+        "improvement_decisions_candidate_uq",
         "improvement_decisions_project_task_idx",
         "golden_examples_project_kind_payload_uq",
         "golden_examples_project_kind_revision_idx"
@@ -182,6 +182,22 @@ describe("workspace SQLite", () => {
           `INSERT INTO improvement_decisions
             (decision_id, candidate_id, project_id, project_revision_before, project_revision_after, task_kind, target_kind, target_id, decision, before_json, after_json, reason, model_id, prompt_version, created_at)
            VALUES ('decision-invalid', 'candidate-check', 'project-check', 1, 1, 'outline_generation', 'outline', 'outline', 'rejected', ?, ?, NULL, 'model-check', '1.0.0', ?)`
+        )
+        .run(candidateJson, candidateJson, now)
+    ).toThrow();
+    connection
+      .prepare(
+        `INSERT INTO improvement_decisions
+          (decision_id, candidate_id, project_id, project_revision_before, project_revision_after, task_kind, target_kind, target_id, decision, before_json, after_json, reason, model_id, prompt_version, created_at)
+         VALUES ('decision-rejected', 'candidate-check', 'project-check', 1, 1, 'outline_generation', 'outline', 'outline', 'rejected', ?, NULL, NULL, 'model-check', '1.0.0', ?)`
+      )
+      .run(candidateJson, now);
+    expect(() =>
+      connection
+        .prepare(
+          `INSERT INTO improvement_decisions
+            (decision_id, candidate_id, project_id, project_revision_before, project_revision_after, task_kind, target_kind, target_id, decision, before_json, after_json, reason, model_id, prompt_version, created_at)
+           VALUES ('decision-accepted', 'candidate-check', 'project-check', 1, 2, 'outline_generation', 'outline', 'outline', 'accepted', ?, ?, NULL, 'model-check', '1.0.0', ?)`
         )
         .run(candidateJson, candidateJson, now)
     ).toThrow();
@@ -365,7 +381,8 @@ describe("workspace SQLite", () => {
       "0002_asset-library",
       "0003_asset-processing-metadata",
       "0004_asset-search",
-      "0005_decision-log-golden-examples"
+      "0005_decision-log-golden-examples",
+      "0006_decision-log-single-final-decision"
     ];
     const definitions: MigrationDefinition[] = [];
     for (let index = 0; index < migrationTags.length; index++) {
@@ -448,7 +465,8 @@ describe("workspace SQLite", () => {
       "0002_asset-library",
       "0003_asset-processing-metadata",
       "0004_asset-search",
-      "0005_decision-log-golden-examples"
+      "0005_decision-log-golden-examples",
+      "0006_decision-log-single-final-decision"
     ];
     const definitions: MigrationDefinition[] = [];
     for (let index = 0; index < migrationTags.length; index += 1) {
@@ -487,7 +505,7 @@ describe("workspace SQLite", () => {
       workspaceRoot
     });
     expect(first.migrationResult.applied).toBe(true);
-    expect(migrationHistory(first.connection)).toHaveLength(6);
+    expect(migrationHistory(first.connection)).toHaveLength(7);
     expect(
       first.connection
         .prepare(
@@ -567,7 +585,8 @@ describe("workspace SQLite", () => {
       "0002_asset-library",
       "0003_asset-processing-metadata",
       "0004_asset-search",
-      "0005_decision-log-golden-examples"
+      "0005_decision-log-golden-examples",
+      "0006_decision-log-single-final-decision"
     ];
     const definitions: MigrationDefinition[] = [];
     for (let index = 0; index < migrationTags.length; index++) {

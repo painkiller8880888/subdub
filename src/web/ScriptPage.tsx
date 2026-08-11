@@ -465,10 +465,11 @@ export function ScriptPage() {
   const [suggestionEndLineId, setSuggestionEndLineId] = useState("");
   const [suggestionResponse, setSuggestionResponse] =
     useState<VisualSuggestionResponse | null>(null);
+  const [visualSuggestionStale, setVisualSuggestionStale] = useState(false);
   const [suggestionError, setSuggestionError] = useState<unknown>(null);
   const [visualDecisionReason, setVisualDecisionReason] = useState("");
   const [candidateDecisionByAssetId, setCandidateDecisionByAssetId] = useState<
-    Record<string, "accepted" | "rejected">
+    Record<string, "accepted" | "rejected" | "stale">
   >({});
   const [assetSearchQuery, setAssetSearchQuery] = useState("");
   const [assetSearchTagIds, setAssetSearchTagIds] = useState("");
@@ -793,6 +794,7 @@ export function ScriptPage() {
     setSuggestionStartLineId("");
     setSuggestionEndLineId("");
     setSuggestionResponse(null);
+    setVisualSuggestionStale(false);
     setSuggestionError(null);
     setVisualDecisionReason("");
     setCandidateDecisionByAssetId({});
@@ -1363,10 +1365,16 @@ export function ScriptPage() {
         acceptVisualMutationResult(saved, context) &&
         suggestionRunId !== undefined
       ) {
-        setCandidateDecisionByAssetId((current) => ({
-          ...current,
-          [asset.assetId]: "accepted"
-        }));
+        setCandidateDecisionByAssetId((current) => {
+          const next = { ...current, [asset.assetId]: "accepted" as const };
+          for (const candidate of suggestionResponse?.data.candidates ?? []) {
+            if (candidate.asset.assetId !== asset.assetId) {
+              next[candidate.asset.assetId] = "stale";
+            }
+          }
+          return next;
+        });
+        setVisualSuggestionStale(true);
       }
     } catch (error) {
       if (isVisualMutationCurrent(context)) {
@@ -1484,6 +1492,7 @@ export function ScriptPage() {
       return;
     }
     setSuggestionResponse(null);
+    setVisualSuggestionStale(false);
     setCandidateDecisionByAssetId({});
     suggestionMutation.mutate(requestContext);
   }
@@ -1878,6 +1887,11 @@ export function ScriptPage() {
               実在するactive素材候補（
               {suggestionResponse.data.diagnostics.candidateCount}件）
             </p>
+            {visualSuggestionStale ? (
+              <p className="status-message">
+                候補を採用したためプロジェクト版が更新されました。残りの候補は無効です。再生成してください。
+              </p>
+            ) : null}
             {suggestionResponse.data.candidates.length === 0 ? (
               <p className="status-message">候補なし</p>
             ) : (
@@ -1901,6 +1915,9 @@ export function ScriptPage() {
                       ) : null}
                       {decision === "rejected" ? (
                         <span className="status-message">却下済み</span>
+                      ) : null}
+                      {decision === "stale" ? (
+                        <span className="status-message">古い候補</span>
                       ) : null}
                       <button
                         className="button button-small"

@@ -535,11 +535,10 @@ export class ProjectService {
         candidateKey: "outline"
       });
     if (candidate === undefined) {
-      throw new ImprovementLogError(
-        IMPROVEMENT_LOG_ERROR_CODE.candidateNotFound,
-        404,
-        "The AI outline candidate does not exist."
-      );
+      // Migration 0005 intentionally does not reconstruct candidates from
+      // existing project JSON. Keep pre-migration outlines approvable as
+      // legacy data, without inventing AI metadata or a candidate row.
+      return undefined;
     }
     if (
       candidate.taskKind !== "outline_generation" ||

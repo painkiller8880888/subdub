@@ -282,6 +282,46 @@ describe("decision log service flows", () => {
     });
   });
 
+  it("keeps pre-migration AI outlines approvable as legacy examples", async () => {
+    const { repository, service, log, project } = await setup();
+    const withLegacyOutline = await repository.saveOutline(
+      project.metadata.id,
+      makeOutline(project, "legacy-outline-run"),
+      project.revision
+    );
+
+    const approvedOutline = await service.approveOutline(project.metadata.id, {
+      expectedRevision: withLegacyOutline.revision
+    });
+    const initialized = await service.initializeScript(project.metadata.id, {
+      expectedRevision: approvedOutline.revision
+    });
+    const approvedScript = await service.approveScript(project.metadata.id, {
+      expectedRevision: initialized.revision
+    });
+    const examples = await log.listGoldenExamples(project.metadata.id);
+
+    expect(approvedScript.script.status).toBe("approved");
+    expect(await log.listDecisions(project.metadata.id)).toHaveLength(0);
+    expect(examples).toHaveLength(2);
+    expect(
+      examples.find((example) => example.exampleKind === "approved_outline")
+    ).toMatchObject({
+      generationRunId: null,
+      modelId: null,
+      promptVersion: null
+    });
+    expect(
+      examples.find(
+        (example) => example.exampleKind === "approved_script_bundle"
+      )
+    ).toMatchObject({
+      generationRunId: null,
+      modelId: null,
+      promptVersion: null
+    });
+  });
+
   it("does not record a decision when approval loses a revision race", async () => {
     const { repository, service, log, project } = await setup();
     const outline = await repository.saveOutline(
