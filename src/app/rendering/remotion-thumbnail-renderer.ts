@@ -142,6 +142,7 @@ export class RemotionThumbnailRenderer implements ThumbnailRendererPort {
       try {
         serveUrl = await bundle({
           entryPoint: this.entryPoint,
+          outDir: path.join(stagingRoot, "bundle"),
           publicDir: publicRoot,
           onProgress: this.bundleOptions?.onProgress ?? (() => undefined)
         });
