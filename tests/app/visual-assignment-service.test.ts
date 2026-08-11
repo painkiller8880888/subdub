@@ -16,7 +16,9 @@ import {
   VisualAssignmentError
 } from "../../src/app/projects/visual-assignment-errors.js";
 import { VisualAssignmentService } from "../../src/app/projects/visual-assignment-service.js";
+import { ImprovementLogRepository } from "../../src/app/projects/improvement-log-repository.js";
 import type { VisualAssignmentFileSystem } from "../../src/app/projects/visual-assignment-file-system.js";
+import { initializeWorkspaceDatabase } from "../../src/db/initialize.js";
 import {
   videoProjectSchema,
   type AssetDetail,
@@ -163,8 +165,14 @@ type SetupOptions = {
 
 describe("VisualAssignmentService", () => {
   const roots: string[] = [];
+  const databases: Array<
+    Awaited<ReturnType<typeof initializeWorkspaceDatabase>>
+  > = [];
 
   afterEach(async () => {
+    for (const database of databases.splice(0)) {
+      database.close();
+    }
     await Promise.all(
       roots
         .splice(0)
@@ -274,6 +282,96 @@ describe("VisualAssignmentService", () => {
     ]);
     const mediaEntries = await fs.readdir(path.dirname(destination));
     expect(mediaEntries.filter((entry) => entry.endsWith(".tmp"))).toEqual([]);
+  });
+
+  it("records an accepted AI candidate using server-owned asset and assignment data", async () => {
+    const context = await setup();
+    const database = await initializeWorkspaceDatabase({
+      workspaceRoot: context.workspaceRoot
+    });
+    databases.push(database);
+    const log = new ImprovementLogRepository(database.database);
+    const service = new VisualAssignmentService({
+      repository: context.repository,
+      assetRepository: { findAssetDetail: () => context.asset },
+      workspaceRoot: context.workspaceRoot,
+      libraryRoot: context.libraryRoot,
+      createId: () => "temp-file-id",
+      improvementLogRepository: log
+    });
+    await context.repository.save(
+      PROJECT_ID,
+      {
+        ...(await context.repository.read(PROJECT_ID)),
+        visuals: {
+          ...(await context.repository.read(PROJECT_ID)).visuals,
+          suggestionRunIds: ["visual-run"]
+        }
+      },
+      0
+    );
+    await log.insertGenerationCandidate({
+      candidateId: "visual-run-candidate-asset-photo",
+      generationRunId: "visual-run",
+      projectId: PROJECT_ID,
+      projectRevision: 1,
+      taskKind: "visual_search_intent",
+      targetKind: "visual_line_range",
+      targetId: "main-mentor-1:main-learner-1",
+      candidateKey: "asset:asset-photo",
+      candidate: {
+        asset: {
+          assetId: context.asset.assetId,
+          version: context.asset.version,
+          kind: context.asset.kind,
+          title: context.asset.title,
+          description: context.asset.description,
+          confidentiality: context.asset.confidentiality,
+          department: context.asset.department,
+          system: context.asset.system,
+          mimeType: context.asset.mimeType,
+          checksum: context.asset.checksum,
+          sizeBytes: context.asset.sizeBytes,
+          width: context.asset.width,
+          height: context.asset.height,
+          durationMs: context.asset.durationMs,
+          pageCount: context.asset.pageCount,
+          thumbnailPaths: context.asset.thumbnailPaths,
+          tags: [],
+          tagIds: [],
+          status: context.asset.status,
+          errorCode: context.asset.errorCode,
+          errorMessage: context.asset.errorMessage,
+          createdAt: context.asset.createdAt,
+          updatedAt: context.asset.updatedAt
+        },
+        matchedRequiredTags: [],
+        matchedOptionalTags: [],
+        matchReasons: ["fixture match"]
+      },
+      modelId: "visual-model",
+      responseModel: null,
+      promptVersion: "1.0.0",
+      createdAt: NOW
+    });
+
+    const result = await service.assign(PROJECT_ID, {
+      expectedRevision: 1,
+      suggestionRunId: "visual-run",
+      reason: "   ",
+      assignment: createAssignment()
+    });
+    const decisions = await log.listDecisions(PROJECT_ID);
+
+    expect(result.revision).toBe(2);
+    expect(decisions).toHaveLength(1);
+    expect(decisions[0]).toMatchObject({
+      decision: "accepted",
+      reason: null,
+      afterJson: expect.objectContaining({ assetId: ASSET_ID }),
+      modelId: "visual-model",
+      promptVersion: "1.0.0"
+    });
   });
 
   it("serializes placement and compensation with other project saves", async () => {

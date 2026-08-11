@@ -164,11 +164,162 @@ export const assetTags = sqliteTable(
   ]
 );
 
+export const aiGenerationCandidates = sqliteTable(
+  "ai_generation_candidates",
+  {
+    candidateId: text("candidate_id").primaryKey(),
+    generationRunId: text("generation_run_id").notNull(),
+    projectId: text("project_id").notNull(),
+    projectRevision: integer("project_revision").notNull(),
+    taskKind: text("task_kind", {
+      enum: ["outline_generation", "visual_search_intent"]
+    }).notNull(),
+    targetKind: text("target_kind", {
+      enum: ["outline", "visual_line_range"]
+    }).notNull(),
+    targetId: text("target_id").notNull(),
+    candidateKey: text("candidate_key").notNull(),
+    candidateJson: text("candidate_json").notNull(),
+    candidateChecksum: text("candidate_checksum").notNull(),
+    modelId: text("model_id").notNull(),
+    responseModel: text("response_model"),
+    promptVersion: text("prompt_version").notNull(),
+    createdAt: text("created_at").notNull()
+  },
+  (table) => [
+    uniqueIndex("ai_generation_candidates_run_key_uq").on(
+      table.generationRunId,
+      table.candidateKey
+    ),
+    index("ai_generation_candidates_project_task_model_run_idx").on(
+      table.projectId,
+      table.taskKind,
+      table.modelId,
+      table.generationRunId
+    ),
+    index("ai_generation_candidates_project_target_idx").on(
+      table.projectId,
+      table.targetKind,
+      table.targetId
+    ),
+    check(
+      "ai_generation_candidates_task_kind_check",
+      sql`${table.taskKind} IN ('outline_generation', 'visual_search_intent')`
+    ),
+    check(
+      "ai_generation_candidates_target_kind_check",
+      sql`${table.targetKind} IN ('outline', 'visual_line_range')`
+    )
+  ]
+);
+
+export const improvementDecisions = sqliteTable(
+  "improvement_decisions",
+  {
+    decisionId: text("decision_id").primaryKey(),
+    candidateId: text("candidate_id")
+      .notNull()
+      .references(() => aiGenerationCandidates.candidateId),
+    projectId: text("project_id").notNull(),
+    projectRevisionBefore: integer("project_revision_before").notNull(),
+    projectRevisionAfter: integer("project_revision_after").notNull(),
+    taskKind: text("task_kind", {
+      enum: ["outline_generation", "visual_search_intent"]
+    }).notNull(),
+    targetKind: text("target_kind", {
+      enum: ["outline", "visual_line_range"]
+    }).notNull(),
+    targetId: text("target_id").notNull(),
+    decision: text("decision", { enum: ["accepted", "rejected"] }).notNull(),
+    beforeJson: text("before_json").notNull(),
+    afterJson: text("after_json"),
+    reason: text("reason"),
+    modelId: text("model_id").notNull(),
+    promptVersion: text("prompt_version").notNull(),
+    createdAt: text("created_at").notNull()
+  },
+  (table) => [
+    uniqueIndex("improvement_decisions_candidate_uq").on(table.candidateId),
+    index("improvement_decisions_project_task_idx").on(
+      table.projectId,
+      table.taskKind,
+      table.targetKind,
+      table.createdAt
+    ),
+    index("improvement_decisions_candidate_idx").on(table.candidateId),
+    check(
+      "improvement_decisions_task_kind_check",
+      sql`${table.taskKind} IN ('outline_generation', 'visual_search_intent')`
+    ),
+    check(
+      "improvement_decisions_target_kind_check",
+      sql`${table.targetKind} IN ('outline', 'visual_line_range')`
+    ),
+    check(
+      "improvement_decisions_decision_check",
+      sql`${table.decision} IN ('accepted', 'rejected')`
+    ),
+    check(
+      "improvement_decisions_after_json_check",
+      sql`(${table.decision} = 'rejected' AND ${table.afterJson} IS NULL) OR (${table.decision} = 'accepted' AND ${table.afterJson} IS NOT NULL)`
+    )
+  ]
+);
+
+export const goldenExamples = sqliteTable(
+  "golden_examples",
+  {
+    exampleId: text("example_id").primaryKey(),
+    exampleKind: text("example_kind", {
+      enum: ["approved_outline", "approved_script_bundle"]
+    }).notNull(),
+    projectId: text("project_id").notNull(),
+    projectRevision: integer("project_revision").notNull(),
+    targetId: text("target_id").notNull(),
+    sourceHash: text("source_hash").notNull(),
+    outlineHash: text("outline_hash"),
+    payloadJson: text("payload_json").notNull(),
+    payloadChecksum: text("payload_checksum").notNull(),
+    generationRunId: text("generation_run_id"),
+    modelId: text("model_id"),
+    promptVersion: text("prompt_version"),
+    createdAt: text("created_at").notNull()
+  },
+  (table) => [
+    uniqueIndex("golden_examples_project_kind_payload_uq").on(
+      table.projectId,
+      table.exampleKind,
+      table.payloadChecksum
+    ),
+    index("golden_examples_project_kind_revision_idx").on(
+      table.projectId,
+      table.exampleKind,
+      table.projectRevision
+    ),
+    index("golden_examples_project_model_idx").on(
+      table.projectId,
+      table.modelId,
+      table.createdAt
+    ),
+    check(
+      "golden_examples_kind_check",
+      sql`${table.exampleKind} IN ('approved_outline', 'approved_script_bundle')`
+    ),
+    check(
+      "golden_examples_generation_metadata_check",
+      sql`(${table.generationRunId} IS NULL AND ${table.modelId} IS NULL AND ${table.promptVersion} IS NULL) OR (${table.generationRunId} IS NOT NULL AND ${table.modelId} IS NOT NULL AND ${table.promptVersion} IS NOT NULL)`
+    )
+  ]
+);
+
 export const schema = {
   terminologyTerms,
   assets,
   assetVersions,
   tags,
   tagAliases,
-  assetTags
+  assetTags,
+  aiGenerationCandidates,
+  improvementDecisions,
+  goldenExamples
 } as const;

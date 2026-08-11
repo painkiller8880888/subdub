@@ -11,6 +11,7 @@ import { ProjectRepository } from "../../src/app/projects/project-repository.js"
 import { VisualSuggestionService } from "../../src/app/projects/visual-suggestion-service.js";
 import {
   apiErrorResponseSchema,
+  improvementDecisionResponseSchema,
   visualSuggestionResponseSchema
 } from "../../src/schema/api.js";
 import type { AssetRepository } from "../../src/app/assets/asset-repository.js";
@@ -177,6 +178,83 @@ describe("visual suggestions API", () => {
     });
     expect(result.data.candidates).toEqual([]);
     expect(result.revision).toBe(project.revision + 1);
+  });
+
+  it("accepts a strict candidate rejection request and returns its decision summary", async () => {
+    let received: unknown[] = [];
+    const app = buildApp({
+      visualSuggestionService: {
+        generate: async () => ({
+          data: {
+            runId: "run-api",
+            target: {
+              startLineId: "main-mentor-1",
+              endLineId: "main-learner-1",
+              sectionId: "main",
+              lineIds: ["main-mentor-1", "main-learner-1"]
+            },
+            aiIntent: {
+              requiredTags: [],
+              optionalTags: [],
+              excludedTags: [],
+              mediaKinds: ["photo"],
+              freeTextQuery: "",
+              reason: "fixture"
+            },
+            resolvedSearch: {
+              requiredTags: [],
+              optionalTags: [],
+              excludedTags: [],
+              mediaKinds: ["photo"],
+              freeTextQuery: ""
+            },
+            diagnostics: {
+              unresolvedTags: [],
+              requiredTagResolutionFailed: false,
+              candidateCount: 0
+            },
+            candidates: []
+          },
+          revision: 1
+        }),
+        rejectCandidate: async (...args: unknown[]) => {
+          received = args;
+          return {
+            data: {
+              decisionId: "decision-api",
+              candidateId: "candidate-api",
+              decision: "rejected" as const,
+              createdAt: "2026-08-11T03:00:00.000Z"
+            },
+            revision: 8
+          };
+        }
+      }
+    });
+    apps.push(app);
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/projects/project-api/visual-suggestions/run-api/candidates/asset-api/reject",
+      payload: { expectedRevision: 7, reason: " " }
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(improvementDecisionResponseSchema.parse(response.json())).toEqual({
+      data: {
+        decisionId: "decision-api",
+        candidateId: "candidate-api",
+        decision: "rejected",
+        createdAt: "2026-08-11T03:00:00.000Z"
+      },
+      revision: 8
+    });
+    expect(received).toEqual([
+      "project-api",
+      "run-api",
+      "asset-api",
+      { expectedRevision: 7, reason: " " }
+    ]);
   });
 
   it("uses the common validation and project error envelope before calling OpenRouter", async () => {

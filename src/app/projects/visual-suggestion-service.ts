@@ -3,8 +3,10 @@ import { createHash, randomUUID } from "node:crypto";
 import {
   normalizeAssetSearchQuery,
   assetTagAxisSchema,
+  idSchema,
   visualSearchIntentJsonSchema,
   visualSearchIntentSchema,
+  visualSuggestionCandidateSchema,
   visualSuggestionRequestSchema,
   visualSuggestionResultSchema,
   type CommonAiRunLog,
@@ -13,6 +15,12 @@ import {
   type VisualSuggestionResult,
   type VideoProject
 } from "../../schema/index.js";
+import { visualSuggestionCandidateRejectRequestSchema } from "../../schema/api.js";
+import {
+  improvementDecisionSummarySchema,
+  normalizeImprovementReason,
+  type ImprovementDecisionSummary
+} from "../../schema/improvement-log.js";
 import { OpenRouterAdapterError } from "../../openrouter/errors.js";
 import {
   resolveModel,
@@ -30,6 +38,7 @@ import {
 } from "../assets/asset-repository.js";
 import {
   buildVisualSuggestionPrompt,
+  VISUAL_SUGGESTION_PROMPT_VERSION,
   type VisualSuggestionPrompt
 } from "./visual-suggestion-prompt.js";
 import { estimateUtf8TokenCount } from "./outline-generation-context.js";
@@ -48,6 +57,11 @@ import {
   ProjectRepositoryError
 } from "./project-repository.js";
 import { computeOutlineHash } from "./script-domain.js";
+import type { ImprovementLogRepositoryPort } from "./improvement-log-repository.js";
+import {
+  IMPROVEMENT_LOG_ERROR_CODE,
+  ImprovementLogError
+} from "./improvement-log-errors.js";
 
 export const VISUAL_SUGGESTION_RESERVED_OUTPUT_TOKENS = 1536;
 export const VISUAL_SUGGESTION_CONTEXT_ESTIMATE_METHOD =
@@ -59,16 +73,23 @@ export type VisualSuggestionServiceOptions = {
   readonly assetRepository: Pick<
     AssetRepository,
     "findActiveTagDictionary" | "searchVisual"
-  >;
+  > &
+    Partial<Pick<AssetRepository, "findAssetDetail">>;
   readonly modelService: Pick<OpenRouterModelService, "listModels">;
   readonly chatAdapter: Pick<OpenRouterChatAdapter, "complete">;
   readonly now?: () => Date;
   readonly createId?: () => string;
   readonly reservedOutputTokens?: number;
+  readonly improvementLogRepository?: ImprovementLogRepositoryPort;
 };
 
 export type VisualSuggestionServiceResult = {
   readonly data: VisualSuggestionResult;
+  readonly revision: number;
+};
+
+export type VisualSuggestionDecisionResult = {
+  readonly data: ImprovementDecisionSummary;
   readonly revision: number;
 };
 
@@ -161,6 +182,9 @@ function errorCode(error: unknown): string {
     return error.code;
   }
   if (error instanceof ProjectRepositoryError) {
+    return error.code;
+  }
+  if (error instanceof ImprovementLogError) {
     return error.code;
   }
   return "INTERNAL_SERVER_ERROR";
@@ -410,6 +434,9 @@ export class VisualSuggestionService {
   private readonly now: () => Date;
   private readonly createId: () => string;
   private readonly reservedOutputTokens: number;
+  private readonly improvementLogRepository:
+    | ImprovementLogRepositoryPort
+    | undefined;
 
   constructor(options: VisualSuggestionServiceOptions) {
     this.repository = options.repository;
@@ -424,6 +451,7 @@ export class VisualSuggestionService {
         options.reservedOutputTokens ?? VISUAL_SUGGESTION_RESERVED_OUTPUT_TOKENS
       )
     );
+    this.improvementLogRepository = options.improvementLogRepository;
   }
 
   async generate(
@@ -600,6 +628,25 @@ export class VisualSuggestionService {
         },
         request.expectedRevision
       );
+      if (this.improvementLogRepository !== undefined && candidates.length > 0) {
+        await this.improvementLogRepository.insertGenerationCandidates(
+          candidates.map((candidate) => ({
+            candidateId: `${runId}-candidate-${candidate.asset.assetId}`,
+            generationRunId: runId,
+            projectId: saved.metadata.id,
+            projectRevision: saved.revision,
+            taskKind: "visual_search_intent" as const,
+            targetKind: "visual_line_range" as const,
+            targetId: `${target.startLine.id}:${target.endLine.id}`,
+            candidateKey: `asset:${candidate.asset.assetId}`,
+            candidate,
+            modelId: run.modelId!,
+            responseModel: run.responseModel,
+            promptVersion: VISUAL_SUGGESTION_PROMPT_VERSION,
+            createdAt: this.now().toISOString()
+          }))
+        );
+      }
       await this.tryFinalizeRunLog(saved, run, "succeeded", null);
       return { data: result, revision: saved.revision };
     } catch (error) {
@@ -620,6 +667,128 @@ export class VisualSuggestionService {
       }
       throw error;
     }
+  }
+
+  async rejectCandidate(
+    projectId: unknown,
+    generationRunId: unknown,
+    assetId: unknown,
+    input: unknown
+  ): Promise<VisualSuggestionDecisionResult> {
+    if (this.improvementLogRepository === undefined) {
+      throw new ImprovementLogError(
+        IMPROVEMENT_LOG_ERROR_CODE.databaseFailed,
+        500,
+        "The improvement log is unavailable."
+      );
+    }
+    const safeProjectId = idSchema.parse(projectId);
+    const safeGenerationRunId = idSchema.parse(generationRunId);
+    const safeAssetId = idSchema.parse(assetId);
+    const request = visualSuggestionCandidateRejectRequestSchema.parse(input);
+    const snapshot = await this.repository.readGenerationSnapshot(safeProjectId);
+    if (snapshot.project.revision !== request.expectedRevision) {
+      throw new ProjectRepositoryError(
+        "PROJECT_REVISION_CONFLICT",
+        409,
+        "The project revision does not match the expected revision."
+      );
+    }
+    const candidate =
+      await this.improvementLogRepository.findGenerationCandidate({
+        projectId: safeProjectId,
+        generationRunId: safeGenerationRunId,
+        candidateKey: `asset:${safeAssetId}`
+      });
+    if (candidate === undefined) {
+      throw new ImprovementLogError(
+        IMPROVEMENT_LOG_ERROR_CODE.candidateNotFound,
+        404,
+        "The visual suggestion candidate does not exist."
+      );
+    }
+    if (
+      candidate.taskKind !== "visual_search_intent" ||
+      candidate.targetKind !== "visual_line_range"
+    ) {
+      throw new ImprovementLogError(
+        IMPROVEMENT_LOG_ERROR_CODE.relationInvalid,
+        422,
+        "The visual suggestion candidate relation is invalid."
+      );
+    }
+    if (!snapshot.project.visuals.suggestionRunIds.includes(safeGenerationRunId)) {
+      throw new ImprovementLogError(
+        IMPROVEMENT_LOG_ERROR_CODE.relationInvalid,
+        422,
+        "The visual suggestion run is not active for this project."
+      );
+    }
+    if (candidate.projectRevision !== snapshot.project.revision) {
+      throw new ImprovementLogError(
+        IMPROVEMENT_LOG_ERROR_CODE.relationInvalid,
+        409,
+        "The visual suggestion candidate is stale."
+      );
+    }
+    const targetParts = candidate.targetId.split(":");
+    if (targetParts.length !== 2) {
+      throw new ImprovementLogError(
+        IMPROVEMENT_LOG_ERROR_CODE.relationInvalid,
+        422,
+        "The visual suggestion target is invalid."
+      );
+    }
+    const [startLineId, endLineId] = targetParts;
+    resolveVisualSuggestionTarget(
+      snapshot.project,
+      startLineId!,
+      endLineId!
+    );
+    const candidatePayload = visualSuggestionCandidateSchema.parse(
+      candidate.candidateJson
+    );
+    if (candidatePayload.asset.assetId !== safeAssetId) {
+      throw new ImprovementLogError(
+        IMPROVEMENT_LOG_ERROR_CODE.relationInvalid,
+        422,
+        "The visual suggestion asset relation is invalid."
+      );
+    }
+    const currentAsset = this.assetRepository.findAssetDetail?.(safeAssetId);
+    if (
+      currentAsset === undefined ||
+      currentAsset.status !== "active" ||
+      currentAsset.checksum === null ||
+      candidatePayload.asset.checksum === null ||
+      currentAsset.checksum.toLowerCase() !== candidatePayload.asset.checksum.toLowerCase()
+    ) {
+      throw new ImprovementLogError(
+        IMPROVEMENT_LOG_ERROR_CODE.relationInvalid,
+        422,
+        "The visual suggestion asset is no longer active or unchanged."
+      );
+    }
+    const decision = await this.improvementLogRepository.insertDecision({
+      decisionId: `${safeGenerationRunId}-decision-${safeAssetId}-rejected`,
+      candidateId: candidate.candidateId,
+      projectId: safeProjectId,
+      projectRevisionBefore: snapshot.project.revision,
+      projectRevisionAfter: snapshot.project.revision,
+      decision: "rejected",
+      after: null,
+      reason: normalizeImprovementReason(request.reason),
+      createdAt: this.now().toISOString()
+    });
+    return {
+      data: improvementDecisionSummarySchema.parse({
+        decisionId: decision.decisionId,
+        candidateId: decision.candidateId,
+        decision: decision.decision,
+        createdAt: decision.createdAt
+      }),
+      revision: snapshot.project.revision
+    };
   }
 
   private async writeStartedRunLog(

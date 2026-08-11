@@ -20,6 +20,8 @@ import {
   type OutlineChatResult
 } from "../../openrouter/chat-adapter.js";
 import { OpenRouterModelService } from "../../openrouter/model-service.js";
+import type { ImprovementLogRepositoryPort } from "./improvement-log-repository.js";
+import { ImprovementLogError } from "./improvement-log-errors.js";
 import {
   estimateOutlineGenerationContext,
   OUTLINE_GENERATION_CONTEXT_ESTIMATE_METHOD,
@@ -30,7 +32,10 @@ import {
   OutlineGenerationError
 } from "./outline-generation-errors.js";
 import { ProjectRepository, ProjectRepositoryError } from "./project-repository.js";
-import { buildOutlineGenerationPrompt } from "./outline-prompt.js";
+import {
+  buildOutlineGenerationPrompt,
+  OUTLINE_GENERATION_PROMPT_VERSION
+} from "./outline-prompt.js";
 
 export type OutlineGenerationServiceOptions = {
   readonly repository: ProjectRepository;
@@ -39,6 +44,7 @@ export type OutlineGenerationServiceOptions = {
   readonly now?: () => Date;
   readonly createId?: () => string;
   readonly reservedOutputTokens?: number;
+  readonly improvementLogRepository?: ImprovementLogRepositoryPort;
 };
 
 type RunState = {
@@ -104,6 +110,9 @@ function errorCode(error: unknown): string {
     return error.code;
   }
   if (error instanceof ProjectRepositoryError) {
+    return error.code;
+  }
+  if (error instanceof ImprovementLogError) {
     return error.code;
   }
   return "INTERNAL_SERVER_ERROR";
@@ -269,6 +278,9 @@ export class OutlineGenerationService {
   private readonly now: () => Date;
   private readonly createId: () => string;
   private readonly reservedOutputTokens: number | undefined;
+  private readonly improvementLogRepository:
+    | ImprovementLogRepositoryPort
+    | undefined;
 
   constructor(options: OutlineGenerationServiceOptions) {
     this.repository = options.repository;
@@ -277,6 +289,7 @@ export class OutlineGenerationService {
     this.now = options.now ?? (() => new Date());
     this.createId = options.createId ?? randomUUID;
     this.reservedOutputTokens = options.reservedOutputTokens;
+    this.improvementLogRepository = options.improvementLogRepository;
   }
 
   async generate(projectId: unknown, input: unknown): Promise<VideoProject> {
@@ -441,6 +454,23 @@ export class OutlineGenerationService {
         outline,
         request.expectedRevision
       );
+      if (this.improvementLogRepository !== undefined) {
+        await this.improvementLogRepository.insertGenerationCandidate({
+          candidateId: `${runId}-candidate-outline`,
+          generationRunId: runId,
+          projectId: saved.metadata.id,
+          projectRevision: saved.revision,
+          taskKind: "outline_generation",
+          targetKind: "outline",
+          targetId: "outline",
+          candidateKey: "outline",
+          candidate: outline,
+          modelId: run.modelId!,
+          responseModel: run.responseModel,
+          promptVersion: OUTLINE_GENERATION_PROMPT_VERSION,
+          createdAt: this.now().toISOString()
+        });
+      }
       await this.tryFinalizeRunLog(saved, run, "succeeded", null);
       return saved;
     } catch (error) {

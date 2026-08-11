@@ -14,12 +14,14 @@ import {
   idSchema,
   relativePosixPathSchema,
   sha256Schema,
+  visualSuggestionCandidateSchema,
   videoProjectSchema,
   type Display,
   type AssetDetail,
   type VisualAssignment,
   type VideoProject
 } from "../../schema/index.js";
+import { normalizeImprovementReason } from "../../schema/improvement-log.js";
 import {
   ASSET_FORMATS,
   ASSET_KIND_FORMATS,
@@ -36,6 +38,13 @@ import {
   VISUAL_ASSIGNMENT_ERROR_CODE,
   VisualAssignmentError
 } from "./visual-assignment-errors.js";
+import type {
+  ImprovementLogRepositoryPort
+} from "./improvement-log-repository.js";
+import {
+  IMPROVEMENT_LOG_ERROR_CODE,
+  ImprovementLogError
+} from "./improvement-log-errors.js";
 import { hasMeaningfulVisuals } from "./project-invalidation.js";
 import {
   NodeVisualAssignmentFileSystem,
@@ -52,6 +61,7 @@ export type VisualAssignmentServiceOptions = {
   libraryRoot?: string;
   fileSystem?: Partial<VisualAssignmentFileSystem>;
   createId?: () => string;
+  improvementLogRepository?: ImprovementLogRepositoryPort;
 };
 
 export type VisualAssignmentServiceResult = {
@@ -159,6 +169,18 @@ function assignmentDetails(
   };
 }
 
+function hasCurrentLineRange(
+  project: VideoProject,
+  startLineId: string,
+  endLineId: string
+): boolean {
+  return project.script.sections.some((section) => {
+    const startIndex = section.lines.findIndex((line) => line.id === startLineId);
+    const endIndex = section.lines.findIndex((line) => line.id === endLineId);
+    return startIndex >= 0 && endIndex >= startIndex;
+  });
+}
+
 type DisplayDomainIssue = {
   readonly path: readonly (string | number)[];
   readonly message: string;
@@ -264,6 +286,9 @@ export class VisualAssignmentService {
   private readonly libraryRoot: string;
   private readonly fileSystem: VisualAssignmentFileSystem;
   private readonly createId: () => string;
+  private readonly improvementLogRepository:
+    | ImprovementLogRepositoryPort
+    | undefined;
 
   constructor(options: VisualAssignmentServiceOptions) {
     this.repository = options.repository;
@@ -294,6 +319,7 @@ export class VisualAssignmentService {
         defaultFileSystem.realpath.bind(defaultFileSystem)
     };
     this.createId = options.createId ?? (() => randomUUID().toLowerCase());
+    this.improvementLogRepository = options.improvementLogRepository;
   }
 
   async assign(
@@ -422,6 +448,12 @@ export class VisualAssignmentService {
       );
     }
 
+    const aiCandidate = await this.findAiCandidate(
+      safeProjectId,
+      currentProject,
+      request
+    );
+
     const asset = this.assetRepository.findAssetDetail(
       request.assignment.assetId
     );
@@ -435,6 +467,20 @@ export class VisualAssignmentService {
 
     const display =
       request.assignment.display ?? this.createDefaultDisplay(asset);
+    if (
+      aiCandidate !== undefined &&
+      (aiCandidate.candidatePayload.asset.status !== "active" ||
+        aiCandidate.candidatePayload.asset.checksum === null ||
+        asset.checksum === null ||
+        aiCandidate.candidatePayload.asset.checksum.toLowerCase() !==
+          asset.checksum.toLowerCase())
+    ) {
+      throw new ImprovementLogError(
+        IMPROVEMENT_LOG_ERROR_CODE.relationInvalid,
+        422,
+        "The visual suggestion asset is no longer active or unchanged."
+      );
+    }
     this.assertAssetUsable(asset, display.kind);
     this.assertDisplayWithinAsset(asset, display);
     const confirmedChecksum = this.assertChecksum(asset.checksum);
@@ -488,6 +534,29 @@ export class VisualAssignmentService {
         candidateResult.data,
         request.expectedRevision
       );
+      if (aiCandidate !== undefined && this.improvementLogRepository !== undefined) {
+        const savedAssignment = saved.visuals.assignments.find(
+          (item) => item.id === assignment.id
+        );
+        if (savedAssignment === undefined) {
+          throw new ImprovementLogError(
+            IMPROVEMENT_LOG_ERROR_CODE.relationInvalid,
+            422,
+            "The saved visual assignment could not be related to the candidate."
+          );
+        }
+        await this.improvementLogRepository.insertDecision({
+          decisionId: `${aiCandidate.candidateId}-decision-accepted`,
+          candidateId: aiCandidate.candidateId,
+          projectId: saved.metadata.id,
+          projectRevisionBefore: request.expectedRevision,
+          projectRevisionAfter: saved.revision,
+          decision: "accepted",
+          after: savedAssignment,
+          reason: normalizeImprovementReason(request.reason),
+          createdAt: new Date().toISOString()
+        });
+      }
       return { data: saved, revision: saved.revision };
     } catch (error) {
       if (placement.createdFinalFile) {
@@ -500,6 +569,74 @@ export class VisualAssignmentService {
       }
       throw error;
     }
+  }
+
+  private async findAiCandidate(
+    projectId: string,
+    project: VideoProject,
+    request: VisualAssignmentRequest
+  ) {
+    if (request.suggestionRunId === undefined) {
+      return undefined;
+    }
+    if (this.improvementLogRepository === undefined) {
+      throw new ImprovementLogError(
+        IMPROVEMENT_LOG_ERROR_CODE.databaseFailed,
+        500,
+        "The improvement log is unavailable."
+      );
+    }
+    const candidate =
+      await this.improvementLogRepository.findGenerationCandidate({
+        projectId,
+        generationRunId: request.suggestionRunId,
+        candidateKey: `asset:${request.assignment.assetId}`
+      });
+    if (candidate === undefined) {
+      throw new ImprovementLogError(
+        IMPROVEMENT_LOG_ERROR_CODE.candidateNotFound,
+        404,
+        "The visual suggestion candidate does not exist."
+      );
+    }
+    if (
+      candidate.taskKind !== "visual_search_intent" ||
+      candidate.targetKind !== "visual_line_range" ||
+      candidate.projectRevision !== project.revision ||
+      !project.visuals.suggestionRunIds.includes(request.suggestionRunId) ||
+      candidate.targetId !==
+        `${request.assignment.startLineId}:${request.assignment.endLineId}`
+    ) {
+      throw new ImprovementLogError(
+        IMPROVEMENT_LOG_ERROR_CODE.relationInvalid,
+        409,
+        "The visual suggestion candidate no longer matches this project revision or line range."
+      );
+    }
+    if (
+      !hasCurrentLineRange(
+        project,
+        request.assignment.startLineId,
+        request.assignment.endLineId
+      )
+    ) {
+      throw new ImprovementLogError(
+        IMPROVEMENT_LOG_ERROR_CODE.relationInvalid,
+        422,
+        "The visual suggestion line range no longer exists."
+      );
+    }
+    const payload = visualSuggestionCandidateSchema.safeParse(
+      candidate.candidateJson
+    );
+    if (!payload.success || payload.data.asset.assetId !== request.assignment.assetId) {
+      throw new ImprovementLogError(
+        IMPROVEMENT_LOG_ERROR_CODE.relationInvalid,
+        422,
+        "The visual suggestion candidate asset relation is invalid."
+      );
+    }
+    return { ...candidate, candidatePayload: payload.data };
   }
 
   private createDefaultDisplay(asset: AssetDetail): Display {

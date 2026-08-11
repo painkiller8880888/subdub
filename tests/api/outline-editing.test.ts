@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { initializeServer } from "../../src/api/server.js";
 import { ProjectRepository } from "../../src/app/projects/project-repository.js";
+import { ImprovementLogRepository } from "../../src/app/projects/improvement-log-repository.js";
 import {
   apiErrorResponseSchema,
   projectCreateResponseSchema,
@@ -526,5 +527,48 @@ describe("outline editing and approval APIs", () => {
       ).json()
     ).data;
     expect(after).toEqual(before);
+  });
+
+  it("rejects an AI outline through the API and stores a reasonless decision", async () => {
+    const { server, project, repository } = await setup();
+    const generated = await repository.saveOutline(
+      project.metadata.id,
+      outlineFor(project),
+      project.revision
+    );
+    const log = new ImprovementLogRepository(server.database.database);
+    await log.insertGenerationCandidate({
+      candidateId: "outline-edit-run-candidate-outline",
+      generationRunId: "outline-edit-run",
+      projectId: project.metadata.id,
+      projectRevision: generated.revision,
+      taskKind: "outline_generation",
+      targetKind: "outline",
+      targetId: "outline",
+      candidateKey: "outline",
+      candidate: generated.outline,
+      modelId: "api-outline-model",
+      responseModel: null,
+      promptVersion: "1.0.0",
+      createdAt: "2026-08-11T03:00:00.000Z"
+    });
+
+    const response = await server.app.inject({
+      method: "POST",
+      url: `/api/projects/${project.metadata.id}/outline/reject`,
+      payload: { expectedRevision: generated.revision }
+    });
+    const rejected = projectMutationResponseSchema.parse(response.json());
+    const decisions = await log.listDecisions(project.metadata.id);
+
+    expect(response.statusCode).toBe(200);
+    expect(rejected.data.outline).toMatchObject({
+      status: "draft",
+      generationRunId: null,
+      sections: []
+    });
+    expect(decisions).toHaveLength(1);
+    expect(decisions[0]?.decision).toBe("rejected");
+    expect(decisions[0]?.reason).toBeNull();
   });
 });

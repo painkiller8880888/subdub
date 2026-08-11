@@ -41,6 +41,7 @@ import {
   approveProjectVisuals,
   approveProjectScript,
   assignProjectVisual,
+  rejectProjectVisualSuggestionCandidate,
   deleteProjectVisualAssignment,
   fetchAsset,
   fetchProject,
@@ -464,7 +465,12 @@ export function ScriptPage() {
   const [suggestionEndLineId, setSuggestionEndLineId] = useState("");
   const [suggestionResponse, setSuggestionResponse] =
     useState<VisualSuggestionResponse | null>(null);
+  const [visualSuggestionStale, setVisualSuggestionStale] = useState(false);
   const [suggestionError, setSuggestionError] = useState<unknown>(null);
+  const [visualDecisionReason, setVisualDecisionReason] = useState("");
+  const [candidateDecisionByAssetId, setCandidateDecisionByAssetId] = useState<
+    Record<string, "accepted" | "rejected" | "stale">
+  >({});
   const [assetSearchQuery, setAssetSearchQuery] = useState("");
   const [assetSearchTagIds, setAssetSearchTagIds] = useState("");
   const [assetSearchResult, setAssetSearchResult] =
@@ -612,9 +618,36 @@ export function ScriptPage() {
     mutationFn: ({
       projectId,
       expectedRevision,
-      assignment
+      assignment,
+      suggestionRunId,
+      reason
     }: VisualAssignmentRequest & { projectId: string }) =>
-      assignProjectVisual(projectId, { expectedRevision, assignment }),
+      assignProjectVisual(projectId, {
+        expectedRevision,
+        assignment,
+        ...(suggestionRunId === undefined ? {} : { suggestionRunId, reason })
+      }),
+    retry: false
+  });
+
+  const visualRejectMutation = useMutation({
+    mutationFn: ({
+      projectId,
+      runId,
+      assetId,
+      expectedRevision,
+      reason
+    }: {
+      projectId: string;
+      runId: string;
+      assetId: string;
+      expectedRevision: number;
+      reason: string;
+    }) =>
+      rejectProjectVisualSuggestionCandidate(projectId, runId, assetId, {
+        expectedRevision,
+        reason
+      }),
     retry: false
   });
 
@@ -761,7 +794,10 @@ export function ScriptPage() {
     setSuggestionStartLineId("");
     setSuggestionEndLineId("");
     setSuggestionResponse(null);
+    setVisualSuggestionStale(false);
     setSuggestionError(null);
+    setVisualDecisionReason("");
+    setCandidateDecisionByAssetId({});
     visualSuggestionContextRef.current = {
       projectId: projectId ?? "",
       projectGeneration: projectGenerationRef.current,
@@ -1177,6 +1213,7 @@ export function ScriptPage() {
     project.script.status === "approved" && draft.status === "approved";
   const visualMutationPending =
     visualAssignMutation.isPending ||
+    visualRejectMutation.isPending ||
     visualUpdateMutation.isPending ||
     visualDeleteMutation.isPending ||
     visualApproveMutation.isPending;
@@ -1255,7 +1292,8 @@ export function ScriptPage() {
   }
 
   async function assignVisualCandidate(
-    asset: AssetDetail | AssetListItem
+    asset: AssetDetail | AssetListItem,
+    suggestionRunId?: string
   ): Promise<void> {
     if (
       suggestionSection === undefined ||
@@ -1309,6 +1347,12 @@ export function ScriptPage() {
     try {
       const saved = await visualAssignMutation.mutateAsync({
         ...context,
+        ...(suggestionRunId === undefined
+          ? {}
+          : {
+              suggestionRunId,
+              reason: visualDecisionReason
+            }),
         assignment: {
           id: nextVisualAssignmentId(latestProject.visuals.assignments),
           startLineId: suggestionStartLineId,
@@ -1317,11 +1361,70 @@ export function ScriptPage() {
           display: displayResult.display
         }
       });
-      acceptVisualMutationResult(saved, context);
+      if (
+        acceptVisualMutationResult(saved, context) &&
+        suggestionRunId !== undefined
+      ) {
+        setCandidateDecisionByAssetId((current) => {
+          const next = { ...current, [asset.assetId]: "accepted" as const };
+          for (const candidate of suggestionResponse?.data.candidates ?? []) {
+            if (
+              candidate.asset.assetId !== asset.assetId &&
+              current[candidate.asset.assetId] === undefined
+            ) {
+              next[candidate.asset.assetId] = "stale";
+            }
+          }
+          return next;
+        });
+        setVisualSuggestionStale(true);
+      }
     } catch (error) {
       if (isVisualMutationCurrent(context)) {
         setVisualError(error);
         setVisualSaveState("idle");
+      }
+    }
+  }
+
+  async function rejectVisualCandidate(assetId: string): Promise<void> {
+    const runId = suggestionResponse?.data.runId;
+    if (
+      runId === undefined ||
+      candidateDecisionByAssetId[assetId] !== undefined
+    ) {
+      return;
+    }
+    const requestProjectId = projectIdRef.current;
+    const requestGeneration = projectGenerationRef.current;
+    const context: VisualMutationContext = {
+      projectId: requestProjectId,
+      projectGeneration: requestGeneration,
+      expectedRevision: revisionRef.current
+    };
+    const flushed = await coordinatorRef.current?.flush();
+    if (flushed !== true || !isVisualMutationCurrent(context)) {
+      return;
+    }
+    setVisualError(null);
+    setVisualSaveState("idle");
+    try {
+      await visualRejectMutation.mutateAsync({
+        projectId: requestProjectId,
+        runId,
+        assetId,
+        expectedRevision: context.expectedRevision,
+        reason: visualDecisionReason
+      });
+      if (isVisualMutationCurrent(context)) {
+        setCandidateDecisionByAssetId((current) => ({
+          ...current,
+          [assetId]: "rejected"
+        }));
+      }
+    } catch (error) {
+      if (isVisualMutationCurrent(context)) {
+        setVisualError(error);
       }
     }
   }
@@ -1392,6 +1495,8 @@ export function ScriptPage() {
       return;
     }
     setSuggestionResponse(null);
+    setVisualSuggestionStale(false);
+    setCandidateDecisionByAssetId({});
     suggestionMutation.mutate(requestContext);
   }
 
@@ -1765,37 +1870,88 @@ export function ScriptPage() {
                 ) : null}
               </div>
             ) : null}
+            <div className="form-field">
+              <label htmlFor="visual-decision-reason">
+                候補の採否理由（任意）
+              </label>
+              <textarea
+                id="visual-decision-reason"
+                rows={3}
+                value={visualDecisionReason}
+                onChange={(event) =>
+                  setVisualDecisionReason(event.target.value)
+                }
+                placeholder="理由を入力しなくても採用・却下の事実は記録されます。"
+                maxLength={2000}
+              />
+              <small>理由未入力でも採用・却下の事実は記録されます。</small>
+            </div>
             <p className="eyebrow">
               実在するactive素材候補（
               {suggestionResponse.data.diagnostics.candidateCount}件）
             </p>
+            {visualSuggestionStale ? (
+              <p className="status-message">
+                候補を採用したためプロジェクト版が更新されました。残りの候補は無効です。再生成してください。
+              </p>
+            ) : null}
             {suggestionResponse.data.candidates.length === 0 ? (
               <p className="status-message">候補なし</p>
             ) : (
               <ul className="asset-candidate-list">
-                {suggestionResponse.data.candidates.map((candidate) => (
-                  <li key={candidate.asset.assetId}>
-                    <strong>{candidate.asset.title}</strong>（
-                    {candidate.asset.kind}）
-                    <span>
-                      タグ:{" "}
-                      {candidate.asset.tags
-                        .map((tag) => tag.canonicalName)
-                        .join("、") || "なし"}
-                    </span>
-                    <span>{candidate.matchReasons.join(" / ")}</span>
-                    <button
-                      className="button button-small"
-                      type="button"
-                      disabled={visualMutationPending}
-                      onClick={() =>
-                        void assignVisualCandidate(candidate.asset)
-                      }
-                    >
-                      この素材を割り当て
-                    </button>
-                  </li>
-                ))}
+                {suggestionResponse.data.candidates.map((candidate) => {
+                  const decision =
+                    candidateDecisionByAssetId[candidate.asset.assetId];
+                  return (
+                    <li key={candidate.asset.assetId}>
+                      <strong>{candidate.asset.title}</strong>（
+                      {candidate.asset.kind}）
+                      <span>
+                        タグ:{" "}
+                        {candidate.asset.tags
+                          .map((tag) => tag.canonicalName)
+                          .join("、") || "なし"}
+                      </span>
+                      <span>{candidate.matchReasons.join(" / ")}</span>
+                      {decision === "accepted" ? (
+                        <span className="status-message">採用済み</span>
+                      ) : null}
+                      {decision === "rejected" ? (
+                        <span className="status-message">却下済み</span>
+                      ) : null}
+                      {decision === "stale" ? (
+                        <span className="status-message">古い候補</span>
+                      ) : null}
+                      <button
+                        className="button button-small"
+                        type="button"
+                        disabled={
+                          visualMutationPending || decision !== undefined
+                        }
+                        onClick={() =>
+                          void assignVisualCandidate(
+                            candidate.asset,
+                            suggestionResponse.data.runId
+                          )
+                        }
+                      >
+                        この素材を採用して割り当て
+                      </button>
+                      <button
+                        className="button button-small"
+                        type="button"
+                        disabled={
+                          visualMutationPending || decision !== undefined
+                        }
+                        onClick={() =>
+                          void rejectVisualCandidate(candidate.asset.assetId)
+                        }
+                      >
+                        この候補を却下
+                      </button>
+                    </li>
+                  );
+                })}
               </ul>
             )}
           </div>

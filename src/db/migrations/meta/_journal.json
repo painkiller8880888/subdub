@@ -36,6 +36,20 @@
       "when": 1786080000000,
       "tag": "0004_asset-search",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1786429926333,
+      "tag": "0005_decision-log-golden-examples",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1786433367793,
+      "tag": "0006_decision-log-single-final-decision",
+      "breakpoints": true
     }
   ]
 }

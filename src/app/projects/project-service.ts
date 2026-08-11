@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 
 import {
   outlineApproveRequestSchema,
+  outlineRejectRequestSchema,
   outlineReviewRequestSchema,
   outlineSaveRequestSchema,
   projectBriefSaveRequestSchema,
@@ -13,6 +14,10 @@ import {
   projectSummarySchema,
   type ProjectSummary
 } from "../../schema/api.js";
+import {
+  normalizeImprovementReason,
+  type AiGenerationCandidateRecord
+} from "../../schema/improvement-log.js";
 import {
   idSchema,
   videoProjectSchema,
@@ -34,9 +39,15 @@ import { applyEditedScript } from "./script-invalidation.js";
 import {
   assertCanApproveScript,
   assertCanInitializeScript,
+  computeOutlineHash,
   createScriptFromApprovedOutline,
   normalizeEditedScriptIds
 } from "./script-domain.js";
+import type { ImprovementLogRepositoryPort } from "./improvement-log-repository.js";
+import {
+  IMPROVEMENT_LOG_ERROR_CODE,
+  ImprovementLogError
+} from "./improvement-log-errors.js";
 import {
   ScriptApprovalError,
   ScriptValidationError
@@ -59,6 +70,7 @@ export type ProjectServiceOptions = {
   now?: () => Date;
   createId?: () => string;
   maxCreateAttempts?: number;
+  improvementLogRepository?: ImprovementLogRepositoryPort;
 };
 
 function projectSummary(project: VideoProject): ProjectSummary {
@@ -148,6 +160,9 @@ export class ProjectService {
   private readonly now: () => Date;
   private readonly createId: () => string;
   private readonly maxCreateAttempts: number;
+  private readonly improvementLogRepository:
+    | ImprovementLogRepositoryPort
+    | undefined;
 
   constructor(options: ProjectServiceOptions) {
     this.repository = options.repository;
@@ -157,6 +172,7 @@ export class ProjectService {
       1,
       Math.floor(options.maxCreateAttempts ?? 5)
     );
+    this.improvementLogRepository = options.improvementLogRepository;
   }
 
   async list(): Promise<ProjectSummary[]> {
@@ -250,11 +266,124 @@ export class ProjectService {
     }
 
     validateOutlineForApproval(snapshot.project, snapshot.sourceHash);
-    return this.repository.saveOutline(
+    const candidate = await this.findOutlineCandidate(
+      snapshot.project.metadata.id,
+      snapshot.project.outline
+    );
+    const saved = await this.repository.saveOutline(
       projectId,
       { ...snapshot.project.outline, status: "approved" },
       request.expectedRevision
     );
+    if (this.improvementLogRepository !== undefined) {
+      if (candidate !== undefined) {
+        await this.improvementLogRepository.insertDecision({
+          decisionId: `${candidate.candidateId}-decision-accepted`,
+          candidateId: candidate.candidateId,
+          projectId: saved.metadata.id,
+          projectRevisionBefore: request.expectedRevision,
+          projectRevisionAfter: saved.revision,
+          decision: "accepted",
+          after: saved.outline,
+          reason: normalizeImprovementReason(request.reason),
+          createdAt: this.now().toISOString()
+        });
+      }
+      await this.improvementLogRepository.insertGoldenExample({
+        exampleId: `${saved.metadata.id}-golden-outline-${saved.revision}`,
+        exampleKind: "approved_outline",
+        projectId: saved.metadata.id,
+        projectRevision: saved.revision,
+        targetId: "outline",
+        sourceHash: saved.source.sha256,
+        outlineHash: null,
+        payload: saved.outline,
+        generationRunId: candidate?.generationRunId ?? null,
+        modelId: candidate?.modelId ?? null,
+        promptVersion: candidate?.promptVersion ?? null,
+        createdAt: this.now().toISOString()
+      });
+    }
+    return saved;
+  }
+
+  async rejectOutline(projectId: unknown, input: unknown): Promise<VideoProject> {
+    const request = outlineRejectRequestSchema.parse(input);
+    const snapshot = await this.repository.readGenerationSnapshot(projectId);
+    if (snapshot.project.revision !== request.expectedRevision) {
+      throw new ProjectRepositoryError(
+        "PROJECT_REVISION_CONFLICT",
+        409,
+        "The project revision does not match the expected revision."
+      );
+    }
+    if (snapshot.project.outline.status === "approved") {
+      throw new ImprovementLogError(
+        IMPROVEMENT_LOG_ERROR_CODE.rejectionNotAllowed,
+        409,
+        "An approved outline cannot be rejected."
+      );
+    }
+    if (
+      snapshot.project.outline.generationRunId === null ||
+      snapshot.project.script.sections.length > 0 ||
+      snapshot.project.script.status !== "draft" ||
+      snapshot.project.visuals.assignments.length > 0 ||
+      snapshot.project.visuals.suggestionRunIds.length > 0 ||
+      snapshot.project.visuals.status !== "draft"
+    ) {
+      throw new ImprovementLogError(
+        IMPROVEMENT_LOG_ERROR_CODE.rejectionNotAllowed,
+        409,
+        "The generated outline cannot be rejected after downstream work exists."
+      );
+    }
+    const candidate = await this.findOutlineCandidate(
+      snapshot.project.metadata.id,
+      snapshot.project.outline
+    );
+    if (candidate === undefined || this.improvementLogRepository === undefined) {
+      throw new ImprovementLogError(
+        IMPROVEMENT_LOG_ERROR_CODE.candidateNotFound,
+        404,
+        "The AI outline candidate does not exist."
+      );
+    }
+    const existingDecision =
+      await this.improvementLogRepository.findDecisionForCandidate({
+        candidateId: candidate.candidateId
+      });
+    if (existingDecision !== undefined) {
+      throw new ImprovementLogError(
+        IMPROVEMENT_LOG_ERROR_CODE.decisionConflict,
+        409,
+        "The AI outline candidate already has a final decision."
+      );
+    }
+    const draftOutline: Outline = {
+      status: "draft",
+      sourceHash: snapshot.sourceHash,
+      generationRunId: null,
+      openQuestions: [],
+      sections: []
+    };
+    const saved = await this.repository.saveOutline(
+      projectId,
+      draftOutline,
+      request.expectedRevision
+    );
+    await this.improvementLogRepository.insertDecision({
+      decisionId: `${candidate.candidateId}-decision-rejected`,
+      candidateId: candidate.candidateId,
+      projectId: saved.metadata.id,
+      projectRevisionBefore: request.expectedRevision,
+      projectRevisionAfter: saved.revision,
+      decision: "rejected",
+      after: null,
+      reason: normalizeImprovementReason(request.reason),
+      createdAt: this.now().toISOString()
+    });
+    return saved;
   }
 
   async reviewOutline(projectId: unknown, input: unknown): Promise<VideoProject> {
@@ -357,11 +486,72 @@ export class ProjectService {
         scriptValidationIssues(updatedProjectResult.error.issues)
       );
     }
-    return this.repository.save(
+    const candidate = await this.findOutlineCandidate(
+      snapshot.project.metadata.id,
+      snapshot.project.outline
+    );
+    const saved = await this.repository.save(
       projectId,
       updatedProjectResult.data,
       request.expectedRevision
     );
+    if (this.improvementLogRepository !== undefined) {
+      await this.improvementLogRepository.insertGoldenExample({
+        exampleId: `${saved.metadata.id}-golden-script-${saved.revision}`,
+        exampleKind: "approved_script_bundle",
+        projectId: saved.metadata.id,
+        projectRevision: saved.revision,
+        targetId: "script",
+        sourceHash: saved.source.sha256,
+        outlineHash: computeOutlineHash(saved.outline),
+        payload: {
+          outline: saved.outline,
+          script: saved.script,
+          characters: saved.characters
+        },
+        generationRunId: candidate?.generationRunId ?? null,
+        modelId: candidate?.modelId ?? null,
+        promptVersion: candidate?.promptVersion ?? null,
+        createdAt: this.now().toISOString()
+      });
+    }
+    return saved;
+  }
+
+  private async findOutlineCandidate(
+    projectId: string,
+    outline: Outline
+  ): Promise<AiGenerationCandidateRecord | undefined> {
+    if (
+      this.improvementLogRepository === undefined ||
+      outline.generationRunId === null
+    ) {
+      return undefined;
+    }
+    const candidate =
+      await this.improvementLogRepository.findGenerationCandidate({
+        projectId,
+        generationRunId: outline.generationRunId,
+        candidateKey: "outline"
+      });
+    if (candidate === undefined) {
+      // Migration 0005 intentionally does not reconstruct candidates from
+      // existing project JSON. Keep pre-migration outlines approvable as
+      // legacy data, without inventing AI metadata or a candidate row.
+      return undefined;
+    }
+    if (
+      candidate.taskKind !== "outline_generation" ||
+      candidate.targetKind !== "outline" ||
+      candidate.targetId !== "outline"
+    ) {
+      throw new ImprovementLogError(
+        IMPROVEMENT_LOG_ERROR_CODE.relationInvalid,
+        422,
+        "The AI outline candidate relation is invalid."
+      );
+    }
+    return candidate;
   }
 }
 
