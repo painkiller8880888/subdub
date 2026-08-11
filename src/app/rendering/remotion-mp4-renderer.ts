@@ -250,7 +250,7 @@ async function copyReferencedAsset(
   await copyFile(resolvedSourcePath, destinationPath);
 }
 
-async function stagePublicDirectory(
+export async function stagePublicDirectory(
   workspaceRoot: string,
   projectId: string,
   manifest: RenderManifest,
@@ -268,9 +268,22 @@ async function stagePublicDirectory(
     path.join(publicRoot, "media"),
     workspaceRoot
   );
+  const projectAudioRoot = path.join(
+    workspaceRoot,
+    "projects",
+    projectId,
+    "audio"
+  );
   await copySafeTree(
-    path.join(workspaceRoot, "projects", projectId, "audio"),
+    projectAudioRoot,
     path.join(publicRoot, "audio"),
+    workspaceRoot
+  );
+  // Keep both the legacy fixture path and the project-prefixed VOICEVOX path
+  // valid because the manifest is passed to Remotion without rewriting paths.
+  await copySafeTree(
+    projectAudioRoot,
+    path.join(publicRoot, "projects", projectId, "audio"),
     workspaceRoot
   );
   for (const asset of manifest.sourceAssetChecksums) {
