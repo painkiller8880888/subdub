@@ -76,6 +76,10 @@ registerMediabunnyServer();
 const repositoryRoot = fileURLToPath(new URL("../../", import.meta.url));
 type RepresentativeFrameGoldenPlatform = "linux" | "windows";
 
+// Remotion uses the browser's installed fonts, whose glyph rasterization and
+// fallback selection differ between Ubuntu CI and Windows development runs.
+// Keep strict pixel tolerances, but compare each renderer platform with the
+// baseline produced by that same platform instead of weakening the assertion.
 function resolveRepresentativeFrameGoldenPlatform(): RepresentativeFrameGoldenPlatform {
   if (process.platform === "linux") {
     return "linux";
