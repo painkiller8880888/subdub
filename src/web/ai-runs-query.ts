@@ -1,5 +1,7 @@
 import {
+  aiRunExportQuerySchema,
   aiRunSearchQuerySchema,
+  type AiRunExportQuery,
   type AiRunSearchQuery
 } from "../schema/api.js";
 import { aiTaskKindSchema } from "../schema/video-project.js";
@@ -77,5 +79,19 @@ export function buildAiRunSearchQuery(
       draft.errorCode.trim() === "" ? undefined : draft.errorCode.trim(),
     limit: aiRunPageSize,
     offset
+  });
+}
+
+export function buildAiRunExportQuery(
+  query: AiRunSearchQuery
+): AiRunExportQuery {
+  return aiRunExportQuerySchema.parse({
+    from: query.from,
+    to: query.to,
+    taskKind: query.taskKind,
+    modelId: query.modelId,
+    status: query.status,
+    decision: query.decision,
+    errorCode: query.errorCode
   });
 }

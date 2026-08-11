@@ -5,10 +5,12 @@ import { Link } from "react-router";
 import {
   ApiClientError,
   ApiClientProtocolError,
+  exportAiRuns,
   searchAiRuns
 } from "./lib/api-client";
 import {
   aiRunTaskKinds,
+  buildAiRunExportQuery,
   buildAiRunSearchQuery,
   emptyAiRunFilterDraft,
   type AiRunFilterDraft
@@ -46,6 +48,16 @@ function getErrorMessage(error: unknown): string {
     return error.message;
   }
   return "AI実行ログの取得に失敗しました。";
+}
+
+function getExportErrorMessage(error: unknown): string {
+  if (error instanceof ApiClientError) {
+    return `${error.message}（エラーコード: ${error.code}）`;
+  }
+  if (error instanceof ApiClientProtocolError) {
+    return error.message;
+  }
+  return "AI実行ログのエクスポートに失敗しました。";
 }
 
 function modifiedLabel(value: AiRunSearchItem["modified"]): string {
@@ -176,6 +188,8 @@ export function AiRunsPage() {
   const [validationMessage, setValidationMessage] = useState<string | null>(
     null
   );
+  const [isExporting, setIsExporting] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
   const aiRunsQuery = useQuery({
     queryKey: ["ai-runs", searchQuery],
     queryFn: () => searchAiRuns(searchQuery),
@@ -187,6 +201,7 @@ export function AiRunsPage() {
     try {
       setSearchQuery(buildAiRunSearchQuery(draft, 0));
       setValidationMessage(null);
+      setExportError(null);
     } catch {
       setValidationMessage("日付または検索条件を確認してください。");
     }
@@ -197,6 +212,34 @@ export function AiRunsPage() {
     setDraft(cleared);
     setSearchQuery(buildAiRunSearchQuery(cleared, 0));
     setValidationMessage(null);
+    setExportError(null);
+  }
+
+  async function exportAppliedSearch(): Promise<void> {
+    if (isExporting) {
+      return;
+    }
+
+    setIsExporting(true);
+    setExportError(null);
+    try {
+      const { blob, filename } = await exportAiRuns(
+        buildAiRunExportQuery(searchQuery)
+      );
+      const objectUrl = URL.createObjectURL(blob);
+      try {
+        const link = document.createElement("a");
+        link.href = objectUrl;
+        link.download = filename;
+        link.click();
+      } finally {
+        URL.revokeObjectURL(objectUrl);
+      }
+    } catch (error) {
+      setExportError(getExportErrorMessage(error));
+    } finally {
+      setIsExporting(false);
+    }
   }
 
   const data = aiRunsQuery.data;
@@ -325,7 +368,20 @@ export function AiRunsPage() {
           <button className="button" type="button" onClick={clearSearch}>
             条件クリア
           </button>
+          <button
+            className="button"
+            type="button"
+            disabled={isExporting}
+            onClick={() => void exportAppliedSearch()}
+          >
+            {isExporting ? "エクスポート中…" : "JSON Linesをエクスポート"}
+          </button>
         </div>
+        {exportError !== null ? (
+          <p className="form-error" role="alert">
+            {exportError}
+          </p>
+        ) : null}
       </form>
 
       {aiRunsQuery.isPending ? (

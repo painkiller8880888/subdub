@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   apiErrorResponseSchema,
   apiSuccessResponseSchema,
+  aiRunExportRecordSchema,
   createApiErrorResponse,
   createApiSuccessResponse
 } from "../../src/schema/api.js";
@@ -44,5 +45,35 @@ describe("shared API contract", () => {
         createApiErrorResponse("API_NOT_FOUND", "見つかりません。", "req-test")
       ).error.details
     ).toEqual([]);
+  });
+
+  it("accepts only the explicit AI run export allowlist", () => {
+    const record = {
+      exportVersion: "1.0.0",
+      runId: "run-example",
+      projectId: "project-example",
+      taskKind: "outline_generation",
+      modelId: "google/gemma-4-31b-it",
+      responseModel: "provider/gemma",
+      status: "succeeded",
+      queuedAt: "2026-08-11T00:00:00.000Z",
+      finishedAt: "2026-08-11T00:00:01.000Z",
+      schemaValidation: "passed",
+      responseTimeMs: 100,
+      errorCode: null,
+      candidateCount: 0,
+      acceptedCount: 0,
+      rejectedCount: 0,
+      undecidedCount: 0,
+      modified: null
+    } as const;
+
+    expect(aiRunExportRecordSchema.parse(record)).toEqual(record);
+    expect(
+      aiRunExportRecordSchema.safeParse({
+        ...record,
+        candidateJson: { secret: "must-not-export" }
+      }).success
+    ).toBe(false);
   });
 });
