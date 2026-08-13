@@ -97,30 +97,32 @@ export function normalizeOutlineOrders(outline: Outline): Outline {
 export function outlineOrderErrors(outline: Outline): string[] {
   const errors: string[] = [];
   if (outline.sections.length < 3) {
-    errors.push("intro・main・outro の3セクション以上が必要です。");
+    errors.push("導入・本編・まとめの3セクション以上が必要です。");
   }
   if (outline.sections[0]?.role !== "intro") {
-    errors.push("先頭セクションは intro にしてください。");
+    errors.push("先頭セクションの役割を「導入」にしてください。");
   }
   if (outline.sections.at(-1)?.role !== "outro") {
-    errors.push("末尾セクションは outro にしてください。");
+    errors.push("末尾セクションの役割を「まとめ・締め」にしてください。");
   }
   const middle = outline.sections.slice(1, -1);
   if (
     middle.length === 0 ||
     !middle.some((section) => section.role === "main")
   ) {
-    errors.push("main セクションを1件以上追加してください。");
+    errors.push("「本編」のセクションを1件以上追加してください。");
   }
   if (middle.some((section) => section.role !== "main")) {
-    errors.push("intro と outro の間は main のみ配置してください。");
+    errors.push(
+      "「導入」と「まとめ・締め」の間には「本編」だけを配置してください。"
+    );
   }
   const orders = outline.sections.map((section) => section.order);
   if (
     new Set(orders).size !== orders.length ||
     orders.some((order, index) => order !== index + 1)
   ) {
-    errors.push("order は表示順と一致する連番にしてください。");
+    errors.push("セクション番号は表示順と一致する連番にしてください。");
   }
   return errors;
 }

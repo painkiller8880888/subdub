@@ -92,11 +92,9 @@ export function PreviewPage() {
         </Link>
       </p>
       <header className="page-header page-header-stacked">
-        <p className="eyebrow">WebUI preview</p>
+        <p className="eyebrow">動画プレビュー</p>
         <h1>{data.project.title}</h1>
-        <p>
-          保存済みのRenderManifestをMP4レンダリングと共通の入力として表示します。
-        </p>
+        <p>保存済みの動画構成情報を、MP4出力と同じ条件で画面上に表示します。</p>
       </header>
 
       <section
@@ -104,7 +102,7 @@ export function PreviewPage() {
         aria-labelledby="preview-status-title"
       >
         <div>
-          <p className="eyebrow">Manifest status</p>
+          <p className="eyebrow">プレビュー状態</p>
           <h2 id="preview-status-title">{viewModel.stateLabel}</h2>
           <p>{viewModel.stateDescription}</p>
         </div>
@@ -115,11 +113,11 @@ export function PreviewPage() {
             disabled={!viewModel.canPlay}
             aria-describedby="preview-play-disabled-reason"
           >
-            {viewModel.canPlay ? "再生コントロール" : "再生できません"}
+            {viewModel.canPlay ? "再生できます" : "再生できません"}
           </button>
           <p id="preview-play-disabled-reason">
             {viewModel.canPlay
-              ? "Playerの操作を有効にしています。"
+              ? "下の再生画面で動画を確認できます。"
               : "前工程または素材に未解決の問題があるため、実行操作を無効にしています。"}
           </p>
         </div>
@@ -174,7 +172,7 @@ export function PreviewPage() {
             style={{ width: "100%", aspectRatio: "16 / 9" }}
             errorFallback={({ error }) => (
               <div className="message-panel message-panel-error" role="alert">
-                <h2>Playerで描画できませんでした</h2>
+                <h2>動画プレビューを表示できませんでした</h2>
                 <p>{error.message || "動画プレビューの描画に失敗しました。"}</p>
               </div>
             )}

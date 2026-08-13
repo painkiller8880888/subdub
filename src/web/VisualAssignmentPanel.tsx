@@ -42,15 +42,70 @@ function assetThumbnailUrl(assetId: string, index: number): string {
 function kindLabel(kind: AssetView["kind"]): string {
   switch (kind) {
     case "video":
-      return "video";
+      return "動画";
     case "photo":
-      return "photo";
+      return "画像";
     case "document_scan":
-      return "document_scan";
+      return "文書画像";
+    case "sound_effect":
+      return "効果音";
     default:
       return kind;
   }
 }
+
+function assetStatusLabel(status: string): string {
+  switch (status) {
+    case "processing":
+      return "処理中";
+    case "active":
+      return "利用可能";
+    case "inactive":
+      return "利用停止";
+    case "error":
+      return "エラー";
+    default:
+      return status;
+  }
+}
+
+function confidentialityLabel(value: string): string {
+  switch (value) {
+    case "internal":
+      return "社内限定";
+    case "restricted":
+      return "取扱注意";
+    case "public":
+      return "公開可";
+    default:
+      return value;
+  }
+}
+
+function approvalStatusLabel(
+  status: VideoProject["visuals"]["status"]
+): string {
+  switch (status) {
+    case "approved":
+      return "承認済み";
+    case "needs_review":
+      return "要確認";
+    default:
+      return "下書き";
+  }
+}
+
+const cropLabels = {
+  x: "左端 x",
+  y: "上端 y",
+  width: "幅",
+  height: "高さ"
+} as const;
+
+const positionLabels = {
+  x: "横位置 x",
+  y: "縦位置 y"
+} as const;
 
 function displayKindLabel(kind: VisualAssignment["display"]["kind"]): string {
   return kindLabel(kind);
@@ -74,13 +129,13 @@ function metadataText(asset: AssetView | undefined): string {
   }
   if (asset.kind === "video") {
     return asset.durationMs === null
-      ? "動画尺: 未取得"
-      : `動画尺: ${asset.durationMs} ms`;
+      ? "動画の長さ：未取得"
+      : `動画の長さ：${asset.durationMs}ミリ秒`;
   }
   if (asset.kind === "document_scan") {
     return asset.pageCount === null
-      ? "ページ数: 未取得"
-      : `ページ数: ${asset.pageCount}`;
+      ? "ページ数：未取得"
+      : `ページ数：${asset.pageCount}`;
   }
   return "写真";
 }
@@ -99,7 +154,7 @@ function StaticAnnotationEditor({
       <legend>{annotation.id}</legend>
       <div className="form-field-group">
         <div className="form-field">
-          <label htmlFor={`${annotation.id}-kind`}>種類</label>
+          <label htmlFor={`${annotation.id}-kind`}>注釈の種類</label>
           <select
             id={`${annotation.id}-kind`}
             value={annotation.kind}
@@ -109,13 +164,13 @@ function StaticAnnotationEditor({
               })
             }
           >
-            <option value="label">label</option>
-            <option value="box">box</option>
-            <option value="arrow">arrow</option>
+            <option value="label">文字ラベル</option>
+            <option value="box">枠</option>
+            <option value="arrow">矢印</option>
           </select>
         </div>
         <div className="form-field">
-          <label htmlFor={`${annotation.id}-color`}>色トークン</label>
+          <label htmlFor={`${annotation.id}-color`}>注釈の色</label>
           <select
             id={`${annotation.id}-color`}
             value={annotation.colorToken}
@@ -125,14 +180,14 @@ function StaticAnnotationEditor({
               })
             }
           >
-            <option value="accent">accent</option>
-            <option value="caution">caution</option>
-            <option value="warning">warning</option>
+            <option value="accent">強調色</option>
+            <option value="caution">注意色</option>
+            <option value="warning">警告色</option>
           </select>
         </div>
       </div>
       <div className="form-field">
-        <label htmlFor={`${annotation.id}-text`}>注釈テキスト</label>
+        <label htmlFor={`${annotation.id}-text`}>注釈に表示する文字</label>
         <input
           id={`${annotation.id}-text`}
           value={annotation.text ?? ""}
@@ -141,7 +196,7 @@ function StaticAnnotationEditor({
       </div>
       <div className="form-field-group">
         <div className="form-field">
-          <label htmlFor={`${annotation.id}-x`}>x（0〜1）</label>
+          <label htmlFor={`${annotation.id}-x`}>横位置 x（0〜1）</label>
           <input
             id={`${annotation.id}-x`}
             type="number"
@@ -153,7 +208,7 @@ function StaticAnnotationEditor({
           />
         </div>
         <div className="form-field">
-          <label htmlFor={`${annotation.id}-y`}>y（0〜1）</label>
+          <label htmlFor={`${annotation.id}-y`}>縦位置 y（0〜1）</label>
           <input
             id={`${annotation.id}-y`}
             type="number"
@@ -165,7 +220,9 @@ function StaticAnnotationEditor({
           />
         </div>
         <div className="form-field">
-          <label htmlFor={`${annotation.id}-width`}>幅（0〜1、任意）</label>
+          <label htmlFor={`${annotation.id}-width`}>
+            幅（画面幅に対する割合、任意）
+          </label>
           <input
             id={`${annotation.id}-width`}
             type="number"
@@ -179,7 +236,9 @@ function StaticAnnotationEditor({
           />
         </div>
         <div className="form-field">
-          <label htmlFor={`${annotation.id}-height`}>高さ（0〜1、任意）</label>
+          <label htmlFor={`${annotation.id}-height`}>
+            高さ（画面高に対する割合、任意）
+          </label>
           <input
             id={`${annotation.id}-height`}
             type="number"
@@ -318,19 +377,25 @@ function VisualAssignmentEditor({
       )}
       <dl className="visual-assignment-details">
         <div>
-          <dt>素材状態</dt>
-          <dd>{asset?.status ?? "確認中"}</dd>
+          <dt>素材の状態</dt>
+          <dd>
+            {asset === undefined ? "確認中" : assetStatusLabel(asset.status)}
+          </dd>
         </div>
         <div>
           <dt>機密区分</dt>
-          <dd>{asset?.confidentiality ?? "確認中"}</dd>
+          <dd>
+            {asset === undefined
+              ? "確認中"
+              : confidentialityLabel(asset.confidentiality)}
+          </dd>
         </div>
         <div>
           <dt>メタデータ</dt>
           <dd>{metadataText(asset)}</dd>
         </div>
         <div>
-          <dt>DBチェックサム</dt>
+          <dt>データベース照合値</dt>
           <dd>
             <code>{asset?.checksum ?? "確認中"}</code>
           </dd>
@@ -409,7 +474,7 @@ function VisualAssignmentEditor({
 
       <div className="form-field-group">
         <div className="form-field">
-          <label htmlFor={`${draft.id}-fit`}>表示方法</label>
+          <label htmlFor={`${draft.id}-fit`}>画像の収め方</label>
           <select
             id={`${draft.id}-fit`}
             value={display.fit}
@@ -417,12 +482,12 @@ function VisualAssignmentEditor({
               updateDisplay({ fit: event.target.value as "contain" | "cover" })
             }
           >
-            <option value="contain">contain</option>
-            <option value="cover">cover</option>
+            <option value="contain">画像全体を収める</option>
+            <option value="cover">枠いっぱいに表示する</option>
           </select>
         </div>
         <div className="form-field">
-          <label htmlFor={`${draft.id}-scale`}>拡大率</label>
+          <label htmlFor={`${draft.id}-scale`}>表示倍率（1.0が標準）</label>
           <input
             id={`${draft.id}-scale`}
             type="number"
@@ -442,16 +507,18 @@ function VisualAssignmentEditor({
               updateDisplay({ prioritizeVisual: event.target.checked })
             }
           />
-          ビジュアルを優先
+          画像を前面に表示
         </label>
       </div>
 
       <fieldset className="visual-settings-fieldset">
-        <legend>切り抜き（正規化 0〜1）</legend>
+        <legend>切り抜き範囲（各値0〜1）</legend>
         <div className="form-field-group">
           {(["x", "y", "width", "height"] as const).map((key) => (
             <div className="form-field" key={key}>
-              <label htmlFor={`${draft.id}-crop-${key}`}>{key}</label>
+              <label htmlFor={`${draft.id}-crop-${key}`}>
+                {cropLabels[key]}
+              </label>
               <input
                 id={`${draft.id}-crop-${key}`}
                 type="number"
@@ -467,11 +534,13 @@ function VisualAssignmentEditor({
       </fieldset>
 
       <fieldset className="visual-settings-fieldset">
-        <legend>位置（正規化 0〜1）</legend>
+        <legend>表示位置（各値0〜1）</legend>
         <div className="form-field-group">
           {(["x", "y"] as const).map((key) => (
             <div className="form-field" key={key}>
-              <label htmlFor={`${draft.id}-position-${key}`}>{key}</label>
+              <label htmlFor={`${draft.id}-position-${key}`}>
+                {positionLabels[key]}
+              </label>
               <input
                 id={`${draft.id}-position-${key}`}
                 type="number"
@@ -491,7 +560,9 @@ function VisualAssignmentEditor({
           <legend>動画設定</legend>
           <div className="form-field-group">
             <div className="form-field">
-              <label htmlFor={`${draft.id}-start-ms`}>開始（ms）</label>
+              <label htmlFor={`${draft.id}-start-ms`}>
+                動画の切り出し開始位置（ミリ秒）
+              </label>
               <input
                 id={`${draft.id}-start-ms`}
                 type="number"
@@ -504,7 +575,9 @@ function VisualAssignmentEditor({
               />
             </div>
             <div className="form-field">
-              <label htmlFor={`${draft.id}-end-ms`}>終了（ms）</label>
+              <label htmlFor={`${draft.id}-end-ms`}>
+                動画の切り出し終了位置（ミリ秒）
+              </label>
               <input
                 id={`${draft.id}-end-ms`}
                 type="number"
@@ -517,7 +590,9 @@ function VisualAssignmentEditor({
               />
             </div>
             <div className="form-field">
-              <label htmlFor={`${draft.id}-playback-rate`}>再生速度</label>
+              <label htmlFor={`${draft.id}-playback-rate`}>
+                再生速度（1.0が標準）
+              </label>
               <input
                 id={`${draft.id}-playback-rate`}
                 type="number"
@@ -537,7 +612,7 @@ function VisualAssignmentEditor({
                   updateDisplay({ muted: event.target.checked })
                 }
               />
-              ミュート
+              音声を消す
             </label>
           </div>
         </fieldset>
@@ -545,7 +620,7 @@ function VisualAssignmentEditor({
 
       {display.kind === "document_scan" ? (
         <div className="form-field">
-          <label htmlFor={`${draft.id}-page`}>帳票ページ</label>
+          <label htmlFor={`${draft.id}-page`}>表示する帳票ページ番号</label>
           <input
             id={`${draft.id}-page`}
             type="number"
@@ -615,14 +690,14 @@ function VisualAssignmentEditor({
 
       {hasExternalUpdate ? (
         <div className="status-message" role="status">
-          Server update detected. Your unsaved draft is being kept.
+          サーバー側で更新が見つかりました。保存前の入力内容を保持しています。
           <button
             className="button button-small"
             type="button"
             disabled={isMutating}
             onClick={reloadFromServer}
           >
-            Reload latest server value
+            最新のサーバー側データを読み込む
           </button>
         </div>
       ) : null}
@@ -664,13 +739,13 @@ export function VisualAssignmentPanel({
     >
       <header className="visual-subsection-header">
         <div>
-          <p className="eyebrow">P3-06 表示設定</p>
-          <h2 id="visual-plan-title">割り当て済みビジュアル</h2>
+          <p className="eyebrow">手順3-6 表示設定</p>
+          <h2 id="visual-plan-title">割り当て済み素材の表示設定</h2>
         </div>
         <span
           className={`visual-status visual-status-${project.visuals.status}`}
         >
-          {project.visuals.status}
+          {approvalStatusLabel(project.visuals.status)}
         </span>
       </header>
       {project.visuals.assignments.length === 0 ? (

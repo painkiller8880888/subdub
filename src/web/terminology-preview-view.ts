@@ -15,7 +15,7 @@ export function TerminologyPreviewResultView({
     return createElement(
       "p",
       { className: "status-message", role: "status", "aria-live": "polite" },
-      "Resolving spoken text…"
+      "読み上げ内容を確認しています…"
     );
   }
 
@@ -31,12 +31,16 @@ export function TerminologyPreviewResultView({
     return createElement(
       "p",
       { className: "status-message", role: "status" },
-      "Run a preview to see the resolved spoken text."
+      "プレビューを実行すると、用語を反映した読み上げ内容を確認できます。"
     );
   }
 
   const resultChildren = [
-    createElement("h3", { key: "resolved-title" }, "Resolved spoken text"),
+    createElement(
+      "h3",
+      { key: "resolved-title" },
+      "用語を反映した読み上げ内容"
+    ),
     createElement("p", { key: "resolved-text" }, result.resolvedSpokenText)
   ];
   if (result.appliedTerms.length === 0) {
@@ -44,12 +48,12 @@ export function TerminologyPreviewResultView({
       createElement(
         "p",
         { key: "no-applied-terms" },
-        "No terminology was applied."
+        "適用された用語はありません。"
       )
     );
   } else {
     resultChildren.push(
-      createElement("h3", { key: "applied-title" }, "Applied terminology"),
+      createElement("h3", { key: "applied-title" }, "適用した用語"),
       createElement(
         "ul",
         { key: "applied-list" },

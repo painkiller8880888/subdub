@@ -114,12 +114,62 @@ function getErrorMessage(error: unknown, fallback: string): string {
 function scriptStatusLabel(status: Script["status"]): string {
   switch (status) {
     case "approved":
-      return "approved（承認済み）";
+      return "承認済み";
     case "needs_review":
-      return "needs_review（要確認）";
+      return "要確認";
     default:
-      return "draft（下書き）";
+      return "下書き";
   }
+}
+
+function assetKindLabel(kind: AssetDetail["kind"]): string {
+  switch (kind) {
+    case "video":
+      return "動画";
+    case "photo":
+      return "画像";
+    case "document_scan":
+      return "文書画像";
+    case "sound_effect":
+      return "効果音";
+  }
+}
+
+function visualTagGroupLabel(group: string): string {
+  switch (group) {
+    case "requiredTags":
+      return "必須タグ";
+    case "optionalTags":
+      return "任意タグ";
+    case "excludedTags":
+      return "除外タグ";
+    default:
+      return group;
+  }
+}
+
+function unresolvedTagReasonLabel(reason: string): string {
+  switch (reason) {
+    case "unknown":
+      return "登録されていません";
+    case "ambiguous":
+      return "複数の候補があります";
+    default:
+      return reason;
+  }
+}
+
+function visualMatchReasonLabel(reason: string): string {
+  const prefixes: ReadonlyArray<readonly [string, string]> = [
+    ["required tags: ", "必須タグ："],
+    ["optional tags: ", "任意タグ："],
+    ["free text: ", "キーワード："],
+    ["media kind: ", "素材の種類："]
+  ];
+  const prefix = prefixes.find(([source]) => reason.startsWith(source));
+  return prefix === undefined
+    ? reason
+    : `${prefix[1]}${reason.slice(prefix[0].length)}`;
 }
 
 function voiceStatusLabel(status: VoiceLineGenerationStatus["status"]): string {
@@ -254,7 +304,7 @@ function ScriptLineCard({
     <article className="script-line-card" aria-label={`セリフ ${line.id}`}>
       <header className="script-line-card-header">
         <div>
-          <p className="eyebrow">セリフID</p>
+          <p className="eyebrow">セリフ識別子</p>
           <code>{line.id}</code>
         </div>
         <div className="script-line-actions">
@@ -302,7 +352,7 @@ function ScriptLineCard({
           </select>
         </div>
         <div className="form-field">
-          <label htmlFor={`${line.id}-expression`}>論理表情</label>
+          <label htmlFor={`${line.id}-expression`}>表情（動画内の表示）</label>
           <select
             id={`${line.id}-expression`}
             value={line.expression}
@@ -312,14 +362,16 @@ function ScriptLineCard({
               })
             }
           >
-            <option value="neutral">neutral（通常）</option>
-            <option value="smile">smile（喜び）</option>
-            <option value="explain">explain（説明）</option>
-            <option value="caution">caution（注意）</option>
+            <option value="neutral">通常</option>
+            <option value="smile">喜び</option>
+            <option value="explain">説明</option>
+            <option value="caution">注意</option>
           </select>
         </div>
         <div className="form-field script-line-wide-field">
-          <label htmlFor={`${line.id}-spoken`}>VOICEVOX 読み上げ</label>
+          <label htmlFor={`${line.id}-spoken`}>
+            読み上げる文章（VOICEVOX）
+          </label>
           <textarea
             id={`${line.id}-spoken`}
             rows={3}
@@ -328,7 +380,7 @@ function ScriptLineCard({
           />
         </div>
         <div className="form-field script-line-wide-field">
-          <label htmlFor={`${line.id}-subtitle`}>字幕</label>
+          <label htmlFor={`${line.id}-subtitle`}>字幕に表示する文章</label>
           <textarea
             id={`${line.id}-subtitle`}
             rows={3}
@@ -337,7 +389,9 @@ function ScriptLineCard({
           />
         </div>
         <div className="form-field">
-          <label htmlFor={`${line.id}-pause-before`}>発話前の無音（ms）</label>
+          <label htmlFor={`${line.id}-pause-before`}>
+            発話前の間（ミリ秒）
+          </label>
           <input
             id={`${line.id}-pause-before`}
             type="number"
@@ -355,7 +409,7 @@ function ScriptLineCard({
           />
         </div>
         <div className="form-field">
-          <label htmlFor={`${line.id}-pause-after`}>発話後の無音（ms）</label>
+          <label htmlFor={`${line.id}-pause-after`}>発話後の間（ミリ秒）</label>
           <input
             id={`${line.id}-pause-after`}
             type="number"
@@ -1138,7 +1192,7 @@ export function ScriptPage() {
       project.outline.status !== "approved"
         ? "構成案が未承認です。構成案画面で確認・承認してください。"
         : project.outline.sourceHash !== project.source.sha256
-          ? "構成案が stale です。構成案画面で再確認してください。"
+          ? "元資料が更新されているため、構成案を再確認してください。"
           : "台本を初期化できます。";
     return (
       <main className="page-shell narrow-shell">
@@ -1146,7 +1200,7 @@ export function ScriptPage() {
           <Link to={outlinePath(projectId)}>構成案へ戻る</Link>
         </p>
         <header className="page-header page-header-stacked">
-          <p className="eyebrow">P2-02 台本</p>
+          <p className="eyebrow">手順2-2 台本</p>
           <h1>{project.metadata.title}</h1>
           <p>承認済み構成案のセクション構造を引き継いで台本を開始します。</p>
           <div className="page-header-actions">
@@ -1163,8 +1217,7 @@ export function ScriptPage() {
           <p>{reason}</p>
           {!isReadyToInitialize ? (
             <p>
-              構成案を承認し、stale
-              を解消すると開始できます。既存の台本データは削除しません。
+              構成案を承認し、元資料との不一致を解消すると開始できます。既存の台本データは削除しません。
             </p>
           ) : null}
           {initializationError !== null ? (
@@ -1566,7 +1619,7 @@ export function ScriptPage() {
       </p>
       <header className="page-header page-header-stacked">
         <div className="page-header-actions">
-          <p className="eyebrow">P2-02 台本編集</p>
+          <p className="eyebrow">手順2-2 台本編集</p>
           <Link
             className="button"
             to={charactersPath(projectId)}
@@ -1578,12 +1631,14 @@ export function ScriptPage() {
           </Link>
         </div>
         <h1>{project.metadata.title}</h1>
-        <p>論理表情・読み上げ文・字幕・前後の無音時間を編集します。</p>
+        <p>
+          話者、表情、読み上げる文章、字幕、発話前後の間を編集します。入力内容を確認してから音声とビジュアルを設定します。
+        </p>
       </header>
 
       <div className="autosave-status" role="status" aria-live="polite">
         <strong>{autosaveMessage}</strong>
-        <span>revision {revisionRef.current}</span>
+        <span>更新番号 {revisionRef.current}</span>
         <span>{scriptStatusLabel(draft.status)}</span>
       </div>
 
@@ -1593,7 +1648,7 @@ export function ScriptPage() {
           <p>
             {getErrorMessage(
               autosaveState.error,
-              "入力中の draft は保持されています。"
+              "入力中の台本は保持されています。"
             )}
           </p>
           {errorDetails(autosaveState.error).length > 0 ? (
@@ -1616,8 +1671,7 @@ export function ScriptPage() {
         <section className="message-panel message-panel-error" role="alert">
           <h2>保存競合</h2>
           <p>
-            別の画面で更新されたため、自動上書きを停止しました。現在の draft
-            は保持しています。
+            別の画面で更新されたため、自動上書きを停止しました。現在の台本入力は保持しています。
           </p>
           <button
             className="button"
@@ -1632,8 +1686,7 @@ export function ScriptPage() {
         <section className="message-panel message-panel-warning" role="alert">
           <h2>入力を確認してください</h2>
           <p>
-            入力中の draft
-            は保持しています。該当フィールドを修正して再保存してください。
+            入力中の台本は保持しています。該当項目を修正して再保存してください。
           </p>
         </section>
       ) : null}
@@ -1643,10 +1696,10 @@ export function ScriptPage() {
         aria-labelledby="voice-generation-title"
       >
         <div>
-          <p className="eyebrow">P4-04 音声</p>
+          <p className="eyebrow">手順4-4 音声</p>
           <h2 id="voice-generation-title">差分のあるセリフだけを生成</h2>
           <p>
-            台本、話者、音声設定、用語、ENGINE版の条件を比較し、最新でないセリフだけを対象にします。
+            台本、話者、音声設定、用語、音声エンジンの版を比較し、更新が必要なセリフだけを対象にします。
           </p>
         </div>
         {voiceStatusQuery.isPending ? (
@@ -1686,19 +1739,21 @@ export function ScriptPage() {
         aria-labelledby="visual-suggestion-title"
       >
         <div>
-          <p className="eyebrow">P3-04 ビジュアル検索意図</p>
-          <h2 id="visual-suggestion-title">AIに候補を提案させる</h2>
+          <p className="eyebrow">手順3-4 ビジュアル候補</p>
+          <h2 id="visual-suggestion-title">AIでビジュアル候補を探す</h2>
           <p>
-            AIは検索条件だけを作り、実在するactive素材の候補はバックエンドが検索します。素材の割り当ては行いません。
+            AIが検索条件を作成し、登録済みで利用可能な素材から候補を検索します。素材の割り当ては最後に手動で確定します。
           </p>
         </div>
         {!canSuggest ? (
           <p className="message-panel message-panel-warning">
-            台本を承認するとAI検索意図を実行できます。通常の素材検索は利用できます。
+            台本を承認するとAIでビジュアル候補を検索できます。承認前も通常の素材検索は利用できます。
           </p>
         ) : null}
         <div className="form-field">
-          <label htmlFor="visual-suggestion-section">対象セクション</label>
+          <label htmlFor="visual-suggestion-section">
+            候補を探すセクション
+          </label>
           <select
             id="visual-suggestion-section"
             value={suggestionSection?.id ?? ""}
@@ -1778,15 +1833,15 @@ export function ScriptPage() {
           }
         >
           {suggestionMutation.isPending
-            ? "検索意図を生成中…"
-            : "AIに候補を提案させる"}
+            ? "ビジュアル候補を検索中…"
+            : "AIでビジュアル候補を検索"}
         </button>
         {suggestionError !== null ? (
           <section className="message-panel message-panel-error" role="alert">
             <p>
               {getErrorMessage(
                 suggestionError,
-                "AI検索意図の生成に失敗しました。"
+                "AIによるビジュアル候補の検索に失敗しました。"
               )}
             </p>
             {errorDetails(suggestionError).length > 0 ? (
@@ -1801,53 +1856,57 @@ export function ScriptPage() {
         ) : null}
         {suggestionResponse !== null ? (
           <div className="visual-suggestion-result">
-            <p className="eyebrow">AIが生成した検索意図</p>
+            <p className="eyebrow">AIが作成した検索条件</p>
             <dl className="definition-list">
-              <dt>required tags</dt>
+              <dt>必須タグ</dt>
               <dd>
                 {suggestionResponse.data.aiIntent.requiredTags.join("、") ||
                   "なし"}
               </dd>
-              <dt>optional tags</dt>
+              <dt>任意タグ</dt>
               <dd>
                 {suggestionResponse.data.aiIntent.optionalTags.join("、") ||
                   "なし"}
               </dd>
-              <dt>excluded tags</dt>
+              <dt>除外タグ</dt>
               <dd>
                 {suggestionResponse.data.aiIntent.excludedTags.join("、") ||
                   "なし"}
               </dd>
-              <dt>media kinds</dt>
-              <dd>{suggestionResponse.data.aiIntent.mediaKinds.join("、")}</dd>
-              <dt>free text query</dt>
+              <dt>素材の種類</dt>
+              <dd>
+                {suggestionResponse.data.aiIntent.mediaKinds
+                  .map(assetKindLabel)
+                  .join("、")}
+              </dd>
+              <dt>キーワード検索</dt>
               <dd>
                 {suggestionResponse.data.aiIntent.freeTextQuery || "なし"}
               </dd>
-              <dt>reason</dt>
+              <dt>提案理由</dt>
               <dd>{suggestionResponse.data.aiIntent.reason}</dd>
             </dl>
-            <p className="eyebrow">バックエンドで解決された検索条件</p>
+            <p className="eyebrow">登録情報に照合した検索条件</p>
             <dl className="definition-list">
-              <dt>required tags</dt>
+              <dt>必須タグ</dt>
               <dd>
                 {suggestionResponse.data.resolvedSearch.requiredTags
                   .map((tag) => `${tag.canonicalName}（${tag.tagId}）`)
                   .join("、") || "なし"}
               </dd>
-              <dt>optional tags</dt>
+              <dt>任意タグ</dt>
               <dd>
                 {suggestionResponse.data.resolvedSearch.optionalTags
                   .map((tag) => `${tag.canonicalName}（${tag.tagId}）`)
                   .join("、") || "なし"}
               </dd>
-              <dt>excluded tags</dt>
+              <dt>除外タグ</dt>
               <dd>
                 {suggestionResponse.data.resolvedSearch.excludedTags
                   .map((tag) => `${tag.canonicalName}（${tag.tagId}）`)
                   .join("、") || "なし"}
               </dd>
-              <dt>free text query</dt>
+              <dt>キーワード検索</dt>
               <dd>
                 {suggestionResponse.data.resolvedSearch.freeTextQuery || "なし"}
               </dd>
@@ -1859,7 +1918,8 @@ export function ScriptPage() {
                   {suggestionResponse.data.diagnostics.unresolvedTags.map(
                     (tag) => (
                       <li key={`${tag.group}-${tag.value}`}>
-                        {tag.group}: {tag.value}（{tag.reason}）
+                        {visualTagGroupLabel(tag.group)}：{tag.value}（
+                        {unresolvedTagReasonLabel(tag.reason)}）
                       </li>
                     )
                   )}
@@ -1887,7 +1947,7 @@ export function ScriptPage() {
               <small>理由未入力でも採用・却下の事実は記録されます。</small>
             </div>
             <p className="eyebrow">
-              実在するactive素材候補（
+              利用可能な素材候補（
               {suggestionResponse.data.diagnostics.candidateCount}件）
             </p>
             {visualSuggestionStale ? (
@@ -1905,14 +1965,18 @@ export function ScriptPage() {
                   return (
                     <li key={candidate.asset.assetId}>
                       <strong>{candidate.asset.title}</strong>（
-                      {candidate.asset.kind}）
+                      {assetKindLabel(candidate.asset.kind)}）
                       <span>
-                        タグ:{" "}
+                        タグ：{" "}
                         {candidate.asset.tags
                           .map((tag) => tag.canonicalName)
                           .join("、") || "なし"}
                       </span>
-                      <span>{candidate.matchReasons.join(" / ")}</span>
+                      <span>
+                        {candidate.matchReasons
+                          .map(visualMatchReasonLabel)
+                          .join(" / ")}
+                      </span>
                       {decision === "accepted" ? (
                         <span className="status-message">採用済み</span>
                       ) : null}
@@ -1962,8 +2026,8 @@ export function ScriptPage() {
         className="asset-search-panel"
         aria-labelledby="asset-search-title"
       >
-        <p className="eyebrow">P3-03 通常検索</p>
-        <h2 id="asset-search-title">素材をキーワード・タグ検索</h2>
+        <p className="eyebrow">手順3-3 素材検索</p>
+        <h2 id="asset-search-title">素材をキーワードやタグで探す</h2>
         <form onSubmit={runAssetSearch}>
           <div className="form-field-group">
             <div className="form-field">
@@ -1976,13 +2040,13 @@ export function ScriptPage() {
             </div>
             <div className="form-field">
               <label htmlFor="asset-search-tag-ids">
-                タグID（カンマまたは空白区切り）
+                タグ識別子（カンマまたは空白で区切る）
               </label>
               <input
                 id="asset-search-tag-ids"
                 value={assetSearchTagIds}
                 onChange={(event) => setAssetSearchTagIds(event.target.value)}
-                placeholder="tag-daily tag-inspection"
+                placeholder="例：tag-daily tag-inspection"
               />
             </div>
             <button
@@ -2006,7 +2070,7 @@ export function ScriptPage() {
             <ul className="asset-candidate-list">
               {assetSearchResult.items.map((asset) => (
                 <li key={asset.assetId}>
-                  <strong>{asset.title}</strong>（{asset.kind}）
+                  <strong>{asset.title}</strong>（{assetKindLabel(asset.kind)}）
                   <span>
                     {asset.tags.map((tag) => tag.canonicalName).join("、") ||
                       "タグなし"}
@@ -2028,7 +2092,7 @@ export function ScriptPage() {
 
       {visualError !== null ? (
         <section className="message-panel message-panel-error" role="alert">
-          <h2>ビジュアルを保存・承認できません</h2>
+          <h2>ビジュアル設定を保存・承認できません</h2>
           <p>
             {getErrorMessage(
               visualError,
@@ -2053,7 +2117,7 @@ export function ScriptPage() {
 
       {visualSaveState === "saved" ? (
         <p className="status-message" role="status">
-          ビジュアル設定を保存済みです（revision {revisionRef.current}）。
+          ビジュアル設定を保存済みです（更新番号 {revisionRef.current}）。
         </p>
       ) : null}
 
@@ -2070,10 +2134,10 @@ export function ScriptPage() {
         aria-labelledby="visual-approval-title"
       >
         <div>
-          <p className="eyebrow">P3-06 ビジュアル承認</p>
+          <p className="eyebrow">手順3-6 ビジュアル承認</p>
           <h2 id="visual-approval-title">検証済みビジュアル計画を承認</h2>
           <p>
-            承認時に台本、素材の状態・チェックサム、取り込み済みファイル、動画尺、帳票ページ、表示設定を再検証します。
+            承認時に台本、素材の状態・照合値（チェックサム）、取り込み済みファイル、動画の長さ、帳票ページ、表示設定を再確認します。
           </p>
           <p className="status-message">
             機密区分は素材ごとに表示しています。区分の順位や権限判定は行いません。
@@ -2105,7 +2169,9 @@ export function ScriptPage() {
       <form className="bulk-paste-panel" onSubmit={pasteLines}>
         <div>
           <h2>話者付きテキストの一括貼り付け</h2>
-          <p>1 行 1 セリフ。半角または全角コロンで話者と本文を分けます。</p>
+          <p>
+            1行に1セリフを入力し、話者名と本文を半角または全角のコロンで区切ります。
+          </p>
         </div>
         <div className="form-field">
           <label htmlFor="bulk-script-section">追加先セクション</label>
@@ -2124,7 +2190,7 @@ export function ScriptPage() {
           </select>
         </div>
         <div className="form-field">
-          <label htmlFor="bulk-script-text">貼り付け本文</label>
+          <label htmlFor="bulk-script-text">貼り付ける台本本文</label>
           <textarea
             id="bulk-script-text"
             rows={5}
@@ -2157,7 +2223,7 @@ export function ScriptPage() {
                 <p className="eyebrow">セクション</p>
                 <h2>{section.name}</h2>
                 <code>
-                  {section.id} / outline: {section.outlineSectionId}
+                  {section.id} / 構成案ID: {section.outlineSectionId}
                 </code>
               </div>
               <button

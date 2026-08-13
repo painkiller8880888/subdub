@@ -71,11 +71,22 @@ function errorDetails(error: unknown): string[] {
 function outlineStatusLabel(status: Outline["status"]): string {
   switch (status) {
     case "approved":
-      return "approved（承認済み）";
+      return "承認済み";
     case "needs_review":
-      return "needs_review（要確認）";
+      return "要確認";
     default:
-      return "draft（下書き）";
+      return "下書き";
+  }
+}
+
+function sectionRoleLabel(role: OutlineSection["role"]): string {
+  switch (role) {
+    case "intro":
+      return "導入";
+    case "main":
+      return "本編";
+    case "outro":
+      return "まとめ・締め";
   }
 }
 
@@ -228,8 +239,8 @@ function OutlineSectionCard({
   return (
     <details className="outline-section-card" open>
       <summary>
-        <span>#{section.order}</span> {section.title || "無題のセクション"}（
-        {section.role}）
+        <span>第{section.order}節</span> {section.title || "無題のセクション"}（
+        {sectionRoleLabel(section.role)}）
       </summary>
       <div className="outline-section-body">
         <div className="outline-card-actions">
@@ -267,7 +278,7 @@ function OutlineSectionCard({
 
         <div className="outline-field-grid">
           <div className="form-field">
-            <label htmlFor={`${section.id}-role`}>role</label>
+            <label htmlFor={`${section.id}-role`}>セクションの役割</label>
             <select
               id={`${section.id}-role`}
               value={section.role}
@@ -278,13 +289,13 @@ function OutlineSectionCard({
                 })
               }
             >
-              <option value="intro">intro</option>
-              <option value="main">main</option>
-              <option value="outro">outro</option>
+              <option value="intro">導入</option>
+              <option value="main">本編</option>
+              <option value="outro">まとめ・締め</option>
             </select>
           </div>
           <div className="form-field">
-            <label htmlFor={`${section.id}-duration`}>targetDurationSec</label>
+            <label htmlFor={`${section.id}-duration`}>目標時間（秒）</label>
             <input
               id={`${section.id}-duration`}
               type="number"
@@ -299,7 +310,7 @@ function OutlineSectionCard({
         </div>
 
         <div className="form-field">
-          <label htmlFor={`${section.id}-title`}>title</label>
+          <label htmlFor={`${section.id}-title`}>セクション名</label>
           <input
             id={`${section.id}-title`}
             value={section.title}
@@ -307,7 +318,7 @@ function OutlineSectionCard({
           />
         </div>
         <div className="form-field">
-          <label htmlFor={`${section.id}-overview`}>overview</label>
+          <label htmlFor={`${section.id}-overview`}>セクションの概要</label>
           <textarea
             id={`${section.id}-overview`}
             rows={3}
@@ -317,7 +328,7 @@ function OutlineSectionCard({
         </div>
         <div className="form-field">
           <label htmlFor={`${section.id}-key-points`}>
-            keyPoints（1行1項目）
+            このセクションの要点（1行に1項目）
           </label>
           <textarea
             id={`${section.id}-key-points`}
@@ -333,7 +344,7 @@ function OutlineSectionCard({
         </div>
         <div className="form-field">
           <label htmlFor={`${section.id}-source-refs`}>
-            sourceRefs（見出し階層を ` / ` で区切る）
+            元資料の位置（見出し階層を「 / 」で区切る）
           </label>
           <textarea
             id={`${section.id}-source-refs`}
@@ -349,7 +360,7 @@ function OutlineSectionCard({
         </div>
         <div className="form-field">
           <label htmlFor={`${section.id}-required`}>
-            humanDirectives.requiredItems
+            このセクションで必ず含める内容（1行に1項目）
           </label>
           <textarea
             id={`${section.id}-required`}
@@ -362,7 +373,7 @@ function OutlineSectionCard({
         </div>
         <div className="form-field">
           <label htmlFor={`${section.id}-prohibited`}>
-            humanDirectives.prohibitedItems
+            このセクションで含めない内容（1行に1項目）
           </label>
           <textarea
             id={`${section.id}-prohibited`}
@@ -375,7 +386,7 @@ function OutlineSectionCard({
         </div>
         <div className="form-field">
           <label htmlFor={`${section.id}-constraints`}>
-            humanDirectives.scriptConstraints
+            台本作成時の注意点（1行に1項目）
           </label>
           <textarea
             id={`${section.id}-constraints`}
@@ -388,7 +399,7 @@ function OutlineSectionCard({
         </div>
         <div className="form-field">
           <label htmlFor={`${section.id}-locked`}>
-            lockedFields（1行1項目）
+            AIに変更させない項目（1行に1項目）
           </label>
           <textarea
             id={`${section.id}-locked`}
@@ -848,24 +859,25 @@ export function OutlinePage() {
         </Link>
       </p>
       <header className="page-header page-header-stacked">
-        <p className="eyebrow">Outline editor</p>
+        <p className="eyebrow">構成案編集</p>
         <h1>{project.metadata.title} の構成案</h1>
-        <p>編集内容は短い待ち時間の後に自動保存されます。承認は別操作です。</p>
+        <p>
+          企画入力の元資料を、動画の章立てと要点に整理します。編集内容は自動保存され、承認すると台本作成へ進めます。
+        </p>
       </header>
 
       <div className="autosave-status" role="status" aria-live="polite">
         <strong>{autosaveMessage}</strong>
         <span>
-          revision {revisionRef.current} / {outlineStatusLabel(draft.status)}
+          更新番号 {revisionRef.current} / {outlineStatusLabel(draft.status)}
         </span>
       </div>
 
       {stale ? (
         <section className="message-panel message-panel-warning" role="alert">
-          <h2>元資料が変更されているため stale です</h2>
+          <h2>元資料が更新されています</h2>
           <p>
-            現在の構成案は古い Markdown
-            に基づいています。承認前に企画画面で資料を確認し、必要なら構成案を見直してください。
+            現在の構成案は更新前の元資料に基づいています。承認前に企画画面で資料を確認し、必要なら構成案を見直してください。
           </p>
           <Link
             className="button"
@@ -925,7 +937,7 @@ export function OutlinePage() {
         >
           <h2 id="outline-generate-title">構成案を生成</h2>
           <p>
-            既定モデルを初期選択しています。生成に失敗した場合は同じ入力で再試行できます。
+            企画入力をもとに構成案を作成します。生成に失敗した場合は、同じ入力のまま再試行できます。
           </p>
           {modelsQuery.isPending ? (
             <p className="status-message">モデル一覧を読み込んでいます…</p>
@@ -949,7 +961,7 @@ export function OutlinePage() {
           ) : null}
           {modelsQuery.data !== undefined ? (
             <div className="form-field">
-              <label htmlFor="outline-model">生成モデル</label>
+              <label htmlFor="outline-model">構成案の生成に使うAIモデル</label>
               <select
                 id="outline-model"
                 value={selectedModelId ?? ""}
@@ -1005,8 +1017,8 @@ export function OutlinePage() {
               </span>
             </div>
             <div>
-              <strong>sourceHash</strong>
-              <span>{stale ? "stale" : "最新"}</span>
+              <strong>元資料との整合性</strong>
+              <span>{stale ? "要確認" : "最新"}</span>
             </div>
           </section>
           {orderErrors.length > 0 ? (
@@ -1072,7 +1084,9 @@ export function OutlinePage() {
           ) : null}
           <div className="form-actions outline-actions">
             <div className="form-field">
-              <label htmlFor="outline-decision-reason">採否理由（任意）</label>
+              <label htmlFor="outline-decision-reason">
+                採用・却下の理由（任意）
+              </label>
               <textarea
                 id="outline-decision-reason"
                 rows={3}

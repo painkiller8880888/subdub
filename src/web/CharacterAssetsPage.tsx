@@ -27,6 +27,17 @@ function getErrorMessage(error: unknown): string {
   return "プロジェクトを取得できませんでした。";
 }
 
+function characterRoleLabel(role: string): string {
+  switch (role) {
+    case "mentor":
+      return "解説役";
+    case "learner":
+      return "聞き役";
+    default:
+      return role;
+  }
+}
+
 function AssetImage({
   alt,
   assetPath,
@@ -138,14 +149,14 @@ function CharacterCard({
     >
       <header className="character-card-header">
         <div>
-          <p className="eyebrow">{character.role}</p>
+          <p className="eyebrow">{characterRoleLabel(character.role)}</p>
           <h2 id={`${character.id}-title`}>{character.name}</h2>
         </div>
         <span className="character-id">{character.id}</span>
       </header>
       <dl className="character-details">
         <div>
-          <dt>VOICEVOX話者</dt>
+          <dt>読み上げ話者（VOICEVOX）</dt>
           <dd>{character.speakerName}</dd>
         </div>
         <div>
@@ -154,7 +165,7 @@ function CharacterCard({
         </div>
       </dl>
       <p className="character-pose-summary">
-        利用可能な素材バリアント:{" "}
+        利用できる素材の種類:{" "}
         {character.availableVariants.map((variant) => variant.label).join("、")}
       </p>
       <div className="character-pose-list">
@@ -226,10 +237,10 @@ export function CharacterAssetsPage() {
         </Link>
       </p>
       <header className="page-header page-header-stacked">
-        <p className="eyebrow">P2-01</p>
+        <p className="eyebrow">手順2-1</p>
         <h1>キャラクター素材の確認</h1>
         <p>
-          素材カタログへ登録されたバリアントだけを表示しています。ここではキャラクター設定を編集しません。
+          台本で使うキャラクター画像を確認します。素材カタログに登録されている画像だけを表示し、ここではキャラクター設定を編集しません。
         </p>
         <Link
           className="button"

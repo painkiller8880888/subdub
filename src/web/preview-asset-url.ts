@@ -20,7 +20,7 @@ export function createProjectManifestAssetUrlResolver(
       /^[A-Za-z][A-Za-z0-9+.-]*:/.test(safePath) ||
       safePath.includes("://")
     ) {
-      throw new Error("Manifest asset path is not a safe relative path.");
+      throw new Error("プレビュー素材のパスが安全な相対パスではありません。");
     }
 
     if (safePath.startsWith("shared-assets/")) {
@@ -30,7 +30,7 @@ export function createProjectManifestAssetUrlResolver(
     const projectPrefix = `projects/${safeProjectId}/`;
     if (safePath.startsWith("projects/")) {
       if (!safePath.startsWith(projectPrefix)) {
-        throw new Error("Manifest asset belongs to another project.");
+        throw new Error("プレビュー素材が別のプロジェクトを参照しています。");
       }
       return `/api/projects/${encodeURIComponent(safeProjectId)}/files/${encodePathSegments(
         safePath.slice(projectPrefix.length)

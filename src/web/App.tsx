@@ -103,7 +103,7 @@ function ProjectSummaryCard({ project }: { project: ProjectSummary }) {
           {project.manualVersion ? ` / 版数 ${project.manualVersion}` : ""}
         </span>
         <span className="project-card-meta">
-          revision {project.revision} ・ 更新 {formatDate(project.updatedAt)}
+          更新番号 {project.revision} ・ 最終更新 {formatDate(project.updatedAt)}
         </span>
       </Link>
     </li>
@@ -126,13 +126,13 @@ function ProjectsPage() {
           <p>動画制作プロジェクトを選択するか、新しく作成します。</p>
         </div>
         <Link className="button button-primary" to="/projects/new">
-          新規プロジェクト
+          新しいプロジェクトを作成
         </Link>
         <Link className="button" to="/terminology">
-          用語管理
+          用語辞書
         </Link>
         <Link className="button" to="/ai-runs">
-          AI実行ログ
+          AI実行履歴
         </Link>
       </header>
 
@@ -164,7 +164,7 @@ function ProjectsPage() {
           <h2 id="empty-projects-title">プロジェクトはまだありません</h2>
           <p>最初のプロジェクトを作成して、制作を始めましょう。</p>
           <Link className="button button-primary" to="/projects/new">
-            プロジェクトを作成
+            最初のプロジェクトを作成
           </Link>
         </section>
       ) : (
@@ -182,7 +182,7 @@ function NewProjectPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [title, setTitle] = useState("");
-  const [department, setDepartment] = useState("General");
+  const [department, setDepartment] = useState("一般");
   const [manualVersion, setManualVersion] = useState("");
   const [validationMessage, setValidationMessage] = useState<string | null>(
     null
@@ -219,12 +219,14 @@ function NewProjectPage() {
       <header className="page-header page-header-stacked">
         <p className="eyebrow">新規作成</p>
         <h1>プロジェクトを作成</h1>
-        <p>タイトルを入力すると、空の制作プロジェクトを作成できます。</p>
+        <p>
+          プロジェクト名を入力して、企画内容と元資料を登録するところから始めます。
+        </p>
       </header>
 
       <form className="project-form" noValidate onSubmit={handleSubmit}>
         <div className="form-field">
-          <label htmlFor="project-title">タイトル（必須）</label>
+          <label htmlFor="project-title">プロジェクト名（必須）</label>
           <input
             id="project-title"
             name="title"
@@ -238,7 +240,7 @@ function NewProjectPage() {
         </div>
 
         <div className="form-field">
-          <label htmlFor="project-department">部門（任意）</label>
+          <label htmlFor="project-department">担当部門（任意）</label>
           <input
             id="project-department"
             name="department"
@@ -250,7 +252,7 @@ function NewProjectPage() {
         </div>
 
         <div className="form-field">
-          <label htmlFor="project-manual-version">版数（任意）</label>
+          <label htmlFor="project-manual-version">対象マニュアルの版数（任意）</label>
           <input
             id="project-manual-version"
             name="manualVersion"
@@ -701,12 +703,12 @@ function ProjectBriefPage() {
       <main className="page-shell narrow-shell">
         <p className="back-link">
           <Link to="/projects" onClick={navigateAway}>
-            Back to projects
+            プロジェクト一覧へ戻る
           </Link>
         </p>
         <section className="message-panel message-panel-error" role="alert">
-          <h1>Could not load project</h1>
-          <p>{getErrorMessage(error, "The project could not be loaded.")}</p>
+          <h1>プロジェクトを読み込めませんでした</h1>
+          <p>{getErrorMessage(error, "プロジェクトを読み込めませんでした。")}</p>
           <button
             className="button"
             type="button"
@@ -714,7 +716,7 @@ function ProjectBriefPage() {
               void reloadLatest();
             }}
           >
-            Retry
+            再試行
           </button>
         </section>
       </main>
@@ -726,14 +728,13 @@ function ProjectBriefPage() {
       <main className="page-shell narrow-shell">
         <p className="back-link">
           <Link to="/projects" onClick={navigateAway}>
-            Back to projects
+            プロジェクト一覧へ戻る
           </Link>
         </p>
         <section className="message-panel message-panel-error" role="alert">
-          <h1>Project data changed while loading</h1>
+          <h1>読み込み中にプロジェクト情報が更新されました</h1>
           <p>
-            The project and Markdown revisions did not match. The editor was
-            not initialized to avoid combining different snapshots.
+            プロジェクト情報と元資料の更新番号が一致しないため、異なる状態を混ぜないよう編集画面を開始していません。
           </p>
           <button
             className="button"
@@ -742,7 +743,7 @@ function ProjectBriefPage() {
               void reloadLatest();
             }}
           >
-            Reload latest data
+            最新データを再読み込み
           </button>
         </section>
       </main>
@@ -759,41 +760,43 @@ function ProjectBriefPage() {
       <main className="page-shell narrow-shell">
         <p className="back-link">
           <Link to="/projects" onClick={navigateAway}>
-            Back to projects
+            プロジェクト一覧へ戻る
           </Link>
         </p>
         <p className="status-message" role="status" aria-live="polite">
-          Loading project editor...
+          企画入力を読み込んでいます…
         </p>
       </main>
     );
   }
 
   const autosaveMessage = pendingNavigation
-    ? "Saving before leaving..."
+    ? "移動前に保存しています…"
     : autosaveState.status === "saving"
-      ? "Saving..."
+      ? "保存中…"
       : autosaveState.status === "saved"
-        ? "Saved"
+        ? "保存済み"
         : autosaveState.status === "error"
-          ? "Save failed"
+          ? "保存に失敗しました"
           : autosaveState.status === "conflict"
-            ? "Conflict"
+            ? "保存競合"
             : autosaveState.status === "pending"
-              ? "Waiting to save..."
-              : "No changes";
+              ? "保存待ち"
+              : "変更はありません";
 
   return (
     <main className="page-shell narrow-shell">
       <p className="back-link">
         <Link to="/projects" onClick={navigateAway}>
-          Back to projects
+          プロジェクト一覧へ戻る
         </Link>
       </p>
       <header className="page-header page-header-stacked">
-        <p className="eyebrow">Project brief</p>
+        <p className="eyebrow">企画入力</p>
         <h1>{projectQuery.data.metadata.title}</h1>
-        <p>Changes are saved automatically shortly after editing.</p>
+        <p>
+          元資料と動画の企画内容を入力します。編集内容は少し待つと自動保存され、構成案の作成に使われます。
+        </p>
         <div className="page-header-actions">
           <Link
             className="button"
@@ -821,16 +824,16 @@ function ProjectBriefPage() {
 
       <div className="autosave-status" role="status" aria-live="polite">
         <strong>{autosaveMessage}</strong>
-        <span>revision {projectQuery.data.revision}</span>
+        <span>更新番号 {projectQuery.data.revision}</span>
       </div>
 
       {autosaveState.status === "error" ? (
         <section className="message-panel message-panel-error" role="alert">
-          <h2>Save failed</h2>
+          <h2>保存に失敗しました</h2>
           <p>
             {getErrorMessage(
               autosaveState.error,
-              "The draft is still in the form. Retry when ready."
+              "入力内容は画面に保持されています。準備ができたら再試行してください。"
             )}
           </p>
           <button
@@ -840,18 +843,16 @@ function ProjectBriefPage() {
               coordinator.retry();
             }}
           >
-            Retry
+            再試行
           </button>
         </section>
       ) : null}
 
       {autosaveState.status === "conflict" ? (
         <section className="message-panel message-panel-error" role="alert">
-          <h2>Conflict</h2>
+          <h2>保存競合</h2>
           <p>
-            Another screen or tab updated this project. Automatic saving is
-            stopped and the current draft was kept. Reload the latest data to
-            continue.
+            別の画面またはタブでこのプロジェクトが更新されました。自動保存を停止し、現在の入力内容を保持しています。最新データを再読み込みして続けてください。
           </p>
           <button
             className="button"
@@ -860,7 +861,7 @@ function ProjectBriefPage() {
               void reloadLatest();
             }}
           >
-            Reload latest data
+            最新データを再読み込み
           </button>
         </section>
       ) : null}
@@ -873,25 +874,28 @@ function ProjectBriefPage() {
         }}
       >
         <div className="form-field">
-          <label htmlFor="project-source-markdown">Markdown source</label>
+          <label htmlFor="project-source-markdown">元資料（Markdown形式）</label>
           <textarea
             id="project-source-markdown"
             name="markdown"
             rows={14}
             value={draft.markdown}
+            placeholder="動画化するマニュアルや手順書の本文を貼り付けてください。"
             onChange={(event) => {
               updateTextField("markdown", event.target.value);
             }}
           />
+          <small>見出しや箇条書きを含む元資料を、そのまま入力してください。</small>
         </div>
 
         <div className="form-field">
-          <label htmlFor="project-audience">Audience</label>
+          <label htmlFor="project-audience">想定視聴者（誰に向けた動画か）</label>
           <textarea
             id="project-audience"
             name="audience"
             rows={3}
             value={draft.audience}
+            placeholder="例：入社直後の社員。業務システムを初めて使う人。"
             onChange={(event) => {
               updateTextField("audience", event.target.value);
             }}
@@ -899,12 +903,13 @@ function ProjectBriefPage() {
         </div>
 
         <div className="form-field">
-          <label htmlFor="project-post-viewing-goal">Post-viewing goal</label>
+          <label htmlFor="project-post-viewing-goal">視聴後にできるようになってほしいこと</label>
           <textarea
             id="project-post-viewing-goal"
             name="postViewingGoal"
             rows={3}
             value={draft.postViewingGoal}
+            placeholder="例：申請画面を開き、必要項目を入力して送信できる。"
             onChange={(event) => {
               updateTextField("postViewingGoal", event.target.value);
             }}
@@ -912,21 +917,22 @@ function ProjectBriefPage() {
         </div>
 
         <div className="form-field">
-          <label htmlFor="project-prerequisites">Prerequisites</label>
+          <label htmlFor="project-prerequisites">事前に知っておいてほしいこと</label>
           <textarea
             id="project-prerequisites"
             name="prerequisites"
             rows={4}
             value={itemsToText(draft.prerequisites)}
+            placeholder="例：社内ポータルにログインできる"
             onChange={(event) => {
               updateItemsField("prerequisites", event.target.value);
             }}
           />
-          <small>One item per line.</small>
+          <small>1項目を1行に入力してください。なければ空欄のままで構いません。</small>
         </div>
 
         <div className="form-field">
-          <label htmlFor="project-target-duration">Target duration (seconds)</label>
+          <label htmlFor="project-target-duration">目標動画時間（秒）</label>
           <input
             id="project-target-duration"
             name="targetDurationSec"
@@ -938,48 +944,52 @@ function ProjectBriefPage() {
               updateTextField("targetDurationSec", event.target.value);
             }}
           />
+          <small>完成した動画のおおよその長さを、秒数で入力してください。</small>
         </div>
 
         <div className="form-field">
-          <label htmlFor="project-required-items">Required items</label>
+          <label htmlFor="project-required-items">動画に必ず含める内容</label>
           <textarea
             id="project-required-items"
             name="requiredItems"
             rows={4}
             value={itemsToText(draft.requiredItems)}
+            placeholder="例：申請前に確認する項目を説明する"
             onChange={(event) => {
               updateItemsField("requiredItems", event.target.value);
             }}
           />
-          <small>One item per line.</small>
+          <small>1項目を1行に入力してください。構成案と台本に反映されます。</small>
         </div>
 
         <div className="form-field">
-          <label htmlFor="project-prohibited-items">Prohibited items</label>
+          <label htmlFor="project-prohibited-items">動画に含めない内容</label>
           <textarea
             id="project-prohibited-items"
             name="prohibitedItems"
             rows={4}
             value={itemsToText(draft.prohibitedItems)}
+            placeholder="例：社外秘の具体的な顧客情報"
             onChange={(event) => {
               updateItemsField("prohibitedItems", event.target.value);
             }}
           />
-          <small>One item per line.</small>
+          <small>1項目を1行に入力してください。</small>
         </div>
 
         <div className="form-field">
-          <label htmlFor="project-global-directives">Global constraints</label>
+          <label htmlFor="project-global-directives">動画全体の注意点</label>
           <textarea
             id="project-global-directives"
             name="globalDirectives"
             rows={4}
             value={itemsToText(draft.globalDirectives)}
+            placeholder="例：専門用語には必ず補足説明を付ける"
             onChange={(event) => {
               updateItemsField("globalDirectives", event.target.value);
             }}
           />
-          <small>One item per line.</small>
+          <small>動画全体に適用するルールを、1項目1行で入力してください。</small>
         </div>
       </form>
     </main>
