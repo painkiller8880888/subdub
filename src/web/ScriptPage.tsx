@@ -20,7 +20,6 @@ import type {
   VisualAssignmentRequest,
   VisualAssignmentUpdateRequest,
   VisualAssignmentDeleteRequest,
-  VisualApprovalRequest,
   VisualSuggestionResponse,
   VoiceLineGenerationStatus
 } from "../schema/api.js";
@@ -38,8 +37,6 @@ import {
 import {
   ApiClientError,
   ApiClientProtocolError,
-  approveProjectVisuals,
-  approveProjectScript,
   assignProjectVisual,
   rejectProjectVisualSuggestionCandidate,
   deleteProjectVisualAssignment,
@@ -115,11 +112,11 @@ function getErrorMessage(error: unknown, fallback: string): string {
 function scriptStatusLabel(status: Script["status"]): string {
   switch (status) {
     case "approved":
-      return "承認済み";
+      return "確認済み";
     case "needs_review":
       return "要確認";
     default:
-      return "下書き";
+      return "編集中";
   }
 }
 
@@ -230,27 +227,31 @@ function lineIssueText(
     .map((issue) => issue.message);
 }
 
-function unassignedLineCount(project: VideoProject): number {
-  let count = 0;
-  for (const section of project.script.sections) {
-    const covered = new Set<number>();
-    for (const assignment of project.visuals.assignments) {
-      const startIndex = section.lines.findIndex(
-        (line) => line.id === assignment.startLineId
-      );
-      const endIndex = section.lines.findIndex(
-        (line) => line.id === assignment.endLineId
-      );
-      if (startIndex < 0 || endIndex < 0 || startIndex > endIndex) {
-        continue;
-      }
-      for (let lineIndex = startIndex; lineIndex <= endIndex; lineIndex += 1) {
-        covered.add(lineIndex);
-      }
-    }
-    count += section.lines.length - covered.size;
+function visualAssignmentsForLine(
+  project: VideoProject,
+  lineId: string
+): VisualAssignment[] {
+  const section = project.script.sections.find((candidate) =>
+    candidate.lines.some((line) => line.id === lineId)
+  );
+  if (section === undefined) {
+    return [];
   }
-  return count;
+  const lineIndex = section.lines.findIndex((line) => line.id === lineId);
+  return project.visuals.assignments.filter((assignment) => {
+    const startIndex = section.lines.findIndex(
+      (line) => line.id === assignment.startLineId
+    );
+    const endIndex = section.lines.findIndex(
+      (line) => line.id === assignment.endLineId
+    );
+    return (
+      startIndex >= 0 &&
+      endIndex >= startIndex &&
+      lineIndex >= startIndex &&
+      lineIndex <= endIndex
+    );
+  });
 }
 
 function nextTemporaryLineId(script: Script): string {
@@ -280,7 +281,8 @@ function ScriptLineCard({
   onMove,
   onDuplicate,
   onDelete,
-  onGenerateVoice
+  onGenerateVoice,
+  onSelectVisualRange
 }: {
   readonly line: ScriptLine;
   readonly sectionIndex: number;
@@ -296,8 +298,10 @@ function ScriptLineCard({
   readonly onDuplicate: () => void;
   readonly onDelete: () => void;
   readonly onGenerateVoice: () => void;
+  readonly onSelectVisualRange: () => void;
 }) {
   const lineIssues = lineIssueText(issues, sectionIndex, lineIndex);
+  const lineVisualAssignments = visualAssignmentsForLine(project, line.id);
   const numberValue = (value: number): string =>
     Number.isFinite(value) ? String(value) : "";
 
@@ -428,6 +432,31 @@ function ScriptLineCard({
           />
         </div>
       </div>
+      <section
+        className="script-line-visual-summary"
+        aria-label={`${line.id}のビジュアル設定`}
+      >
+        <div>
+          <span className="eyebrow">ビジュアル</span>
+          {lineVisualAssignments.length === 0 ? (
+            <span className="status-message">未割り当て</span>
+          ) : (
+            <span className="status-message">
+              {lineVisualAssignments.length}件の素材を使用
+              {lineVisualAssignments.map((assignment) => (
+                <code key={assignment.id}> {assignment.id}</code>
+              ))}
+            </span>
+          )}
+        </div>
+        <button
+          className="button button-small"
+          type="button"
+          onClick={onSelectVisualRange}
+        >
+          このセリフを素材対象にする
+        </button>
+      </section>
       <div className="script-line-voice-status" aria-label="音声状態">
         <span className="eyebrow">音声状態</span>
         {voiceStatus === undefined ? (
@@ -446,6 +475,7 @@ function ScriptLineCard({
           type="button"
           disabled={
             voiceGenerationDisabled ||
+            lineIssues.length > 0 ||
             voiceStatus?.status === "current" ||
             voiceStatus?.status === "generating" ||
             voiceStatus?.status === "needs_review"
@@ -514,7 +544,6 @@ export function ScriptPage() {
   const [bulkErrors, setBulkErrors] = useState<BulkPasteError[]>([]);
   const [pendingNavigation, setPendingNavigation] = useState(false);
   const [initializationError, setInitializationError] = useState<unknown>(null);
-  const [approvalError, setApprovalError] = useState<unknown>(null);
   const [suggestionSectionId, setSuggestionSectionId] = useState("");
   const [suggestionStartLineId, setSuggestionStartLineId] = useState("");
   const [suggestionEndLineId, setSuggestionEndLineId] = useState("");
@@ -604,17 +633,6 @@ export function ScriptPage() {
       });
     },
     onError: setVoiceError,
-    retry: false
-  });
-
-  const approveMutation = useMutation({
-    mutationFn: ({
-      projectId,
-      expectedRevision
-    }: {
-      projectId: string;
-      expectedRevision: number;
-    }) => approveProjectScript(projectId, { expectedRevision }),
     retry: false
   });
 
@@ -735,15 +753,6 @@ export function ScriptPage() {
       deleteProjectVisualAssignment(projectId, assignmentId, {
         expectedRevision
       }),
-    retry: false
-  });
-
-  const visualApproveMutation = useMutation({
-    mutationFn: ({
-      projectId,
-      expectedRevision
-    }: VisualApprovalRequest & { projectId: string }) =>
-      approveProjectVisuals(projectId, { expectedRevision }),
     retry: false
   });
 
@@ -1012,46 +1021,15 @@ export function ScriptPage() {
     }
   }
 
-  async function approve(): Promise<void> {
-    if (coordinatorRef.current === null) {
-      return;
-    }
-    setApprovalError(null);
-    const flushed = await coordinatorRef.current.flush();
-    if (!flushed) {
-      return;
-    }
-    const approvingProjectId = projectIdRef.current;
-    const approvingGeneration = projectGenerationRef.current;
-    try {
-      const saved = await approveMutation.mutateAsync({
-        projectId: approvingProjectId,
-        expectedRevision: revisionRef.current
-      });
-      updateMutationCaches(saved);
-      if (
-        !isProjectContextCurrent(
-          projectIdRef.current,
-          projectGenerationRef.current,
-          approvingProjectId,
-          approvingGeneration
-        )
-      ) {
-        return;
-      }
-      adoptProject(saved);
-    } catch (error) {
-      if (
-        isProjectContextCurrent(
-          projectIdRef.current,
-          projectGenerationRef.current,
-          approvingProjectId,
-          approvingGeneration
-        )
-      ) {
-        setApprovalError(error);
-      }
-    }
+  function selectVisualRange(sectionId: string, lineId: string): void {
+    setSuggestionSectionId(sectionId);
+    setSuggestionStartLineId(lineId);
+    setSuggestionEndLineId(lineId);
+    setSuggestionResponse(null);
+    setSuggestionError(null);
+    document
+      .getElementById("workflow-visual")
+      ?.scrollIntoView({ behavior: "smooth", block: "start" });
   }
 
   function updateDraft(nextDraft: Script): void {
@@ -1128,8 +1106,6 @@ export function ScriptPage() {
       assignmentAssetQueries[index]?.data
     );
   });
-  const unassignedLines =
-    project === undefined ? 0 : unassignedLineCount(project);
   const isReadyToInitialize =
     project !== undefined && isScriptInitializationAllowed(project);
   const issues =
@@ -1200,11 +1176,11 @@ export function ScriptPage() {
         <p className="back-link">
           <Link to={outlinePath(projectId)}>構成案へ戻る</Link>
         </p>
-        <WorkflowIndicator projectId={projectId} currentStep="script" />
+        <WorkflowIndicator projectId={projectId} currentStep="production" />
         <header className="page-header page-header-stacked">
-          <p className="eyebrow">手順2-2 台本</p>
+          <p className="eyebrow">制作 台本・ビジュアル・音声</p>
           <h1>{project.metadata.title}</h1>
-          <p>承認済み構成案のセクション構造を引き継いで台本を開始します。</p>
+          <p>構成案のセクション構造を引き継いで、台本中心の制作を開始します。</p>
           <div className="page-header-actions">
             <Link className="button" to={outlinePath(projectId)}>
               構成案を確認
@@ -1262,16 +1238,12 @@ export function ScriptPage() {
     draft.sections.find((section) => section.id === suggestionSectionId) ??
     draft.sections.find((section) => section.lines.length > 0) ??
     draft.sections[0];
-  const canSuggest =
-    project.script.status === "approved" && draft.status === "approved";
-  const canApproveVisuals =
-    project.script.status === "approved" && draft.status === "approved";
+  const canSuggest = issues.length === 0;
   const visualMutationPending =
     visualAssignMutation.isPending ||
     visualRejectMutation.isPending ||
     visualUpdateMutation.isPending ||
-    visualDeleteMutation.isPending ||
-    visualApproveMutation.isPending;
+    visualDeleteMutation.isPending;
 
   function isVisualMutationCurrent(context: VisualMutationContext): boolean {
     return (
@@ -1484,41 +1456,6 @@ export function ScriptPage() {
     }
   }
 
-  async function approveVisuals(): Promise<void> {
-    const requestProjectId = projectIdRef.current;
-    const requestGeneration = projectGenerationRef.current;
-    setVisualError(null);
-    setVisualSaveState("idle");
-    const flushed = await coordinatorRef.current?.flush();
-    if (flushed !== true) {
-      return;
-    }
-    if (
-      !isProjectContextCurrent(
-        projectIdRef.current,
-        projectGenerationRef.current,
-        requestProjectId,
-        requestGeneration
-      )
-    ) {
-      return;
-    }
-    const context: VisualMutationContext = {
-      projectId: requestProjectId,
-      projectGeneration: requestGeneration,
-      expectedRevision: revisionRef.current
-    };
-    try {
-      const saved = await visualApproveMutation.mutateAsync(context);
-      acceptVisualMutationResult(saved, context);
-    } catch (error) {
-      if (isVisualMutationCurrent(context)) {
-        setVisualError(error);
-        setVisualSaveState("idle");
-      }
-    }
-  }
-
   async function runVisualSuggestion(): Promise<void> {
     if (
       suggestionSection === undefined ||
@@ -1619,10 +1556,10 @@ export function ScriptPage() {
           プロジェクト一覧へ戻る
         </Link>
       </p>
-      <WorkflowIndicator projectId={projectId} currentStep="script" />
+      <WorkflowIndicator projectId={projectId} currentStep="production" />
       <header className="page-header page-header-stacked">
         <div className="page-header-actions">
-          <p className="eyebrow">手順2-2 台本編集</p>
+          <p className="eyebrow">制作 台本・ビジュアル・音声</p>
           <Link
             className="button"
             to={charactersPath(projectId)}
@@ -1635,7 +1572,7 @@ export function ScriptPage() {
         </div>
         <h1>{project.metadata.title}</h1>
         <p>
-          話者、表情、読み上げる文章、字幕、発話前後の間を編集します。入力内容を確認してから音声とビジュアルを設定します。
+          台本を書きながら、セリフごとのビジュアルとVOICEVOX音声を設定・確認します。保存と検証の状態はこの画面で確認できます。
         </p>
       </header>
 
@@ -1700,7 +1637,7 @@ export function ScriptPage() {
         aria-labelledby="voice-generation-title"
       >
         <div>
-          <p className="eyebrow">手順4-4 音声</p>
+          <p className="eyebrow">制作 音声</p>
           <h2 id="voice-generation-title">差分のあるセリフだけを生成</h2>
           <p>
             台本、話者、音声設定、用語、音声エンジンの版を比較し、更新が必要なセリフだけを対象にします。
@@ -1744,7 +1681,7 @@ export function ScriptPage() {
         aria-labelledby="visual-suggestion-title"
       >
         <div>
-          <p className="eyebrow">手順3-4 ビジュアル候補</p>
+          <p className="eyebrow">制作 ビジュアル候補</p>
           <h2 id="visual-suggestion-title">AIでビジュアル候補を探す</h2>
           <p>
             AIが検索条件を作成し、登録済みで利用可能な素材から候補を検索します。素材の割り当ては最後に手動で確定します。
@@ -1752,7 +1689,7 @@ export function ScriptPage() {
         </div>
         {!canSuggest ? (
           <p className="message-panel message-panel-warning">
-            台本を承認するとAIでビジュアル候補を検索できます。承認前も通常の素材検索は利用できます。
+            台本の入力エラーを解消するとAIでビジュアル候補を検索できます。通常の素材検索と素材の割り当ては編集中も利用できます。
           </p>
         ) : null}
         <div className="form-field">
@@ -2097,7 +2034,7 @@ export function ScriptPage() {
 
       {visualError !== null ? (
         <section className="message-panel message-panel-error" role="alert">
-          <h2>ビジュアル設定を保存・承認できません</h2>
+          <h2>ビジュアル設定を保存できません</h2>
           <p>
             {getErrorMessage(
               visualError,
@@ -2133,43 +2070,6 @@ export function ScriptPage() {
         onRemove={removeVisualAssignment}
         isMutating={visualMutationPending}
       />
-
-      <section
-        className="visual-approval-panel"
-        aria-labelledby="visual-approval-title"
-      >
-        <div>
-          <p className="eyebrow">手順3-6 ビジュアル承認</p>
-          <h2 id="visual-approval-title">検証済みビジュアル計画を承認</h2>
-          <p>
-            承認時に台本、素材の状態・照合値（チェックサム）、取り込み済みファイル、動画の長さ、帳票ページ、表示設定を再確認します。
-          </p>
-          <p className="status-message">
-            機密区分は素材ごとに表示しています。区分の順位や権限判定は行いません。
-          </p>
-        </div>
-        {unassignedLines > 0 ? (
-          <p className="message-panel message-panel-warning">
-            {unassignedLines}
-            件のセリフにはビジュアルが未割当です。未割当区間は承認をブロックせず、警告として表示しています。
-          </p>
-        ) : null}
-        {!canApproveVisuals ? (
-          <p className="message-panel message-panel-warning">
-            ビジュアル承認には、先に台本の承認が必要です。
-          </p>
-        ) : null}
-        <button
-          className="button button-primary"
-          type="button"
-          disabled={!canApproveVisuals || visualMutationPending}
-          onClick={() => void approveVisuals()}
-        >
-          {visualApproveMutation.isPending
-            ? "ビジュアルを検証・承認中…"
-            : "ビジュアルを承認"}
-        </button>
-      </section>
 
       <form className="bulk-paste-panel" onSubmit={pasteLines}>
         <div>
@@ -2281,6 +2181,9 @@ export function ScriptPage() {
                       )
                     }
                     onGenerateVoice={() => void generateVoiceLine(line.id)}
+                    onSelectVisualRange={() =>
+                      selectVisualRange(section.id, line.id)
+                    }
                   />
                 ))}
               </div>
@@ -2288,38 +2191,6 @@ export function ScriptPage() {
           </section>
         ))}
       </section>
-      {approvalError !== null ? (
-        <section className="message-panel message-panel-error" role="alert">
-          <h2>台本を承認できません</h2>
-          <p>
-            {getErrorMessage(
-              approvalError,
-              "台本の承認条件を満たしていません。"
-            )}
-          </p>
-          {errorDetails(approvalError).length > 0 ? (
-            <ul>
-              {errorDetails(approvalError).map((detail) => (
-                <li key={detail}>{detail}</li>
-              ))}
-            </ul>
-          ) : null}
-        </section>
-      ) : null}
-      <div className="form-actions outline-actions">
-        <button
-          className="button button-primary"
-          type="button"
-          onClick={() => void approve()}
-          disabled={
-            approveMutation.isPending ||
-            autosaveState.status === "conflict" ||
-            autosaveState.status === "error"
-          }
-        >
-          {approveMutation.isPending ? "承認中…" : "台本を承認"}
-        </button>
-      </div>
     </main>
   );
 }

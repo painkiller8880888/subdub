@@ -306,7 +306,7 @@ describe("script approval API", () => {
     expect(parseError(response).code).toBe("REQUEST_VALIDATION_FAILED");
   });
 
-  it("only the approve endpoint can set the script to approved", async () => {
+  it("allows script saves to preserve a legacy approved status", async () => {
     const { server, project } = await setup();
     const initialized = await initialize(server, project);
     const saveResponse = await server.app.inject({
@@ -318,11 +318,8 @@ describe("script approval API", () => {
       }
     });
 
-    expect(saveResponse.statusCode).toBe(422);
-    const error = parseError(saveResponse);
-    expect(error.code).toBe("REQUEST_VALIDATION_FAILED");
-    expect(
-      error.details.some((detail) => detail.path.join(".") === "script.status")
-    ).toBe(true);
+    expect(saveResponse.statusCode).toBe(200);
+    const saved = projectMutationResponseSchema.parse(saveResponse.json());
+    expect(saved.data.script.status).toBe("approved");
   });
 });

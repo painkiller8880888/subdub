@@ -18,12 +18,10 @@ export function WorkflowIndicator({
   const location = useLocation();
   const hashStep =
     location.pathname.endsWith("/script") &&
-    location.hash === "#workflow-visual"
-      ? "visual"
-      : location.pathname.endsWith("/script") &&
-          location.hash === "#workflow-voice"
-        ? "voice"
-        : null;
+    (location.hash === "#workflow-visual" ||
+      location.hash === "#workflow-voice")
+      ? "production"
+      : null;
   const activeStep = hashStep ?? currentStep;
   const activeIndex = WORKFLOW_STEPS.findIndex(
     (step) => step.id === activeStep

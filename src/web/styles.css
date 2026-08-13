@@ -441,6 +441,7 @@ input:focus-visible {
 }
 
 .script-line-voice-status,
+.script-line-visual-summary,
 .voice-generation-panel {
   background: #f8faff;
   border: 1px solid #d7deea;
@@ -450,6 +451,22 @@ input:focus-visible {
   gap: 0.6rem;
   align-items: center;
   padding: 0.8rem;
+}
+
+.script-line-visual-summary {
+  justify-content: space-between;
+}
+
+.script-line-visual-summary > div {
+  display: grid;
+  gap: 0.25rem;
+  min-width: 0;
+}
+
+.script-line-visual-summary code {
+  color: #59647b;
+  font-size: 0.75rem;
+  overflow-wrap: anywhere;
 }
 
 .voice-generation-panel {
@@ -1060,8 +1077,7 @@ input:focus-visible {
 
 .visual-suggestion-panel,
 .asset-search-panel,
-.visual-assignment-panel,
-.visual-approval-panel {
+.visual-assignment-panel {
   background: #fff;
   border: 1px solid #d7deea;
   border-radius: 0.8rem;
@@ -1253,10 +1269,6 @@ input:focus-visible {
 .visual-annotation-list {
   display: grid;
   gap: 0.8rem;
-}
-
-.visual-approval-panel {
-  border-color: #b8cce9;
 }
 
 .preview-status-panel {

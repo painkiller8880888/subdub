@@ -352,12 +352,6 @@ function assertSuggestionAllowed(
   sourceHash: string
 ): void {
   const details = [];
-  if (project.script.status !== "approved") {
-    details.push({
-      path: ["script", "status"],
-      message: "an approved script is required before visual suggestions"
-    });
-  }
   if (project.outline.status !== "approved") {
     details.push({
       path: ["outline", "status"],
@@ -373,14 +367,14 @@ function assertSuggestionAllowed(
   if (computeOutlineHash(project.outline) !== project.script.outlineHash) {
     details.push({
       path: ["script", "outlineHash"],
-      message: "the approved script is stale relative to the current outline"
+      message: "the script is stale relative to the current outline"
     });
   }
   if (details.length > 0) {
     throw new VisualSuggestionError(
       VISUAL_SUGGESTION_ERROR_CODE.notAllowed,
       422,
-      "Visual suggestions require an approved, current script.",
+      "Visual suggestions require a current outline and valid script context.",
       details
     );
   }

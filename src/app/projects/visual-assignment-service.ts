@@ -897,14 +897,6 @@ export class VisualAssignmentService {
     if (currentProject.revision !== expectedRevision) {
       throw projectRevisionConflict();
     }
-    if (currentProject.script.status !== "approved") {
-      throw visualAssignmentError(
-        VISUAL_ASSIGNMENT_ERROR_CODE.scriptNotApproved,
-        422,
-        "The script must be approved before visual approval.",
-        [{ path: ["script", "status"], message: "script is not approved" }]
-      );
-    }
 
     const linePositions = new Map<
       string,

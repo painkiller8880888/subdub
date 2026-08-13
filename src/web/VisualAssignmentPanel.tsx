@@ -82,16 +82,16 @@ function confidentialityLabel(value: string): string {
   }
 }
 
-function approvalStatusLabel(
+function productionStatusLabel(
   status: VideoProject["visuals"]["status"]
 ): string {
   switch (status) {
     case "approved":
-      return "承認済み";
+      return "確認済み";
     case "needs_review":
       return "要確認";
     default:
-      return "下書き";
+      return "編集中";
   }
 }
 
@@ -739,13 +739,14 @@ export function VisualAssignmentPanel({
     >
       <header className="visual-subsection-header">
         <div>
-          <p className="eyebrow">手順3-6 表示設定</p>
+          <p className="eyebrow">制作素材・表示設定</p>
           <h2 id="visual-plan-title">割り当て済み素材の表示設定</h2>
         </div>
         <span
           className={`visual-status visual-status-${project.visuals.status}`}
+          aria-label="ビジュアル制作状態"
         >
-          {approvalStatusLabel(project.visuals.status)}
+          {productionStatusLabel(project.visuals.status)}
         </span>
       </header>
       {project.visuals.assignments.length === 0 ? (
