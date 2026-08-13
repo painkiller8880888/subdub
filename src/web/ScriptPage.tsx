@@ -81,6 +81,7 @@ import {
 } from "./script-editor";
 import { VisualAssignmentPanel } from "./VisualAssignmentPanel";
 import { VoiceAdjustmentEditor } from "./VoiceAdjustmentEditor";
+import { WorkflowIndicator } from "./WorkflowIndicator";
 import {
   assignmentInput,
   defaultDisplayForAsset,
@@ -1199,6 +1200,7 @@ export function ScriptPage() {
         <p className="back-link">
           <Link to={outlinePath(projectId)}>構成案へ戻る</Link>
         </p>
+        <WorkflowIndicator projectId={projectId} currentStep="script" />
         <header className="page-header page-header-stacked">
           <p className="eyebrow">手順2-2 台本</p>
           <h1>{project.metadata.title}</h1>
@@ -1617,6 +1619,7 @@ export function ScriptPage() {
           プロジェクト一覧へ戻る
         </Link>
       </p>
+      <WorkflowIndicator projectId={projectId} currentStep="script" />
       <header className="page-header page-header-stacked">
         <div className="page-header-actions">
           <p className="eyebrow">手順2-2 台本編集</p>
@@ -1692,6 +1695,7 @@ export function ScriptPage() {
       ) : null}
 
       <section
+        id="workflow-voice"
         className="voice-generation-panel"
         aria-labelledby="voice-generation-title"
       >
@@ -1735,6 +1739,7 @@ export function ScriptPage() {
       </section>
 
       <section
+        id="workflow-visual"
         className="visual-suggestion-panel"
         aria-labelledby="visual-suggestion-title"
       >

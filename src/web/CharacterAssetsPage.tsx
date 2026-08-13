@@ -13,6 +13,7 @@ import {
   toCharacterAssetViewModels,
   type CharacterAssetVariantView
 } from "./character-assets-view";
+import { WorkflowIndicator } from "./WorkflowIndicator";
 
 function getErrorMessage(error: unknown): string {
   if (error instanceof ApiClientError) {
@@ -236,6 +237,7 @@ export function CharacterAssetsPage() {
           企画画面へ戻る
         </Link>
       </p>
+      <WorkflowIndicator projectId={projectId} currentStep="script" />
       <header className="page-header page-header-stacked">
         <p className="eyebrow">手順2-1</p>
         <h1>キャラクター素材の確認</h1>
