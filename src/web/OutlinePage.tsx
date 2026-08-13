@@ -37,6 +37,11 @@ import {
   textToItems,
   textToSourceRefs
 } from "./outline-draft";
+import {
+  filterModelsByPricing,
+  modelPricingTier,
+  type ModelPricingFilter
+} from "./model-pricing";
 
 type OutlineSaveDraft = {
   readonly outline: Outline;
@@ -445,6 +450,8 @@ export function OutlinePage() {
   });
   const [draft, setDraft] = useState<Outline | null>(null);
   const [selectedModelId, setSelectedModelId] = useState<string | null>(null);
+  const [modelPricingFilter, setModelPricingFilter] =
+    useState<ModelPricingFilter>("all");
   const [autosaveState, setAutosaveState] = useState<AutosaveState>({
     status: "idle",
     error: undefined
@@ -555,14 +562,31 @@ export function OutlinePage() {
   }, [projectId, projectQuery.data]);
 
   useEffect(() => {
-    if (selectedModelId !== null || modelsQuery.data === undefined) {
+    if (modelsQuery.data === undefined) {
+      return;
+    }
+    const visibleModels = filterModelsByPricing(
+      modelsQuery.data.models,
+      modelPricingFilter
+    );
+    if (
+      selectedModelId !== null &&
+      visibleModels.some((model) => model.id === selectedModelId)
+    ) {
       return;
     }
     const defaultModelId = projectQuery.data?.aiSettings.defaultModelId;
     setSelectedModelId(
-      defaultModelId ?? modelsQuery.data.models[0]?.id ?? null
+      visibleModels.find((model) => model.id === defaultModelId)?.id ??
+        visibleModels[0]?.id ??
+        null
     );
-  }, [modelsQuery.data, projectQuery.data, selectedModelId]);
+  }, [
+    modelPricingFilter,
+    modelsQuery.data,
+    projectQuery.data,
+    selectedModelId
+  ]);
 
   if (projectId === undefined) {
     return <Navigate replace to="/projects" />;
@@ -643,6 +667,35 @@ export function OutlinePage() {
       ...draft.sections,
       makeSection(temporaryId("outline-section"))
     ]);
+  }
+
+  function startManualOutline(): void {
+    if (draft === null) {
+      return;
+    }
+    updateDraft({
+      ...draft,
+      sections: [
+        {
+          ...makeSection(temporaryId("outline-intro")),
+          order: 1,
+          role: "intro",
+          title: "導入"
+        },
+        {
+          ...makeSection(temporaryId("outline-main")),
+          order: 2,
+          role: "main",
+          title: "本編"
+        },
+        {
+          ...makeSection(temporaryId("outline-outro")),
+          order: 3,
+          role: "outro",
+          title: "まとめ・締め"
+        }
+      ]
+    });
   }
 
   function removeSection(index: number): void {
@@ -835,6 +888,10 @@ export function OutlinePage() {
     draft.sections.length === 0 &&
     draft.openQuestions.length === 0 &&
     draft.generationRunId === null;
+  const visibleModels =
+    modelsQuery.data === undefined
+      ? []
+      : filterModelsByPricing(modelsQuery.data.models, modelPricingFilter);
   const autosaveMessage = pendingNavigation
     ? "移動前に保存しています…"
     : autosaveState.status === "saving"
@@ -935,11 +992,11 @@ export function OutlinePage() {
       {isEmpty ? (
         <section
           className="message-panel"
-          aria-labelledby="outline-generate-title"
+          aria-labelledby="outline-start-title"
         >
-          <h2 id="outline-generate-title">構成案を生成</h2>
+          <h2 id="outline-start-title">構成案を始める</h2>
           <p>
-            企画入力をもとに構成案を作成します。生成に失敗した場合は、同じ入力のまま再試行できます。
+            AIで生成するか、セクションを手入力して構成案を作成します。生成を使わずに始めることもできます。
           </p>
           {modelsQuery.isPending ? (
             <p className="status-message">モデル一覧を読み込んでいます…</p>
@@ -962,22 +1019,49 @@ export function OutlinePage() {
             </div>
           ) : null}
           {modelsQuery.data !== undefined ? (
-            <div className="form-field">
-              <label htmlFor="outline-model">構成案の生成に使うAIモデル</label>
-              <select
-                id="outline-model"
-                value={selectedModelId ?? ""}
-                onChange={(event) =>
-                  setSelectedModelId(event.target.value || null)
-                }
-              >
-                {modelsQuery.data.models.map((model) => (
-                  <option key={model.id} value={model.id}>
-                    {model.displayName}（{model.id}）
-                  </option>
-                ))}
-              </select>
-            </div>
+            <>
+              <div className="form-field">
+                <label htmlFor="outline-model-pricing">料金区分</label>
+                <select
+                  id="outline-model-pricing"
+                  value={modelPricingFilter}
+                  onChange={(event) =>
+                    setModelPricingFilter(
+                      event.target.value as ModelPricingFilter
+                    )
+                  }
+                >
+                  <option value="all">すべて</option>
+                  <option value="free">free（無料）</option>
+                  <option value="paid">paid（有料）</option>
+                </select>
+              </div>
+              <div className="form-field">
+                <label htmlFor="outline-model">
+                  構成案の生成に使うAIモデル
+                </label>
+                {visibleModels.length > 0 ? (
+                  <select
+                    id="outline-model"
+                    value={selectedModelId ?? ""}
+                    onChange={(event) =>
+                      setSelectedModelId(event.target.value || null)
+                    }
+                  >
+                    {visibleModels.map((model) => (
+                      <option key={model.id} value={model.id}>
+                        {model.displayName}（{modelPricingTier(model)}・
+                        {model.id}）
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <p className="field-hint">
+                    選択した料金区分に該当するモデルがありません。
+                  </p>
+                )}
+              </div>
+            </>
           ) : null}
           {generateMutation.isError ? (
             <p className="form-error" role="alert">
@@ -987,18 +1071,28 @@ export function OutlinePage() {
               )}
             </p>
           ) : null}
-          <button
-            className="button button-primary"
-            type="button"
-            onClick={generate}
-            disabled={
-              generateMutation.isPending ||
-              selectedModelId === null ||
-              modelsQuery.isPending
-            }
-          >
-            {generateMutation.isPending ? "生成中…" : "構成案を生成"}
-          </button>
+          <div className="form-actions">
+            <button
+              className="button button-primary"
+              type="button"
+              onClick={generate}
+              disabled={
+                generateMutation.isPending ||
+                selectedModelId === null ||
+                modelsQuery.isPending
+              }
+            >
+              {generateMutation.isPending ? "生成中…" : "AIで構成案を生成"}
+            </button>
+            <button
+              className="button"
+              type="button"
+              onClick={startManualOutline}
+              disabled={generateMutation.isPending}
+            >
+              手入力で構成案を作成
+            </button>
+          </div>
         </section>
       ) : (
         <>
