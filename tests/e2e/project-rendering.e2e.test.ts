@@ -20,6 +20,7 @@ import { describe, expect, it, vi } from "vitest";
 import { createServer, type ViteDevServer } from "vite";
 
 import { initializeServer } from "../../src/api/server.js";
+import { legacyCharacterVariantCatalog as characterVariantCatalog } from "../../src/app/character-visuals/character-visual-seed.js";
 import { OutlineGenerationService } from "../../src/app/projects/outline-generation-service.js";
 import { ProjectRepository } from "../../src/app/projects/project-repository.js";
 import { computeOutlineHash } from "../../src/app/projects/script-domain.js";
@@ -37,10 +38,7 @@ import { RenderManifestStore } from "../../src/app/rendering/render-manifest-sto
 import { RunLogStore } from "../../src/app/run-log-store.js";
 import { VoicevoxAudioStore } from "../../src/app/voicevox/audio-store.js";
 import { VoicevoxClient } from "../../src/voicevox/client.js";
-import {
-  characterVariantCatalog,
-  characterVariantMapping
-} from "../../src/assets/character-asset-manifest.js";
+import { characterVariantMapping } from "../../src/assets/character-asset-manifest.js";
 import { tags } from "../../src/db/schema.js";
 import {
   assetDetailResponseSchema,

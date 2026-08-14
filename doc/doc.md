@@ -1133,7 +1133,9 @@ type CharacterVisualSet = {
   visualId: string;
   name: string;
   description: string;
-  status: string;
+  status: "active" | "inactive";
+  baseWidth: number | null;
+  baseHeight: number | null;
   variants: CharacterVariant[];
   createdAt: string;
   updatedAt: string;
@@ -1150,7 +1152,9 @@ type CharacterVariant = {
 type CharacterVisualFile = {
   key: string;
   libraryPath: string;
+  mimeType: "image/png";
   checksum: string;
+  sizeBytes: number;
   width: number;
   height: number;
 };
@@ -1163,7 +1167,7 @@ type CharacterVisualFile = {
 - `single-image`: `single` を 1 件持つ。口差分を持たない。
 - `mouth-pair`: `closed` と `open` を 1 件ずつ持つ。口パクの対象にできる。
 
-`CharacterVisualSet` 全体は、表情・ポーズに対応する variant が一部未登録でも登録可能とする。未登録 variant の存在だけで set をエラーにしない。永続化する variant は必須 slot が揃った完成状態に限り、`single-image` の作成は `single` 1 件、`mouth-pair` の作成は `closed` と `open` 各 1 件を同一リクエストで検証・登録する。必須 slot 欠落の作成リクエストは variant 行やファイルを残さず失敗させる。登録後の差し替えは 1 slot 単位で許可するが、必須 slot の削除は許可しない。登録された最初の完成 variant のキャンバスサイズを visual の基準とし、以後の画像は同じ visual 内で一致させる。基準サイズの保持フィールド、`status` の具体的な enum と遷移は CV-01 で実装前に確定する。
+`CharacterVisualSet` 全体は、表情・ポーズに対応する variant が一部未登録でも登録可能とする。未登録 variant の存在だけで set をエラーにしない。永続化する variant は必須 slot が揃った完成状態に限り、`single-image` の作成は `single` 1 件、`mouth-pair` の作成は `closed` と `open` 各 1 件を同一リクエストで検証・登録する。必須 slot 欠落の作成リクエストは variant 行やファイルを残さず失敗させる。登録後の差し替えは 1 slot 単位で許可するが、必須 slot の削除は許可しない。登録された最初の完成 variant のキャンバスサイズを visual の基準とし、以後の画像は同じ visual 内で一致させる。CV-01 では `status` を `active` / `inactive` とし、variant が 0 件の visual では `baseWidth` / `baseHeight` を null にできる。最初の完成 variant で基準サイズを確定し、以後のファイルを同じサイズに制限する。
 
 登録時点では `CharacterVisualSet` を `mentor` / `learner` の役割や特定プロジェクトへ紐付けない。既存の `character-mentor` / `character-learner` は、現在の `VideoProject` と初期 seed を移行するための互換上の識別子としてのみ扱い、新規 visual の構造的な制約にしない。
 

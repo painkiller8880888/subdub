@@ -2,7 +2,6 @@ import { createHash } from "node:crypto";
 import { z } from "zod";
 
 import {
-  characterVariantCatalog as defaultCharacterVariantCatalog,
   characterVariantMapping as defaultCharacterVariantMapping,
   CHARACTER_VARIANT_CATALOG_VERSION,
   CHARACTER_VARIANT_MAPPING_VERSION,
@@ -308,11 +307,9 @@ function recordInputAssets(input: RenderManifestCompilerInput): unknown {
 }
 
 function recordInputCatalog(input: RenderManifestCompilerInput): unknown {
-  return (
-    input.characterVariantCatalog ??
-    input.catalog ??
-    defaultCharacterVariantCatalog
-  );
+  // Catalog metadata is a required runtime boundary input. The legacy seed
+  // fixture is intentionally not available from this production path.
+  return input.characterVariantCatalog ?? input.catalog ?? null;
 }
 
 function recordInputMapping(input: RenderManifestCompilerInput): unknown {

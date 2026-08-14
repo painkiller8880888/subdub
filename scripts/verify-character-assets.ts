@@ -4,10 +4,15 @@ import {
   formatCharacterAssetIssues,
   validateCharacterAssets
 } from "../src/validation/character-assets.js";
+import { legacyCharacterVariantCatalog } from "../src/app/character-visuals/character-visual-seed.js";
 
 const sourceRoot = fileURLToPath(new URL("../doc/assets/", import.meta.url));
 const publicRoot = fileURLToPath(new URL("../public/", import.meta.url));
-const result = await validateCharacterAssets({ sourceRoot, publicRoot });
+const result = await validateCharacterAssets({
+  sourceRoot,
+  publicRoot,
+  catalog: legacyCharacterVariantCatalog
+});
 
 if (!result.valid) {
   console.error(formatCharacterAssetIssues(result.issues));

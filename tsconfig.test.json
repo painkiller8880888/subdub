@@ -10,6 +10,7 @@
   },
   "include": [
     "scripts/verify-character-assets.ts",
+    "scripts/seed-character-visual-catalog.ts",
     "tests/**/*.ts",
     "src/api/**/*.ts",
     "src/app/**/*.ts",

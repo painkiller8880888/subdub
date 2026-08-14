@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
+import { legacyCharacterVariantCatalog as characterVariantCatalog } from "../../src/app/character-visuals/character-visual-seed.js";
 import {
-  characterVariantCatalog,
   characterVariantMapping,
   CHARACTER_VARIANT_CATALOG_VERSION,
   CHARACTER_VARIANT_MAPPING_VERSION
@@ -26,6 +26,15 @@ function diagnosticCodes(result: ReturnType<typeof compileRenderManifest>) {
 }
 
 describe("compileRenderManifest", () => {
+  it("rejects compilation when the runtime catalog snapshot is not injected", () => {
+    const input = { ...validInput() };
+    Reflect.deleteProperty(input, "characterVariantCatalog");
+    const result = compileRenderManifest(input);
+
+    expect(result.success).toBe(false);
+    expect(diagnosticCodes(result)).toContain("CHARACTER_CATALOG_INVALID");
+  });
+
   it("resolves the explicit character mapping and compiles all timeline inputs", () => {
     const result = compileRenderManifest(validInput());
 

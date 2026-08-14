@@ -51,6 +51,10 @@ import {
   registerAiRunRoutes,
   type AiRunSearchServicePort
 } from "./routes/ai-runs.js";
+import {
+  registerCharacterVisualRoutes,
+  type CharacterVisualCatalogServicePort
+} from "./routes/character-visuals.js";
 
 export type AppOptions = {
   logger?: FastifyServerOptions["logger"];
@@ -74,6 +78,7 @@ export type AppOptions = {
   projectFileService?: ProjectFileServicePort;
   renderJobService?: RenderJobServicePort;
   aiRunSearchService?: AiRunSearchServicePort;
+  characterVisualCatalogService?: CharacterVisualCatalogServicePort;
 };
 
 export function buildApp(options: AppOptions = {}): FastifyInstance {
@@ -140,6 +145,10 @@ export function buildApp(options: AppOptions = {}): FastifyInstance {
 
   if (options.aiRunSearchService !== undefined) {
     registerAiRunRoutes(app, options.aiRunSearchService);
+  }
+
+  if (options.characterVisualCatalogService !== undefined) {
+    registerCharacterVisualRoutes(app, options.characterVisualCatalogService);
   }
 
   if (options.staticRoot !== undefined) {

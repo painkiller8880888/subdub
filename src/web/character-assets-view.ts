@@ -1,9 +1,10 @@
 import {
-  characterVariantCatalog,
+  characterVisualSnapshotToVariantCatalog,
   characterVariantsForCharacter,
   type CharacterVariantCatalog,
   type CharacterVariantRenderType
 } from "../assets/character-asset-manifest.js";
+import type { CharacterVisualCatalogSnapshot } from "../schema/character-visual.js";
 import type { Character, VideoProject } from "../schema/index.js";
 
 export type CharacterAssetVariantFileView = {
@@ -30,7 +31,7 @@ export type CharacterAssetViewModel = {
 
 export function toCharacterAssetViewModel(
   character: Character,
-  catalog: CharacterVariantCatalog = characterVariantCatalog
+  catalog: CharacterVariantCatalog
 ): CharacterAssetViewModel {
   return {
     id: character.id,
@@ -55,11 +56,28 @@ export function toCharacterAssetViewModel(
 
 export function toCharacterAssetViewModels(
   project: VideoProject,
-  catalog: CharacterVariantCatalog = characterVariantCatalog
+  catalog: CharacterVariantCatalog
 ): CharacterAssetViewModel[] {
   return project.characters.map((character) =>
     toCharacterAssetViewModel(character, catalog)
   );
+}
+
+export function characterVisualSnapshotToCharacterAssetCatalog(
+  snapshot: CharacterVisualCatalogSnapshot
+): CharacterVariantCatalog {
+  return characterVisualSnapshotToVariantCatalog(snapshot).map((variant) => ({
+    ...variant,
+    files: variant.files.map((file) => ({
+      ...file,
+      destinationPath: [
+        "api/character-visuals",
+        encodeURIComponent(variant.characterId),
+        encodeURIComponent(variant.variantId),
+        encodeURIComponent(file.key)
+      ].join("/")
+    }))
+  }));
 }
 
 export function characterAssetUrl(assetPath: string): string {

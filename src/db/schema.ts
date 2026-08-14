@@ -312,6 +312,92 @@ export const goldenExamples = sqliteTable(
   ]
 );
 
+export const characterVisuals = sqliteTable(
+  "character_visuals",
+  {
+    visualId: text("visual_id").primaryKey(),
+    name: text("name").notNull(),
+    description: text("description").notNull().default(""),
+    status: text("status", { enum: ["active", "inactive"] }).notNull(),
+    baseWidth: integer("base_width"),
+    baseHeight: integer("base_height"),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull()
+  },
+  (table) => [
+    index("character_visuals_status_idx").on(table.status),
+    check(
+      "character_visuals_status_check",
+      sql`${table.status} IN ('active', 'inactive')`
+    ),
+    check(
+      "character_visuals_base_canvas_check",
+      sql`(${table.baseWidth} IS NULL AND ${table.baseHeight} IS NULL) OR (${table.baseWidth} IS NOT NULL AND ${table.baseHeight} IS NOT NULL AND ${table.baseWidth} > 0 AND ${table.baseHeight} > 0)`
+    )
+  ]
+);
+
+export const characterVariants = sqliteTable(
+  "character_variants",
+  {
+    variantId: text("variant_id").primaryKey(),
+    visualId: text("visual_id")
+      .notNull()
+      .references(() => characterVisuals.visualId, { onDelete: "cascade" }),
+    label: text("label").notNull(),
+    renderType: text("render_type", {
+      enum: ["single-image", "mouth-pair"]
+    }).notNull(),
+    tags: text("tags").notNull(),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull()
+  },
+  (table) => [
+    index("character_variants_visual_id_idx").on(table.visualId),
+    check(
+      "character_variants_render_type_check",
+      sql`${table.renderType} IN ('single-image', 'mouth-pair')`
+    )
+  ]
+);
+
+export const characterVariantFiles = sqliteTable(
+  "character_variant_files",
+  {
+    variantId: text("variant_id")
+      .notNull()
+      .references(() => characterVariants.variantId, { onDelete: "cascade" }),
+    fileKey: text("file_key").notNull(),
+    libraryPath: text("library_path").notNull(),
+    mimeType: text("mime_type").notNull(),
+    checksum: text("checksum").notNull(),
+    sizeBytes: integer("size_bytes").notNull(),
+    width: integer("width").notNull(),
+    height: integer("height").notNull(),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull()
+  },
+  (table) => [
+    primaryKey({ columns: [table.variantId, table.fileKey] }),
+    uniqueIndex("character_variant_files_library_path_uq").on(
+      table.libraryPath
+    ),
+    index("character_variant_files_variant_id_idx").on(table.variantId),
+    check(
+      "character_variant_files_mime_type_check",
+      sql`${table.mimeType} = 'image/png'`
+    ),
+    check(
+      "character_variant_files_checksum_check",
+      sql`length(${table.checksum}) = 64`
+    ),
+    check(
+      "character_variant_files_dimensions_check",
+      sql`${table.sizeBytes} >= 0 AND ${table.width} > 0 AND ${table.height} > 0`
+    )
+  ]
+);
+
 export const schema = {
   terminologyTerms,
   assets,
@@ -321,5 +407,8 @@ export const schema = {
   assetTags,
   aiGenerationCandidates,
   improvementDecisions,
-  goldenExamples
+  goldenExamples,
+  characterVisuals,
+  characterVariants,
+  characterVariantFiles
 } as const;

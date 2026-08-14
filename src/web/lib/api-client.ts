@@ -7,6 +7,7 @@ import {
   aiRunSearchResponseSchema,
   assetListQuerySchema,
   assetListResponseSchema,
+  characterVisualCatalogResponseSchema,
   outlineApproveRequestSchema,
   outlineRejectRequestSchema,
   outlineGenerateRequestSchema,
@@ -96,6 +97,7 @@ import type { TerminologyTerm } from "../../schema/terminology.js";
 import type { AssetListResult } from "../../schema/asset.js";
 import type { AssetDetail } from "../../schema/asset.js";
 import type { VideoProject } from "../../schema/video-project.js";
+import type { CharacterVisualCatalogSnapshot } from "../../schema/character-visual.js";
 
 export type ApiClientErrorData = {
   readonly status: number;
@@ -324,6 +326,14 @@ export async function fetchProject(projectId: string): Promise<VideoProject> {
   const response = await fetchApi(
     `/api/projects/${encodeURIComponent(projectId)}`,
     projectDetailResponseSchema
+  );
+  return response.data;
+}
+
+export async function fetchCharacterVisualCatalog(): Promise<CharacterVisualCatalogSnapshot> {
+  const response = await fetchApi(
+    "/api/character-visuals",
+    characterVisualCatalogResponseSchema
   );
   return response.data;
 }

@@ -6,15 +6,27 @@ import { deflateSync } from "node:zlib";
 
 import { afterEach, describe, expect, it } from "vitest";
 
+import { legacyCharacterVariantCatalog as characterVariantCatalog } from "../../src/app/character-visuals/character-visual-seed.js";
 import {
-  characterVariantCatalog,
   type CharacterVariant,
   type CharacterVariantCatalog
 } from "../../src/assets/character-asset-manifest.js";
 import {
   formatCharacterAssetIssues,
-  validateCharacterAssets
+  validateCharacterAssets as validateCharacterAssetsFromCatalog,
+  type CharacterAssetValidationOptions
 } from "../../src/validation/character-assets.js";
+
+async function validateCharacterAssets(
+  options: Omit<CharacterAssetValidationOptions, "catalog"> & {
+    readonly catalog?: CharacterVariantCatalog;
+  }
+) {
+  return validateCharacterAssetsFromCatalog({
+    ...options,
+    catalog: options.catalog ?? characterVariantCatalog
+  });
+}
 
 function crc32(bytes: Uint8Array): number {
   let crc = 0xffffffff;

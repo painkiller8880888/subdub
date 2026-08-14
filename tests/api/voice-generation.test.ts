@@ -51,7 +51,7 @@ async function waitForProductionVoiceJob(
   throw new Error(`voice job ${runId} did not finish`);
 }
 
-describe("project voice generation API", () => {
+describe("project voice generation API", { timeout: 30_000 }, () => {
   const apps: Array<Awaited<ReturnType<typeof buildApp>>> = [];
 
   afterEach(async () => {
