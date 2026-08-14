@@ -254,6 +254,25 @@ function visualAssignmentsForLine(
   });
 }
 
+function visualAssignmentRangeLabel(
+  project: VideoProject,
+  assignment: VisualAssignment
+): string {
+  const section = project.script.sections.find((candidate) =>
+    candidate.lines.some(
+      (line) =>
+        line.id === assignment.startLineId || line.id === assignment.endLineId
+    )
+  );
+  return section === undefined
+    ? `${assignment.startLineId} ～ ${assignment.endLineId}`
+    : `${section.name}: ${assignment.startLineId} ～ ${assignment.endLineId}`;
+}
+
+function assetThumbnailUrl(assetId: string, index: number): string {
+  return `/api/assets/${encodeURIComponent(assetId)}/thumbnails/${index}`;
+}
+
 function nextTemporaryLineId(script: Script): string {
   const ids = new Set(
     script.sections.flatMap((section) => section.lines.map((line) => line.id))
@@ -272,6 +291,8 @@ function ScriptLineCard({
   sectionIndex,
   lineIndex,
   project,
+  assignmentAssets,
+  isVisualSelected,
   issues,
   voiceStatus,
   voiceGenerationDisabled,
@@ -288,6 +309,8 @@ function ScriptLineCard({
   readonly sectionIndex: number;
   readonly lineIndex: number;
   readonly project: VideoProject;
+  readonly assignmentAssets: ReadonlyMap<string, AssetDetail | undefined>;
+  readonly isVisualSelected: boolean;
   readonly issues: readonly ScriptDraftIssue[];
   readonly voiceStatus: VoiceLineGenerationStatus | undefined;
   readonly voiceGenerationDisabled: boolean;
@@ -306,7 +329,13 @@ function ScriptLineCard({
     Number.isFinite(value) ? String(value) : "";
 
   return (
-    <article className="script-line-card" aria-label={`セリフ ${line.id}`}>
+    <article
+      className={`script-line-card${
+        isVisualSelected ? " script-line-card-visual-selected" : ""
+      }`}
+      aria-label={`セリフ ${line.id}`}
+      aria-current={isVisualSelected ? "true" : undefined}
+    >
       <header className="script-line-card-header">
         <div>
           <p className="eyebrow">セリフ識別子</p>
@@ -436,25 +465,53 @@ function ScriptLineCard({
         className="script-line-visual-summary"
         aria-label={`${line.id}のビジュアル設定`}
       >
-        <div>
+        <div className="script-line-visual-summary-content">
           <span className="eyebrow">ビジュアル</span>
           {lineVisualAssignments.length === 0 ? (
             <span className="status-message">未割り当て</span>
           ) : (
-            <span className="status-message">
-              {lineVisualAssignments.length}件の素材を使用
-              {lineVisualAssignments.map((assignment) => (
-                <code key={assignment.id}> {assignment.id}</code>
-              ))}
-            </span>
+            <div className="script-line-visual-assignments">
+              {lineVisualAssignments.map((assignment) => {
+                const asset = assignmentAssets.get(assignment.assetId);
+                const thumbnailPath = asset?.thumbnailPaths[0];
+                return (
+                  <div
+                    className="script-line-visual-assignment"
+                    key={assignment.id}
+                  >
+                    {thumbnailPath !== undefined ? (
+                      <img
+                        className="script-line-visual-thumbnail"
+                        src={assetThumbnailUrl(assignment.assetId, 0)}
+                        alt={`${asset?.title ?? assignment.assetId}のサムネイル`}
+                      />
+                    ) : (
+                      <div
+                        className="script-line-visual-thumbnail script-line-visual-thumbnail-empty"
+                        aria-hidden="true"
+                      >
+                        素材
+                      </div>
+                    )}
+                    <span className="script-line-visual-assignment-details">
+                      <strong>{asset?.title ?? assignment.assetId}</strong>
+                      <span>
+                        適用範囲：{visualAssignmentRangeLabel(project, assignment)}
+                      </span>
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
           )}
         </div>
         <button
           className="button button-small"
           type="button"
+          aria-pressed={isVisualSelected}
           onClick={onSelectVisualRange}
         >
-          このセリフを素材対象にする
+          {isVisualSelected ? "このセリフを選択中" : "このセリフの素材を編集"}
         </button>
       </section>
       <div className="script-line-voice-status" aria-label="音声状態">
@@ -547,6 +604,7 @@ export function ScriptPage() {
   const [suggestionSectionId, setSuggestionSectionId] = useState("");
   const [suggestionStartLineId, setSuggestionStartLineId] = useState("");
   const [suggestionEndLineId, setSuggestionEndLineId] = useState("");
+  const [selectedVisualLineId, setSelectedVisualLineId] = useState("");
   const [suggestionResponse, setSuggestionResponse] =
     useState<VisualSuggestionResponse | null>(null);
   const [visualSuggestionStale, setVisualSuggestionStale] = useState(false);
@@ -857,6 +915,7 @@ export function ScriptPage() {
     setSuggestionSectionId("");
     setSuggestionStartLineId("");
     setSuggestionEndLineId("");
+    setSelectedVisualLineId("");
     setSuggestionResponse(null);
     setVisualSuggestionStale(false);
     setSuggestionError(null);
@@ -922,7 +981,16 @@ export function ScriptPage() {
     ) {
       setSuggestionEndLineId(lastLineId);
     }
-  }, [draft, suggestionEndLineId, suggestionSectionId, suggestionStartLineId]);
+    if (!selectedSection.lines.some((line) => line.id === selectedVisualLineId)) {
+      setSelectedVisualLineId(firstLineId);
+    }
+  }, [
+    draft,
+    selectedVisualLineId,
+    suggestionEndLineId,
+    suggestionSectionId,
+    suggestionStartLineId
+  ]);
 
   const initializeMutation = useMutation({
     mutationFn: ({
@@ -1022,14 +1090,12 @@ export function ScriptPage() {
   }
 
   function selectVisualRange(sectionId: string, lineId: string): void {
+    setSelectedVisualLineId(lineId);
     setSuggestionSectionId(sectionId);
     setSuggestionStartLineId(lineId);
     setSuggestionEndLineId(lineId);
     setSuggestionResponse(null);
     setSuggestionError(null);
-    document
-      .getElementById("workflow-visual")
-      ?.scrollIntoView({ behavior: "smooth", block: "start" });
   }
 
   function updateDraft(nextDraft: Script): void {
@@ -1238,6 +1304,18 @@ export function ScriptPage() {
     draft.sections.find((section) => section.id === suggestionSectionId) ??
     draft.sections.find((section) => section.lines.length > 0) ??
     draft.sections[0];
+  const selectedVisualSection =
+    draft.sections.find((section) =>
+      section.lines.some((line) => line.id === selectedVisualLineId)
+    ) ?? suggestionSection;
+  const selectedVisualLine =
+    selectedVisualSection?.lines.find(
+      (line) => line.id === selectedVisualLineId
+    ) ??
+    suggestionSection?.lines.find(
+      (line) => line.id === suggestionStartLineId
+    ) ??
+    suggestionSection?.lines[0];
   const canSuggest = issues.length === 0;
   const visualMutationPending =
     visualAssignMutation.isPending ||
@@ -1424,13 +1502,16 @@ export function ScriptPage() {
     }
     const requestProjectId = projectIdRef.current;
     const requestGeneration = projectGenerationRef.current;
+    const flushed = await coordinatorRef.current?.flush();
+    if (flushed !== true) {
+      return;
+    }
     const context: VisualMutationContext = {
       projectId: requestProjectId,
       projectGeneration: requestGeneration,
       expectedRevision: revisionRef.current
     };
-    const flushed = await coordinatorRef.current?.flush();
-    if (flushed !== true || !isVisualMutationCurrent(context)) {
+    if (!isVisualMutationCurrent(context)) {
       return;
     }
     setVisualError(null);
@@ -1466,21 +1547,32 @@ export function ScriptPage() {
     ) {
       return;
     }
-    const requestContext: VisualSuggestionRequestContext = {
-      projectId: projectIdRef.current,
-      projectGeneration: projectGenerationRef.current,
-      sectionId: suggestionSection.id,
-      startLineId: suggestionStartLineId,
-      endLineId: suggestionEndLineId,
-      expectedRevision: revisionRef.current
-    };
+    const requestProjectId = projectIdRef.current;
+    const requestGeneration = projectGenerationRef.current;
+    const requestSectionId = suggestionSection.id;
+    const requestStartLineId = suggestionStartLineId;
+    const requestEndLineId = suggestionEndLineId;
     const flushed = await coordinatorRef.current?.flush();
     if (flushed !== true) {
       return;
     }
+    const requestContext: VisualSuggestionRequestContext = {
+      projectId: requestProjectId,
+      projectGeneration: requestGeneration,
+      sectionId: requestSectionId,
+      startLineId: requestStartLineId,
+      endLineId: requestEndLineId,
+      expectedRevision: revisionRef.current
+    };
+    const currentContext: VisualSuggestionCurrentContext = {
+      ...visualSuggestionContextRef.current,
+      projectId: projectIdRef.current,
+      projectGeneration: projectGenerationRef.current,
+      revision: revisionRef.current
+    };
     if (
       !isVisualSuggestionContextCurrent(
-        visualSuggestionContextRef.current,
+        currentContext,
         requestContext
       )
     ) {
@@ -1675,11 +1767,54 @@ export function ScriptPage() {
         </button>
       </section>
 
-      <section
-        id="workflow-visual"
-        className="visual-suggestion-panel"
-        aria-labelledby="visual-suggestion-title"
-      >
+      <div className="script-production-layout">
+        <aside
+          className="script-visual-sidebar"
+          aria-label="セリフのビジュアル編集"
+        >
+          <section
+            className="selected-script-line-panel"
+            aria-labelledby="selected-script-line-title"
+          >
+            <div className="visual-subsection-header">
+              <div>
+                <p className="eyebrow">現在の編集対象</p>
+                <h2 id="selected-script-line-title">
+                  {selectedVisualLine?.id ?? "セリフを選択してください"}
+                </h2>
+              </div>
+              <span className="status-message">台本と同じ画面で編集</span>
+            </div>
+            {selectedVisualLine !== undefined ? (
+              <dl className="selected-script-line-details">
+                <div>
+                  <dt>読み上げ文</dt>
+                  <dd>{selectedVisualLine.spokenText || "未入力"}</dd>
+                </div>
+                <div>
+                  <dt>字幕</dt>
+                  <dd>{selectedVisualLine.subtitleText || "未入力"}</dd>
+                </div>
+                <div>
+                  <dt>対象範囲</dt>
+                  <dd>
+                    {suggestionSection?.name ?? "不明"}：
+                    {suggestionStartLineId || "—"} ～ {suggestionEndLineId || "—"}
+                  </dd>
+                </div>
+              </dl>
+            ) : (
+              <p className="status-message">
+                左のセリフカードを選ぶと、対象範囲と割り当て済み素材をここで編集できます。
+              </p>
+            )}
+          </section>
+
+          <section
+            id="workflow-visual"
+            className="visual-suggestion-panel"
+            aria-labelledby="visual-suggestion-title"
+          >
         <div>
           <p className="eyebrow">制作 ビジュアル候補</p>
           <h2 id="visual-suggestion-title">AIでビジュアル候補を探す</h2>
@@ -1706,6 +1841,7 @@ export function ScriptPage() {
               setSuggestionSectionId(event.target.value);
               setSuggestionStartLineId(nextSection?.lines[0]?.id ?? "");
               setSuggestionEndLineId(nextSection?.lines.at(-1)?.id ?? "");
+              setSelectedVisualLineId(nextSection?.lines[0]?.id ?? "");
               setSuggestionResponse(null);
               setSuggestionError(null);
             }}
@@ -1726,6 +1862,7 @@ export function ScriptPage() {
               value={suggestionStartLineId}
               onChange={(event) => {
                 setSuggestionStartLineId(event.target.value);
+                setSelectedVisualLineId(event.target.value);
                 setSuggestionResponse(null);
                 setSuggestionError(null);
               }}
@@ -2066,10 +2203,14 @@ export function ScriptPage() {
       <VisualAssignmentPanel
         project={project}
         assets={assignmentAssets}
+        focusLineId={selectedVisualLine?.id}
         onSave={saveVisualAssignment}
         onRemove={removeVisualAssignment}
         isMutating={visualMutationPending}
       />
+
+        </aside>
+        <div className="script-production-main">
 
       <form className="bulk-paste-panel" onSubmit={pasteLines}>
         <div>
@@ -2150,6 +2291,8 @@ export function ScriptPage() {
                     sectionIndex={sectionIndex}
                     lineIndex={lineIndex}
                     project={project}
+                    assignmentAssets={assignmentAssets}
+                    isVisualSelected={selectedVisualLineId === line.id}
                     issues={issues}
                     voiceStatus={voiceStatusByLine.get(line.id)}
                     voiceGenerationDisabled={
@@ -2191,6 +2334,8 @@ export function ScriptPage() {
           </section>
         ))}
       </section>
+        </div>
+      </div>
     </main>
   );
 }
