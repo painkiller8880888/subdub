@@ -63,6 +63,7 @@
 - WebUI、OpenCode、レビュー、その他プロジェクト内外の AI 用途は、MVP では Gemma 4 31B Instruct を共通モデルとする。
 - OpenRouter の初期モデル ID は `google/gemma-4-31b-it` とする。
 - `:free` variant は既定にせず、人間がモデル選択画面から明示的に選択した場合だけ使用する。
+- モデル選択画面では、入力単価と出力単価がともに `0` のモデルを `free`、それ以外を `paid` として絞り込める。これは表示上のフィルターであり、サーバーは選択されたモデル ID を既存の能力、有効期限、ZDR 条件で検証する。
 - AI 呼び出しは用途を `AiTaskKind` で識別するが、MVP の用途別上書きは空とし、すべて共通モデルへ解決する。
 - 用途別モデルへの分離は MVP 後の評価事項とする。MVP の該当機能を実装する前に別モデルを決める必要はない。
 - 用途別の評価では、スキーマ検証通過率、人間による修正量、根拠のない情報を追加した回数、応答時間、入出力トークン数と料金、画像入力またはツール利用の必要性を記録する。
@@ -647,6 +648,8 @@ type OpenQuestion = {
 - 未解決の `openQuestions` がない。
 - `sourceHash` が現在の入力資料のハッシュと一致する。
 
+構成案は、AI 生成または人間の手入力から開始できる。手入力で保存した構成案は `generationRunId: null` とし、AI 生成を経由しない。どちらの経路も同じ編集、自動保存、承認条件を使用する。
+
 ### 7.7 台本
 
 ```ts
@@ -1222,6 +1225,8 @@ POST   /api/projects/{projectId}/script/review
 
 AI 生成 API はエンドポイントに対応する `taskKind` をサーバー側で確定し、リクエストの `modelId` は実行時上書きとして任意に受け取る。上書きがない場合はプロジェクト設定から上記の優先順で解決し、解決結果が `null` の場合は実行を拒否する。生成に失敗した場合、既存の構成案または台本を変更しない。
 
+構成案生成は任意の開始経路である。AI を使わない場合は WebUI の手入力開始操作から `PUT /api/projects/{projectId}/outline` で構成案を保存し、その後は AI 生成時と同じ編集・承認フローを使用する。
+
 ### 11.4 用語
 
 ```text
@@ -1281,6 +1286,7 @@ POST   /api/projects/{projectId}/thumbnail/render
 - OpenCode のエージェントは役割別に分けても、初期設定ではすべて `google/gemma-4-31b-it` を参照する。
 - 実行ログには `taskKind`、解決されたモデル ID、モデル選択元 `run_override | task_override | default` を記録する。
 - モデル一覧は認証済み利用可能モデルを取得し、text 出力と structured output 対応で絞り込む。
+- WebUI のモデル選択では、入出力単価がともに `0` の `free` と、それ以外の `paid` を切り替えて表示できる。
 - 構成案生成は非ストリーミングとする。
 - structured output は strict JSON Schema を使用し、受信後に Zod で再検証する。
 - ZDR 有効時はリクエストへ ZDR を指定する。
@@ -1576,7 +1582,7 @@ SQLite にはキー入力単位ではなく、保存、承認、レビュー判�
 
 - プロジェクト画面
 - Markdown、企画条件
-- OpenRouter モデル一覧と構成案生成
+- OpenRouter モデル一覧（`free` / `paid` 絞り込み）と構成案生成・手入力開始
 - 構成案編集、要確認事項、承認
 
 ### Phase 2: 台本と用語
