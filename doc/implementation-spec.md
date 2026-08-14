@@ -581,7 +581,9 @@ type CharacterVariantRenderType = "single-image" | "mouth-pair";
 type CharacterVisualFile = {
   key: string;
   libraryPath: string;
+  mimeType: "image/png";
   checksum: string;
+  sizeBytes: number;
   width: number;
   height: number;
 };
@@ -598,7 +600,9 @@ type CharacterVisualSet = {
   visualId: string;
   name: string;
   description: string;
-  status: string;
+  status: "active" | "inactive";
+  baseWidth: number | null;
+  baseHeight: number | null;
   variants: readonly CharacterVariant[];
   createdAt: string;
   updatedAt: string;
@@ -610,7 +614,7 @@ type CharacterVisualCatalogSnapshot = readonly CharacterVisualSet[];
 type CharacterVariantCatalog = readonly CharacterVariant[];
 ```
 
-`status` の具体的な enum と遷移、visual 単位の基準キャンバスを表す DB フィールド、snapshot の版表現は CV-01 で確定する。ファイルの checksum とキャンバス技術情報はバックエンド検証と API 応答に必要なため保持する。
+CV-01 では `status` を `active` / `inactive` とし、visual 単位の基準キャンバスを nullable な `baseWidth` / `baseHeight` として保持する。variant が 0 件の visual は両方を null にでき、最初の完成 variant を登録する時点で両方を確定する。snapshot の版表現は後続設計で扱う。ファイルの MIME type、checksum、サイズ、キャンバス技術情報はバックエンド検証と API 応答に必要なため保持する。
 
 P2-01 の当時の静的カタログには各キャラクター 3 variant、5 ファイル、2 キャラクター合計 6 variant、10 ファイルが登録されていた。CV-01 の migration 後は、この件数を初期 DB seed として保持し、一覧・検証・配信の実行時正本は SQLite と管理領域に切り替える。
 

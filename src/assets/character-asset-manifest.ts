@@ -1,3 +1,5 @@
+import type { CharacterVisualCatalogSnapshot } from "../schema/character-visual.js";
+
 export const CHARACTER_CANVAS_SIZE = {
   width: 600,
   height: 1000
@@ -53,7 +55,11 @@ export const characterVariantMapping = {
   }
 } as const satisfies CharacterVariantMapping;
 
-export const characterVariantCatalog = [
+/**
+ * Legacy migration/compatibility fixture. New runtime registration data is
+ * loaded from CharacterVisualCatalogService and adapted at the boundary.
+ */
+export const legacyCharacterVariantCatalog = [
   {
     variantId: "character-mentor-stand-v1",
     characterId: "character-mentor",
@@ -169,6 +175,28 @@ export const characterVariantCatalog = [
     ]
   }
 ] as const satisfies CharacterVariantCatalog;
+
+/** @deprecated Use the database snapshot adapter for runtime catalog data. */
+export const characterVariantCatalog = legacyCharacterVariantCatalog;
+
+export function characterVisualSnapshotToVariantCatalog(
+  snapshot: CharacterVisualCatalogSnapshot
+): CharacterVariantCatalog {
+  return snapshot.flatMap((visual) =>
+    visual.variants.map((variant) => ({
+      variantId: variant.variantId,
+      characterId: visual.visualId,
+      label: variant.label,
+      renderType: variant.renderType,
+      tags: variant.tags,
+      files: variant.files.map((file) => ({
+        key: file.key,
+        sourceFile: file.libraryPath,
+        destinationPath: file.libraryPath
+      }))
+    }))
+  );
+}
 
 export type CharacterAssetId =
   (typeof characterVariantCatalog)[number]["characterId"];

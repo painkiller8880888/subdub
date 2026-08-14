@@ -1,6 +1,7 @@
 export * from "./api.js";
 export * from "./ai-run-log.js";
 export * from "./asset.js";
+export * from "./character-visual.js";
 export * from "./common.js";
 export * from "./primitives.js";
 export * from "./render-manifest.js";

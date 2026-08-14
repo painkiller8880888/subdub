@@ -89,6 +89,9 @@ export async function ensureWorkspaceDirectories(
     mkdir(path.join(resolvedWorkspaceRoot, "library", "staging"), {
       recursive: true
     }),
+    mkdir(path.join(resolvedWorkspaceRoot, "library", "character-visuals"), {
+      recursive: true
+    }),
     mkdir(path.join(resolvedWorkspaceRoot, "projects"), { recursive: true })
   ]);
 }

@@ -107,7 +107,7 @@ describe("workspace SQLite", () => {
     const first = await initializeWorkspaceDatabase({ workspaceRoot });
     const firstHistory = migrationHistory(first.connection);
     expect(first.migrationResult.applied).toBe(true);
-    expect(firstHistory).toHaveLength(7);
+    expect(firstHistory).toHaveLength(8);
     first.close();
 
     const second = await initializeWorkspaceDatabase({ workspaceRoot });
@@ -382,7 +382,8 @@ describe("workspace SQLite", () => {
       "0003_asset-processing-metadata",
       "0004_asset-search",
       "0005_decision-log-golden-examples",
-      "0006_decision-log-single-final-decision"
+      "0006_decision-log-single-final-decision",
+      "0007_massive_madame_web"
     ];
     const definitions: MigrationDefinition[] = [];
     for (let index = 0; index < migrationTags.length; index++) {
@@ -466,7 +467,8 @@ describe("workspace SQLite", () => {
       "0003_asset-processing-metadata",
       "0004_asset-search",
       "0005_decision-log-golden-examples",
-      "0006_decision-log-single-final-decision"
+      "0006_decision-log-single-final-decision",
+      "0007_massive_madame_web"
     ];
     const definitions: MigrationDefinition[] = [];
     for (let index = 0; index < migrationTags.length; index += 1) {
@@ -505,11 +507,32 @@ describe("workspace SQLite", () => {
       workspaceRoot
     });
     expect(first.migrationResult.applied).toBe(true);
-    expect(migrationHistory(first.connection)).toHaveLength(7);
+    expect(migrationHistory(first.connection)).toHaveLength(8);
     expect(
       first.connection
         .prepare(
           "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'golden_examples'"
+        )
+        .get()
+    ).toEqual({ 1: 1 });
+    expect(
+      first.connection
+        .prepare(
+          "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'character_visuals'"
+        )
+        .get()
+    ).toEqual({ 1: 1 });
+    expect(
+      first.connection
+        .prepare(
+          "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'character_variants'"
+        )
+        .get()
+    ).toEqual({ 1: 1 });
+    expect(
+      first.connection
+        .prepare(
+          "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'character_variant_files'"
         )
         .get()
     ).toEqual({ 1: 1 });
@@ -586,7 +609,8 @@ describe("workspace SQLite", () => {
       "0003_asset-processing-metadata",
       "0004_asset-search",
       "0005_decision-log-golden-examples",
-      "0006_decision-log-single-final-decision"
+      "0006_decision-log-single-final-decision",
+      "0007_massive_madame_web"
     ];
     const definitions: MigrationDefinition[] = [];
     for (let index = 0; index < migrationTags.length; index++) {
