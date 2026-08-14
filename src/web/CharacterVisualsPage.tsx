@@ -1,5 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { type ChangeEvent, type FormEvent, useEffect, useState } from "react";
+import {
+  type ChangeEvent,
+  type FormEvent,
+  useEffect,
+  useRef,
+  useState
+} from "react";
 
 import {
   ApiClientError,
@@ -19,6 +25,13 @@ import type {
   CharacterVariantRenderType,
   CharacterVisualSet
 } from "../schema/character-visual.js";
+import {
+  characterVisualDraftFromSet,
+  characterVisualFileUrl,
+  createEmptyCharacterVisualDraft,
+  shouldInitializeSelectedVisualDraft,
+  type CharacterVisualDraft
+} from "./character-visuals-view";
 
 type VariantFileKey = "single" | "closed" | "open";
 
@@ -30,14 +43,6 @@ const fileSlots: readonly {
   { key: "closed", label: "closed（口閉じ）" },
   { key: "open", label: "open（口開き）" }
 ];
-
-function characterVisualFileUrl(
-  visualId: string,
-  variantId: string,
-  fileKey: string
-): string {
-  return `/api/character-visuals/${encodeURIComponent(visualId)}/${encodeURIComponent(variantId)}/${encodeURIComponent(fileKey)}`;
-}
 
 function formatCanvas(visual: CharacterVisualSet): string {
   return visual.baseWidth === null || visual.baseHeight === null
@@ -93,18 +98,25 @@ function domId(value: string): string {
   return value.replace(/[^a-zA-Z0-9_-]/gu, "-");
 }
 
-function ManagedVariantImage({
+export function ManagedVariantImage({
   visualId,
   variantId,
   fileKey,
-  label
+  label,
+  checksum
 }: {
   readonly visualId: string;
   readonly variantId: string;
   readonly fileKey: string;
   readonly label: string;
+  readonly checksum: string;
 }) {
   const [failed, setFailed] = useState(false);
+  const src = characterVisualFileUrl(visualId, variantId, fileKey, checksum);
+
+  useEffect(() => {
+    setFailed(false);
+  }, [src]);
 
   if (failed) {
     return (
@@ -123,7 +135,7 @@ function ManagedVariantImage({
     <img
       alt={label}
       className="character-visual-preview-image"
-      src={characterVisualFileUrl(visualId, variantId, fileKey)}
+      src={src}
       onError={() => setFailed(true)}
     />
   );
@@ -189,12 +201,18 @@ function FileSlotInput({
   inputId,
   label,
   expectedCanvas,
+  disabled,
+  errorId,
+  hasError,
   onChange
 }: {
   readonly file: File | null;
   readonly inputId: string;
   readonly label: string;
   readonly expectedCanvas: string;
+  readonly disabled: boolean;
+  readonly errorId: string | undefined;
+  readonly hasError: boolean;
   readonly onChange: (file: File | null) => void;
 }) {
   return (
@@ -202,6 +220,9 @@ function FileSlotInput({
       <label htmlFor={inputId}>{label} PNG</label>
       <input
         accept="image/png"
+        aria-describedby={hasError ? errorId : undefined}
+        aria-invalid={hasError ? true : undefined}
+        disabled={disabled}
         id={inputId}
         type="file"
         onChange={(event: ChangeEvent<HTMLInputElement>) => {
@@ -269,6 +290,12 @@ function VariantEditor({
   const existingFiles = new Map(
     existingVariant?.files.map((file) => [file.key, file]) ?? []
   );
+  const variantKey = `${domId(visual.visualId)}-${existingVariant?.variantId ?? "new"}`;
+  const variantErrorId = `${variantKey}-error`;
+  const variantErrorMessage =
+    validationMessage ??
+    (mutation.isError ? friendlyErrorMessage(mutation.error, visual) : null);
+  const isBusy = mutation.isPending || isPreparingUpload;
 
   async function existingFileBlob(key: VariantFileKey): Promise<Blob | null> {
     if (
@@ -341,6 +368,9 @@ function VariantEditor({
 
   return (
     <form
+      aria-describedby={
+        variantErrorMessage !== null ? variantErrorId : undefined
+      }
       className="character-visual-variant-form"
       noValidate
       onSubmit={handleSubmit}
@@ -353,8 +383,12 @@ function VariantEditor({
             variant名
           </label>
           <input
-            disabled={mutation.isPending}
-            id={`${domId(visual.visualId)}-${existingVariant?.variantId ?? "new"}-label`}
+            aria-describedby={
+              variantErrorMessage !== null ? variantErrorId : undefined
+            }
+            aria-invalid={variantErrorMessage !== null ? true : undefined}
+            disabled={isBusy}
+            id={`${variantKey}-label`}
             type="text"
             value={label}
             onChange={(event) => setLabel(event.target.value)}
@@ -367,8 +401,12 @@ function VariantEditor({
             renderType
           </label>
           <select
-            disabled={mutation.isPending}
-            id={`${domId(visual.visualId)}-${existingVariant?.variantId ?? "new"}-render-type`}
+            aria-describedby={
+              variantErrorMessage !== null ? variantErrorId : undefined
+            }
+            aria-invalid={variantErrorMessage !== null ? true : undefined}
+            disabled={isBusy}
+            id={`${variantKey}-render-type`}
             value={renderType}
             onChange={(event) => {
               setRenderType(event.target.value as CharacterVariantRenderType);
@@ -387,8 +425,12 @@ function VariantEditor({
           tags（カンマ区切り・任意）
         </label>
         <input
-          disabled={mutation.isPending}
-          id={`${domId(visual.visualId)}-${existingVariant?.variantId ?? "new"}-tags`}
+          aria-describedby={
+            variantErrorMessage !== null ? variantErrorId : undefined
+          }
+          aria-invalid={variantErrorMessage !== null ? true : undefined}
+          disabled={isBusy}
+          id={`${variantKey}-tags`}
           type="text"
           value={tags}
           onChange={(event) => setTags(event.target.value)}
@@ -405,9 +447,12 @@ function VariantEditor({
       >
         {activeSlots.map((slot) => (
           <FileSlotInput
+            disabled={isBusy}
+            errorId={variantErrorId}
             expectedCanvas={formatCanvas(visual)}
             file={files[slot.key] ?? null}
-            inputId={`${domId(visual.visualId)}-${existingVariant?.variantId ?? "new"}-${slot.key}`}
+            hasError={variantErrorMessage !== null}
+            inputId={`${variantKey}-${slot.key}`}
             key={slot.key}
             label={slot.label}
             onChange={(file) => {
@@ -417,14 +462,9 @@ function VariantEditor({
         ))}
       </div>
 
-      {validationMessage !== null ? (
-        <p className="form-error" role="alert">
-          {validationMessage}
-        </p>
-      ) : null}
-      {mutation.isError ? (
-        <p className="form-error" role="alert">
-          {friendlyErrorMessage(mutation.error, visual)}
+      {variantErrorMessage !== null ? (
+        <p className="form-error" id={variantErrorId} role="alert">
+          {variantErrorMessage}
         </p>
       ) : null}
       {mutation.isSuccess ? (
@@ -432,11 +472,7 @@ function VariantEditor({
           保存しました。
         </p>
       ) : null}
-      <button
-        className="button button-primary"
-        disabled={mutation.isPending || isPreparingUpload}
-        type="submit"
-      >
+      <button className="button button-primary" disabled={isBusy} type="submit">
         {isPreparingUpload
           ? "画像を準備中…"
           : mutation.isPending
@@ -522,17 +558,34 @@ function VariantCard({
       <div
         className={`character-visual-variant-preview character-visual-variant-preview-${variant.renderType}`}
       >
-        {slots.map((slot) => (
-          <figure key={slot.key}>
-            <ManagedVariantImage
-              fileKey={slot.key}
-              label={`${variant.label}・${slot.label}`}
-              variantId={variant.variantId}
-              visualId={visual.visualId}
-            />
-            <figcaption>{slot.label}</figcaption>
-          </figure>
-        ))}
+        {slots.map((slot) => {
+          const file = variant.files.find(
+            (candidate) => candidate.key === slot.key
+          );
+          return (
+            <figure key={`${slot.key}-${file?.checksum ?? "missing"}`}>
+              {file === undefined ? (
+                <div
+                  className="character-visual-image-error"
+                  role="img"
+                  aria-label={`${slot.label}を読み込めません`}
+                >
+                  <strong>画像がありません</strong>
+                  <span>{slot.label}</span>
+                </div>
+              ) : (
+                <ManagedVariantImage
+                  checksum={file.checksum}
+                  fileKey={file.key}
+                  label={`${variant.label}・${slot.label}`}
+                  variantId={variant.variantId}
+                  visualId={visual.visualId}
+                />
+              )}
+              <figcaption>{slot.label}</figcaption>
+            </figure>
+          );
+        })}
       </div>
       {statusMutation.isError ? (
         <p className="form-error" role="alert">
@@ -550,7 +603,7 @@ function VariantCard({
   );
 }
 
-function VisualListItem({
+export function VisualListItem({
   visual,
   selected,
   onSelect
@@ -560,7 +613,21 @@ function VisualListItem({
   readonly onSelect: () => void;
 }) {
   const [failed, setFailed] = useState(false);
-  const representative = visual.variants[0]?.files[0];
+  const representativeVariant = visual.variants[0];
+  const representative = representativeVariant?.files[0];
+  const representativeSrc =
+    representativeVariant !== undefined && representative !== undefined
+      ? characterVisualFileUrl(
+          visual.visualId,
+          representativeVariant.variantId,
+          representative.key,
+          representative.checksum
+        )
+      : null;
+
+  useEffect(() => {
+    setFailed(false);
+  }, [representativeSrc]);
 
   return (
     <li>
@@ -570,7 +637,7 @@ function VisualListItem({
         type="button"
         onClick={onSelect}
       >
-        {representative === undefined || failed ? (
+        {representativeSrc === null || failed ? (
           <span
             className="character-visual-list-placeholder"
             aria-hidden="true"
@@ -581,19 +648,22 @@ function VisualListItem({
           <img
             alt=""
             className="character-visual-list-image"
-            src={characterVisualFileUrl(
-              visual.visualId,
-              visual.variants[0]!.variantId,
-              representative.key
-            )}
+            src={representativeSrc}
             onError={() => setFailed(true)}
           />
         )}
         <span className="character-visual-list-copy">
           <strong>{visual.name}</strong>
-          <small>
-            {visual.variants.length} variant / {formatCanvas(visual)}
-          </small>
+          <span className="character-visual-list-meta">
+            <small>
+              {visual.variants.length} variant / {formatCanvas(visual)}
+            </small>
+            <span
+              className={`character-visual-status character-visual-status-${visual.status}`}
+            >
+              {visual.status === "active" ? "active" : "inactive"}
+            </span>
+          </span>
         </span>
       </button>
     </li>
@@ -611,14 +681,18 @@ export function CharacterVisualsPage() {
   const [isCreating, setIsCreating] = useState(false);
   const [editingVariantId, setEditingVariantId] = useState<string | null>(null);
   const [showVariantForm, setShowVariantForm] = useState(false);
-  const [visualName, setVisualName] = useState("");
-  const [visualDescription, setVisualDescription] = useState("");
-  const [visualStatus, setVisualStatus] = useState<"active" | "inactive">(
-    "active"
+  const [createDraft, setCreateDraft] = useState<CharacterVisualDraft>(() =>
+    createEmptyCharacterVisualDraft()
   );
-  const [visualValidationMessage, setVisualValidationMessage] = useState<
+  const [selectedVisualDraft, setSelectedVisualDraft] =
+    useState<CharacterVisualDraft | null>(null);
+  const [createValidationMessage, setCreateValidationMessage] = useState<
     string | null
   >(null);
+  const [selectedValidationMessage, setSelectedValidationMessage] = useState<
+    string | null
+  >(null);
+  const initializedSelectedVisualIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     const catalog = catalogQuery.data;
@@ -637,25 +711,43 @@ export function CharacterVisualsPage() {
   );
 
   useEffect(() => {
+    if (selectedVisualId === null) {
+      initializedSelectedVisualIdRef.current = null;
+      setSelectedVisualDraft(null);
+      setEditingVariantId(null);
+      setShowVariantForm(false);
+      setSelectedValidationMessage(null);
+      return;
+    }
+
     if (selectedVisual === undefined) {
       return;
     }
-    setVisualName(selectedVisual.name);
-    setVisualDescription(selectedVisual.description);
-    setVisualStatus(selectedVisual.status);
+
+    if (
+      !shouldInitializeSelectedVisualDraft(
+        initializedSelectedVisualIdRef.current,
+        selectedVisualId,
+        selectedVisual
+      )
+    ) {
+      return;
+    }
+
+    initializedSelectedVisualIdRef.current = selectedVisualId;
+    setSelectedVisualDraft(characterVisualDraftFromSet(selectedVisual));
     setEditingVariantId(null);
     setShowVariantForm(false);
-    setVisualValidationMessage(null);
-  }, [selectedVisual]);
+    setSelectedValidationMessage(null);
+  }, [selectedVisual, selectedVisualId]);
 
   const createMutation = useMutation({
     mutationFn: createCharacterVisual,
     onSuccess: async (visual) => {
       setIsCreating(false);
+      setCreateDraft(createEmptyCharacterVisualDraft());
+      setCreateValidationMessage(null);
       setSelectedVisualId(visual.visualId);
-      setVisualName(visual.name);
-      setVisualDescription(visual.description);
-      setVisualStatus(visual.status);
       await queryClient.invalidateQueries({ queryKey: ["character-visuals"] });
     }
   });
@@ -678,32 +770,57 @@ export function CharacterVisualsPage() {
 
   function submitNewVisual(event: FormEvent<HTMLFormElement>): void {
     event.preventDefault();
-    if (visualName.trim().length === 0) {
-      setVisualValidationMessage("visual名を入力してください。");
+    if (createDraft.name.trim().length === 0) {
+      setCreateValidationMessage("visual名を入力してください。");
       return;
     }
-    setVisualValidationMessage(null);
+    setCreateValidationMessage(null);
     createMutation.mutate({
-      name: visualName,
-      description: visualDescription,
-      status: visualStatus
+      name: createDraft.name,
+      description: createDraft.description,
+      status: createDraft.status
     });
   }
 
   function submitVisualMetadata(event: FormEvent<HTMLFormElement>): void {
     event.preventDefault();
-    if (selectedVisual === undefined || visualName.trim().length === 0) {
-      setVisualValidationMessage("visual名を入力してください。");
+    const draft =
+      selectedVisualDraft ??
+      (selectedVisual === undefined
+        ? null
+        : characterVisualDraftFromSet(selectedVisual));
+    if (
+      selectedVisual === undefined ||
+      draft === null ||
+      draft.name.trim().length === 0
+    ) {
+      setSelectedValidationMessage("visual名を入力してください。");
       return;
     }
-    setVisualValidationMessage(null);
+    setSelectedValidationMessage(null);
     updateMutation.mutate({
       visualId: selectedVisual.visualId,
-      name: visualName,
-      description: visualDescription,
-      status: visualStatus
+      name: draft.name,
+      description: draft.description,
+      status: draft.status
     });
   }
+
+  const selectedDraftForRender =
+    selectedVisualDraft ??
+    (selectedVisual === undefined
+      ? null
+      : characterVisualDraftFromSet(selectedVisual));
+  const createErrorMessage =
+    createValidationMessage ??
+    (createMutation.isError
+      ? friendlyErrorMessage(createMutation.error)
+      : null);
+  const selectedErrorMessage =
+    selectedValidationMessage ??
+    (updateMutation.isError && selectedVisual !== undefined
+      ? friendlyErrorMessage(updateMutation.error, selectedVisual)
+      : null);
 
   if (catalogQuery.isPending) {
     return (
@@ -751,11 +868,13 @@ export function CharacterVisualsPage() {
           className="button button-primary"
           type="button"
           onClick={() => {
-            setIsCreating((current) => !current);
-            setVisualName("");
-            setVisualDescription("");
-            setVisualStatus("active");
-            setVisualValidationMessage(null);
+            setIsCreating((current) => {
+              if (!current) {
+                setCreateDraft(createEmptyCharacterVisualDraft());
+                setCreateValidationMessage(null);
+              }
+              return !current;
+            });
           }}
         >
           {isCreating ? "新規登録を閉じる" : "+ 新規ビジュアル"}
@@ -779,24 +898,48 @@ export function CharacterVisualsPage() {
             <div className="form-field">
               <label htmlFor="new-character-visual-name">名前</label>
               <input
+                aria-describedby={
+                  createErrorMessage !== null
+                    ? "new-character-visual-error"
+                    : undefined
+                }
+                aria-invalid={
+                  createValidationMessage !== null &&
+                  createDraft.name.trim().length === 0
+                    ? true
+                    : undefined
+                }
                 autoComplete="off"
                 disabled={createMutation.isPending}
                 id="new-character-visual-name"
                 required
                 type="text"
-                value={visualName}
-                onChange={(event) => setVisualName(event.target.value)}
+                value={createDraft.name}
+                onChange={(event) => {
+                  setCreateDraft((current) => ({
+                    ...current,
+                    name: event.target.value
+                  }));
+                }}
               />
             </div>
             <div className="form-field">
               <label htmlFor="new-character-visual-status">状態</label>
               <select
+                aria-describedby={
+                  createErrorMessage !== null
+                    ? "new-character-visual-error"
+                    : undefined
+                }
                 disabled={createMutation.isPending}
                 id="new-character-visual-status"
-                value={visualStatus}
-                onChange={(event) =>
-                  setVisualStatus(event.target.value as "active" | "inactive")
-                }
+                value={createDraft.status}
+                onChange={(event) => {
+                  setCreateDraft((current) => ({
+                    ...current,
+                    status: event.target.value as "active" | "inactive"
+                  }));
+                }}
               >
                 <option value="active">active</option>
                 <option value="inactive">inactive</option>
@@ -808,21 +951,30 @@ export function CharacterVisualsPage() {
               説明（任意）
             </label>
             <textarea
+              aria-describedby={
+                createErrorMessage !== null
+                  ? "new-character-visual-error"
+                  : undefined
+              }
               disabled={createMutation.isPending}
               id="new-character-visual-description"
               rows={3}
-              value={visualDescription}
-              onChange={(event) => setVisualDescription(event.target.value)}
+              value={createDraft.description}
+              onChange={(event) => {
+                setCreateDraft((current) => ({
+                  ...current,
+                  description: event.target.value
+                }));
+              }}
             />
           </div>
-          {visualValidationMessage !== null ? (
-            <p className="form-error" role="alert">
-              {visualValidationMessage}
-            </p>
-          ) : null}
-          {createMutation.isError ? (
-            <p className="form-error" role="alert">
-              {friendlyErrorMessage(createMutation.error)}
+          {createErrorMessage !== null ? (
+            <p
+              className="form-error"
+              id="new-character-visual-error"
+              role="alert"
+            >
+              {createErrorMessage}
             </p>
           ) : null}
           <button
@@ -899,11 +1051,30 @@ export function CharacterVisualsPage() {
                   <div className="form-field">
                     <label htmlFor="selected-character-visual-name">名前</label>
                     <input
+                      aria-describedby={
+                        selectedErrorMessage !== null
+                          ? "selected-character-visual-error"
+                          : undefined
+                      }
+                      aria-invalid={
+                        selectedValidationMessage !== null &&
+                        (selectedDraftForRender?.name.trim().length ?? 0) === 0
+                          ? true
+                          : undefined
+                      }
                       disabled={updateMutation.isPending}
                       id="selected-character-visual-name"
                       type="text"
-                      value={visualName}
-                      onChange={(event) => setVisualName(event.target.value)}
+                      value={
+                        selectedDraftForRender?.name ?? selectedVisual.name
+                      }
+                      onChange={(event) => {
+                        setSelectedVisualDraft((current) => ({
+                          ...(current ??
+                            characterVisualDraftFromSet(selectedVisual)),
+                          name: event.target.value
+                        }));
+                      }}
                     />
                   </div>
                   <div className="form-field">
@@ -911,14 +1082,23 @@ export function CharacterVisualsPage() {
                       状態
                     </label>
                     <select
+                      aria-describedby={
+                        selectedErrorMessage !== null
+                          ? "selected-character-visual-error"
+                          : undefined
+                      }
                       disabled={updateMutation.isPending}
                       id="selected-character-visual-status"
-                      value={visualStatus}
-                      onChange={(event) =>
-                        setVisualStatus(
-                          event.target.value as "active" | "inactive"
-                        )
+                      value={
+                        selectedDraftForRender?.status ?? selectedVisual.status
                       }
+                      onChange={(event) => {
+                        setSelectedVisualDraft((current) => ({
+                          ...(current ??
+                            characterVisualDraftFromSet(selectedVisual)),
+                          status: event.target.value as "active" | "inactive"
+                        }));
+                      }}
                     >
                       <option value="active">active</option>
                       <option value="inactive">inactive</option>
@@ -930,23 +1110,34 @@ export function CharacterVisualsPage() {
                     説明
                   </label>
                   <textarea
+                    aria-describedby={
+                      selectedErrorMessage !== null
+                        ? "selected-character-visual-error"
+                        : undefined
+                    }
                     disabled={updateMutation.isPending}
                     id="selected-character-visual-description"
                     rows={3}
-                    value={visualDescription}
-                    onChange={(event) =>
-                      setVisualDescription(event.target.value)
+                    value={
+                      selectedDraftForRender?.description ??
+                      selectedVisual.description
                     }
+                    onChange={(event) => {
+                      setSelectedVisualDraft((current) => ({
+                        ...(current ??
+                          characterVisualDraftFromSet(selectedVisual)),
+                        description: event.target.value
+                      }));
+                    }}
                   />
                 </div>
-                {visualValidationMessage !== null ? (
-                  <p className="form-error" role="alert">
-                    {visualValidationMessage}
-                  </p>
-                ) : null}
-                {updateMutation.isError ? (
-                  <p className="form-error" role="alert">
-                    {friendlyErrorMessage(updateMutation.error, selectedVisual)}
+                {selectedErrorMessage !== null ? (
+                  <p
+                    className="form-error"
+                    id="selected-character-visual-error"
+                    role="alert"
+                  >
+                    {selectedErrorMessage}
                   </p>
                 ) : null}
                 {updateMutation.isSuccess ? (
