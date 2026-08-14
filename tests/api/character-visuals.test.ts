@@ -128,7 +128,31 @@ describe("character visual catalog routes", () => {
       });
 
       expect(response.statusCode).toBe(200);
-      expect(response.json()).toEqual({ data: [] });
+      const snapshot = characterVisualCatalogResponseSchema.parse(
+        response.json()
+      ).data;
+      expect(snapshot).toHaveLength(2);
+      expect(
+        snapshot.reduce((count, visual) => count + visual.variants.length, 0)
+      ).toBe(6);
+      expect(
+        snapshot.reduce(
+          (count, visual) =>
+            count +
+            visual.variants.reduce(
+              (variantCount, variant) => variantCount + variant.files.length,
+              0
+            ),
+          0
+        )
+      ).toBe(10);
+
+      const fileResponse = await initialized.app.inject({
+        method: "GET",
+        url: "/api/character-visuals/character-mentor/character-mentor-stand-v1/single"
+      });
+      expect(fileResponse.statusCode).toBe(200);
+      expect(fileResponse.headers["content-type"]).toMatch(/^image\/png/);
     } finally {
       await initialized?.app.close();
       await fs.rm(workspaceRoot, { recursive: true, force: true });

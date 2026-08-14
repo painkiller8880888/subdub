@@ -1,5 +1,6 @@
 import { mkdir } from "node:fs/promises";
 import * as path from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { type FastifyInstance } from "fastify";
 
@@ -53,9 +54,18 @@ import {
 import { RunLogStore } from "../app/run-log-store.js";
 import { CharacterVisualRepository } from "../app/character-visuals/character-visual-repository.js";
 import { CharacterVisualCatalogService } from "../app/character-visuals/character-visual-service.js";
+import {
+  legacyCharacterVisualDescriptions,
+  legacyCharacterVisualNames,
+  legacyCharacterVisualSeed
+} from "../app/character-visuals/character-visual-seed.js";
 
 export const SERVER_HOST = API_HOST;
 export const SERVER_PORT = API_PORT;
+
+const characterVisualSeedSourceRoot = fileURLToPath(
+  new URL("../../doc/assets/", import.meta.url)
+);
 
 export type ServerOptions = AppOptions & {
   backupDatabase?: BackupDatabase;
@@ -146,12 +156,23 @@ export async function initializeServer(
     const resolvedChatAdapter = createOpenRouterChatAdapter();
     const resolvedAssetRepository =
       assetRepository ?? new AssetRepository(database.database);
-    const resolvedCharacterVisualCatalogService =
-      appOptions.characterVisualCatalogService ??
-      new CharacterVisualCatalogService({
-        repository: new CharacterVisualRepository(database.database),
-        workspaceRoot
+    let resolvedCharacterVisualCatalogService =
+      appOptions.characterVisualCatalogService;
+    if (resolvedCharacterVisualCatalogService === undefined) {
+      const seededCharacterVisualCatalogService =
+        new CharacterVisualCatalogService({
+          repository: new CharacterVisualRepository(database.database),
+          workspaceRoot
+        });
+      await seededCharacterVisualCatalogService.seedLegacyCatalog({
+        sourceRoot: characterVisualSeedSourceRoot,
+        catalog: legacyCharacterVisualSeed,
+        names: legacyCharacterVisualNames,
+        descriptions: legacyCharacterVisualDescriptions
       });
+      resolvedCharacterVisualCatalogService =
+        seededCharacterVisualCatalogService;
+    }
     const resolvedProjectService =
       suppliedProjectService ??
       new ProjectService({
