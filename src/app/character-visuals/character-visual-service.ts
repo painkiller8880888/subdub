@@ -638,44 +638,6 @@ async function installSeedFiles(
   }
 }
 
-function assertSeedVisualMatches(
-  existing: CharacterVisualSet,
-  incoming: PreparedSeedVisual
-): void {
-  if (
-    existing.name !== incoming.name ||
-    existing.description !== incoming.description ||
-    existing.status !== incoming.status
-  ) {
-    throw new CharacterVisualSeedConflictError(
-      `visual ${incoming.visualId} already exists with different metadata`
-    );
-  }
-  if (
-    existing.baseWidth !== incoming.baseWidth ||
-    existing.baseHeight !== incoming.baseHeight
-  ) {
-    throw new CharacterVisualSeedConflictError(
-      `visual ${incoming.visualId} already exists with a different base canvas`
-    );
-  }
-}
-
-function assertSeedVariantMatches(
-  existing: CharacterVariant,
-  incoming: PreparedSeedVariant
-): void {
-  if (
-    existing.label !== incoming.label ||
-    existing.renderType !== incoming.renderType ||
-    JSON.stringify(existing.tags) !== JSON.stringify(incoming.tags)
-  ) {
-    throw new CharacterVisualSeedConflictError(
-      `variant ${incoming.variantId} already exists with different metadata`
-    );
-  }
-}
-
 function preparedSeedSnapshot(
   visuals: readonly PreparedSeedVisual[],
   timestamp: string
@@ -1174,21 +1136,35 @@ export class CharacterVisualCatalogService {
     try {
       promotion = await this.promoteFiles(staged.files);
       this.repository.transaction((transaction) => {
-        transaction.updateVisual(visual.visualId, {
-          name: visual.name,
-          description: visual.description,
-          status: visual.status,
-          updatedAt: timestamp
-        });
+        const currentVisual = transaction.findById(visual.visualId);
+        if (currentVisual === undefined) {
+          throw new CharacterVisualNotFoundError();
+        }
+        const firstStagedFile = staged.files[0];
+        if (firstStagedFile === undefined) {
+          throw new CharacterVisualMissingSlotError();
+        }
+        if (
+          currentVisual.baseWidth === null ||
+          currentVisual.baseHeight === null
+        ) {
+          transaction.updateBaseCanvas(
+            visual.visualId,
+            firstStagedFile.width,
+            firstStagedFile.height,
+            timestamp
+          );
+        } else if (
+          staged.files.some(
+            (file) =>
+              file.width !== currentVisual.baseWidth ||
+              file.height !== currentVisual.baseHeight
+          )
+        ) {
+          throw new CharacterVisualCanvasSizeMismatchError();
+        }
+        transaction.touchVisual(visual.visualId, timestamp);
         if (existingVariant === undefined) {
-          if (visual.baseWidth === null || visual.baseHeight === null) {
-            transaction.updateBaseCanvas(
-              visual.visualId,
-              baseWidth as number,
-              baseHeight as number,
-              timestamp
-            );
-          }
           transaction.insertVariant({
             variantId,
             visualId: visual.visualId,
@@ -1299,12 +1275,7 @@ export class CharacterVisualCatalogService {
     const timestamp = toIsoDate(this.now);
     this.repository.transaction((transaction) => {
       transaction.updateVariantStatus(variant.variantId, status, timestamp);
-      transaction.updateVisual(visual.visualId, {
-        name: visual.name,
-        description: visual.description,
-        status: visual.status,
-        updatedAt: timestamp
-      });
+      transaction.touchVisual(visual.visualId, timestamp);
     });
     return this.requireVisual(visualId);
   }
@@ -1345,57 +1316,31 @@ export class CharacterVisualCatalogService {
       options.names ?? {},
       options.descriptions ?? {}
     );
-    const { createdPaths } = await installSeedFiles(
-      this.workspaceRoot,
-      prepared
+    const existingCatalog = this.repository.list();
+    const existingVisualIds = new Set(
+      existingCatalog.map((visual) => visual.visualId)
     );
+    const visualsToSeed = prepared.filter(
+      (visual) => !existingVisualIds.has(visual.visualId)
+    );
+    const { createdPaths } =
+      visualsToSeed.length === 0
+        ? { createdPaths: [] as readonly string[] }
+        : await installSeedFiles(this.workspaceRoot, visualsToSeed);
     const timestamp = toIsoDate(this.now);
 
     try {
-      const preparedSnapshot = preparedSeedSnapshot(prepared, timestamp);
-      assertCharacterVisualCatalog(preparedSnapshot);
-      await this.verifyFiles(preparedSnapshot);
+      if (visualsToSeed.length > 0) {
+        const preparedSnapshot = preparedSeedSnapshot(visualsToSeed, timestamp);
+        assertCharacterVisualCatalog(preparedSnapshot);
+        await this.verifyFiles(preparedSnapshot);
+      }
       const finalSnapshot = this.repository.transaction((transaction) => {
-        const existingCatalog = transaction.list();
-        for (const visual of prepared) {
-          const existing = existingCatalog.find(
-            (candidate) => candidate.visualId === visual.visualId
-          );
-          if (existing === undefined) {
-            transaction.insertVisual(visualInsert(visual, timestamp));
-          } else {
-            assertSeedVisualMatches(existing, visual);
-          }
-
+        for (const visual of visualsToSeed) {
+          transaction.insertVisual(visualInsert(visual, timestamp));
           for (const variant of visual.variants) {
-            const existingVariant = existing?.variants.find(
-              (candidate) => candidate.variantId === variant.variantId
-            );
-            if (existingVariant === undefined) {
-              transaction.insertVariant(variantInsert(variant, timestamp));
-            } else {
-              assertSeedVariantMatches(existingVariant, variant);
-            }
-
-            const existingFiles = new Map(
-              (existingVariant?.files ?? []).map((file) => [file.key, file])
-            );
+            transaction.insertVariant(variantInsert(variant, timestamp));
             for (const file of variant.files) {
-              const existingFile = existingFiles.get(file.fileKey);
-              if (existingFile !== undefined) {
-                if (
-                  existingFile.libraryPath !== file.libraryPath ||
-                  existingFile.checksum !== file.checksum ||
-                  existingFile.sizeBytes !== file.sizeBytes ||
-                  existingFile.width !== file.width ||
-                  existingFile.height !== file.height
-                ) {
-                  throw new CharacterVisualSeedConflictError(
-                    `file ${variant.variantId}/${file.fileKey} already exists with different metadata`
-                  );
-                }
-                continue;
-              }
               transaction.insertFile(fileInsert(file, timestamp));
             }
           }

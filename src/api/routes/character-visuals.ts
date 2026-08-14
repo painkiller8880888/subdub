@@ -163,6 +163,35 @@ async function readVariantMultipart(
   }
 }
 
+async function discardVariantStagedUploads(
+  characterVisualCatalogService: CharacterVisualCatalogServicePort,
+  input: CharacterVisualVariantInput
+): Promise<void> {
+  const stagedByPath = new Map<string, CharacterVisualStagedUpload>();
+  for (const file of input.files) {
+    if (file.staged !== undefined) {
+      stagedByPath.set(file.staged.stagingRelativePath, file.staged);
+    }
+  }
+  await Promise.allSettled(
+    [...stagedByPath.values()].map((staged) =>
+      characterVisualCatalogService.discardStaged(staged)
+    )
+  );
+}
+
+async function withVariantStagedUploadsCleaned<T>(
+  characterVisualCatalogService: CharacterVisualCatalogServicePort,
+  input: CharacterVisualVariantInput,
+  operation: () => Promise<T>
+): Promise<T> {
+  try {
+    return await operation();
+  } finally {
+    await discardVariantStagedUploads(characterVisualCatalogService, input);
+  }
+}
+
 function requireVisual(
   characterVisualCatalogService: CharacterVisualCatalogServicePort,
   visualId: string
@@ -230,14 +259,20 @@ export function registerCharacterVisualRoutes(
     "/api/character-visuals/:visualId/variants",
     async (request) => {
       const params = characterVisualParamsSchema.parse(request.params);
+      requireVisual(characterVisualCatalogService, params.visualId);
       const input = await parseVariantMultipart(request);
-      return characterVisualResponseSchema.parse(
-        createApiSuccessResponse(
-          await characterVisualCatalogService.createVariant(
-            params.visualId,
-            input
+      return withVariantStagedUploadsCleaned(
+        characterVisualCatalogService,
+        input,
+        async () =>
+          characterVisualResponseSchema.parse(
+            createApiSuccessResponse(
+              await characterVisualCatalogService.createVariant(
+                params.visualId,
+                input
+              )
+            )
           )
-        )
       );
     }
   );
@@ -246,15 +281,31 @@ export function registerCharacterVisualRoutes(
     "/api/character-visuals/:visualId/variants/:variantId",
     async (request) => {
       const params = characterVisualVariantParamsSchema.parse(request.params);
-      const input = await parseVariantMultipart(request);
-      return characterVisualResponseSchema.parse(
-        createApiSuccessResponse(
-          await characterVisualCatalogService.updateVariant(
-            params.visualId,
-            params.variantId,
-            input
-          )
+      const visual = requireVisual(
+        characterVisualCatalogService,
+        params.visualId
+      );
+      if (
+        !visual.variants.some(
+          (variant) => variant.variantId === params.variantId
         )
+      ) {
+        throw new CharacterVariantNotFoundError();
+      }
+      const input = await parseVariantMultipart(request);
+      return withVariantStagedUploadsCleaned(
+        characterVisualCatalogService,
+        input,
+        async () =>
+          characterVisualResponseSchema.parse(
+            createApiSuccessResponse(
+              await characterVisualCatalogService.updateVariant(
+                params.visualId,
+                params.variantId,
+                input
+              )
+            )
+          )
       );
     }
   );

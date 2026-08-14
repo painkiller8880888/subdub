@@ -117,7 +117,19 @@ export function registerAssetRoutes(
     let fileCount = 0;
 
     try {
-      for await (const part of request.parts()) {
+      for await (const part of request.parts({
+        limits: {
+          fileSize: limits.maxGlobalFileBytes,
+          // Keep one parser slot for the route-level checks below so the
+          // domain-specific limit errors are returned instead of a premature
+          // multipart close from busboy.
+          files: limits.maxFileCount + 1,
+          fields: limits.maxFieldCount + 1,
+          parts: limits.maxPartCount + 1,
+          fieldNameSize: limits.maxFieldNameLength,
+          fieldSize: limits.maxFieldValueLength
+        }
+      })) {
         partCount++;
         if (partCount > limits.maxPartCount) {
           throw new AssetTooManyPartsError();
@@ -127,13 +139,21 @@ export function registerAssetRoutes(
           if (fieldCount > limits.maxFieldCount) {
             throw new AssetTooManyFieldsError();
           }
+          if (
+            Buffer.byteLength(part.fieldname, "utf8") >
+              limits.maxFieldNameLength ||
+            part.fieldnameTruncated
+          ) {
+            throw new AssetInvalidFieldError();
+          }
           if (!allowedFieldNames.has(part.fieldname)) {
             throw new AssetInvalidFieldError();
           }
-          if (part.fieldnameTruncated) {
-            throw new AssetInvalidFieldError();
-          }
-          if (part.valueTruncated) {
+          if (
+            part.valueTruncated ||
+            Buffer.byteLength(String(part.value), "utf8") >
+              limits.maxFieldValueLength
+          ) {
             throw new AssetFieldTooLargeError();
           }
           accumulateField(fields, part.fieldname, String(part.value));

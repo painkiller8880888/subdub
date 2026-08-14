@@ -330,6 +330,106 @@ describe("character visual catalog routes", () => {
     }
   });
 
+  it("restarts with mutable seed visual and variant data intact", async () => {
+    const workspaceRoot = await fs.mkdtemp(
+      path.join(tmpdir(), "subdub-character-visual-api-restart-")
+    );
+    let initialized: Awaited<ReturnType<typeof initializeServer>> | undefined;
+    try {
+      initialized = await initializeServer({ workspaceRoot });
+      const initial = characterVisualCatalogResponseSchema.parse(
+        (
+          await initialized.app.inject({
+            method: "GET",
+            url: "/api/character-visuals"
+          })
+        ).json()
+      ).data;
+      const visual = initial.find(
+        (candidate) => candidate.visualId === "character-mentor"
+      )!;
+      const variant = visual.variants.find(
+        (candidate) => candidate.variantId === "character-mentor-stand-v1"
+      )!;
+      const oldLibraryPath = variant.files[0]!.libraryPath;
+
+      const visualUpdate = await initialized.app.inject({
+        method: "PUT",
+        url: `/api/character-visuals/${visual.visualId}`,
+        headers: { "content-type": "application/json" },
+        payload: JSON.stringify({
+          name: "Customized mentor",
+          description: "Customized seed description",
+          status: "inactive"
+        })
+      });
+      expect(visualUpdate.statusCode).toBe(200);
+
+      const replacement = makeTransparentPng(600, 1000, 1);
+      const variantUpdate = buildMultipartBody([
+        { name: "label", value: "Customized stand" },
+        { name: "renderType", value: "single-image" },
+        { name: "tags", value: "custom" },
+        {
+          name: "single",
+          filename: "customized.png",
+          mimeType: "image/png",
+          data: replacement
+        }
+      ]);
+      const variantResponse = await initialized.app.inject({
+        method: "PUT",
+        url: `/api/character-visuals/${visual.visualId}/variants/${variant.variantId}`,
+        headers: { "content-type": variantUpdate.contentType },
+        payload: variantUpdate.body
+      });
+      expect(variantResponse.statusCode).toBe(200);
+
+      await initialized.app.close();
+      initialized = undefined;
+      initialized = await initializeServer({ workspaceRoot });
+
+      const restarted = characterVisualCatalogResponseSchema.parse(
+        (
+          await initialized.app.inject({
+            method: "GET",
+            url: "/api/character-visuals"
+          })
+        ).json()
+      ).data;
+      const restartedVisual = restarted.find(
+        (candidate) => candidate.visualId === visual.visualId
+      )!;
+      const restartedVariant = restartedVisual.variants.find(
+        (candidate) => candidate.variantId === variant.variantId
+      )!;
+      expect(restartedVisual).toMatchObject({
+        name: "Customized mentor",
+        description: "Customized seed description",
+        status: "inactive"
+      });
+      expect(restartedVariant).toMatchObject({
+        label: "Customized stand",
+        renderType: "single-image",
+        tags: ["custom"]
+      });
+      expect(restartedVariant.files[0]!.libraryPath).not.toBe(oldLibraryPath);
+      await expect(
+        fs.stat(path.join(workspaceRoot, oldLibraryPath))
+      ).rejects.toMatchObject({ code: "ENOENT" });
+
+      const fileResponse = await initialized.app.inject({
+        method: "GET",
+        url: `/api/character-visuals/${visual.visualId}/${variant.variantId}/single`
+      });
+      expect(fileResponse.statusCode).toBe(200);
+      expect([...fileResponse.rawPayload]).toEqual([...replacement]);
+    } finally {
+      await initialized?.app.close();
+      await fs.rm(workspaceRoot, { recursive: true, force: true });
+    }
+  });
+
   it("validates invalid PNG, missing pair slots, and canvas mismatch through multipart", async () => {
     const workspaceRoot = await fs.mkdtemp(
       path.join(tmpdir(), "subdub-character-visual-api-validation-")
@@ -418,6 +518,54 @@ describe("character visual catalog routes", () => {
       expect(
         apiErrorResponseSchema.parse(mismatchResponse.json()).error.code
       ).toBe("CHARACTER_VISUAL_CANVAS_SIZE_MISMATCH");
+    } finally {
+      await initialized?.app.close();
+      await fs.rm(workspaceRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("does not stage uploads for missing visual or variant targets", async () => {
+    const workspaceRoot = await fs.mkdtemp(
+      path.join(tmpdir(), "subdub-character-visual-api-missing-target-")
+    );
+    let initialized: Awaited<ReturnType<typeof initializeServer>> | undefined;
+    try {
+      initialized = await initializeServer({ workspaceRoot });
+      const multipart = buildMultipartBody([
+        { name: "label", value: "Unused" },
+        { name: "renderType", value: "single-image" },
+        {
+          name: "single",
+          filename: "unused.png",
+          mimeType: "image/png",
+          data: pngBytes
+        }
+      ]);
+
+      const missingVisualResponse = await initialized.app.inject({
+        method: "POST",
+        url: "/api/character-visuals/not-exist/variants",
+        headers: { "content-type": multipart.contentType },
+        payload: multipart.body
+      });
+      expect(missingVisualResponse.statusCode).toBe(404);
+
+      const missingVariantResponse = await initialized.app.inject({
+        method: "PUT",
+        url: "/api/character-visuals/character-mentor/variants/not-exist",
+        headers: { "content-type": multipart.contentType },
+        payload: multipart.body
+      });
+      expect(missingVariantResponse.statusCode).toBe(404);
+
+      const stagingEntries = await fs.readdir(
+        path.join(workspaceRoot, "library", "staging")
+      );
+      expect(
+        stagingEntries.filter((entry) =>
+          entry.startsWith("character-visual-upload-")
+        )
+      ).toEqual([]);
     } finally {
       await initialized?.app.close();
       await fs.rm(workspaceRoot, { recursive: true, force: true });

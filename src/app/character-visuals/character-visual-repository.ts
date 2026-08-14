@@ -287,6 +287,16 @@ export class CharacterVisualRepository {
     });
   }
 
+  touchVisual(visualId: string, updatedAt: string): void {
+    withDatabaseErrors(() => {
+      this.database
+        .update(characterVisuals)
+        .set({ updatedAt })
+        .where(eq(characterVisuals.visualId, visualId))
+        .run();
+    });
+  }
+
   insertVariant(values: CharacterVariantInsert): void {
     withDatabaseErrors(() => {
       this.database

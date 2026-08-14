@@ -437,6 +437,78 @@ describe("character visual catalog", { timeout: 30_000 }, () => {
     expect(repository.list()).toEqual([before]);
   });
 
+  it("does not overwrite concurrent visual metadata during variant registration", async () => {
+    const { repository, service } = await makeService();
+    const visual = service.create({ name: "Original visual" });
+    const originalTransaction = repository.transaction.bind(repository);
+    vi.spyOn(repository, "transaction").mockImplementation((operation) => {
+      repository.updateVisual(visual.visualId, {
+        name: "Concurrent visual",
+        description: "Concurrent description",
+        status: "inactive",
+        updatedAt: "2026-08-14T00:00:01.000Z"
+      });
+      return originalTransaction(operation);
+    });
+
+    const result = await service.createVariant(visual.visualId, {
+      label: "Concurrent-safe variant",
+      renderType: "single-image",
+      tags: [],
+      files: [
+        {
+          key: "single",
+          content: makeTransparentPng(600, 1000, 1),
+          mimeType: "image/png"
+        }
+      ]
+    });
+
+    expect(result).toMatchObject({
+      name: "Concurrent visual",
+      description: "Concurrent description",
+      status: "inactive",
+      baseWidth: 600,
+      baseHeight: 1000
+    });
+  });
+
+  it("rechecks a concurrently initialized base canvas before committing a variant", async () => {
+    const { repository, service } = await makeService();
+    const visual = service.create({ name: "Concurrent canvas visual" });
+    const originalTransaction = repository.transaction.bind(repository);
+    vi.spyOn(repository, "transaction").mockImplementation((operation) => {
+      repository.updateBaseCanvas(
+        visual.visualId,
+        600,
+        1000,
+        "2026-08-14T00:00:01.000Z"
+      );
+      return originalTransaction(operation);
+    });
+
+    await expect(
+      service.createVariant(visual.visualId, {
+        label: "Wrong canvas",
+        renderType: "single-image",
+        tags: [],
+        files: [
+          {
+            key: "single",
+            content: makeTransparentPng(700, 1000, 1),
+            mimeType: "image/png"
+          }
+        ]
+      })
+    ).rejects.toMatchObject({ code: "CHARACTER_VISUAL_CANVAS_SIZE_MISMATCH" });
+    expect(repository.findById(visual.visualId)).toMatchObject({
+      baseWidth: 600,
+      baseHeight: 1000,
+      variants: []
+    });
+    await expect(service.findOrphanedFiles()).resolves.toEqual([]);
+  });
+
   it("promotes replacements to immutable paths while the old path remains ready", async () => {
     const { repository, service, workspaceRoot } = await makeService();
     const visual = service.create({ name: "Immutable replacement visual" });
@@ -526,28 +598,31 @@ describe("character visual catalog", { timeout: 30_000 }, () => {
     await expect(fs.readFile(orphanStagingPath)).resolves.toEqual(pngBytes);
   });
 
-  it("does not remove committed files when the post-commit read path fails", async () => {
+  it("does not install seed files when the existing catalog read fails", async () => {
     const { repository, service, workspaceRoot } = await makeService();
     const sourceRoot = path.join(process.cwd(), "doc", "assets");
     const listSpy = vi.spyOn(repository, "list").mockImplementation(() => {
-      throw new Error("post-commit read failed");
+      throw new Error("existing catalog read failed");
     });
 
-    const snapshot = await service.seedLegacyCatalog({
-      sourceRoot,
-      catalog: legacyCharacterVisualSeed,
-      names: legacyCharacterVisualNames,
-      descriptions: legacyCharacterVisualDescriptions
-    });
+    await expect(
+      service.seedLegacyCatalog({
+        sourceRoot,
+        catalog: legacyCharacterVisualSeed,
+        names: legacyCharacterVisualNames,
+        descriptions: legacyCharacterVisualDescriptions
+      })
+    ).rejects.toThrow("existing catalog read failed");
 
-    expect(snapshot).toHaveLength(2);
-    expect(listSpy).not.toHaveBeenCalled();
-    const managedPath = path.join(
-      workspaceRoot,
-      snapshot[0]!.variants[0]!.files[0]!.libraryPath
-    );
-    const stats = await fs.stat(managedPath);
-    expect(stats.isFile()).toBe(true);
+    expect(listSpy).toHaveBeenCalledTimes(1);
+    await expect(
+      fs.stat(
+        path.join(
+          workspaceRoot,
+          "library/character-visuals/character-mentor/character-mentor-stand-v1/single.png"
+        )
+      )
+    ).rejects.toMatchObject({ code: "ENOENT" });
   });
 
   it("removes newly installed files when the metadata transaction fails", async () => {
