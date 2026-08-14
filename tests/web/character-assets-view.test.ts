@@ -5,10 +5,53 @@ import type { CharacterVariant } from "../../src/assets/character-asset-manifest
 import { createEmptyVideoProject } from "../../src/app/projects/empty-video-project.js";
 import {
   characterAssetUrl,
+  characterVisualSnapshotToCharacterAssetCatalog,
   toCharacterAssetViewModels
 } from "../../src/web/character-assets-view.js";
+import { characterVisualCatalogSnapshotSchema } from "../../src/schema/character-visual.js";
 
 describe("character asset view model", () => {
+  it("maps a database snapshot to read-only browser asset URLs", () => {
+    const snapshot = characterVisualCatalogSnapshotSchema.parse([
+      {
+        visualId: "character-mentor",
+        name: "Mentor",
+        description: "",
+        status: "active",
+        baseWidth: 600,
+        baseHeight: 1000,
+        variants: [
+          {
+            variantId: "character-mentor-stand-v1",
+            label: "Stand",
+            renderType: "single-image",
+            tags: [],
+            files: [
+              {
+                key: "single",
+                libraryPath:
+                  "library/character-visuals/character-mentor/character-mentor-stand-v1/single.png",
+                mimeType: "image/png",
+                checksum: "0".repeat(64),
+                sizeBytes: 1,
+                width: 600,
+                height: 1000
+              }
+            ]
+          }
+        ],
+        createdAt: "2026-08-14T00:00:00.000Z",
+        updatedAt: "2026-08-14T00:00:00.000Z"
+      }
+    ]);
+
+    const [variant] = characterVisualSnapshotToCharacterAssetCatalog(snapshot);
+
+    expect(variant?.files[0]?.destinationPath).toBe(
+      "api/character-visuals/character-mentor/character-mentor-stand-v1/single"
+    );
+  });
+
   it("lists catalog variants by character without using VideoProject visualAssets", () => {
     const project = createEmptyVideoProject({
       projectId: "character-view-project",

@@ -55,6 +55,11 @@ export type CharacterVisualCreateInput = {
   readonly status?: CharacterVisualStatus;
 };
 
+export type CharacterVisualManagedFile = {
+  readonly content: Buffer;
+  readonly mimeType: CharacterVisualFile["mimeType"];
+};
+
 type PreparedSeedFile = {
   readonly variantId: string;
   readonly fileKey: CharacterVisualFile["key"];
@@ -571,6 +576,26 @@ export class CharacterVisualCatalogService {
 
   get(visualId: string): CharacterVisualSet | undefined {
     return this.repository.findById(visualId);
+  }
+
+  async readManagedFile(
+    visualId: string,
+    variantId: string,
+    fileKey: string
+  ): Promise<CharacterVisualManagedFile | undefined> {
+    const visual = this.repository.findById(visualId);
+    const variant = visual?.variants.find(
+      (candidate) => candidate.variantId === variantId
+    );
+    const file = variant?.files.find((candidate) => candidate.key === fileKey);
+    if (file === undefined) {
+      return undefined;
+    }
+
+    const managedPath = resolveInside(this.workspaceRoot, file.libraryPath);
+    await assertNoSymlinkComponents(this.workspaceRoot, file.libraryPath);
+    const content = await readRegularFile(managedPath);
+    return { content, mimeType: file.mimeType };
   }
 
   create(input: CharacterVisualCreateInput): CharacterVisualSet {

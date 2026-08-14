@@ -51,6 +51,8 @@ import {
   type AiRunSearchImprovementLogRepositoryPort
 } from "../app/ai-run-search-service.js";
 import { RunLogStore } from "../app/run-log-store.js";
+import { CharacterVisualRepository } from "../app/character-visuals/character-visual-repository.js";
+import { CharacterVisualCatalogService } from "../app/character-visuals/character-visual-service.js";
 
 export const SERVER_HOST = API_HOST;
 export const SERVER_PORT = API_PORT;
@@ -144,6 +146,12 @@ export async function initializeServer(
     const resolvedChatAdapter = createOpenRouterChatAdapter();
     const resolvedAssetRepository =
       assetRepository ?? new AssetRepository(database.database);
+    const resolvedCharacterVisualCatalogService =
+      appOptions.characterVisualCatalogService ??
+      new CharacterVisualCatalogService({
+        repository: new CharacterVisualRepository(database.database),
+        workspaceRoot
+      });
     const resolvedProjectService =
       suppliedProjectService ??
       new ProjectService({
@@ -253,7 +261,8 @@ export async function initializeServer(
       manifestPreviewService: resolvedManifestPreviewService,
       projectFileService: resolvedProjectFileService,
       renderJobService: resolvedRenderJobService,
-      aiRunSearchService: resolvedAiRunSearchService
+      aiRunSearchService: resolvedAiRunSearchService,
+      characterVisualCatalogService: resolvedCharacterVisualCatalogService
     });
     resolvedProcessingWorker.start();
     resolvedRenderJobService.start();

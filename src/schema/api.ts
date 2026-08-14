@@ -61,6 +61,7 @@ import {
   improvementDecisionSummarySchema,
   improvementReasonSchema
 } from "./improvement-log.js";
+import { characterVisualCatalogSnapshotSchema } from "./character-visual.js";
 
 const optionalImprovementReasonSchema = improvementReasonSchema
   .nullable()
@@ -107,6 +108,17 @@ export const healthResponseSchema = z
     revision: z.number().int().nonnegative().optional()
   })
   .strict();
+
+export const characterVisualCatalogResponseSchema = strictObject({
+  data: characterVisualCatalogSnapshotSchema,
+  revision: nonNegativeIntegerSchema.optional()
+});
+
+export const characterVisualFileParamsSchema = strictObject({
+  visualId: idSchema,
+  variantId: idSchema,
+  fileKey: idSchema
+});
 
 export const voicevoxStatusDataSchema = strictObject({
   available: z.literal(true),
@@ -807,6 +819,9 @@ export type ApiSuccessResponse<T> = {
 };
 export type ApiErrorResponse = z.infer<typeof apiErrorResponseSchema>;
 export type HealthResponse = z.infer<typeof healthResponseSchema>;
+export type CharacterVisualCatalogResponse = z.infer<
+  typeof characterVisualCatalogResponseSchema
+>;
 export type VoicevoxStatusData = z.infer<typeof voicevoxStatusDataSchema>;
 export type VoicevoxStatusResponse = z.infer<
   typeof voicevoxStatusResponseSchema

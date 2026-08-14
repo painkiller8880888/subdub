@@ -6,10 +6,12 @@ import { ZodError } from "zod";
 import {
   ApiClientError,
   ApiClientProtocolError,
+  fetchCharacterVisualCatalog,
   fetchProject
 } from "./lib/api-client";
 import {
   characterAssetUrl,
+  characterVisualSnapshotToCharacterAssetCatalog,
   toCharacterAssetViewModels,
   type CharacterAssetVariantView
 } from "./character-assets-view";
@@ -192,12 +194,18 @@ export function CharacterAssetsPage() {
     enabled: projectId !== undefined,
     retry: false
   });
+  const catalogQuery = useQuery({
+    queryKey: ["character-visuals"],
+    queryFn: fetchCharacterVisualCatalog,
+    enabled: projectId !== undefined,
+    retry: false
+  });
 
   if (projectId === undefined) {
     return <Navigate replace to="/projects" />;
   }
 
-  if (projectQuery.isPending) {
+  if (projectQuery.isPending || catalogQuery.isPending) {
     return (
       <main className="page-shell narrow-shell">
         <p className="status-message" role="status">
@@ -207,7 +215,12 @@ export function CharacterAssetsPage() {
     );
   }
 
-  if (projectQuery.isError || projectQuery.data === undefined) {
+  if (
+    projectQuery.isError ||
+    projectQuery.data === undefined ||
+    catalogQuery.isError ||
+    catalogQuery.data === undefined
+  ) {
     return (
       <main className="page-shell narrow-shell">
         <p className="back-link">
@@ -217,15 +230,16 @@ export function CharacterAssetsPage() {
         </p>
         <section className="message-panel message-panel-error" role="alert">
           <h1>キャラクター素材を確認できません</h1>
-          <p>{getErrorMessage(projectQuery.error)}</p>
+          <p>{getErrorMessage(projectQuery.error ?? catalogQuery.error)}</p>
         </section>
       </main>
     );
   }
 
-  // CV-02 will inject the read-only catalog API into this page. Keep the
-  // catalog explicit so the legacy seed fixture cannot become a UI fallback.
-  const characters = toCharacterAssetViewModels(projectQuery.data, []);
+  const catalog = characterVisualSnapshotToCharacterAssetCatalog(
+    catalogQuery.data
+  );
+  const characters = toCharacterAssetViewModels(projectQuery.data, catalog);
   const handleAssetError = (assetPath: string): void => {
     setFailedAssetPaths((current) =>
       current.includes(assetPath) ? current : [...current, assetPath]
