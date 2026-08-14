@@ -8,12 +8,14 @@ export type CharacterVisualApiErrorCode =
   | "CHARACTER_VISUAL_INVALID_PNG"
   | "CHARACTER_VISUAL_MISSING_SLOT"
   | "CHARACTER_VISUAL_CANVAS_SIZE_MISMATCH"
+  | "CHARACTER_VISUAL_TOO_MANY_FILES"
+  | "CHARACTER_VISUAL_FILE_TOO_LARGE"
   | "CHARACTER_VISUAL_UNSAFE_PATH"
   | "CHARACTER_VISUAL_CONFLICT"
   | "CHARACTER_VISUAL_STORAGE_FAILED"
   | "CHARACTER_VISUAL_UPLOAD_INTERRUPTED";
 
-export type CharacterVisualApiErrorStatus = 400 | 404 | 409 | 422 | 500;
+export type CharacterVisualApiErrorStatus = 400 | 404 | 409 | 413 | 422 | 500;
 
 export class CharacterVisualApiError extends Error {
   readonly code: CharacterVisualApiErrorCode;
@@ -100,6 +102,28 @@ export class CharacterVisualCanvasSizeMismatchError extends CharacterVisualApiEr
       "The uploaded canvas does not match the character visual canvas."
     );
     this.name = "CharacterVisualCanvasSizeMismatchError";
+  }
+}
+
+export class CharacterVisualTooManyFilesError extends CharacterVisualApiError {
+  constructor() {
+    super(
+      "CHARACTER_VISUAL_TOO_MANY_FILES",
+      413,
+      "The character visual upload contains too many files."
+    );
+    this.name = "CharacterVisualTooManyFilesError";
+  }
+}
+
+export class CharacterVisualFileTooLargeError extends CharacterVisualApiError {
+  constructor() {
+    super(
+      "CHARACTER_VISUAL_FILE_TOO_LARGE",
+      413,
+      "The character visual file is too large."
+    );
+    this.name = "CharacterVisualFileTooLargeError";
   }
 }
 

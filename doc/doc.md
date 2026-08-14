@@ -991,6 +991,8 @@ POST /api/projects/{projectId}/visuals/approve
 
 Character visual metadata is read from the workspace SQLite `CharacterVisualSet`; the TypeScript catalog is only a typed adapter or legacy seed input. Both visual sets and variants persist `active | inactive`. Deactivation changes the variant status and never physically deletes its database row or managed files. The API/UI candidate adapter excludes inactive visuals and variants from ordinary use while retaining them in the database snapshot.
 
+Uploads are streamed directly into workspace staging with a separate 32 MiB per-file character-PNG limit. Variant replacement uses a generation-qualified immutable path, commits the new SQLite file metadata before removing old paths, and exposes unreferenced final/staging files through orphan diagnostics without automatic deletion.
+
 `script/approve` と `visuals/approve` 相当の API が既存データ互換のため残る場合でも、通常の制作画面、音声操作、Manifest 生成、プレビュー、レンダリングはそれらを呼び出さず、前提条件にも使用しない。
 
 - `GET /api/models` は OpenRouter のモデル一覧を取得し、WebUI 用に必要な情報へ整形して返す。

@@ -1,6 +1,8 @@
 import { promises as fs } from "node:fs";
+import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import * as path from "node:path";
+import { Readable } from "node:stream";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -22,7 +24,7 @@ import { characterVisualSetSchema } from "../../src/schema/character-visual.js";
 import { validateCharacterVisualCatalog } from "../../src/validation/character-visuals.js";
 import { compileRenderManifest } from "../../src/app/rendering/render-manifest-compiler.js";
 import { createRenderManifestInput } from "../fixtures/render-manifest-input.js";
-import { pngBytes } from "../fixtures/asset-fixtures.js";
+import { makeTransparentPng, pngBytes } from "../fixtures/asset-fixtures.js";
 
 describe("character visual catalog", { timeout: 30_000 }, () => {
   const workspaceRoots: string[] = [];
@@ -294,6 +296,22 @@ describe("character visual catalog", { timeout: 30_000 }, () => {
     );
   });
 
+  it("streams a multipart file into staging and cleans the staging root", async () => {
+    const { service, workspaceRoot } = await makeService();
+    const staged = await service.stageUpload({
+      stream: Readable.from([pngBytes]),
+      mimeType: "image/png",
+      filename: "client-name.png"
+    });
+    const stagedPath = path.join(workspaceRoot, staged.fileRelativePath);
+    await expect(fs.readFile(stagedPath)).resolves.toEqual(pngBytes);
+
+    await service.discardStaged(staged);
+    await expect(
+      fs.stat(path.join(workspaceRoot, staged.stagingRelativePath))
+    ).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
   it("returns deterministic ordering regardless of seed input order", async () => {
     const { service } = await makeService();
     const sourceRoot = path.join(process.cwd(), "doc", "assets");
@@ -417,6 +435,95 @@ describe("character visual catalog", { timeout: 30_000 }, () => {
     ).rejects.toThrow("database replacement failed");
     await expect(fs.readFile(filePath)).resolves.toEqual(pngBytes);
     expect(repository.list()).toEqual([before]);
+  });
+
+  it("promotes replacements to immutable paths while the old path remains ready", async () => {
+    const { repository, service, workspaceRoot } = await makeService();
+    const visual = service.create({ name: "Immutable replacement visual" });
+    const before = await service.createVariant(visual.visualId, {
+      label: "Before",
+      renderType: "single-image",
+      tags: [],
+      files: [{ key: "single", content: pngBytes, mimeType: "image/png" }]
+    });
+    const beforeFile = before.variants[0]!.files[0]!;
+    const beforePath = path.join(workspaceRoot, beforeFile.libraryPath);
+    let oldFileWasReadyAtTransactionBoundary = false;
+    vi.spyOn(repository, "transaction").mockImplementation(() => {
+      oldFileWasReadyAtTransactionBoundary = existsSync(beforePath);
+      throw new Error("simulate process interruption before metadata commit");
+    });
+
+    await expect(
+      service.updateVariant(visual.visualId, before.variants[0]!.variantId, {
+        label: "After",
+        renderType: "single-image",
+        tags: [],
+        files: [
+          {
+            key: "single",
+            content: makeTransparentPng(1, 1, 1),
+            mimeType: "image/png"
+          }
+        ]
+      })
+    ).rejects.toThrow("simulate process interruption");
+    expect(oldFileWasReadyAtTransactionBoundary).toBe(true);
+    await expect(fs.readFile(beforePath)).resolves.toEqual(pngBytes);
+  });
+
+  it("switches metadata to a new immutable path after a successful replacement", async () => {
+    const { service, workspaceRoot } = await makeService();
+    const visual = service.create({ name: "Successful immutable replacement" });
+    const before = await service.createVariant(visual.visualId, {
+      label: "Before",
+      renderType: "single-image",
+      tags: [],
+      files: [{ key: "single", content: pngBytes, mimeType: "image/png" }]
+    });
+    const beforeFile = before.variants[0]!.files[0]!;
+    const replacement = makeTransparentPng(1, 1, 1);
+    const after = await service.updateVariant(
+      visual.visualId,
+      before.variants[0]!.variantId,
+      {
+        label: "After",
+        renderType: "single-image",
+        tags: [],
+        files: [{ key: "single", content: replacement, mimeType: "image/png" }]
+      }
+    );
+    const afterFile = after.variants[0]!.files[0]!;
+    expect(afterFile.libraryPath).not.toBe(beforeFile.libraryPath);
+    await expect(
+      fs.readFile(path.join(workspaceRoot, afterFile.libraryPath))
+    ).resolves.toEqual(replacement);
+    await expect(
+      fs.stat(path.join(workspaceRoot, beforeFile.libraryPath))
+    ).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("diagnoses unreferenced final and staging files without deleting them", async () => {
+    const { service, workspaceRoot } = await makeService();
+    const orphanFinalPath = path.join(
+      workspaceRoot,
+      "library/character-visuals/orphan-visual/orphan-variant/orphan.png"
+    );
+    const orphanStagingPath = path.join(
+      workspaceRoot,
+      "library/staging/character-visual-upload-crashed/upload.bin"
+    );
+    await fs.mkdir(path.dirname(orphanFinalPath), { recursive: true });
+    await fs.mkdir(path.dirname(orphanStagingPath), { recursive: true });
+    await fs.writeFile(orphanFinalPath, pngBytes);
+    await fs.writeFile(orphanStagingPath, pngBytes);
+
+    await expect(service.findOrphanedFiles()).resolves.toEqual([
+      "library/character-visuals/orphan-visual/orphan-variant/orphan.png",
+      "library/staging/character-visual-upload-crashed/upload.bin"
+    ]);
+    await expect(fs.readFile(orphanFinalPath)).resolves.toEqual(pngBytes);
+    await expect(fs.readFile(orphanStagingPath)).resolves.toEqual(pngBytes);
   });
 
   it("does not remove committed files when the post-commit read path fails", async () => {

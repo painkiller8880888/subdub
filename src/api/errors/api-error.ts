@@ -100,6 +100,8 @@ export const API_ERROR_CODE = {
   characterVisualInvalidPng: "CHARACTER_VISUAL_INVALID_PNG",
   characterVisualMissingSlot: "CHARACTER_VISUAL_MISSING_SLOT",
   characterVisualCanvasSizeMismatch: "CHARACTER_VISUAL_CANVAS_SIZE_MISMATCH",
+  characterVisualTooManyFiles: "CHARACTER_VISUAL_TOO_MANY_FILES",
+  characterVisualFileTooLarge: "CHARACTER_VISUAL_FILE_TOO_LARGE",
   characterVisualUnsafePath: "CHARACTER_VISUAL_UNSAFE_PATH",
   characterVisualConflict: "CHARACTER_VISUAL_CONFLICT",
   characterVisualStorageFailed: "CHARACTER_VISUAL_STORAGE_FAILED",

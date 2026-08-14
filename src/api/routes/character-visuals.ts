@@ -1,13 +1,17 @@
 import type { FastifyInstance, FastifyRequest } from "fastify";
 
 import {
+  CharacterVisualFileTooLargeError,
   CharacterVisualNotFoundError,
+  CharacterVisualTooManyFilesError,
   CharacterVisualUploadInterruptedError,
   CharacterVisualValidationError,
   CharacterVariantNotFoundError
 } from "../../app/character-visuals/character-visual-errors.js";
 import {
+  CHARACTER_VISUAL_MAX_FILE_BYTES,
   CharacterVisualCatalogService,
+  type CharacterVisualStagedUpload,
   type CharacterVisualUploadFile,
   type CharacterVisualVariantInput
 } from "../../app/character-visuals/character-visual-service.js";
@@ -33,6 +37,8 @@ export type CharacterVisualCatalogServicePort = Pick<
   | "updateVariant"
   | "deactivateVariant"
   | "activateVariant"
+  | "stageUpload"
+  | "discardStaged"
   | "readManagedFile"
 >;
 
@@ -42,6 +48,12 @@ const fileFieldNames = new Set(["single", "closed", "open"]);
 function toCharacterVisualMultipartError(error: unknown): unknown {
   if (typeof error === "object" && error !== null && "code" in error) {
     const code = error.code;
+    if (code === "FST_REQ_FILE_TOO_LARGE") {
+      return new CharacterVisualFileTooLargeError();
+    }
+    if (code === "FST_FILES_LIMIT") {
+      return new CharacterVisualTooManyFilesError();
+    }
     if (
       code === "FST_MP_PREMATURE_CLOSE" ||
       code === "ERR_STREAM_PREMATURE_CLOSE"
@@ -60,6 +72,13 @@ function toCharacterVisualMultipartError(error: unknown): unknown {
   return error;
 }
 
+async function drainFile(file: AsyncIterable<unknown>): Promise<void> {
+  for await (const chunk of file) {
+    // Drain rejected file parts so the multipart parser can finish cleanly.
+    void chunk;
+  }
+}
+
 function appendField(
   fields: Record<string, string | string[]>,
   name: string,
@@ -76,46 +95,72 @@ function appendField(
 }
 
 async function readVariantMultipart(
-  request: FastifyRequest
+  request: FastifyRequest,
+  characterVisualCatalogService: CharacterVisualCatalogServicePort
 ): Promise<CharacterVisualVariantInput> {
   const fields: Record<string, string | string[]> = {};
   const files: CharacterVisualUploadFile[] = [];
+  const stagedUploads: CharacterVisualStagedUpload[] = [];
 
-  for await (const part of request.parts()) {
-    if (part.type === "field") {
-      if (
-        !metadataFieldNames.has(part.fieldname) ||
-        part.fieldnameTruncated ||
-        part.valueTruncated
-      ) {
+  try {
+    for await (const part of request.parts({
+      limits: {
+        fileSize: CHARACTER_VISUAL_MAX_FILE_BYTES,
+        files: 2,
+        fields: 32,
+        parts: 64
+      }
+    })) {
+      if (part.type === "field") {
+        if (
+          !metadataFieldNames.has(part.fieldname) ||
+          part.fieldnameTruncated ||
+          part.valueTruncated
+        ) {
+          throw new CharacterVisualValidationError(
+            "unknown or truncated character visual metadata field"
+          );
+        }
+        appendField(fields, part.fieldname, String(part.value));
+        continue;
+      }
+
+      if (!fileFieldNames.has(part.fieldname)) {
+        await drainFile(part.file);
         throw new CharacterVisualValidationError(
-          "unknown or truncated character visual metadata field"
+          "unknown character visual file slot"
         );
       }
-      appendField(fields, part.fieldname, String(part.value));
-      continue;
+      if (files.some((file) => file.key === part.fieldname)) {
+        await drainFile(part.file);
+        throw new CharacterVisualValidationError(
+          "character visual file slots must be unique"
+        );
+      }
+      const staged = await characterVisualCatalogService.stageUpload({
+        stream: part.file,
+        mimeType: part.mimetype,
+        filename: part.filename
+      });
+      stagedUploads.push(staged);
+      files.push({
+        key: part.fieldname,
+        staged,
+        mimeType: part.mimetype,
+        filename: part.filename
+      });
     }
 
-    if (!fileFieldNames.has(part.fieldname)) {
-      throw new CharacterVisualValidationError(
-        "unknown character visual file slot"
-      );
-    }
-    if (files.some((file) => file.key === part.fieldname)) {
-      throw new CharacterVisualValidationError(
-        "character visual file slots must be unique"
-      );
-    }
-    files.push({
-      key: part.fieldname,
-      content: await part.toBuffer(),
-      mimeType: part.mimetype,
-      filename: part.filename
-    });
+    const metadata = characterVisualVariantMultipartRequestSchema.parse(fields);
+    return { ...metadata, files };
+  } catch (error) {
+    await Promise.all(
+      stagedUploads.map((staged) =>
+        characterVisualCatalogService.discardStaged(staged)
+      )
+    );
+    throw toCharacterVisualMultipartError(error);
   }
-
-  const metadata = characterVisualVariantMultipartRequestSchema.parse(fields);
-  return { ...metadata, files };
 }
 
 function requireVisual(
@@ -175,7 +220,7 @@ export function registerCharacterVisualRoutes(
     request: FastifyRequest
   ): Promise<CharacterVisualVariantInput> {
     try {
-      return await readVariantMultipart(request);
+      return await readVariantMultipart(request, characterVisualCatalogService);
     } catch (error) {
       throw toCharacterVisualMultipartError(error);
     }

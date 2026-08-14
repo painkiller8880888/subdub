@@ -12,8 +12,15 @@ import {
   characterVisualCatalogSnapshotSchema,
   characterVisualSetSchema
 } from "../../src/schema/character-visual.js";
-import { characterVisualResponseSchema } from "../../src/schema/api.js";
-import { buildMultipartBody, pngBytes } from "../fixtures/asset-fixtures.js";
+import {
+  apiErrorResponseSchema,
+  characterVisualResponseSchema
+} from "../../src/schema/api.js";
+import {
+  buildMultipartBody,
+  makeTransparentPng,
+  pngBytes
+} from "../fixtures/asset-fixtures.js";
 
 const catalogSnapshot = characterVisualCatalogSnapshotSchema.parse([
   {
@@ -61,6 +68,12 @@ function makeCatalogService(
     updateVariant: async () => catalogSnapshot[0]!,
     deactivateVariant: () => catalogSnapshot[0]!,
     activateVariant: () => catalogSnapshot[0]!,
+    stageUpload: async () => ({
+      stagingRelativePath: "library/staging/test",
+      fileRelativePath: "library/staging/test/upload.bin",
+      sizeBytes: 0
+    }),
+    discardStaged: async () => undefined,
     readManagedFile: async () => undefined,
     ...overrides
   };
@@ -311,6 +324,100 @@ describe("character visual catalog routes", () => {
       characterVisualSetSchema.parse(
         characterVisualResponseSchema.parse(updateResponse.json()).data
       );
+    } finally {
+      await initialized?.app.close();
+      await fs.rm(workspaceRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("validates invalid PNG, missing pair slots, and canvas mismatch through multipart", async () => {
+    const workspaceRoot = await fs.mkdtemp(
+      path.join(tmpdir(), "subdub-character-visual-api-validation-")
+    );
+    let initialized: Awaited<ReturnType<typeof initializeServer>> | undefined;
+    try {
+      initialized = await initializeServer({ workspaceRoot });
+      const createVisual = async (name: string) => {
+        const response = await initialized!.app.inject({
+          method: "POST",
+          url: "/api/character-visuals",
+          headers: { "content-type": "application/json" },
+          payload: JSON.stringify({ name, description: "", status: "active" })
+        });
+        return characterVisualResponseSchema.parse(response.json()).data;
+      };
+
+      const invalidPngVisual = await createVisual("Invalid PNG visual");
+      const invalidPng = buildMultipartBody([
+        { name: "label", value: "Invalid" },
+        { name: "renderType", value: "single-image" },
+        {
+          name: "single",
+          filename: "invalid.png",
+          mimeType: "image/png",
+          data: Buffer.from("not a png")
+        }
+      ]);
+      const invalidResponse = await initialized.app.inject({
+        method: "POST",
+        url: `/api/character-visuals/${invalidPngVisual.visualId}/variants`,
+        headers: { "content-type": invalidPng.contentType },
+        payload: invalidPng.body
+      });
+      expect(invalidResponse.statusCode).toBe(422);
+      expect(
+        apiErrorResponseSchema.parse(invalidResponse.json()).error.code
+      ).toBe("CHARACTER_VISUAL_INVALID_PNG");
+
+      const missingPairVisual = await createVisual("Missing pair visual");
+      const missingPair = buildMultipartBody([
+        { name: "label", value: "Missing pair" },
+        { name: "renderType", value: "mouth-pair" },
+        {
+          name: "closed",
+          filename: "closed.png",
+          mimeType: "image/png",
+          data: makeTransparentPng(1, 1)
+        }
+      ]);
+      const missingPairResponse = await initialized.app.inject({
+        method: "POST",
+        url: `/api/character-visuals/${missingPairVisual.visualId}/variants`,
+        headers: { "content-type": missingPair.contentType },
+        payload: missingPair.body
+      });
+      expect(missingPairResponse.statusCode).toBe(422);
+      expect(
+        apiErrorResponseSchema.parse(missingPairResponse.json()).error.code
+      ).toBe("CHARACTER_VISUAL_MISSING_SLOT");
+
+      const mismatchVisual = await createVisual("Canvas mismatch visual");
+      const mismatch = buildMultipartBody([
+        { name: "label", value: "Canvas mismatch" },
+        { name: "renderType", value: "mouth-pair" },
+        {
+          name: "closed",
+          filename: "closed.png",
+          mimeType: "image/png",
+          data: makeTransparentPng(1, 1)
+        },
+        {
+          name: "open",
+          filename: "open.png",
+          mimeType: "image/png",
+          data: makeTransparentPng(2, 1)
+        }
+      ]);
+      const mismatchResponse = await initialized.app.inject({
+        method: "POST",
+        url: `/api/character-visuals/${mismatchVisual.visualId}/variants`,
+        headers: { "content-type": mismatch.contentType },
+        payload: mismatch.body
+      });
+      expect(mismatchResponse.statusCode).toBe(422);
+      expect(
+        apiErrorResponseSchema.parse(mismatchResponse.json()).error.code
+      ).toBe("CHARACTER_VISUAL_CANVAS_SIZE_MISMATCH");
     } finally {
       await initialized?.app.close();
       await fs.rm(workspaceRoot, { recursive: true, force: true });

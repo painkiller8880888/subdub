@@ -1357,6 +1357,8 @@ POST   /api/character-visuals/{visualId}/variants/{variantId}/activate
 
 The current mutation contract uses one multipart request to replace a complete variant. `POST .../deactivate` and `POST .../activate` persist variant status without deleting rows or managed files; inactive records remain visible in list/detail responses but are excluded from ordinary API/UI candidates. The generated SQL migration adds `character_variants.status` with a check constraint and backfills existing rows as `active`; `drizzle-kit push` is not part of the workflow.
 
+Multipart character PNGs are streamed directly into workspace staging and capped at 32 MiB per file independently of the asset/video upload cap. A replacement uses a generation-qualified immutable `libraryPath`, keeps old referenced files untouched until the SQLite transaction commits, and removes old paths only afterward. Promotion or commit interruption therefore leaves the previous ready variant usable; unreferenced final/staging files are reported by orphan diagnostics and are not deleted automatically.
+
 CV-02 で実装する API の責務は次のとおりとする。
 
 - 一覧・詳細は SQLite から `CharacterVisualSet` を読み、variant と管理された画像 URL を返す。TypeScript の静的配列を実在項目の一覧として使用しない。

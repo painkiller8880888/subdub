@@ -1,14 +1,19 @@
 import { createHash, randomUUID } from "node:crypto";
+import { createWriteStream } from "node:fs";
 import {
   copyFile,
   lstat,
   mkdir,
   readFile,
+  readdir,
   rename,
   rm,
+  stat,
   writeFile as writeFileNode
 } from "node:fs/promises";
 import * as path from "node:path";
+import { Readable, Transform } from "node:stream";
+import { pipeline } from "node:stream/promises";
 
 import {
   characterVisualSetSchema,
@@ -30,6 +35,7 @@ import {
   CharacterVisualApiError,
   CharacterVisualCanvasSizeMismatchError,
   CharacterVisualConflictError,
+  CharacterVisualFileTooLargeError,
   CharacterVisualInvalidPngError,
   CharacterVisualMissingSlotError,
   CharacterVisualNotFoundError,
@@ -66,7 +72,14 @@ export type CharacterVisualCatalogServiceOptions = {
   readonly workspaceRoot: string;
   readonly createId?: () => string;
   readonly now?: () => Date;
+  readonly onOrphanDetected?: (
+    paths: readonly string[],
+    cause: unknown
+  ) => void;
 };
+
+/** A per-file cap for character PNG uploads, independent of video asset limits. */
+export const CHARACTER_VISUAL_MAX_FILE_BYTES = 32 * 1024 * 1024;
 
 export type CharacterVisualCreateInput = {
   readonly name: string;
@@ -80,9 +93,20 @@ export type CharacterVisualUpdateInput = {
   readonly status: CharacterVisualStatus;
 };
 
+export type CharacterVisualStagedUpload = {
+  /** Staging directory relative to the workspace root. */
+  readonly stagingRelativePath: string;
+  /** Staged file path relative to the workspace root. */
+  readonly fileRelativePath: string;
+  readonly sizeBytes: number;
+};
+
 export type CharacterVisualUploadFile = {
   readonly key: string;
-  readonly content: Buffer;
+  /** Used by the HTTP route after streaming the part into workspace staging. */
+  readonly staged?: CharacterVisualStagedUpload;
+  /** Kept for direct in-process callers and existing service tests. */
+  readonly content?: Buffer;
   readonly mimeType?: string;
   readonly filename?: string;
 };
@@ -142,6 +166,11 @@ type PreparedUploadedFile = {
   readonly height: number;
 };
 
+type PreparedVariantFiles = {
+  readonly stagingRoots: readonly string[];
+  readonly files: readonly PreparedUploadedFile[];
+};
+
 function toIsoDate(now: () => Date): string {
   return now().toISOString();
 }
@@ -188,6 +217,68 @@ function isMissingPath(error: unknown): boolean {
     "code" in error &&
     error.code === "ENOENT"
   );
+}
+
+function isTruncated(stream: Readable): boolean {
+  return (stream as Readable & { truncated?: unknown }).truncated === true;
+}
+
+function isMultipartUploadError(error: unknown): boolean {
+  if (typeof error !== "object" || error === null || !("code" in error)) {
+    return false;
+  }
+  return (
+    error.code === "FST_REQ_FILE_TOO_LARGE" ||
+    error.code === "FST_MP_PREMATURE_CLOSE" ||
+    error.code === "ERR_STREAM_PREMATURE_CLOSE"
+  );
+}
+
+function createUploadSizeLimiter(): Transform {
+  let bytes = 0;
+  return new Transform({
+    transform(chunk, encoding, callback) {
+      const chunkBytes =
+        typeof chunk === "string"
+          ? Buffer.byteLength(chunk, encoding)
+          : chunk instanceof Uint8Array
+            ? chunk.byteLength
+            : Buffer.byteLength(String(chunk), encoding);
+      bytes += chunkBytes;
+      if (bytes > CHARACTER_VISUAL_MAX_FILE_BYTES) {
+        callback(new CharacterVisualFileTooLargeError());
+        return;
+      }
+      callback(null, chunk);
+    }
+  });
+}
+
+async function collectFiles(
+  absoluteRoot: string,
+  relativeRoot: string
+): Promise<string[]> {
+  let entries;
+  try {
+    entries = await readdir(absoluteRoot, { withFileTypes: true });
+  } catch (error) {
+    if (isMissingPath(error)) {
+      return [];
+    }
+    throw error;
+  }
+
+  const files: string[] = [];
+  for (const entry of entries) {
+    const absolutePath = path.join(absoluteRoot, entry.name);
+    const relativePath = `${relativeRoot}/${entry.name}`;
+    if (entry.isDirectory()) {
+      files.push(...(await collectFiles(absolutePath, relativePath)));
+    } else if (entry.isFile() || entry.isSymbolicLink()) {
+      files.push(relativePath);
+    }
+  }
+  return files;
 }
 
 async function readRegularFile(filePath: string): Promise<Buffer> {
@@ -622,12 +713,15 @@ export class CharacterVisualCatalogService {
   private readonly workspaceRoot: string;
   private readonly createId: () => string;
   private readonly now: () => Date;
+  private readonly onOrphanDetected:
+    ((paths: readonly string[], cause: unknown) => void) | undefined;
 
   constructor(options: CharacterVisualCatalogServiceOptions) {
     this.repository = options.repository;
     this.workspaceRoot = path.resolve(options.workspaceRoot);
     this.createId = options.createId ?? (() => randomUUID().toLowerCase());
     this.now = options.now ?? (() => new Date());
+    this.onOrphanDetected = options.onOrphanDetected;
   }
 
   list(): CharacterVisualCatalogSnapshot {
@@ -666,6 +760,78 @@ export class CharacterVisualCatalogService {
 
   get(visualId: string): CharacterVisualSet | undefined {
     return this.repository.findById(visualId);
+  }
+
+  async stageUpload(file: {
+    readonly stream: Readable;
+    readonly mimeType?: string;
+    readonly filename?: string;
+  }): Promise<CharacterVisualStagedUpload> {
+    await assertNoSymlinkComponents(this.workspaceRoot, "library/staging");
+    const stagingRelativePath = `library/staging/character-visual-upload-${randomUUID().toLowerCase()}`;
+    const fileRelativePath = `${stagingRelativePath}/upload.bin`;
+    const stagingRoot = resolveInside(this.workspaceRoot, stagingRelativePath);
+    const filePath = resolveInside(this.workspaceRoot, fileRelativePath);
+    await mkdir(stagingRoot, { recursive: true });
+
+    try {
+      await pipeline(
+        file.stream,
+        createUploadSizeLimiter(),
+        createWriteStream(filePath, { flags: "wx" })
+      );
+      const fileStats = await stat(filePath);
+      if (
+        isTruncated(file.stream) ||
+        fileStats.size > CHARACTER_VISUAL_MAX_FILE_BYTES
+      ) {
+        throw new CharacterVisualFileTooLargeError();
+      }
+      return {
+        stagingRelativePath,
+        fileRelativePath,
+        sizeBytes: fileStats.size
+      };
+    } catch (error) {
+      await this.cleanupStagingRoots([stagingRelativePath], error);
+      if (
+        error instanceof CharacterVisualApiError ||
+        isMultipartUploadError(error)
+      ) {
+        throw error;
+      }
+      throw new CharacterVisualStorageError(error);
+    }
+  }
+
+  async discardStaged(staged: CharacterVisualStagedUpload): Promise<void> {
+    await this.cleanupStagingRoots([staged.stagingRelativePath], staged);
+  }
+
+  async findOrphanedFiles(): Promise<readonly string[]> {
+    const referencedPaths = new Set(
+      this.repository
+        .list()
+        .flatMap((visual) =>
+          visual.variants.flatMap((variant) =>
+            variant.files.map((file) => file.libraryPath)
+          )
+        )
+    );
+    const managedFiles = await collectFiles(
+      resolveInside(this.workspaceRoot, "library/character-visuals"),
+      "library/character-visuals"
+    );
+    const stagingFiles = (
+      await collectFiles(
+        resolveInside(this.workspaceRoot, "library/staging"),
+        "library/staging"
+      )
+    ).filter((file) => file.startsWith("library/staging/character-visual-"));
+    return [
+      ...managedFiles.filter((file) => !referencedPaths.has(file)),
+      ...stagingFiles
+    ].sort();
   }
 
   async readManagedFile(
@@ -713,15 +879,79 @@ export class CharacterVisualCatalogService {
     return { visual, variant };
   }
 
+  private async cleanupPathsBestEffort(
+    paths: readonly string[],
+    cause: unknown,
+    recursive = false
+  ): Promise<void> {
+    const failedPaths: string[] = [];
+    for (const targetPath of paths) {
+      try {
+        await rm(targetPath, { force: true, recursive });
+      } catch {
+        failedPaths.push(
+          path
+            .relative(this.workspaceRoot, targetPath)
+            .replaceAll(path.sep, "/")
+        );
+      }
+    }
+    if (failedPaths.length > 0) {
+      this.reportOrphans(failedPaths, cause);
+    }
+  }
+
+  private reportOrphans(paths: readonly string[], cause: unknown): void {
+    try {
+      this.onOrphanDetected?.(paths, cause);
+    } catch {
+      // Diagnostics must never change the result of the storage operation.
+    }
+  }
+
+  private async cleanupStagingRoots(
+    stagingRoots: readonly string[],
+    cause: unknown
+  ): Promise<void> {
+    await this.cleanupPathsBestEffort(
+      stagingRoots.map((relativePath) =>
+        resolveInside(this.workspaceRoot, relativePath)
+      ),
+      cause,
+      true
+    );
+  }
+
+  private async stageInlineContent(
+    key: string,
+    content: Buffer
+  ): Promise<{
+    readonly stagingRelativePath: string;
+    readonly stagePath: string;
+  }> {
+    if (content.length > CHARACTER_VISUAL_MAX_FILE_BYTES) {
+      throw new CharacterVisualFileTooLargeError();
+    }
+    await assertNoSymlinkComponents(this.workspaceRoot, "library/staging");
+    const stagingRelativePath = `library/staging/character-visual-upload-${randomUUID().toLowerCase()}`;
+    const stagingRoot = resolveInside(this.workspaceRoot, stagingRelativePath);
+    await mkdir(stagingRoot, { recursive: true });
+    const stagePath = path.join(stagingRoot, `${key}.upload`);
+    try {
+      await writeFileNode(stagePath, content, { flag: "wx" });
+      return { stagingRelativePath, stagePath };
+    } catch (error) {
+      await this.cleanupStagingRoots([stagingRelativePath], error);
+      throw new CharacterVisualStorageError(error);
+    }
+  }
+
   private async stageVariantFiles(
     visual: CharacterVisualSet,
     variantId: string,
     input: CharacterVisualVariantInput,
     excludedVariantId?: string
-  ): Promise<{
-    readonly stagingRoot: string;
-    readonly files: readonly PreparedUploadedFile[];
-  }> {
+  ): Promise<PreparedVariantFiles> {
     const expectedKeys = expectedCharacterVariantFileKeys(input.renderType);
     const filesByKey = new Map<string, CharacterVisualUploadFile>();
     for (const file of input.files) {
@@ -738,15 +968,8 @@ export class CharacterVisualCatalogService {
       throw new CharacterVisualMissingSlotError();
     }
 
-    await assertNoSymlinkComponents(this.workspaceRoot, "library/staging");
-    const stagingRoot = path.join(
-      this.workspaceRoot,
-      "library",
-      "staging",
-      `character-visual-upload-${randomUUID().toLowerCase()}`
-    );
-    await mkdir(stagingRoot, { recursive: true });
-
+    const stagingRoots = new Set<string>();
+    const generationId = randomUUID().toLowerCase();
     try {
       const prepared: PreparedUploadedFile[] = [];
       for (const key of expectedKeys) {
@@ -754,11 +977,37 @@ export class CharacterVisualCatalogService {
         if (upload === undefined) {
           throw new CharacterVisualMissingSlotError();
         }
-        const stagePath = path.join(stagingRoot, `${key}.upload`);
-        try {
-          await writeFileNode(stagePath, upload.content, { flag: "wx" });
-        } catch (error) {
-          throw new CharacterVisualStorageError(error);
+
+        let stagePath: string;
+        if (upload.staged !== undefined) {
+          if (
+            !upload.staged.fileRelativePath.startsWith(
+              `${upload.staged.stagingRelativePath}/`
+            )
+          ) {
+            throw new CharacterVisualUnsafePathError();
+          }
+          await assertNoSymlinkComponents(
+            this.workspaceRoot,
+            upload.staged.stagingRelativePath
+          );
+          await assertNoSymlinkComponents(
+            this.workspaceRoot,
+            upload.staged.fileRelativePath
+          );
+          stagingRoots.add(upload.staged.stagingRelativePath);
+          stagePath = resolveInside(
+            this.workspaceRoot,
+            upload.staged.fileRelativePath
+          );
+        } else if (upload.content !== undefined) {
+          const inline = await this.stageInlineContent(key, upload.content);
+          stagingRoots.add(inline.stagingRelativePath);
+          stagePath = inline.stagePath;
+        } else {
+          throw new CharacterVisualStorageError(
+            new Error("character visual upload has no staged content")
+          );
         }
 
         let buffer: Buffer;
@@ -769,7 +1018,7 @@ export class CharacterVisualCatalogService {
         }
         const inspected = inspectUploadedPng(buffer, upload.mimeType);
         const libraryPath =
-          `library/character-visuals/${visual.visualId}/${variantId}/${key}.png` as CharacterVisualFile["libraryPath"];
+          `library/character-visuals/${visual.visualId}/${variantId}/${generationId}-${key}.png` as CharacterVisualFile["libraryPath"];
         prepared.push({
           key: key as CharacterVisualFile["key"],
           stagePath,
@@ -821,98 +1070,49 @@ export class CharacterVisualCatalogService {
         checksums.add(file.checksum);
       }
 
-      return { stagingRoot, files: prepared };
+      return { stagingRoots: [...stagingRoots], files: prepared };
     } catch (error) {
-      await rm(stagingRoot, { recursive: true, force: true });
+      await this.cleanupStagingRoots([...stagingRoots], error);
       throw error;
     }
   }
 
-  private async rollbackPromotion(promotion: {
-    readonly installedPaths: readonly string[];
-    readonly backups: readonly {
-      readonly targetPath: string;
-      readonly backupPath: string;
-    }[];
-  }): Promise<void> {
-    for (const targetPath of [...promotion.installedPaths].reverse()) {
-      await rm(targetPath, { force: true });
-    }
-    for (const backup of [...promotion.backups].reverse()) {
-      try {
-        await rename(backup.backupPath, backup.targetPath);
-      } catch {
-        // The original file is retained as an orphan for diagnosis if restore fails.
-      }
-    }
+  private async rollbackPromotion(
+    installedPaths: readonly string[],
+    cause: unknown
+  ): Promise<void> {
+    await this.cleanupPathsBestEffort(installedPaths, cause);
   }
 
   private async promoteFiles(
-    stagingRoot: string,
-    files: readonly PreparedUploadedFile[],
-    obsoletePaths: readonly string[],
-    replacing: boolean
-  ): Promise<{
-    readonly installedPaths: readonly string[];
-    readonly backups: readonly {
-      readonly targetPath: string;
-      readonly backupPath: string;
-    }[];
-  }> {
-    const backupRoot = path.join(stagingRoot, "backups");
-    await mkdir(backupRoot, { recursive: true });
+    files: readonly PreparedUploadedFile[]
+  ): Promise<{ readonly installedPaths: readonly string[] }> {
     const installedPaths: string[] = [];
-    const backups: { targetPath: string; backupPath: string }[] = [];
-    const pathsToBackUp = [
-      ...obsoletePaths,
-      ...(replacing ? files.map((file) => file.targetPath) : [])
-    ].filter((targetPath, index, paths) => paths.indexOf(targetPath) === index);
-
     try {
-      for (const [index, targetPath] of pathsToBackUp.entries()) {
+      for (const file of files) {
         await assertNoSymlinkComponents(
           this.workspaceRoot,
           path
-            .relative(this.workspaceRoot, targetPath)
+            .relative(this.workspaceRoot, file.targetPath)
             .replaceAll(path.sep, "/")
         );
-        let stats;
         try {
-          stats = await lstat(targetPath);
+          await lstat(file.targetPath);
+          throw new CharacterVisualConflictError(
+            "The managed character visual path is already registered."
+          );
         } catch (error) {
-          if (isMissingPath(error)) {
-            throw new CharacterVisualStorageError(error);
-          }
-          throw error;
-        }
-        if (!stats.isFile() || stats.isSymbolicLink()) {
-          throw new CharacterVisualStorageError();
-        }
-        const backupPath = path.join(backupRoot, `${index}.png`);
-        await rename(targetPath, backupPath);
-        backups.push({ targetPath, backupPath });
-      }
-
-      for (const file of files) {
-        if (!replacing) {
-          try {
-            await lstat(file.targetPath);
-            throw new CharacterVisualConflictError(
-              "The managed character visual path is already registered."
-            );
-          } catch (error) {
-            if (!isMissingPath(error)) {
-              throw error;
-            }
+          if (!isMissingPath(error)) {
+            throw error;
           }
         }
         await mkdir(path.dirname(file.targetPath), { recursive: true });
         await rename(file.stagePath, file.targetPath);
         installedPaths.push(file.targetPath);
       }
-      return { installedPaths, backups };
+      return { installedPaths };
     } catch (error) {
-      await this.rollbackPromotion({ installedPaths, backups });
+      await this.rollbackPromotion(installedPaths, error);
       if (error instanceof CharacterVisualApiError) {
         throw error;
       }
@@ -924,10 +1124,7 @@ export class CharacterVisualCatalogService {
     visual: CharacterVisualSet,
     variantId: string,
     input: CharacterVisualVariantInput,
-    staged: {
-      readonly stagingRoot: string;
-      readonly files: readonly PreparedUploadedFile[];
-    },
+    staged: PreparedVariantFiles,
     existingVariant: CharacterVariant | undefined
   ): Promise<CharacterVisualSet> {
     const timestamp = toIsoDate(this.now);
@@ -965,28 +1162,17 @@ export class CharacterVisualCatalogService {
         updatedAt: timestamp
       });
       obsoletePaths =
-        existingVariant === undefined
-          ? []
-          : existingVariant.files
-              .filter(
-                (file) =>
-                  !staged.files.some((candidate) => candidate.key === file.key)
-              )
-              .map((file) =>
-                resolveInside(this.workspaceRoot, file.libraryPath)
-              );
+        existingVariant?.files.map((file) =>
+          resolveInside(this.workspaceRoot, file.libraryPath)
+        ) ?? [];
     } catch (error) {
-      await rm(staged.stagingRoot, { recursive: true, force: true });
+      await this.cleanupStagingRoots(staged.stagingRoots, error);
       throw error;
     }
-    const promotion = await this.promoteFiles(
-      staged.stagingRoot,
-      staged.files,
-      obsoletePaths,
-      existingVariant !== undefined
-    );
 
+    let promotion: { readonly installedPaths: readonly string[] } | undefined;
     try {
+      promotion = await this.promoteFiles(staged.files);
       this.repository.transaction((transaction) => {
         transaction.updateVisual(visual.visualId, {
           name: visual.name,
@@ -1036,10 +1222,22 @@ export class CharacterVisualCatalogService {
         }
       });
     } catch (error) {
-      await this.rollbackPromotion(promotion);
+      if (promotion !== undefined) {
+        await this.rollbackPromotion(promotion.installedPaths, error);
+      }
       throw error;
     } finally {
-      await rm(staged.stagingRoot, { recursive: true, force: true });
+      await this.cleanupStagingRoots(
+        staged.stagingRoots,
+        new Error("variant upload completed")
+      );
+    }
+
+    if (obsoletePaths.length > 0) {
+      await this.cleanupPathsBestEffort(
+        obsoletePaths,
+        new Error("replaced character visual files are no longer referenced")
+      );
     }
 
     return this.requireVisual(visual.visualId);
