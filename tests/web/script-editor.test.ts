@@ -15,6 +15,8 @@ import {
   moveScriptLine,
   parseBulkScript,
   reconcileScriptLineIds,
+  reconcileScriptLineIdsWithMap,
+  reconcileVisualLineSelection,
   resolveScriptLineId,
   resolveScriptLineRange,
   scriptStatusAfterEdit,
@@ -193,6 +195,42 @@ describe("script editor helpers", () => {
     expect(reconciled.sections[0]?.lines[0]).toMatchObject({
       id: "script-line-formal",
       spokenText: "保存中に追加した編集"
+    });
+  });
+
+  it("keeps visual selection on a newly saved line after ID reconciliation", () => {
+    const submitted = appendScriptLines(script, 0, [
+      createDefaultScriptLine("character-mentor", "draft-line-3", "荳ｭ逶ｮ")
+    ]);
+    const saved = appendScriptLines(script, 0, [
+      createDefaultScriptLine(
+        "character-mentor",
+        "script-line-formal-3",
+        "荳ｭ逶ｮ"
+      )
+    ]);
+    const reconciliation = reconcileScriptLineIdsWithMap(
+      submitted,
+      saved,
+      submitted
+    );
+    const selection = reconcileVisualLineSelection(
+      {
+        suggestionSectionId: "script-section-main",
+        suggestionStartLineId: "draft-line-3",
+        suggestionEndLineId: "draft-line-3",
+        selectedVisualLineId: "draft-line-3"
+      },
+      reconciliation.lineIdMap
+    );
+
+    expect(reconciliation.script.sections[0]?.lines.at(-1)?.id).toBe(
+      "script-line-formal-3"
+    );
+    expect(selection).toMatchObject({
+      suggestionStartLineId: "script-line-formal-3",
+      suggestionEndLineId: "script-line-formal-3",
+      selectedVisualLineId: "script-line-formal-3"
     });
   });
 

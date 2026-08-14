@@ -70,7 +70,8 @@ import {
   isVisualSuggestionContextCurrent,
   moveScriptLine,
   parseBulkScript,
-  reconcileScriptLineIds,
+  reconcileScriptLineIdsWithMap,
+  reconcileVisualLineSelection,
   resolveScriptLineId,
   resolveScriptLineRange,
   scriptStatusAfterEdit,
@@ -78,6 +79,7 @@ import {
   validateScriptDraft,
   type BulkPasteError,
   type ScriptDraftIssue,
+  type VisualLineSelection,
   type VisualSuggestionCurrentContext,
   type VisualSuggestionRequestContext
 } from "./script-editor";
@@ -611,6 +613,18 @@ export function ScriptPage() {
   const [suggestionStartLineId, setSuggestionStartLineId] = useState("");
   const [suggestionEndLineId, setSuggestionEndLineId] = useState("");
   const [selectedVisualLineId, setSelectedVisualLineId] = useState("");
+  const visualLineSelectionRef = useRef<VisualLineSelection>({
+    suggestionSectionId: "",
+    suggestionStartLineId: "",
+    suggestionEndLineId: "",
+    selectedVisualLineId: ""
+  });
+  visualLineSelectionRef.current = {
+    suggestionSectionId,
+    suggestionStartLineId,
+    suggestionEndLineId,
+    selectedVisualLineId
+  };
   const [suggestionResponse, setSuggestionResponse] =
     useState<VisualSuggestionResponse | null>(null);
   const [visualSuggestionStale, setVisualSuggestionStale] = useState(false);
@@ -888,13 +902,31 @@ export function ScriptPage() {
     }
     revisionRef.current = project.revision;
     const latestDraft = draftRef.current ?? nextDraft;
+    const reconciliation = reconcileScriptLineIdsWithMap(
+      nextDraft,
+      project.script,
+      latestDraft
+    );
     const reconciledDraft = {
-      ...reconcileScriptLineIds(nextDraft, project.script, latestDraft),
+      ...reconciliation.script,
       status: project.script.status
+    };
+    const reconciledSelection = reconcileVisualLineSelection(
+      visualLineSelectionRef.current,
+      reconciliation.lineIdMap
+    );
+    visualLineSelectionRef.current = reconciledSelection;
+    visualSuggestionContextRef.current = {
+      ...visualSuggestionContextRef.current,
+      startLineId: reconciledSelection.suggestionStartLineId,
+      endLineId: reconciledSelection.suggestionEndLineId
     };
     lastSavedRef.current = cloneScript(project.script);
     draftRef.current = reconciledDraft;
     coordinatorRef.current?.replaceDraft(reconciledDraft);
+    setSuggestionStartLineId(reconciledSelection.suggestionStartLineId);
+    setSuggestionEndLineId(reconciledSelection.suggestionEndLineId);
+    setSelectedVisualLineId(reconciledSelection.selectedVisualLineId);
     setDraft(reconciledDraft);
   }
 

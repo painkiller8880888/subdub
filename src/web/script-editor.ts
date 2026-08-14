@@ -133,6 +133,31 @@ export type ResolvedScriptLineRange = {
   readonly endLineId: string;
 };
 
+export type ScriptLineIdReconciliation = {
+  readonly script: Script;
+  readonly lineIdMap: ReadonlyMap<string, string>;
+};
+
+export type VisualLineSelection = {
+  readonly suggestionSectionId: string;
+  readonly suggestionStartLineId: string;
+  readonly suggestionEndLineId: string;
+  readonly selectedVisualLineId: string;
+};
+
+export function reconcileVisualLineSelection(
+  selection: VisualLineSelection,
+  lineIdMap: ReadonlyMap<string, string>
+): VisualLineSelection {
+  const reconcile = (lineId: string): string => lineIdMap.get(lineId) ?? lineId;
+  return {
+    ...selection,
+    suggestionStartLineId: reconcile(selection.suggestionStartLineId),
+    suggestionEndLineId: reconcile(selection.suggestionEndLineId),
+    selectedVisualLineId: reconcile(selection.selectedVisualLineId)
+  };
+}
+
 export function createScriptLineLocator(
   script: Script,
   sectionId: string,
@@ -192,11 +217,11 @@ export function resolveScriptLineRange(
   return { startLineId, endLineId };
 }
 
-export function reconcileScriptLineIds(
+export function reconcileScriptLineIdsWithMap(
   submitted: Script,
   saved: Script,
   latest: Script
-): Script {
+): ScriptLineIdReconciliation {
   const submittedToSaved = new Map<string, string>();
 
   for (const [sectionIndex, submittedSection] of submitted.sections.entries()) {
@@ -225,7 +250,15 @@ export function reconcileScriptLineIds(
       }
     }
   }
-  return reconciled;
+  return { script: reconciled, lineIdMap: submittedToSaved };
+}
+
+export function reconcileScriptLineIds(
+  submitted: Script,
+  saved: Script,
+  latest: Script
+): Script {
+  return reconcileScriptLineIdsWithMap(submitted, saved, latest).script;
 }
 
 export function isProjectContextCurrent(
