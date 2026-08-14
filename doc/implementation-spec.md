@@ -2,7 +2,7 @@
 
 文書版: 0.2  
 作成日: 2026-07-28  
-更新日: 2026-08-02  
+更新日: 2026-08-14<br>
 上位仕様: [`doc.md`](./doc.md)
 
 ## 1. 目的
@@ -16,6 +16,16 @@
 - **初期対象外**: 拡張点は確保するが、MVP では実装しない。
 
 `doc.md` と本書が矛盾する場合は、要求と目的については `doc.md` を優先し、実装の詳細については本書を更新して整合させる。
+
+### 1.1 Issue #87 による制作工程の更新
+
+Issue #87 以降、`/projects/{projectId}/script` を台本・ビジュアル・音声の一体型制作画面とし、3 つのデータを引き続き同じ `project.json` に保存する。制作中の承認操作を後工程の開始条件にはしない。
+
+- `outline.status === "approved"` かつ `outline.sourceHash === source.sha256` であることは、台本の初期化と現在の制作コンテキストの前提として維持する。この文書の対象範囲では、構成案の承認が唯一の明示的な工程境界である。
+- `script/approve` と `visuals/approve` は新しい通常制作フローから外す。既存データ、旧クライアント、レビュー履歴との互換性のため API や `approved` status を残す場合でも、制作画面、音声操作、候補利用、素材割り当て、`RenderManifest` 生成の前提に使用しない。
+- `Script.status` と `VisualPlan.status` の `draft`、`needs_review`、`approved` は、互換性、レビュー結果、stale、再生成要否の表示に使える。ただし `approved` は出力可能を意味せず、`draft` や `needs_review` だけを理由に編集や候補利用を拒否しない。
+- プレビュー、`RenderManifest` 生成、MP4 レンダリングのゲートは、保存済み正本に対する validation とする。Zod、台本構造、話者・発話、`outlineHash`、音声の current/stale/missing、ビジュアル参照・適用範囲・checksum、revision、Manifest の整合性を機械検証し、失敗時は該当する操作だけを無効化して理由を表示する。
+- revision 管理、自動保存、expected revision による競合拒否、安全な一時ファイル保存、生成物の stale 保持は変更しない。
 
 ## 2. 今回確定した判断
 
@@ -82,7 +92,7 @@
 
 | データ | 正本または性質 | P2-01 時点の扱い |
 |---|---|---|
-| `projects/{projectId}/project.json` | 人間が編集・承認する動画制作データの正本 | `VideoProject 1.0.0` を維持する |
+| `projects/{projectId}/project.json` | 人間が編集する動画制作データの正本。構成案の承認と、台本・ビジュアル・音声のレビュー状態もここに保持する | `VideoProject 1.0.0` を維持する |
 | `characterVariantCatalog` | 登録済み利用可能物理素材とメタデータの正本 | TypeScript の静的カタログとして実装する。SQLite ではない |
 | `RenderManifest` | 特定レンダリングへ使う解決済み派生データ | 現行 `1.0.0` は論理表情を持つ。物理 variant の解決情報は後続設計 |
 
@@ -98,7 +108,7 @@ PNG はカタログから参照されるファイル実体であり、PNG 自体
 2. プロジェクトの作成、一覧、読み込み
 3. Markdown と企画条件の編集、自動保存
 4. OpenRouter による構成案生成、編集、承認
-5. 2 キャラクター形式の人力台本編集、承認
+5. 2 キャラクター形式の台本編集と、ビジュアル・音声を含む一体型の制作画面
 6. P2-01 の初期 2 キャラクター設定、物理素材カタログ、PNG 検証、読み取り専用確認画面
 7. 固有名詞・社内用語の登録、検索、読み上げへの適用
 8. 素材ライブラリへの動画、写真、帳票スキャン、効果音の登録
@@ -108,7 +118,7 @@ PNG はカタログから参照されるファイル実体であり、PNG 自体
 12. `RenderManifest` の生成
 13. Remotion による同一マニフェストのプレビューと MP4 出力
 14. サムネイルのプレビューと画像出力
-15. 機械検証、承認ゲート、意味のある操作のログ
+15. 機械検証、互換 status・レビュー結果・stale 状態、意味のある操作のログ（出力ゲートは validation）
 
 ### 3.2 初期対象外
 
@@ -378,8 +388,9 @@ project-root/
 
 - フォーム変更後、短い debounce を経てセクションまたは画面単位で保存する。
 - 保存中、保存済み、失敗、競合の状態を常時表示する。
-- 自動保存と承認操作を分離する。
-- 承認操作は対象データを保存した後、承認用の検証を通過した場合だけ状態を `approved` にする。
+- 自動保存と、プレビュー・`RenderManifest`・レンダリング時の validation を分離する。
+- script/visual の保存は承認操作を要求せず、保存済み status は互換性、レビュー結果、stale、再生成要否の表示に使う。
+- 出力実行時は、構成案の承認・最新性と、台本、音声、素材参照、assignment 範囲、checksum、Manifest の整合性を validation する。script/visual の `approved` status は要求しない。
 
 ## 7. 正本データ `VideoProject`
 
@@ -639,6 +650,8 @@ type OpenQuestion = {
 };
 ```
 
+`ApprovalStatus` は既存 JSON の共通 enum として維持する。`Outline.status` の `approved` は構成案の明示的な前提に使うが、`Script.status` と `VisualPlan.status` の同じ値は互換性、レビュー、stale、再生成要否を表すだけで、制作や出力の承認ゲートには使わない。
+
 承認条件:
 
 - `intro` が先頭に 1 件ある。
@@ -648,7 +661,7 @@ type OpenQuestion = {
 - 未解決の `openQuestions` がない。
 - `sourceHash` が現在の入力資料のハッシュと一致する。
 
-構成案は、AI 生成または人間の手入力から開始できる。手入力で保存した構成案は `generationRunId: null` とし、AI 生成を経由しない。どちらの経路も同じ編集、自動保存、承認条件を使用する。
+構成案は、AI 生成または人間の手入力から開始できる。手入力で保存した構成案は `generationRunId: null` とし、AI 生成を経由しない。どちらの経路も同じ編集、自動保存、構成案の承認条件を使用する。構成案の承認・最新性確認は、この仕様で制作の前提として残す唯一の明示的な承認境界である。
 
 ### 7.7 台本
 
@@ -685,12 +698,12 @@ type ScriptLine = {
 ```
 
 - `origin` の初期値は `manual` とする。
-- `outlineHash` は台本作成元となった承認済み構成案の内容ハッシュとする。現在の構成案と一致しない台本は stale とする。
+- `outlineHash` は台本作成元となった承認済み・最新の構成案の内容ハッシュとする。現在の構成案と一致しない台本は stale とするが、編集やビジュアル・音声操作を承認待ちに戻すゲートにはしない。
 - `pauseBeforeMs` の初期値は `0`、`pauseAfterMs` の初期値は `250` とする。
 - `spokenText` と `subtitleText` は別々に保存する。
 - `speakerId` は `characters[].id` を参照する。
 - 1 セクション内の line ID は重複不可とし、プロジェクト全体でも一意にする。
-- 台本承認後に構成案または台本を変更した場合は、影響を受ける後工程の承認状態を `needs_review` に戻す。
+- 構成案・台本の変更時は、対象ビジュアル範囲、音声生成物、`RenderManifest` の freshness/status を再計算し、stale または `needs_review` を表示する。これは承認ゲートへ戻す処理ではなく、出力時 validation が検出・ブロックするための状態である。
 
 ### 7.8 ビジュアル
 
@@ -711,6 +724,8 @@ type VisualAssignment = {
   display: VideoDisplay | ImageDisplay | DocumentDisplay;
 };
 ```
+
+`VisualPlan.status` は既存データ互換、レビュー結果、stale 表示のために保持できる。素材検索、AI 候補表示、割り当て、差し替え、解除、表示設定の更新、音声操作、`RenderManifest` のコンパイルは、ビジュアル承認を要求しない。
 
 表示設定の共通部分:
 
@@ -1219,13 +1234,16 @@ PUT    /api/projects/{projectId}/outline
 POST   /api/projects/{projectId}/outline/review
 POST   /api/projects/{projectId}/outline/approve
 PUT    /api/projects/{projectId}/script
-POST   /api/projects/{projectId}/script/approve
 POST   /api/projects/{projectId}/script/review
+POST   /api/projects/{projectId}/script/approve
 ```
 
 AI 生成 API はエンドポイントに対応する `taskKind` をサーバー側で確定し、リクエストの `modelId` は実行時上書きとして任意に受け取る。上書きがない場合はプロジェクト設定から上記の優先順で解決し、解決結果が `null` の場合は実行を拒否する。生成に失敗した場合、既存の構成案または台本を変更しない。
 
-構成案生成は任意の開始経路である。AI を使わない場合は WebUI の手入力開始操作から `PUT /api/projects/{projectId}/outline` で構成案を保存し、その後は AI 生成時と同じ編集・承認フローを使用する。
+構成案生成は任意の開始経路である。AI を使わない場合は WebUI の手入力開始操作から `PUT /api/projects/{projectId}/outline` で構成案を保存し、その後は AI 生成時と同じ編集・承認フローを使用する。台本の保存、ビジュアル候補の利用、素材割り当て、音声生成は、台本承認を要求しない。
+
+`script/approve` は旧クライアントおよび既存履歴との互換性のため残せるが、成功しても台本・ビジュアル・音声・出力の実行条件を変えない。通常の UI からは呼び出さず、保存後のレビュー結果または status 表示に限定して扱う。
+`visuals/approve` も同じ互換扱いとする。通常の UI からは呼び出さず、素材検索、候補表示、割り当て、差し替え、解除、音声操作、`RenderManifest`、プレビュー、レンダリングの前提にしない。
 
 ### 11.4 用語
 
@@ -1324,7 +1342,7 @@ POST   /api/projects/{projectId}/thumbnail/render
 処理:
 
 1. project schema を検証する。
-2. 承認状態と参照整合性を検証する。
+2. 出力条件と参照整合性を検証する。構成案の承認・最新性は確認するが、台本・ビジュアルの `approved` status は要求しない。
 3. 全セリフに有効な音声インデックスがあることを確認する。
 4. 無音時間と音声長をフレームへ変換する。
 5. セリフを累積して line range を作る。
@@ -1368,26 +1386,24 @@ POST   /api/projects/{projectId}/thumbnail/render
 
 ルーティング表現は採用フレームワークに合わせて変更してよいが、画面責務は維持する。
 
-P2-01 時点の `/projects/{projectId}/script` は、台本編集画面ではなく、`GET /api/projects/{projectId}` と `fetchProject()` で取得した `VideoProject` のキャラクター情報に、`characterVariantCatalog` の登録済み variant を組み合わせて表示する読み取り専用のキャラクター素材確認画面である。画像読込失敗時は対象パスを表示し、カタログに登録されていない物理素材を表示しない。
+`/projects/{projectId}/script` は台本・ビジュアル・音声を一体に扱う制作画面である。キャラクター素材の確認部分では、`GET /api/projects/{projectId}` と `fetchProject()` で取得した `VideoProject` に `characterVariantCatalog` の登録済み variant を組み合わせて表示する。画像読込失敗時は対象パスを表示し、カタログに登録されていない物理素材を表示しない。台本、素材 assignment、音声状態を同じ `project.json` の revision と自動保存で扱う。
 
 ### 14.2 制作ステップ
 
 ```text
 企画
-  → 構成案承認
-  → 台本承認
-  → ビジュアル承認
-  → 音声生成
-  → マニフェスト検証
-  → プレビュー
-  → レンダリング
+  → 構成案（承認・最新性確認）
+  → 制作（台本・ビジュアル・音声）
+  → 出力 validation
+  → `RenderManifest` 生成
+  → プレビュー／レンダリング
 ```
 
-後工程の画面は閲覧可能にしてよいが、前提条件を満たさない実行操作は無効化し、理由と修正先へのリンクを表示する。
+制作画面は台本承認・ビジュアル承認なしで編集、候補表示、素材割り当て、音声生成・調整を行える。プレビュー、`RenderManifest` 生成、レンダリングは、構成案の承認・最新性、入力内容、音声、素材参照、範囲、checksum などの validation に失敗した場合だけ無効化し、理由と修正先へのリンクを表示する。
 
 ### 14.3 台本画面
 
-以下は P2-02 以降に拡張する台本編集画面の目標であり、P2-01 で実装済みとは扱わない。P2-02 では `ScriptLine.expression` の論理表情を編集対象とする。物理 variant の選択や mapping を P2-02 に暗黙に含めず、必要になった場合は別の設計判断または後続タスクとして扱う。
+以下は `/script` 制作画面の基本責務である。実装は段階的に追加してよいが、台本・ビジュアル・音声を別々の承認工程へ戻さない。`ScriptLine.expression` は論理表情として編集し、物理 variant の選択や mapping は別の設計判断または後続タスクとして扱う。
 
 - 上部: 同一 `RenderManifest` を使う Remotion プレビュー
 - 中央: セクションとセリフカード
@@ -1397,7 +1413,7 @@ P2-01 時点の `/projects/{projectId}/script` は、台本編集画面ではな
 - セリフカードの効果音設定: 素材選択、`confirm`／`attention`／`warning`、発話開始からのオフセット、音量、複数追加、単体試聴、セクション音声との合成試聴
 - 話者付きテキストの一括貼り付けと機械的なカード分割
 - `spokenText` に登録用語が含まれる場合、解決後読み上げと適用用語を表示
-- 変更は自動保存、承認は明示操作
+- 変更は自動保存する。セリフカードからビジュアルの検索・割り当て・範囲変更と、VOICEVOX の個別生成・再生成・調整を直接操作できる。入力不正、素材参照切れ、音声 stale/missing は validation として表示し、script/visual の承認操作を要求しない。
 
 ### 14.4 挿入プレースホルダーとサムネイル
 
@@ -1412,7 +1428,13 @@ P2-01 時点の `/projects/{projectId}/script` は、台本編集画面ではな
 
 - 入力不正
 - revision 競合
-- 未承認または stale な前工程
+- 構成案の未承認または source hash の不一致
+- 台本の構造不正、`outlineHash` 不一致、話者・発話の欠落
+- 素材参照切れ、assignment 範囲外、checksum 不一致
+- 音声の missing、stale、生成失敗、VOICEVOX 接続不可
+- `RenderManifest` の生成・検証エラー
+
+- script/visual の `approved` status は、上記 validation blocker とはみなさない。
 - 未解決の要確認事項
 - モデル未選択
 - OpenRouter 認証、残高、非対応、入力超過、一時障害
@@ -1420,21 +1442,23 @@ P2-01 時点の `/projects/{projectId}/script` は、台本編集画面ではな
 - 素材参照切れ、チェックサム不一致、範囲外
 - レンダリング失敗
 
-## 15. 承認と無効化規則
+## 15. 検証と依存アーティファクトの stale 規則
 
-| 変更 | 自動的に見直し対象へ戻す状態 |
+| 変更 | stale または再検証が必要になる依存アーティファクト |
 |---|---|
-| Markdown または企画条件 | 構成案、台本、ビジュアル |
-| 承認済み構成案の内容 | 台本、ビジュアル |
-| 台本のセリフ追加・削除・順序変更 | ビジュアル、音声、マニフェスト |
-| `spokenText`、話者、音声設定 | 対象音声、マニフェスト |
-| `subtitleText`、表情 | マニフェスト |
-| ビジュアル割り当て | ビジュアル承認、マニフェスト |
-| 背景、挿入素材、BGM、効果音 | マニフェスト |
+| Markdown または企画条件 | 構成案と、その下流の台本・ビジュアル・音声・Manifest |
+| 構成案の内容または source hash | 台本の `outlineHash`、ビジュアル候補の検索コンテキスト、出力 validation |
+| 台本のセリフ追加・削除・順序変更 | ビジュアル assignment の範囲、音声、Manifest |
+| `spokenText`、話者、音声設定 | 対象音声、Manifest |
+| `subtitleText`、表情 | Manifest |
+| ビジュアル割り当て | Manifest |
+| 背景、挿入素材、BGM、効果音 | Manifest |
 | サムネイル構成 | サムネイル出力 |
 | 用語の読みまたは状態 | 該当セリフの音声 |
 
 「見直し対象」は既存ファイルの削除を意味しない。古い生成物を stale と表示し、新しい生成が成功するまで保持する。
+
+`needs_review`、`stale`、`missing` は依存生成物の再生成や出力 validation のための状態であり、script/visual の人間による承認を再要求するための状態ではない。構成案の承認・最新性だけは台本の作成元と現在の制作コンテキストを確認するために維持する。
 
 ## 16. 検証
 
@@ -1456,12 +1480,15 @@ P2-01 時点の `/projects/{projectId}/script` は、台本編集画面ではな
 - プレースホルダーの固定長と eye catch の境界参照
 - サムネイルの必須タイトルと部門・対象システム名
 
-### 16.2 承認前
+### 16.2 制作・出力前 validation
 
-- 構成案の role 順序と未解決質問
-- 台本の空セリフ、話者、構成案対応
+- 構成案の role 順序、未解決質問、承認状態、source hash の最新性
+- 台本の空セリフ、話者、`outlineHash`、section/line 参照
 - ビジュアルの割り当て範囲、素材状態、チェックサム、機密区分
-- 前工程の source hash と revision
+- 音声の current/stale/missing、生成エラー、音声 index の参照
+- 前工程の revision、assignment 範囲、Manifest の入力ハッシュ
+
+この validation は保存・編集を一律に止めるものではない。該当する候補、音声操作、プレビュー、Manifest、レンダリングだけを、必要な条件が満たされるまで無効化する。
 
 ### 16.3 音声生成前
 
@@ -1475,7 +1502,7 @@ P2-01 時点の `/projects/{projectId}/script` は、台本編集画面ではな
 
 ### 16.4 レンダリング前
 
-- 最新 `RenderManifest`
+- 最新 `RenderManifest` を validation 済みの入力から生成できること（script/visual の `approved` status は不要）
 - 全素材と音声の存在、チェックサム
 - 現行 `RenderManifest 1.0.0` の `RenderLine.expression` は論理表情であり、物理ファイルパスとして解釈しない。
 - P5-02 / P5-04 以降は、解決済み `variantId`、character ID、renderType、ファイルパス、checksum、mouth slot が manifest に固定されていることを確認する。具体的なフィールドは TBD。
@@ -1508,7 +1535,7 @@ AI、音声、マニフェスト、レンダリングの各実行は `projects/{
 
 ### 17.2 改善ログ
 
-SQLite にはキー入力単位ではなく、保存、承認、レビュー判断、音声再生成、候補採否など意味のあるイベントだけを保存する。修正前後、理由、対象の安定 ID、生成元、モデル、プロンプト版を関連付ける。
+SQLite にはキー入力単位ではなく、保存、構成案の承認、レビュー判断、status/stale の変化、音声再生成、候補採否など意味のあるイベントだけを保存する。修正前後、理由、対象の安定 ID、生成元、モデル、プロンプト版を関連付ける。
 
 ## 18. セキュリティとローカル運用
 
@@ -1534,7 +1561,7 @@ SQLite にはキー入力単位ではなく、保存、承認、レビュー判�
 - セリフ累積と半開区間
 - assignment の line range 解決
 - source/project/asset hash
-- 承認と stale 化
+- 構成案の承認・最新性、status/stale の遷移、依存生成物の validation
 - パストラバーサル拒否
 
 ### 19.2 統合テスト
@@ -1560,13 +1587,14 @@ SQLite にはキー入力単位ではなく、保存、承認、レビュー判�
 
 1. プロジェクト作成
 2. Markdown と企画条件保存
-3. 構成案の取り込みと承認
-4. 2 キャラクター、複数セリフの台本作成
-5. 固有名詞登録と読み上げ解決
-6. 動画、写真、帳票の 3 種類の素材登録と割り当て、および効果音素材の登録
-7. fixture WAV からマニフェスト生成
-8. 代表フレームの画像比較
-9. 短い MP4 とサムネイルの生成
+3. 構成案の取り込み、編集、承認・最新性確認
+4. 2 キャラクター、複数セリフの台本作成と、台本画面からのビジュアル・音声制作
+5. 台本・ビジュアルの承認操作なしで制作を続け、stale/missing validation を確認する
+6. 固有名詞登録と読み上げ解決
+7. 動画、写真、帳票の 3 種類の素材登録と割り当て、および効果音素材の登録
+8. fixture WAV から validation を通したマニフェスト生成
+9. 代表フレームの画像比較
+10. 短い MP4 とサムネイルの生成
 
 ## 20. 実装順序
 
@@ -1583,7 +1611,7 @@ SQLite にはキー入力単位ではなく、保存、承認、レビュー判�
 - プロジェクト画面
 - Markdown、企画条件
 - OpenRouter モデル一覧（`free` / `paid` 絞り込み）と構成案生成・手入力開始
-- 構成案編集、要確認事項、承認
+- 構成案編集、要確認事項、承認（この承認境界は維持）
 
 ### Phase 2: 台本と用語
 
@@ -1591,7 +1619,7 @@ SQLite にはキー入力単位ではなく、保存、承認、レビュー判�
 - 台本編集と一括入力
 - 固有名詞・社内用語 CRUD
 - 読み上げ解決プレビュー
-- 台本承認
+- 台本の構造 validation、依存音声・ビジュアルの stale 検出、承認なしの制作操作
 
 ### Phase 3: 素材とビジュアル
 
@@ -1599,7 +1627,7 @@ SQLite にはキー入力単位ではなく、保存、承認、レビュー判�
 - AI 検索意図
 - 素材ピッカー
 - プロジェクトへの取り込み
-- 表示設定、静的注釈、承認
+- 表示設定、静的注釈、assignment 範囲 validation
 
 ### Phase 4: 音声
 
