@@ -91,6 +91,140 @@ input:focus-visible {
   color: #59647b;
 }
 
+.workflow-indicator {
+  background: #fff;
+  border: 1px solid #d7deea;
+  border-radius: 0.8rem;
+  display: grid;
+  gap: 1rem;
+  padding: 1rem 1.1rem;
+}
+
+.workflow-indicator-header {
+  align-items: center;
+  display: flex;
+  gap: 1rem;
+  justify-content: space-between;
+}
+
+.workflow-indicator-kicker,
+.workflow-indicator-current {
+  margin: 0;
+}
+
+.workflow-indicator-kicker {
+  color: #59647b;
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+}
+
+.workflow-indicator-current {
+  margin-top: 0.2rem;
+}
+
+.workflow-indicator-count {
+  background: #eef3fa;
+  border-radius: 999px;
+  color: #33415c;
+  font-size: 0.85rem;
+  font-weight: 700;
+  padding: 0.35rem 0.65rem;
+  white-space: nowrap;
+}
+
+.workflow-steps {
+  display: grid;
+  gap: 0.45rem;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.workflow-step-item {
+  min-width: 0;
+  position: relative;
+}
+
+.workflow-step-item::after {
+  background: #d7deea;
+  content: "";
+  height: 2px;
+  left: calc(50% + 1rem);
+  position: absolute;
+  right: calc(-50% + 1rem);
+  top: 1rem;
+}
+
+.workflow-step-item-past::after {
+  background: #a4d2ab;
+}
+
+.workflow-step-item:last-child::after {
+  display: none;
+}
+
+.workflow-step {
+  align-items: center;
+  color: #59647b;
+  display: grid;
+  gap: 0.4rem;
+  justify-items: center;
+  position: relative;
+  text-align: center;
+  text-decoration: none;
+  z-index: 1;
+}
+
+.workflow-step-marker {
+  align-items: center;
+  background: #eef2f8;
+  border: 2px solid #c7d0df;
+  border-radius: 50%;
+  box-sizing: border-box;
+  display: inline-flex;
+  font-size: 0.8rem;
+  font-weight: 800;
+  height: 2rem;
+  justify-content: center;
+  width: 2rem;
+}
+
+.workflow-step-label {
+  font-size: 0.85rem;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.workflow-step-past {
+  color: #23683a;
+}
+
+.workflow-step-past .workflow-step-marker {
+  background: #e7f5eb;
+  border-color: #75b884;
+}
+
+.workflow-step-current {
+  color: #1e4f9a;
+}
+
+.workflow-step-current .workflow-step-marker {
+  background: #1e4f9a;
+  border-color: #1e4f9a;
+  color: #fff;
+}
+
+.workflow-step-future .workflow-step-marker {
+  color: #59647b;
+}
+
+.workflow-step:hover .workflow-step-label,
+.workflow-step:focus-visible .workflow-step-label {
+  text-decoration: underline;
+}
+
 .eyebrow {
   color: #59647b;
   font-size: 0.8rem;
@@ -1389,6 +1523,16 @@ input:focus-visible {
 @media (max-width: 640px) {
   .page-shell {
     padding: 2rem 1rem 3rem;
+  }
+
+  .workflow-steps {
+    grid-template-columns: repeat(6, minmax(4.5rem, 1fr));
+    overflow-x: auto;
+    padding-bottom: 0.25rem;
+  }
+
+  .workflow-step-label {
+    white-space: nowrap;
   }
 
   .page-header {

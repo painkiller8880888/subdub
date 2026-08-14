@@ -48,6 +48,7 @@ import { ScriptPage } from "./ScriptPage";
 import { TerminologyPage } from "./TerminologyPage";
 import { PreviewPage } from "./PreviewPage";
 import { AiRunsPage } from "./AiRunsPage";
+import { WorkflowIndicator } from "./WorkflowIndicator";
 
 function projectBriefPath(projectId: string): string {
   return `/projects/${encodeURIComponent(projectId)}/brief`;
@@ -791,6 +792,7 @@ function ProjectBriefPage() {
           プロジェクト一覧へ戻る
         </Link>
       </p>
+      <WorkflowIndicator projectId={projectId} currentStep="brief" />
       <header className="page-header page-header-stacked">
         <p className="eyebrow">企画入力</p>
         <h1>{projectQuery.data.metadata.title}</h1>

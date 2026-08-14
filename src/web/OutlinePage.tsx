@@ -22,6 +22,7 @@ import {
   saveProjectOutline
 } from "./lib/api-client";
 import { AutosaveCoordinator, type AutosaveState } from "./brief-autosave";
+import { WorkflowIndicator } from "./WorkflowIndicator";
 import {
   cloneOutline,
   countOpenQuestions,
@@ -858,6 +859,7 @@ export function OutlinePage() {
           企画画面へ
         </Link>
       </p>
+      <WorkflowIndicator projectId={projectId} currentStep="outline" />
       <header className="page-header page-header-stacked">
         <p className="eyebrow">構成案編集</p>
         <h1>{project.metadata.title} の構成案</h1>

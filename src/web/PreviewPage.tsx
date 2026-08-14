@@ -13,6 +13,7 @@ import {
   createPreviewPlayerProps,
   createPreviewViewModel
 } from "./preview-state";
+import { WorkflowIndicator } from "./WorkflowIndicator";
 
 function getErrorMessage(error: unknown): string {
   if (error instanceof ApiClientError) {
@@ -91,6 +92,7 @@ export function PreviewPage() {
           プロジェクト概要へ戻る
         </Link>
       </p>
+      <WorkflowIndicator projectId={projectId} currentStep="output" />
       <header className="page-header page-header-stacked">
         <p className="eyebrow">動画プレビュー</p>
         <h1>{data.project.title}</h1>
