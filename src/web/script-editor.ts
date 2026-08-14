@@ -182,6 +182,21 @@ export type VisualSuggestionCurrentContext = {
   readonly revision: number;
 };
 
+export async function captureVisualSuggestionRequestAfterFlush(
+  flush: () => Promise<boolean | undefined>,
+  request: Omit<VisualSuggestionRequestContext, "expectedRevision">,
+  getCurrentRevision: () => number
+): Promise<VisualSuggestionRequestContext | undefined> {
+  const flushed = await flush();
+  if (flushed !== true) {
+    return undefined;
+  }
+  return {
+    ...request,
+    expectedRevision: getCurrentRevision()
+  };
+}
+
 export function isVisualSuggestionContextCurrent(
   current: VisualSuggestionCurrentContext,
   requested: VisualSuggestionRequestContext

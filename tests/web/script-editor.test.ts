@@ -4,6 +4,7 @@ import { createEmptyVideoProject } from "../../src/app/projects/empty-video-proj
 import type { Script } from "../../src/schema/index.js";
 import {
   appendScriptLines,
+  captureVisualSuggestionRequestAfterFlush,
   createDefaultScriptLine,
   deleteScriptLine,
   duplicateScriptLine,
@@ -327,6 +328,33 @@ describe("script editor helpers", () => {
         requested
       )
     ).toBe(false);
+  });
+
+  it("captures the visual suggestion revision after autosave completes", async () => {
+    let revision = 4;
+    const request = await captureVisualSuggestionRequestAfterFlush(
+      async () => {
+        revision = 5;
+        return true;
+      },
+      {
+        projectId: "project-a",
+        projectGeneration: 1,
+        sectionId: "section-a",
+        startLineId: "line-one",
+        endLineId: "line-two"
+      },
+      () => revision
+    );
+
+    expect(request).toMatchObject({
+      projectId: "project-a",
+      projectGeneration: 1,
+      sectionId: "section-a",
+      startLineId: "line-one",
+      endLineId: "line-two",
+      expectedRevision: 5
+    });
   });
 
   it("ignores a delayed initialization success after switching projects", async () => {

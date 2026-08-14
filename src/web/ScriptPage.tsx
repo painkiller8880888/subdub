@@ -58,6 +58,7 @@ import {
 } from "./brief-autosave";
 import {
   appendScriptLines,
+  captureVisualSuggestionRequestAfterFlush,
   cloneScript,
   createDefaultScriptLine,
   deleteScriptLine,
@@ -1552,18 +1553,20 @@ export function ScriptPage() {
     const requestSectionId = suggestionSection.id;
     const requestStartLineId = suggestionStartLineId;
     const requestEndLineId = suggestionEndLineId;
-    const flushed = await coordinatorRef.current?.flush();
-    if (flushed !== true) {
+    const requestContext = await captureVisualSuggestionRequestAfterFlush(
+      () => coordinatorRef.current?.flush() ?? Promise.resolve(false),
+      {
+        projectId: requestProjectId,
+        projectGeneration: requestGeneration,
+        sectionId: requestSectionId,
+        startLineId: requestStartLineId,
+        endLineId: requestEndLineId
+      },
+      () => revisionRef.current
+    );
+    if (requestContext === undefined) {
       return;
     }
-    const requestContext: VisualSuggestionRequestContext = {
-      projectId: requestProjectId,
-      projectGeneration: requestGeneration,
-      sectionId: requestSectionId,
-      startLineId: requestStartLineId,
-      endLineId: requestEndLineId,
-      expectedRevision: revisionRef.current
-    };
     const currentContext: VisualSuggestionCurrentContext = {
       ...visualSuggestionContextRef.current,
       projectId: projectIdRef.current,
