@@ -88,7 +88,7 @@ function productionStatusLabel(
 ): string {
   switch (status) {
     case "approved":
-      return "確認済み";
+      return "互換 status（approved）";
     case "needs_review":
       return "要確認";
     default:

@@ -113,7 +113,7 @@ function getErrorMessage(error: unknown, fallback: string): string {
 function scriptStatusLabel(status: Script["status"]): string {
   switch (status) {
     case "approved":
-      return "確認済み";
+      return "互換 status（approved）";
     case "needs_review":
       return "要確認";
     default:
@@ -497,7 +497,8 @@ function ScriptLineCard({
                     <span className="script-line-visual-assignment-details">
                       <strong>{asset?.title ?? assignment.assetId}</strong>
                       <span>
-                        適用範囲：{visualAssignmentRangeLabel(project, assignment)}
+                        適用範囲：
+                        {visualAssignmentRangeLabel(project, assignment)}
                       </span>
                     </span>
                   </div>
@@ -982,7 +983,9 @@ export function ScriptPage() {
     ) {
       setSuggestionEndLineId(lastLineId);
     }
-    if (!selectedSection.lines.some((line) => line.id === selectedVisualLineId)) {
+    if (
+      !selectedSection.lines.some((line) => line.id === selectedVisualLineId)
+    ) {
       setSelectedVisualLineId(firstLineId);
     }
   }, [
@@ -1247,7 +1250,9 @@ export function ScriptPage() {
         <header className="page-header page-header-stacked">
           <p className="eyebrow">制作 台本・ビジュアル・音声</p>
           <h1>{project.metadata.title}</h1>
-          <p>構成案のセクション構造を引き継いで、台本中心の制作を開始します。</p>
+          <p>
+            構成案のセクション構造を引き継いで、台本中心の制作を開始します。
+          </p>
           <div className="page-header-actions">
             <Link className="button" to={outlinePath(projectId)}>
               構成案を確認
@@ -1573,12 +1578,7 @@ export function ScriptPage() {
       projectGeneration: projectGenerationRef.current,
       revision: revisionRef.current
     };
-    if (
-      !isVisualSuggestionContextCurrent(
-        currentContext,
-        requestContext
-      )
-    ) {
+    if (!isVisualSuggestionContextCurrent(currentContext, requestContext)) {
       return;
     }
     setSuggestionResponse(null);
@@ -1802,7 +1802,8 @@ export function ScriptPage() {
                   <dt>対象範囲</dt>
                   <dd>
                     {suggestionSection?.name ?? "不明"}：
-                    {suggestionStartLineId || "—"} ～ {suggestionEndLineId || "—"}
+                    {suggestionStartLineId || "—"} ～{" "}
+                    {suggestionEndLineId || "—"}
                   </dd>
                 </div>
               </dl>
@@ -1818,525 +1819,540 @@ export function ScriptPage() {
             className="visual-suggestion-panel"
             aria-labelledby="visual-suggestion-title"
           >
-        <div>
-          <p className="eyebrow">制作 ビジュアル候補</p>
-          <h2 id="visual-suggestion-title">AIでビジュアル候補を探す</h2>
-          <p>
-            AIが検索条件を作成し、登録済みで利用可能な素材から候補を検索します。素材の割り当ては最後に手動で確定します。
-          </p>
-        </div>
-        {!canSuggest ? (
-          <p className="message-panel message-panel-warning">
-            台本の入力エラーを解消するとAIでビジュアル候補を検索できます。通常の素材検索と素材の割り当ては編集中も利用できます。
-          </p>
-        ) : null}
-        <div className="form-field">
-          <label htmlFor="visual-suggestion-section">
-            候補を探すセクション
-          </label>
-          <select
-            id="visual-suggestion-section"
-            value={suggestionSection?.id ?? ""}
-            onChange={(event) => {
-              const nextSection = draft.sections.find(
-                (section) => section.id === event.target.value
-              );
-              setSuggestionSectionId(event.target.value);
-              setSuggestionStartLineId(nextSection?.lines[0]?.id ?? "");
-              setSuggestionEndLineId(nextSection?.lines.at(-1)?.id ?? "");
-              setSelectedVisualLineId(nextSection?.lines[0]?.id ?? "");
-              setSuggestionResponse(null);
-              setSuggestionError(null);
-            }}
-            disabled={suggestionMutation.isPending}
-          >
-            {draft.sections.map((section) => (
-              <option key={section.id} value={section.id}>
-                {section.name}（{section.lines.length}セリフ）
-              </option>
-            ))}
-          </select>
-        </div>
-        <div className="form-field-group">
-          <div className="form-field">
-            <label htmlFor="visual-suggestion-start">開始セリフ</label>
-            <select
-              id="visual-suggestion-start"
-              value={suggestionStartLineId}
-              onChange={(event) => {
-                setSuggestionStartLineId(event.target.value);
-                setSelectedVisualLineId(event.target.value);
-                setSuggestionResponse(null);
-                setSuggestionError(null);
-              }}
-              disabled={
-                suggestionSection === undefined || suggestionMutation.isPending
-              }
-            >
-              {suggestionSection?.lines.map((line) => (
-                <option key={line.id} value={line.id}>
-                  {line.id}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="form-field">
-            <label htmlFor="visual-suggestion-end">終了セリフ</label>
-            <select
-              id="visual-suggestion-end"
-              value={suggestionEndLineId}
-              onChange={(event) => {
-                setSuggestionEndLineId(event.target.value);
-                setSuggestionResponse(null);
-                setSuggestionError(null);
-              }}
-              disabled={
-                suggestionSection === undefined || suggestionMutation.isPending
-              }
-            >
-              {suggestionSection?.lines.map((line) => (
-                <option key={line.id} value={line.id}>
-                  {line.id}
-                </option>
-              ))}
-            </select>
-          </div>
-        </div>
-        <button
-          className="button button-primary"
-          type="button"
-          onClick={() => void runVisualSuggestion()}
-          disabled={
-            !canSuggest ||
-            suggestionSection === undefined ||
-            suggestionStartLineId.length === 0 ||
-            suggestionEndLineId.length === 0 ||
-            suggestionMutation.isPending
-          }
-        >
-          {suggestionMutation.isPending
-            ? "ビジュアル候補を検索中…"
-            : "AIでビジュアル候補を検索"}
-        </button>
-        {suggestionError !== null ? (
-          <section className="message-panel message-panel-error" role="alert">
-            <p>
-              {getErrorMessage(
-                suggestionError,
-                "AIによるビジュアル候補の検索に失敗しました。"
-              )}
-            </p>
-            {errorDetails(suggestionError).length > 0 ? (
-              <ul>
-                {errorDetails(suggestionError).map((detail) => (
-                  <li key={detail}>{detail}</li>
-                ))}
-              </ul>
-            ) : null}
-            <p>通常の素材検索は引き続き利用できます。</p>
-          </section>
-        ) : null}
-        {suggestionResponse !== null ? (
-          <div className="visual-suggestion-result">
-            <p className="eyebrow">AIが作成した検索条件</p>
-            <dl className="definition-list">
-              <dt>必須タグ</dt>
-              <dd>
-                {suggestionResponse.data.aiIntent.requiredTags.join("、") ||
-                  "なし"}
-              </dd>
-              <dt>任意タグ</dt>
-              <dd>
-                {suggestionResponse.data.aiIntent.optionalTags.join("、") ||
-                  "なし"}
-              </dd>
-              <dt>除外タグ</dt>
-              <dd>
-                {suggestionResponse.data.aiIntent.excludedTags.join("、") ||
-                  "なし"}
-              </dd>
-              <dt>素材の種類</dt>
-              <dd>
-                {suggestionResponse.data.aiIntent.mediaKinds
-                  .map(assetKindLabel)
-                  .join("、")}
-              </dd>
-              <dt>キーワード検索</dt>
-              <dd>
-                {suggestionResponse.data.aiIntent.freeTextQuery || "なし"}
-              </dd>
-              <dt>提案理由</dt>
-              <dd>{suggestionResponse.data.aiIntent.reason}</dd>
-            </dl>
-            <p className="eyebrow">登録情報に照合した検索条件</p>
-            <dl className="definition-list">
-              <dt>必須タグ</dt>
-              <dd>
-                {suggestionResponse.data.resolvedSearch.requiredTags
-                  .map((tag) => `${tag.canonicalName}（${tag.tagId}）`)
-                  .join("、") || "なし"}
-              </dd>
-              <dt>任意タグ</dt>
-              <dd>
-                {suggestionResponse.data.resolvedSearch.optionalTags
-                  .map((tag) => `${tag.canonicalName}（${tag.tagId}）`)
-                  .join("、") || "なし"}
-              </dd>
-              <dt>除外タグ</dt>
-              <dd>
-                {suggestionResponse.data.resolvedSearch.excludedTags
-                  .map((tag) => `${tag.canonicalName}（${tag.tagId}）`)
-                  .join("、") || "なし"}
-              </dd>
-              <dt>キーワード検索</dt>
-              <dd>
-                {suggestionResponse.data.resolvedSearch.freeTextQuery || "なし"}
-              </dd>
-            </dl>
-            {suggestionResponse.data.diagnostics.unresolvedTags.length > 0 ? (
-              <div className="message-panel message-panel-warning">
-                <h3>未解決条件</h3>
-                <ul>
-                  {suggestionResponse.data.diagnostics.unresolvedTags.map(
-                    (tag) => (
-                      <li key={`${tag.group}-${tag.value}`}>
-                        {visualTagGroupLabel(tag.group)}：{tag.value}（
-                        {unresolvedTagReasonLabel(tag.reason)}）
-                      </li>
-                    )
-                  )}
-                </ul>
-                {suggestionResponse.data.diagnostics
-                  .requiredTagResolutionFailed ? (
-                  <p>必須タグを解決できないため候補は返していません。</p>
-                ) : null}
-              </div>
-            ) : null}
-            <div className="form-field">
-              <label htmlFor="visual-decision-reason">
-                候補の採否理由（任意）
-              </label>
-              <textarea
-                id="visual-decision-reason"
-                rows={3}
-                value={visualDecisionReason}
-                onChange={(event) =>
-                  setVisualDecisionReason(event.target.value)
-                }
-                placeholder="理由を入力しなくても採用・却下の事実は記録されます。"
-                maxLength={2000}
-              />
-              <small>理由未入力でも採用・却下の事実は記録されます。</small>
+            <div>
+              <p className="eyebrow">制作 ビジュアル候補</p>
+              <h2 id="visual-suggestion-title">AIでビジュアル候補を探す</h2>
+              <p>
+                AIが検索条件を作成し、登録済みで利用可能な素材から候補を検索します。素材の割り当ては最後に手動で確定します。
+              </p>
             </div>
-            <p className="eyebrow">
-              利用可能な素材候補（
-              {suggestionResponse.data.diagnostics.candidateCount}件）
-            </p>
-            {visualSuggestionStale ? (
-              <p className="status-message">
-                候補を採用したためプロジェクト版が更新されました。残りの候補は無効です。再生成してください。
+            {!canSuggest ? (
+              <p className="message-panel message-panel-warning">
+                台本の入力エラーを解消するとAIでビジュアル候補を検索できます。通常の素材検索と素材の割り当ては編集中も利用できます。
               </p>
             ) : null}
-            {suggestionResponse.data.candidates.length === 0 ? (
-              <p className="status-message">候補なし</p>
-            ) : (
-              <ul className="asset-candidate-list">
-                {suggestionResponse.data.candidates.map((candidate) => {
-                  const decision =
-                    candidateDecisionByAssetId[candidate.asset.assetId];
-                  return (
-                    <li key={candidate.asset.assetId}>
-                      <strong>{candidate.asset.title}</strong>（
-                      {assetKindLabel(candidate.asset.kind)}）
-                      <span>
-                        タグ：{" "}
-                        {candidate.asset.tags
-                          .map((tag) => tag.canonicalName)
-                          .join("、") || "なし"}
-                      </span>
-                      <span>
-                        {candidate.matchReasons
-                          .map(visualMatchReasonLabel)
-                          .join(" / ")}
-                      </span>
-                      {decision === "accepted" ? (
-                        <span className="status-message">採用済み</span>
-                      ) : null}
-                      {decision === "rejected" ? (
-                        <span className="status-message">却下済み</span>
-                      ) : null}
-                      {decision === "stale" ? (
-                        <span className="status-message">古い候補</span>
-                      ) : null}
-                      <button
-                        className="button button-small"
-                        type="button"
-                        disabled={
-                          visualMutationPending || decision !== undefined
-                        }
-                        onClick={() =>
-                          void assignVisualCandidate(
-                            candidate.asset,
-                            suggestionResponse.data.runId
-                          )
-                        }
-                      >
-                        この素材を採用して割り当て
-                      </button>
-                      <button
-                        className="button button-small"
-                        type="button"
-                        disabled={
-                          visualMutationPending || decision !== undefined
-                        }
-                        onClick={() =>
-                          void rejectVisualCandidate(candidate.asset.assetId)
-                        }
-                      >
-                        この候補を却下
-                      </button>
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
-          </div>
-        ) : null}
-      </section>
-
-      <section
-        className="asset-search-panel"
-        aria-labelledby="asset-search-title"
-      >
-        <p className="eyebrow">手順3-3 素材検索</p>
-        <h2 id="asset-search-title">素材をキーワードやタグで探す</h2>
-        <form onSubmit={runAssetSearch}>
-          <div className="form-field-group">
             <div className="form-field">
-              <label htmlFor="asset-search-query">キーワード</label>
-              <input
-                id="asset-search-query"
-                value={assetSearchQuery}
-                onChange={(event) => setAssetSearchQuery(event.target.value)}
-              />
-            </div>
-            <div className="form-field">
-              <label htmlFor="asset-search-tag-ids">
-                タグ識別子（カンマまたは空白で区切る）
+              <label htmlFor="visual-suggestion-section">
+                候補を探すセクション
               </label>
-              <input
-                id="asset-search-tag-ids"
-                value={assetSearchTagIds}
-                onChange={(event) => setAssetSearchTagIds(event.target.value)}
-                placeholder="例：tag-daily tag-inspection"
-              />
+              <select
+                id="visual-suggestion-section"
+                value={suggestionSection?.id ?? ""}
+                onChange={(event) => {
+                  const nextSection = draft.sections.find(
+                    (section) => section.id === event.target.value
+                  );
+                  setSuggestionSectionId(event.target.value);
+                  setSuggestionStartLineId(nextSection?.lines[0]?.id ?? "");
+                  setSuggestionEndLineId(nextSection?.lines.at(-1)?.id ?? "");
+                  setSelectedVisualLineId(nextSection?.lines[0]?.id ?? "");
+                  setSuggestionResponse(null);
+                  setSuggestionError(null);
+                }}
+                disabled={suggestionMutation.isPending}
+              >
+                {draft.sections.map((section) => (
+                  <option key={section.id} value={section.id}>
+                    {section.name}（{section.lines.length}セリフ）
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="form-field-group">
+              <div className="form-field">
+                <label htmlFor="visual-suggestion-start">開始セリフ</label>
+                <select
+                  id="visual-suggestion-start"
+                  value={suggestionStartLineId}
+                  onChange={(event) => {
+                    setSuggestionStartLineId(event.target.value);
+                    setSelectedVisualLineId(event.target.value);
+                    setSuggestionResponse(null);
+                    setSuggestionError(null);
+                  }}
+                  disabled={
+                    suggestionSection === undefined ||
+                    suggestionMutation.isPending
+                  }
+                >
+                  {suggestionSection?.lines.map((line) => (
+                    <option key={line.id} value={line.id}>
+                      {line.id}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="form-field">
+                <label htmlFor="visual-suggestion-end">終了セリフ</label>
+                <select
+                  id="visual-suggestion-end"
+                  value={suggestionEndLineId}
+                  onChange={(event) => {
+                    setSuggestionEndLineId(event.target.value);
+                    setSuggestionResponse(null);
+                    setSuggestionError(null);
+                  }}
+                  disabled={
+                    suggestionSection === undefined ||
+                    suggestionMutation.isPending
+                  }
+                >
+                  {suggestionSection?.lines.map((line) => (
+                    <option key={line.id} value={line.id}>
+                      {line.id}
+                    </option>
+                  ))}
+                </select>
+              </div>
             </div>
             <button
-              className="button"
-              type="submit"
-              disabled={assetSearchMutation.isPending}
+              className="button button-primary"
+              type="button"
+              onClick={() => void runVisualSuggestion()}
+              disabled={
+                !canSuggest ||
+                suggestionSection === undefined ||
+                suggestionStartLineId.length === 0 ||
+                suggestionEndLineId.length === 0 ||
+                suggestionMutation.isPending
+              }
             >
-              {assetSearchMutation.isPending ? "検索中…" : "通常検索"}
+              {suggestionMutation.isPending
+                ? "ビジュアル候補を検索中…"
+                : "AIでビジュアル候補を検索"}
             </button>
-          </div>
-        </form>
-        {assetSearchError !== null ? (
-          <p className="form-error" role="alert">
-            {getErrorMessage(assetSearchError, "素材検索に失敗しました。")}
-          </p>
-        ) : null}
-        {assetSearchResult !== null ? (
-          assetSearchResult.items.length === 0 ? (
-            <p className="status-message">候補なし</p>
-          ) : (
-            <ul className="asset-candidate-list">
-              {assetSearchResult.items.map((asset) => (
-                <li key={asset.assetId}>
-                  <strong>{asset.title}</strong>（{assetKindLabel(asset.kind)}）
-                  <span>
-                    {asset.tags.map((tag) => tag.canonicalName).join("、") ||
-                      "タグなし"}
-                  </span>
-                  <button
-                    className="button button-small"
-                    type="button"
-                    disabled={visualMutationPending}
-                    onClick={() => void assignVisualCandidate(asset)}
-                  >
-                    この素材を割り当て
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )
-        ) : null}
-      </section>
-
-      {visualError !== null ? (
-        <section className="message-panel message-panel-error" role="alert">
-          <h2>ビジュアル設定を保存できません</h2>
-          <p>
-            {getErrorMessage(
-              visualError,
-              "入力内容または素材の状態を確認してください。"
-            )}
-          </p>
-          {errorDetails(visualError).length > 0 ? (
-            <ul>
-              {errorDetails(visualError).map((detail) => (
-                <li key={detail}>{detail}</li>
-              ))}
-            </ul>
-          ) : null}
-          {visualError instanceof ApiClientError &&
-          visualError.status === 409 ? (
-            <p>
-              競合のため、入力中の表示設定は保持しています。最新データで上書きしません。
-            </p>
-          ) : null}
-        </section>
-      ) : null}
-
-      {visualSaveState === "saved" ? (
-        <p className="status-message" role="status">
-          ビジュアル設定を保存済みです（更新番号 {revisionRef.current}）。
-        </p>
-      ) : null}
-
-      <VisualAssignmentPanel
-        project={project}
-        assets={assignmentAssets}
-        focusLineId={selectedVisualLine?.id}
-        onSave={saveVisualAssignment}
-        onRemove={removeVisualAssignment}
-        isMutating={visualMutationPending}
-      />
-
-        </aside>
-        <div className="script-production-main">
-
-      <form className="bulk-paste-panel" onSubmit={pasteLines}>
-        <div>
-          <h2>話者付きテキストの一括貼り付け</h2>
-          <p>
-            1行に1セリフを入力し、話者名と本文を半角または全角のコロンで区切ります。
-          </p>
-        </div>
-        <div className="form-field">
-          <label htmlFor="bulk-script-section">追加先セクション</label>
-          <select
-            id="bulk-script-section"
-            value={bulkSectionIndex}
-            onChange={(event) =>
-              setBulkSectionIndex(Number(event.target.value))
-            }
-          >
-            {draft.sections.map((section, index) => (
-              <option key={section.id} value={index}>
-                {section.name}（{section.id}）
-              </option>
-            ))}
-          </select>
-        </div>
-        <div className="form-field">
-          <label htmlFor="bulk-script-text">貼り付ける台本本文</label>
-          <textarea
-            id="bulk-script-text"
-            rows={5}
-            value={bulkText}
-            onChange={(event: ChangeEvent<HTMLTextAreaElement>) =>
-              setBulkText(event.target.value)
-            }
-            placeholder="四国めたん：最初に申請画面を開きます。\nずんだもん: 右上の新規作成を押すのだ。"
-          />
-        </div>
-        {bulkErrors.length > 0 ? (
-          <ul className="form-error" role="alert">
-            {bulkErrors.map((error) => (
-              <li key={`${error.lineNumber}-${error.message}`}>
-                {error.lineNumber}行目: {error.message}
-              </li>
-            ))}
-          </ul>
-        ) : null}
-        <button className="button" type="submit">
-          セリフカードへ追加
-        </button>
-      </form>
-
-      <section className="script-section-list" aria-label="台本セクション">
-        {draft.sections.map((section, sectionIndex) => (
-          <section className="script-section-card" key={section.id}>
-            <header className="script-section-header">
-              <div>
-                <p className="eyebrow">セクション</p>
-                <h2>{section.name}</h2>
-                <code>
-                  {section.id} / 構成案ID: {section.outlineSectionId}
-                </code>
-              </div>
-              <button
-                className="button"
-                type="button"
-                onClick={() => addLine(sectionIndex)}
+            {suggestionError !== null ? (
+              <section
+                className="message-panel message-panel-error"
+                role="alert"
               >
-                セリフを追加
-              </button>
-            </header>
-            {section.lines.length === 0 ? (
-              <p className="status-message">セリフはまだありません。</p>
-            ) : (
-              <div className="script-line-list">
-                {section.lines.map((line, lineIndex) => (
-                  <ScriptLineCard
-                    key={line.id}
-                    line={line}
-                    sectionIndex={sectionIndex}
-                    lineIndex={lineIndex}
-                    project={project}
-                    assignmentAssets={assignmentAssets}
-                    isVisualSelected={selectedVisualLineId === line.id}
-                    issues={issues}
-                    voiceStatus={voiceStatusByLine.get(line.id)}
-                    voiceGenerationDisabled={
-                      voiceGenerationDisabled || issues.length > 0
-                    }
-                    voiceAvailable={voiceStatusQuery.data?.available === true}
-                    projectId={project.metadata.id}
-                    onChange={(update) =>
-                      updateLine(sectionIndex, lineIndex, update)
-                    }
-                    onMove={(direction) =>
-                      updateDraft(
-                        moveScriptLine(
-                          draft,
-                          sectionIndex,
-                          lineIndex,
-                          direction
+                <p>
+                  {getErrorMessage(
+                    suggestionError,
+                    "AIによるビジュアル候補の検索に失敗しました。"
+                  )}
+                </p>
+                {errorDetails(suggestionError).length > 0 ? (
+                  <ul>
+                    {errorDetails(suggestionError).map((detail) => (
+                      <li key={detail}>{detail}</li>
+                    ))}
+                  </ul>
+                ) : null}
+                <p>通常の素材検索は引き続き利用できます。</p>
+              </section>
+            ) : null}
+            {suggestionResponse !== null ? (
+              <div className="visual-suggestion-result">
+                <p className="eyebrow">AIが作成した検索条件</p>
+                <dl className="definition-list">
+                  <dt>必須タグ</dt>
+                  <dd>
+                    {suggestionResponse.data.aiIntent.requiredTags.join("、") ||
+                      "なし"}
+                  </dd>
+                  <dt>任意タグ</dt>
+                  <dd>
+                    {suggestionResponse.data.aiIntent.optionalTags.join("、") ||
+                      "なし"}
+                  </dd>
+                  <dt>除外タグ</dt>
+                  <dd>
+                    {suggestionResponse.data.aiIntent.excludedTags.join("、") ||
+                      "なし"}
+                  </dd>
+                  <dt>素材の種類</dt>
+                  <dd>
+                    {suggestionResponse.data.aiIntent.mediaKinds
+                      .map(assetKindLabel)
+                      .join("、")}
+                  </dd>
+                  <dt>キーワード検索</dt>
+                  <dd>
+                    {suggestionResponse.data.aiIntent.freeTextQuery || "なし"}
+                  </dd>
+                  <dt>提案理由</dt>
+                  <dd>{suggestionResponse.data.aiIntent.reason}</dd>
+                </dl>
+                <p className="eyebrow">登録情報に照合した検索条件</p>
+                <dl className="definition-list">
+                  <dt>必須タグ</dt>
+                  <dd>
+                    {suggestionResponse.data.resolvedSearch.requiredTags
+                      .map((tag) => `${tag.canonicalName}（${tag.tagId}）`)
+                      .join("、") || "なし"}
+                  </dd>
+                  <dt>任意タグ</dt>
+                  <dd>
+                    {suggestionResponse.data.resolvedSearch.optionalTags
+                      .map((tag) => `${tag.canonicalName}（${tag.tagId}）`)
+                      .join("、") || "なし"}
+                  </dd>
+                  <dt>除外タグ</dt>
+                  <dd>
+                    {suggestionResponse.data.resolvedSearch.excludedTags
+                      .map((tag) => `${tag.canonicalName}（${tag.tagId}）`)
+                      .join("、") || "なし"}
+                  </dd>
+                  <dt>キーワード検索</dt>
+                  <dd>
+                    {suggestionResponse.data.resolvedSearch.freeTextQuery ||
+                      "なし"}
+                  </dd>
+                </dl>
+                {suggestionResponse.data.diagnostics.unresolvedTags.length >
+                0 ? (
+                  <div className="message-panel message-panel-warning">
+                    <h3>未解決条件</h3>
+                    <ul>
+                      {suggestionResponse.data.diagnostics.unresolvedTags.map(
+                        (tag) => (
+                          <li key={`${tag.group}-${tag.value}`}>
+                            {visualTagGroupLabel(tag.group)}：{tag.value}（
+                            {unresolvedTagReasonLabel(tag.reason)}）
+                          </li>
                         )
-                      )
+                      )}
+                    </ul>
+                    {suggestionResponse.data.diagnostics
+                      .requiredTagResolutionFailed ? (
+                      <p>必須タグを解決できないため候補は返していません。</p>
+                    ) : null}
+                  </div>
+                ) : null}
+                <div className="form-field">
+                  <label htmlFor="visual-decision-reason">
+                    候補の採否理由（任意）
+                  </label>
+                  <textarea
+                    id="visual-decision-reason"
+                    rows={3}
+                    value={visualDecisionReason}
+                    onChange={(event) =>
+                      setVisualDecisionReason(event.target.value)
                     }
-                    onDuplicate={() =>
-                      updateDraft(
-                        duplicateScriptLine(draft, sectionIndex, lineIndex)
-                      )
-                    }
-                    onDelete={() =>
-                      updateDraft(
-                        deleteScriptLine(draft, sectionIndex, lineIndex)
-                      )
-                    }
-                    onGenerateVoice={() => void generateVoiceLine(line.id)}
-                    onSelectVisualRange={() =>
-                      selectVisualRange(section.id, line.id)
+                    placeholder="理由を入力しなくても採用・却下の事実は記録されます。"
+                    maxLength={2000}
+                  />
+                  <small>理由未入力でも採用・却下の事実は記録されます。</small>
+                </div>
+                <p className="eyebrow">
+                  利用可能な素材候補（
+                  {suggestionResponse.data.diagnostics.candidateCount}件）
+                </p>
+                {visualSuggestionStale ? (
+                  <p className="status-message">
+                    候補を採用したためプロジェクト版が更新されました。残りの候補は無効です。再生成してください。
+                  </p>
+                ) : null}
+                {suggestionResponse.data.candidates.length === 0 ? (
+                  <p className="status-message">候補なし</p>
+                ) : (
+                  <ul className="asset-candidate-list">
+                    {suggestionResponse.data.candidates.map((candidate) => {
+                      const decision =
+                        candidateDecisionByAssetId[candidate.asset.assetId];
+                      return (
+                        <li key={candidate.asset.assetId}>
+                          <strong>{candidate.asset.title}</strong>（
+                          {assetKindLabel(candidate.asset.kind)}）
+                          <span>
+                            タグ：{" "}
+                            {candidate.asset.tags
+                              .map((tag) => tag.canonicalName)
+                              .join("、") || "なし"}
+                          </span>
+                          <span>
+                            {candidate.matchReasons
+                              .map(visualMatchReasonLabel)
+                              .join(" / ")}
+                          </span>
+                          {decision === "accepted" ? (
+                            <span className="status-message">採用済み</span>
+                          ) : null}
+                          {decision === "rejected" ? (
+                            <span className="status-message">却下済み</span>
+                          ) : null}
+                          {decision === "stale" ? (
+                            <span className="status-message">古い候補</span>
+                          ) : null}
+                          <button
+                            className="button button-small"
+                            type="button"
+                            disabled={
+                              visualMutationPending || decision !== undefined
+                            }
+                            onClick={() =>
+                              void assignVisualCandidate(
+                                candidate.asset,
+                                suggestionResponse.data.runId
+                              )
+                            }
+                          >
+                            この素材を採用して割り当て
+                          </button>
+                          <button
+                            className="button button-small"
+                            type="button"
+                            disabled={
+                              visualMutationPending || decision !== undefined
+                            }
+                            onClick={() =>
+                              void rejectVisualCandidate(
+                                candidate.asset.assetId
+                              )
+                            }
+                          >
+                            この候補を却下
+                          </button>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
+              </div>
+            ) : null}
+          </section>
+
+          <section
+            className="asset-search-panel"
+            aria-labelledby="asset-search-title"
+          >
+            <p className="eyebrow">手順3-3 素材検索</p>
+            <h2 id="asset-search-title">素材をキーワードやタグで探す</h2>
+            <form onSubmit={runAssetSearch}>
+              <div className="form-field-group">
+                <div className="form-field">
+                  <label htmlFor="asset-search-query">キーワード</label>
+                  <input
+                    id="asset-search-query"
+                    value={assetSearchQuery}
+                    onChange={(event) =>
+                      setAssetSearchQuery(event.target.value)
                     }
                   />
-                ))}
+                </div>
+                <div className="form-field">
+                  <label htmlFor="asset-search-tag-ids">
+                    タグ識別子（カンマまたは空白で区切る）
+                  </label>
+                  <input
+                    id="asset-search-tag-ids"
+                    value={assetSearchTagIds}
+                    onChange={(event) =>
+                      setAssetSearchTagIds(event.target.value)
+                    }
+                    placeholder="例：tag-daily tag-inspection"
+                  />
+                </div>
+                <button
+                  className="button"
+                  type="submit"
+                  disabled={assetSearchMutation.isPending}
+                >
+                  {assetSearchMutation.isPending ? "検索中…" : "通常検索"}
+                </button>
               </div>
-            )}
+            </form>
+            {assetSearchError !== null ? (
+              <p className="form-error" role="alert">
+                {getErrorMessage(assetSearchError, "素材検索に失敗しました。")}
+              </p>
+            ) : null}
+            {assetSearchResult !== null ? (
+              assetSearchResult.items.length === 0 ? (
+                <p className="status-message">候補なし</p>
+              ) : (
+                <ul className="asset-candidate-list">
+                  {assetSearchResult.items.map((asset) => (
+                    <li key={asset.assetId}>
+                      <strong>{asset.title}</strong>（
+                      {assetKindLabel(asset.kind)}）
+                      <span>
+                        {asset.tags
+                          .map((tag) => tag.canonicalName)
+                          .join("、") || "タグなし"}
+                      </span>
+                      <button
+                        className="button button-small"
+                        type="button"
+                        disabled={visualMutationPending}
+                        onClick={() => void assignVisualCandidate(asset)}
+                      >
+                        この素材を割り当て
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )
+            ) : null}
           </section>
-        ))}
-      </section>
+
+          {visualError !== null ? (
+            <section className="message-panel message-panel-error" role="alert">
+              <h2>ビジュアル設定を保存できません</h2>
+              <p>
+                {getErrorMessage(
+                  visualError,
+                  "入力内容または素材の状態を確認してください。"
+                )}
+              </p>
+              {errorDetails(visualError).length > 0 ? (
+                <ul>
+                  {errorDetails(visualError).map((detail) => (
+                    <li key={detail}>{detail}</li>
+                  ))}
+                </ul>
+              ) : null}
+              {visualError instanceof ApiClientError &&
+              visualError.status === 409 ? (
+                <p>
+                  競合のため、入力中の表示設定は保持しています。最新データで上書きしません。
+                </p>
+              ) : null}
+            </section>
+          ) : null}
+
+          {visualSaveState === "saved" ? (
+            <p className="status-message" role="status">
+              ビジュアル設定を保存済みです（更新番号 {revisionRef.current}）。
+            </p>
+          ) : null}
+
+          <VisualAssignmentPanel
+            project={project}
+            assets={assignmentAssets}
+            focusLineId={selectedVisualLine?.id}
+            onSave={saveVisualAssignment}
+            onRemove={removeVisualAssignment}
+            isMutating={visualMutationPending}
+          />
+        </aside>
+        <div className="script-production-main">
+          <form className="bulk-paste-panel" onSubmit={pasteLines}>
+            <div>
+              <h2>話者付きテキストの一括貼り付け</h2>
+              <p>
+                1行に1セリフを入力し、話者名と本文を半角または全角のコロンで区切ります。
+              </p>
+            </div>
+            <div className="form-field">
+              <label htmlFor="bulk-script-section">追加先セクション</label>
+              <select
+                id="bulk-script-section"
+                value={bulkSectionIndex}
+                onChange={(event) =>
+                  setBulkSectionIndex(Number(event.target.value))
+                }
+              >
+                {draft.sections.map((section, index) => (
+                  <option key={section.id} value={index}>
+                    {section.name}（{section.id}）
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="form-field">
+              <label htmlFor="bulk-script-text">貼り付ける台本本文</label>
+              <textarea
+                id="bulk-script-text"
+                rows={5}
+                value={bulkText}
+                onChange={(event: ChangeEvent<HTMLTextAreaElement>) =>
+                  setBulkText(event.target.value)
+                }
+                placeholder="四国めたん：最初に申請画面を開きます。\nずんだもん: 右上の新規作成を押すのだ。"
+              />
+            </div>
+            {bulkErrors.length > 0 ? (
+              <ul className="form-error" role="alert">
+                {bulkErrors.map((error) => (
+                  <li key={`${error.lineNumber}-${error.message}`}>
+                    {error.lineNumber}行目: {error.message}
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+            <button className="button" type="submit">
+              セリフカードへ追加
+            </button>
+          </form>
+
+          <section className="script-section-list" aria-label="台本セクション">
+            {draft.sections.map((section, sectionIndex) => (
+              <section className="script-section-card" key={section.id}>
+                <header className="script-section-header">
+                  <div>
+                    <p className="eyebrow">セクション</p>
+                    <h2>{section.name}</h2>
+                    <code>
+                      {section.id} / 構成案ID: {section.outlineSectionId}
+                    </code>
+                  </div>
+                  <button
+                    className="button"
+                    type="button"
+                    onClick={() => addLine(sectionIndex)}
+                  >
+                    セリフを追加
+                  </button>
+                </header>
+                {section.lines.length === 0 ? (
+                  <p className="status-message">セリフはまだありません。</p>
+                ) : (
+                  <div className="script-line-list">
+                    {section.lines.map((line, lineIndex) => (
+                      <ScriptLineCard
+                        key={line.id}
+                        line={line}
+                        sectionIndex={sectionIndex}
+                        lineIndex={lineIndex}
+                        project={project}
+                        assignmentAssets={assignmentAssets}
+                        isVisualSelected={selectedVisualLineId === line.id}
+                        issues={issues}
+                        voiceStatus={voiceStatusByLine.get(line.id)}
+                        voiceGenerationDisabled={
+                          voiceGenerationDisabled || issues.length > 0
+                        }
+                        voiceAvailable={
+                          voiceStatusQuery.data?.available === true
+                        }
+                        projectId={project.metadata.id}
+                        onChange={(update) =>
+                          updateLine(sectionIndex, lineIndex, update)
+                        }
+                        onMove={(direction) =>
+                          updateDraft(
+                            moveScriptLine(
+                              draft,
+                              sectionIndex,
+                              lineIndex,
+                              direction
+                            )
+                          )
+                        }
+                        onDuplicate={() =>
+                          updateDraft(
+                            duplicateScriptLine(draft, sectionIndex, lineIndex)
+                          )
+                        }
+                        onDelete={() =>
+                          updateDraft(
+                            deleteScriptLine(draft, sectionIndex, lineIndex)
+                          )
+                        }
+                        onGenerateVoice={() => void generateVoiceLine(line.id)}
+                        onSelectVisualRange={() =>
+                          selectVisualRange(section.id, line.id)
+                        }
+                      />
+                    ))}
+                  </div>
+                )}
+              </section>
+            ))}
+          </section>
         </div>
       </div>
     </main>
