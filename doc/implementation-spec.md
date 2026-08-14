@@ -592,6 +592,7 @@ type CharacterVariant = {
   variantId: string;
   label: string;
   renderType: CharacterVariantRenderType;
+  status: "active" | "inactive";
   tags: readonly string[];
   files: readonly CharacterVisualFile[];
 };
@@ -614,6 +615,8 @@ type CharacterVisualCatalogSnapshot = readonly CharacterVisualSet[];
 type CharacterVariantCatalog = readonly CharacterVariant[];
 ```
 
+The database is the source of truth for both visual-set and variant status. Existing rows are migrated with `status = 'active'`; deactivation is a status update and never a physical delete. Ordinary candidate adapters used by the API/UI and render input include only active visuals and active variants, while list/detail snapshots retain inactive rows for management and reactivation.
+
 CV-01 では `status` を `active` / `inactive` とし、visual 単位の基準キャンバスを nullable な `baseWidth` / `baseHeight` として保持する。variant が 0 件の visual は両方を null にでき、最初の完成 variant を登録する時点で両方を確定する。snapshot の版表現は後続設計で扱う。ファイルの MIME type、checksum、サイズ、キャンバス技術情報はバックエンド検証と API 応答に必要なため保持する。
 
 P2-01 の当時の静的カタログには各キャラクター 3 variant、5 ファイル、2 キャラクター合計 6 variant、10 ファイルが登録されていた。CV-01 の migration 後は、この件数を初期 DB seed として保持し、一覧・検証・配信の実行時正本は SQLite と管理領域に切り替える。
@@ -634,7 +637,7 @@ P2-01 の当時の静的カタログには各キャラクター 3 variant、5 �
 - `mouth-pair` の `closed` / `open` キャンバス一致
 - alpha channel または `tRNS`
 
-初期 seed / migration では `doc/assets` の既存 10 PNG を管理領域へコピーし、checksum と技術情報を DB へ保存する。新規登録では未登録 variant の存在をエラーにせず、`single-image` の `single`、`mouth-pair` の `closed` / `open` を揃えた作成リクエストだけを永続化する。必須 slot 欠落、形式不正、checksum 不一致、基準キャンバス不一致は、variant 行や最終ファイルを残さず操作全体を失敗させる。既存の完成 variant の差し替えは 1 slot 単位で行い、必須 slot を削除する操作は提供しない。PNG の完全デコードによる透明ピクセル量や alpha bounding box の数値解析は行わない。身体の基準位置は、同じ visual の代表画像を並べた手動確認で扱い、根拠のない alpha bounding box 許容値は導入しない。
+初期 seed / migration では `doc/assets` の既存 10 PNG を管理領域へコピーし、checksum と技術情報を DB へ保存する。新規登録では未登録 variant の存在をエラーにせず、`single-image` の `single`、`mouth-pair` の `closed` / `open` を揃えた作成リクエストだけを永続化する。必須 slot 欠落、形式不正、checksum 不一致、基準キャンバス不一致は、variant 行や最終ファイルを残さず操作全体を失敗させる。既存の完成 variant の差し替えは complete file set 単位で行い、必須 slot を削除する操作は提供しない。PNG の完全デコードによる透明ピクセル量や alpha bounding box の数値解析は行わない。身体の基準位置は、同じ visual の代表画像を並べた手動確認で扱い、根拠のない alpha bounding box 許容値は導入しない。
 
 ### 7.6 構成案
 
@@ -1190,7 +1193,7 @@ character_visual_sets
       └─ created_at / updated_at
 ```
 
-`tags[]` は variant とタグの関連として保持し、既存素材のタグ辞書と共有できる。`renderType` と必須 slot の検証はアプリケーション層で行う。visual 全体は一部 variant が未登録でも有効にできるが、永続化する variant は必須 slot が揃った完成状態に限る。`single-image` の作成は `single` 1 件、`mouth-pair` の作成は `closed` と `open` 各 1 件を同一リクエストで検証・登録し、必須 slot 欠落の variant 行や file を残さない。登録後の差し替えは 1 slot 単位で許可するが、必須 slot の削除は許可しない。最初の完成 variant で `canvas_width` / `canvas_height` を設定し、以後の file 登録時に同じ visual の値と比較する。異なるサイズは保存せず、既存レコードとファイルを壊さない。
+`tags[]` は variant とタグの関連として保持し、既存素材のタグ辞書と共有できる。`renderType` と必須 slot の検証はアプリケーション層で行う。visual 全体は一部 variant が未登録でも有効にできるが、永続化する variant は必須 slot が揃った完成状態に限る。`single-image` の作成は `single` 1 件、`mouth-pair` の作成は `closed` と `open` 各 1 件を同一リクエストで検証・登録し、必須 slot 欠落の variant 行や file を残さない。登録後の差し替えは complete file set 単位で許可するが、必須 slot の削除は許可しない。最初の完成 variant で `canvas_width` / `canvas_height` を設定し、以後の file 登録時に同じ visual の値と比較する。異なるサイズは保存せず、既存レコードとファイルを壊さない。
 
 `status` の具体的な enum・遷移と、slot key の将来拡張は CV-01 で確定する。ただし、未登録 variant の存在だけで `CharacterVisualSet` を error にしないこと、登録時点で `mentor` / `learner` や project ID を持たせないことは確定する。
 
@@ -1347,14 +1350,18 @@ POST   /api/character-visuals
 GET    /api/character-visuals/{visualId}
 PUT    /api/character-visuals/{visualId}
 POST   /api/character-visuals/{visualId}/variants
-PUT    /api/character-visuals/{visualId}/variants/{variantId}/files/{slotKey}
+PUT    /api/character-visuals/{visualId}/variants/{variantId}
+POST   /api/character-visuals/{visualId}/variants/{variantId}/deactivate
+POST   /api/character-visuals/{visualId}/variants/{variantId}/activate
 ```
+
+The current mutation contract uses one multipart request to replace a complete variant. `POST .../deactivate` and `POST .../activate` persist variant status without deleting rows or managed files; inactive records remain visible in list/detail responses but are excluded from ordinary API/UI candidates. The generated SQL migration adds `character_variants.status` with a check constraint and backfills existing rows as `active`; `drizzle-kit push` is not part of the workflow.
 
 CV-02 で実装する API の責務は次のとおりとする。
 
 - 一覧・詳細は SQLite から `CharacterVisualSet` を読み、variant と管理された画像 URL を返す。TypeScript の静的配列を実在項目の一覧として使用しない。
 - `POST /api/character-visuals/{visualId}/variants` は variant metadata と完全な file set を受け取る。`single-image` は `single`、`mouth-pair` は `closed` と `open` を同一リクエストに含め、全ファイルを検証できた場合だけ variant row と file metadata を永続化する。
-- `PUT /api/character-visuals/{visualId}/variants/{variantId}/files/{slotKey}` は、既存の完成 variant の 1 slot だけを差し替える。対象 variant が存在しない場合、slot key が renderType に適合しない場合、または必須 slot を削除しようとする場合は拒否する。
+- `PUT /api/character-visuals/{visualId}/variants/{variantId}` は、既存の完成 variant の complete file set だけを差し替える。対象 variant が存在しない場合、slot key が renderType に適合しない場合、または必須 slot を削除しようとする場合は拒否する。
 - 作成・差し替えは一時領域で受信し、形式・PNG 構造・必須 slot・visual 基準キャンバス・checksum を検証してから管理領域へ移す。作成リクエストの slot 欠落は DB 行や最終ファイルを残さず失敗させる。
 - ファイル保存と SQLite metadata 更新は、単一の SQLite/filesystem transaction とはみなさない。1つのアプリケーション操作として staged file、atomic rename、SQLite transaction、失敗時の compensating cleanup を組み合わせ、作成時の全ファイルまたは差し替え対象の新ファイルだけが未参照で残る場合は回収する。既存の有効ファイルを新規アップロード失敗で壊さない。クラッシュ残骸は orphan として診断する。
 - `public/` へ直接保存せず、画像は Fastify の管理された配信経路から返す。WebUI に OS 絶対パスを返さない。
@@ -1494,7 +1501,7 @@ POST   /api/projects/{projectId}/thumbnail/render
 
 `/projects/{projectId}/script` は台本・ビジュアル・音声を一体に扱う制作画面である。キャラクター素材の確認部分では、`GET /api/projects/{projectId}` で取得した `VideoProject` と、バックエンドが解決した `CharacterVisualSet` snapshot を組み合わせて表示する。画像読込失敗時は管理された配信 URL と対象 ID を表示し、DB に登録されていない物理素材を表示しない。台本、素材 assignment、音声状態は同じ `project.json` の revision と自動保存で扱い、ワークスペース共通の visual metadata は `project.json` へ保存しない。
 
-`/character-visuals` はプロジェクトに依存しないワークスペース共通の登録・管理画面である。サイドバーから開き、一覧、作成、基本情報編集、完全な variant の作成、既存 file slot の差し替え、status 更新を行う。全表情・全ポーズの一括登録は要求しない。未登録 variant は未登録として表示し、variant 作成フォームでは `single-image` の `single`、`mouth-pair` の `closed` / `open` を揃えるまで登録操作を完了できない。必須 slot 欠落や形式不正はフォームの validation として表示するが、不完全な variant は DB や管理領域へ保存しない。既存の完成 variant は 1 slot 単位で差し替えでき、必須 slot の削除は行わない。`mentor` / `learner` の役割付与、プロジェクトへの自動紐付け、`ScriptLine.expression` との mapping はこの画面の責務に含めない。
+`/character-visuals` はプロジェクトに依存しないワークスペース共通の登録・管理画面である。サイドバーから開き、一覧、作成、基本情報編集、完全な variant の作成、既存 file slot の差し替え、status 更新を行う。全表情・全ポーズの一括登録は要求しない。未登録 variant は未登録として表示し、variant 作成フォームでは `single-image` の `single`、`mouth-pair` の `closed` / `open` を揃えるまで登録操作を完了できない。必須 slot 欠落や形式不正はフォームの validation として表示するが、不完全な variant は DB や管理領域へ保存しない。既存の完成 variant は complete file set 単位で差し替えでき、必須 slot の削除は行わない。`mentor` / `learner` の役割付与、プロジェクトへの自動紐付け、`ScriptLine.expression` との mapping はこの画面の責務に含めない。
 
 WebUI は SQLite、`library/character-visuals/`、ローカルファイルシステムを直接操作しない。Character Visual API が返す metadata と管理された画像 URL だけを使用する。
 
@@ -1582,7 +1589,7 @@ WebUI は SQLite、`library/character-visuals/`、ローカルファイルシス
 - `library/character-visuals/{visualId}/{variantId}/` namespace と安全な相対パス
 - `single-image` の `single`、`mouth-pair` の `closed` / `open` スロット
 - 必須 slot 欠落の variant 作成リクエストを拒否し、variant row や最終ファイルを残さないこと
-- 既存の完成 variant の 1 slot 差し替え失敗時に、旧ファイルと旧 metadata を維持すること
+- 既存の完成 variant の complete file set 差し替え失敗時に、旧ファイルと旧 metadata を維持すること
 - 管理領域のファイル存在、許可 MIME type、checksum、PNG 技術情報
 - PNG signature、chunk 構造、CRC、IHDR、IDAT/IEND、alpha / `tRNS`
 - visual ごとの最初の完成 variant から決まる基準キャンバスとの一致
@@ -1668,7 +1675,7 @@ SQLite にはキー入力単位ではなく、保存、構成案の承認、レ�
 - 全 Zod スキーマの正常・異常系
 - SQLite の `CharacterVisualSet` へ variant を追加すると、API の snapshot、検証結果、確認画面の view model へ反映されること
 - `single-image` と `mouth-pair` の完全な作成、必須 slot 欠落リクエストの拒否
-- 既存の完成 variant の 1 slot 差し替え、差し替え失敗時の旧ファイル維持、必須 slot 削除の拒否
+- 既存の完成 variant の complete file set 差し替え、差し替え失敗時の旧ファイル維持、必須 slot 削除の拒否
 - visual namespace 違反、非 PNG 配置先、未登録 library file、checksum 不一致
 - duplicate `visualId`、duplicate `variantId`、duplicate file slot、duplicate library path
 - visual 単位のキャンバス基準、異なるサイズの追加拒否、variant 不足を許可する set 状態

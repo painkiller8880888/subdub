@@ -1,4 +1,3 @@
-import fastifyMultipart from "@fastify/multipart";
 import type { FastifyInstance } from "fastify";
 import { createReadStream } from "node:fs";
 
@@ -102,17 +101,6 @@ export function registerAssetRoutes(
   options: { limits?: AssetUploadLimits } = {}
 ): void {
   const limits = options.limits ?? DEFAULT_ASSET_UPLOAD_LIMITS;
-
-  app.register(fastifyMultipart, {
-    limits: {
-      files: limits.maxFileCount,
-      parts: limits.maxPartCount,
-      fields: 1000, // we enforce our own field count limit
-      fieldNameSize: limits.maxFieldNameLength,
-      fieldSize: limits.maxFieldValueLength,
-      fileSize: limits.maxGlobalFileBytes
-    }
-  });
 
   app.get("/api/assets", async (request) => {
     const query = assetListQuerySchema.parse(request.query);

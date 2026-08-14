@@ -38,6 +38,25 @@ describe("character asset view model", () => {
                 height: 1000
               }
             ]
+          },
+          {
+            variantId: "character-mentor-disabled-v1",
+            label: "Disabled",
+            renderType: "single-image",
+            status: "inactive",
+            tags: [],
+            files: [
+              {
+                key: "single",
+                libraryPath:
+                  "library/character-visuals/character-mentor/character-mentor-disabled-v1/single.png",
+                mimeType: "image/png",
+                checksum: "1".repeat(64),
+                sizeBytes: 1,
+                width: 600,
+                height: 1000
+              }
+            ]
           }
         ],
         createdAt: "2026-08-14T00:00:00.000Z",
@@ -47,6 +66,9 @@ describe("character asset view model", () => {
 
     const [variant] = characterVisualSnapshotToCharacterAssetCatalog(snapshot);
 
+    expect(
+      characterVisualSnapshotToCharacterAssetCatalog(snapshot)
+    ).toHaveLength(1);
     expect(variant?.files[0]?.destinationPath).toBe(
       "api/character-visuals/character-mentor/character-mentor-stand-v1/single"
     );

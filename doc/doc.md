@@ -447,7 +447,7 @@ AI に素材そのもの、完成スライド、図解を生成させない。AI
 
 キャラクタービジュアル登録は、現場動画・写真・帳票スキャンの登録とは別のワークスペース共通ライブラリ機能である。サイドバーから `/character-visuals` を開き、`CharacterVisualSet` の作成、名称・説明の編集、完全な variant の作成、既存 variant の file slot 差し替え、利用状態の変更を行う。`/projects/{projectId}/script` は登録済みビジュアルを参照する制作画面であり、登録処理の正本や導線を兼ねない。
 
-登録時点で全表情・全ポーズを揃える必要はない。不足している variant は未登録として表示し、`CharacterVisualSet` 全体の登録を失敗扱いにしない。一方、永続化する variant は必須 slot が揃った完成状態に限る。`single-image` の作成は `single` 1 件、`mouth-pair` の作成は `closed` と `open` 各 1 件を同一リクエストで検証・登録し、1 slot 欠落の variant を DB や管理領域へ残さない。作成後の差し替えは既存 variant の 1 slot 単位で許可するが、必須 slot を削除する API は設けない。形式不正、checksum 不一致、visual 基準キャンバスとの不一致、作成リクエストの slot 欠落は操作全体を失敗させ、既存の完成 variant を変更しない。
+登録時点で全表情・全ポーズを揃える必要はない。不足している variant は未登録として表示し、`CharacterVisualSet` 全体の登録を失敗扱いにしない。一方、永続化する variant は必須 slot が揃った完成状態に限る。`single-image` の作成は `single` 1 件、`mouth-pair` の作成は `closed` と `open` 各 1 件を同一リクエストで検証・登録し、complete file set 欠落の variant を DB や管理領域へ残さない。作成後の差し替えは既存 variant の complete file set 単位で許可するが、必須 slot を削除する API は設けない。形式不正、checksum 不一致、visual 基準キャンバスとの不一致、作成リクエストの slot 欠落は操作全体を失敗させ、既存の完成 variant を変更しない。
 
 登録画面は `mentor` / `learner` の役割選択を要求せず、プロジェクトへ自動紐付けしない。同一キャラクターの別衣装、将来の別キャラクター、差し替え候補を同じワークスペースで保持できるようにする。`ScriptLine.expression` と物理 variant の mapping はこの画面の責務に含めない。
 
@@ -941,7 +941,7 @@ AI が生成する内容と人間が入力する指示を視覚的にもデー�
 
 `/character-visuals` はワークスペース共通のキャラクタービジュアル一覧と登録画面である。サイドバーから常に開ける独立した画面とし、プロジェクト選択や `/projects/{projectId}/script` の状態に依存させない。一覧では `name`、`description`、`status`、登録済み variant 数、完成 variant 数、キャンバス基準サイズを表示する。
 
-登録・編集画面では、`CharacterVisualSet` の基本情報、variant の `label`、`renderType`、`tags`、ファイル slot を編集する。全表情・全ポーズの一括登録は要求せず、未登録の variant は未登録として表示する。variant 作成フォームでは、`single-image` の `single`、`mouth-pair` の `closed` / `open` を揃えてから登録する。slot 欠落、形式不正、checksum 不一致、visual 基準キャンバスとの不一致は登録リクエストの validation として表示し、不完全な variant を永続化しない。既存の完成 variant は 1 slot 単位で差し替えできるが、必須 slot の削除は行わない。`mentor` / `learner` の役割付与、プロジェクト選択、論理表情との mapping はこの画面に置かない。
+登録・編集画面では、`CharacterVisualSet` の基本情報、variant の `label`、`renderType`、`tags`、ファイル slot を編集する。全表情・全ポーズの一括登録は要求せず、未登録の variant は未登録として表示する。variant 作成フォームでは、`single-image` の `single`、`mouth-pair` の `closed` / `open` を揃えてから登録する。slot 欠落、形式不正、checksum 不一致、visual 基準キャンバスとの不一致は登録リクエストの validation として表示し、不完全な variant を永続化しない。既存の完成 variant は complete file set 単位で差し替えできるが、必須 slot の削除は行わない。`mentor` / `learner` の役割付与、プロジェクト選択、論理表情との mapping はこの画面に置かない。
 
 WebUI は SQLite、キャラクターファイル、ローカルファイルシステムを直接操作しない。登録・更新は Fastify API に渡し、画像表示も管理された配信経路を使用する。
 
@@ -981,11 +981,15 @@ POST /api/character-visuals
 GET  /api/character-visuals/{visualId}
 PUT  /api/character-visuals/{visualId}
 POST /api/character-visuals/{visualId}/variants
-PUT  /api/character-visuals/{visualId}/variants/{variantId}/files/{slotKey}
+PUT  /api/character-visuals/{visualId}/variants/{variantId}
+POST /api/character-visuals/{visualId}/variants/{variantId}/deactivate
+POST /api/character-visuals/{visualId}/variants/{variantId}/activate
 POST /api/projects/{projectId}/visual-suggestions
 PUT  /api/projects/{projectId}/visual-assignments
 POST /api/projects/{projectId}/visuals/approve
 ```
+
+Character visual metadata is read from the workspace SQLite `CharacterVisualSet`; the TypeScript catalog is only a typed adapter or legacy seed input. Both visual sets and variants persist `active | inactive`. Deactivation changes the variant status and never physically deletes its database row or managed files. The API/UI candidate adapter excludes inactive visuals and variants from ordinary use while retaining them in the database snapshot.
 
 `script/approve` と `visuals/approve` 相当の API が既存データ互換のため残る場合でも、通常の制作画面、音声操作、Manifest 生成、プレビュー、レンダリングはそれらを呼び出さず、前提条件にも使用しない。
 
@@ -998,7 +1002,7 @@ POST /api/projects/{projectId}/visuals/approve
 - `GET /api/assets` はキーワード、タグ、素材種別、部門、対象システム、状態、ページングを受け取り、サムネイル情報を含む検索結果を返す。
 - `GET /api/character-visuals` と `GET /api/character-visuals/{visualId}` は SQLite の `CharacterVisualSet` を読み、登録済み variant とファイルの管理された配信情報を返す。TypeScript の静的配列を一覧の正本として使用しない。
 - `POST /api/character-visuals/{visualId}/variants` は、`single-image` なら `single`、`mouth-pair` なら `closed` と `open` を含む完全な variant を一括登録する。必須 slot が欠けたリクエストは、DB 行や最終ファイルを作らずに拒否する。
-- `PUT /api/character-visuals/{visualId}/variants/{variantId}/files/{slotKey}` は、既存の完成 variant の 1 slot だけを差し替える。必須 slot を削除する API は設けず、差し替え失敗時は既存ファイルと SQLite メタデータを維持する。
+- `PUT /api/character-visuals/{visualId}/variants/{variantId}` は、既存の完成 variant の complete file set だけを差し替える。必須 slot を削除する API は設けず、差し替え失敗時は既存ファイルと SQLite メタデータを維持する。
 - キャラクタービジュアルのファイル保存と SQLite 更新は、単一の SQLite/filesystem transaction とはみなさない。1つのアプリケーション操作として、staged file の一時保存、形式・slot・checksum・visual 基準キャンバス検証、atomic rename、SQLite transaction、失敗時の compensating cleanup を組み合わせ、片方だけが有効な状態を残さない。`public/` へ直接書き込まない。
 - キャラクタービジュアルの画像配信は Fastify の管理された経路から行い、OS の絶対パスを WebUI へ返さない。API の正確な multipart 形式、エラーコード、status 遷移は CV-02 で固定する。
 - ビジュアル候補 API は AI の検索意図と、バックエンドが素材DBから取得した候補を分けて返す。AI 応答内の文字列を素材 ID として採用しない。
@@ -1167,7 +1171,7 @@ type CharacterVisualFile = {
 - `single-image`: `single` を 1 件持つ。口差分を持たない。
 - `mouth-pair`: `closed` と `open` を 1 件ずつ持つ。口パクの対象にできる。
 
-`CharacterVisualSet` 全体は、表情・ポーズに対応する variant が一部未登録でも登録可能とする。未登録 variant の存在だけで set をエラーにしない。永続化する variant は必須 slot が揃った完成状態に限り、`single-image` の作成は `single` 1 件、`mouth-pair` の作成は `closed` と `open` 各 1 件を同一リクエストで検証・登録する。必須 slot 欠落の作成リクエストは variant 行やファイルを残さず失敗させる。登録後の差し替えは 1 slot 単位で許可するが、必須 slot の削除は許可しない。登録された最初の完成 variant のキャンバスサイズを visual の基準とし、以後の画像は同じ visual 内で一致させる。CV-01 では `status` を `active` / `inactive` とし、variant が 0 件の visual では `baseWidth` / `baseHeight` を null にできる。最初の完成 variant で基準サイズを確定し、以後のファイルを同じサイズに制限する。
+`CharacterVisualSet` 全体は、表情・ポーズに対応する variant が一部未登録でも登録可能とする。未登録 variant の存在だけで set をエラーにしない。永続化する variant は必須 slot が揃った完成状態に限り、`single-image` の作成は `single` 1 件、`mouth-pair` の作成は `closed` と `open` 各 1 件を同一リクエストで検証・登録する。必須 slot 欠落の作成リクエストは variant 行やファイルを残さず失敗させる。登録後の差し替えは complete file set 単位で許可するが、必須 slot の削除は許可しない。登録された最初の完成 variant のキャンバスサイズを visual の基準とし、以後の画像は同じ visual 内で一致させる。CV-01 では `status` を `active` / `inactive` とし、variant が 0 件の visual では `baseWidth` / `baseHeight` を null にできる。最初の完成 variant で基準サイズを確定し、以後のファイルを同じサイズに制限する。
 
 登録時点では `CharacterVisualSet` を `mentor` / `learner` の役割や特定プロジェクトへ紐付けない。既存の `character-mentor` / `character-learner` は、現在の `VideoProject` と初期 seed を移行するための互換上の識別子としてのみ扱い、新規 visual の構造的な制約にしない。
 

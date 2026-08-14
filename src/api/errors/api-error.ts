@@ -46,6 +46,12 @@ import { RenderJobError } from "../../app/rendering/render-job-errors.js";
 import { RenderRunLogStoreError } from "../../app/rendering/render-run-log-store.js";
 import { ImprovementLogError } from "../../app/projects/improvement-log-errors.js";
 import { RunLogStoreError } from "../../app/run-log-store.js";
+import {
+  CharacterVisualApiError,
+  CharacterVisualRepositoryError,
+  CharacterVisualSeedConflictError,
+  CharacterVisualValidationError
+} from "../../app/character-visuals/character-visual-errors.js";
 
 export class ApiResponseValidationError extends Error {
   constructor(cause: unknown) {
@@ -87,6 +93,18 @@ export const API_ERROR_CODE = {
   assetUploadInterrupted: "ASSET_UPLOAD_INTERRUPTED",
   assetStagingFailed: "ASSET_STAGING_FAILED",
   assetDatabaseFailed: "ASSET_DATABASE_FAILED",
+  characterVisualNotFound: "CHARACTER_VISUAL_NOT_FOUND",
+  characterVariantNotFound: "CHARACTER_VARIANT_NOT_FOUND",
+  characterVisualUnsupportedFileType:
+    "CHARACTER_VISUAL_UNSUPPORTED_FILE_TYPE",
+  characterVisualInvalidPng: "CHARACTER_VISUAL_INVALID_PNG",
+  characterVisualMissingSlot: "CHARACTER_VISUAL_MISSING_SLOT",
+  characterVisualCanvasSizeMismatch: "CHARACTER_VISUAL_CANVAS_SIZE_MISMATCH",
+  characterVisualUnsafePath: "CHARACTER_VISUAL_UNSAFE_PATH",
+  characterVisualConflict: "CHARACTER_VISUAL_CONFLICT",
+  characterVisualStorageFailed: "CHARACTER_VISUAL_STORAGE_FAILED",
+  characterVisualUploadInterrupted: "CHARACTER_VISUAL_UPLOAD_INTERRUPTED",
+  characterVisualDatabaseFailed: "CHARACTER_VISUAL_DATABASE_FAILED",
   visualAssignmentProjectPathInvalid:
     VISUAL_ASSIGNMENT_ERROR_CODE.projectPathInvalid,
   visualAssignmentAssetNotFound: VISUAL_ASSIGNMENT_ERROR_CODE.assetNotFound,
@@ -613,6 +631,51 @@ export function mapApiError(error: unknown): MappedApiError {
       message: error.message,
       details: error.details,
       shouldLog: error.shouldLog
+    };
+  }
+
+  if (error instanceof CharacterVisualApiError) {
+    return {
+      code: error.code,
+      status: error.status,
+      message: error.message,
+      details: [],
+      shouldLog: error.shouldLog
+    };
+  }
+
+  if (error instanceof CharacterVisualRepositoryError) {
+    return {
+      code:
+        error.constraint === "unknown"
+          ? API_ERROR_CODE.characterVisualDatabaseFailed
+          : "CHARACTER_VISUAL_CONFLICT",
+      status: error.constraint === "unknown" ? 500 : 409,
+      message:
+        error.constraint === "unknown"
+          ? genericInternalMessage
+          : "The character visual registration conflicts with existing data.",
+      details: [],
+      shouldLog: error.constraint === "unknown"
+    };
+  }
+
+  if (
+    error instanceof CharacterVisualValidationError ||
+    error instanceof CharacterVisualSeedConflictError
+  ) {
+    return {
+      code:
+        error instanceof CharacterVisualSeedConflictError
+          ? "CHARACTER_VISUAL_CONFLICT"
+          : "REQUEST_VALIDATION_FAILED",
+      status: error instanceof CharacterVisualSeedConflictError ? 409 : 422,
+      message:
+        error instanceof CharacterVisualSeedConflictError
+          ? "The character visual registration conflicts with existing data."
+          : genericValidationMessage,
+      details: [],
+      shouldLog: false
     };
   }
 

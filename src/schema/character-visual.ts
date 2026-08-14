@@ -12,6 +12,8 @@ import {
 
 export const characterVisualStatusSchema = z.enum(["active", "inactive"]);
 
+export const characterVariantStatusSchema = z.enum(["active", "inactive"]);
+
 export const characterVariantRenderTypeSchema = z.enum([
   "single-image",
   "mouth-pair"
@@ -41,6 +43,7 @@ export const characterVariantSchema = strictObject({
   variantId: idSchema,
   label: z.string().min(1),
   renderType: characterVariantRenderTypeSchema,
+  status: characterVariantStatusSchema.default("active"),
   tags: z.array(characterVisualTagSchema),
   files: z.array(characterVisualFileSchema)
 }).superRefine((variant, ctx) => {
@@ -166,6 +169,9 @@ export const characterVisualCatalogSnapshotSchema = z.array(
 );
 
 export type CharacterVisualStatus = z.infer<typeof characterVisualStatusSchema>;
+export type CharacterVariantStatus = z.infer<
+  typeof characterVariantStatusSchema
+>;
 export type CharacterVariantRenderType = z.infer<
   typeof characterVariantRenderTypeSchema
 >;

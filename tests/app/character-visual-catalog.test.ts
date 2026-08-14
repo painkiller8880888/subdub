@@ -22,6 +22,7 @@ import { characterVisualSetSchema } from "../../src/schema/character-visual.js";
 import { validateCharacterVisualCatalog } from "../../src/validation/character-visuals.js";
 import { compileRenderManifest } from "../../src/app/rendering/render-manifest-compiler.js";
 import { createRenderManifestInput } from "../fixtures/render-manifest-input.js";
+import { pngBytes } from "../fixtures/asset-fixtures.js";
 
 describe("character visual catalog", { timeout: 30_000 }, () => {
   const workspaceRoots: string[] = [];
@@ -168,6 +169,52 @@ describe("character visual catalog", { timeout: 30_000 }, () => {
       baseHeight: 1000
     });
     expect(invalid.success).toBe(false);
+  });
+
+  it("persists variant deactivation, keeps the row, and allows reactivation", async () => {
+    const { service, repository, database, workspaceRoot } =
+      await makeService();
+    const visual = service.create({ name: "Status visual" });
+    const withVariant = await service.createVariant(visual.visualId, {
+      label: "Status variant",
+      renderType: "single-image",
+      tags: [],
+      files: [
+        {
+          key: "single",
+          content: pngBytes,
+          mimeType: "image/png",
+          filename: "ignored-by-server.png"
+        }
+      ]
+    });
+    const variantId = withVariant.variants[0]!.variantId;
+    const countRows = (): number => {
+      const row = database.connection
+        .prepare("SELECT COUNT(*) AS count FROM character_variants")
+        .get() as { count: number };
+      return row.count;
+    };
+
+    expect(countRows()).toBe(1);
+    const inactive = service.deactivateVariant(visual.visualId, variantId);
+    expect(inactive.variants[0]?.status).toBe("inactive");
+    expect(countRows()).toBe(1);
+    expect(characterVisualSnapshotToVariantCatalog(repository.list())).toEqual(
+      []
+    );
+    await expect(
+      fs.stat(
+        path.join(workspaceRoot, inactive.variants[0]!.files[0]!.libraryPath)
+      )
+    ).resolves.toBeDefined();
+
+    const active = service.activateVariant(visual.visualId, variantId);
+    expect(active.variants[0]?.status).toBe("active");
+    expect(
+      characterVisualSnapshotToVariantCatalog(repository.list())
+    ).toHaveLength(1);
+    expect(countRows()).toBe(1);
   });
 
   it("rejects duplicate slots, missing mouth slots, duplicate visual IDs, and duplicate paths", () => {
@@ -343,6 +390,33 @@ describe("character visual catalog", { timeout: 30_000 }, () => {
       })
     ).toThrow("force rollback");
     expect(repository.list()).toEqual([]);
+  });
+
+  it("keeps the previous ready file when a variant replacement transaction fails", async () => {
+    const { repository, service, workspaceRoot } = await makeService();
+    const visual = service.create({ name: "Replacement visual" });
+    const before = await service.createVariant(visual.visualId, {
+      label: "Before",
+      renderType: "single-image",
+      tags: [],
+      files: [{ key: "single", content: pngBytes, mimeType: "image/png" }]
+    });
+    const variant = before.variants[0]!;
+    const filePath = path.join(workspaceRoot, variant.files[0]!.libraryPath);
+    vi.spyOn(repository, "transaction").mockImplementation(() => {
+      throw new Error("database replacement failed");
+    });
+
+    await expect(
+      service.updateVariant(visual.visualId, variant.variantId, {
+        label: "After",
+        renderType: "single-image",
+        tags: [],
+        files: [{ key: "single", content: pngBytes, mimeType: "image/png" }]
+      })
+    ).rejects.toThrow("database replacement failed");
+    await expect(fs.readFile(filePath)).resolves.toEqual(pngBytes);
+    expect(repository.list()).toEqual([before]);
   });
 
   it("does not remove committed files when the post-commit read path fails", async () => {

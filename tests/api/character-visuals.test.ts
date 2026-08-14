@@ -6,8 +6,14 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { buildApp } from "../../src/api/app.js";
 import { initializeServer } from "../../src/api/server.js";
+import type { CharacterVisualCatalogServicePort } from "../../src/api/routes/character-visuals.js";
 import { characterVisualCatalogResponseSchema } from "../../src/schema/api.js";
-import { characterVisualCatalogSnapshotSchema } from "../../src/schema/character-visual.js";
+import {
+  characterVisualCatalogSnapshotSchema,
+  characterVisualSetSchema
+} from "../../src/schema/character-visual.js";
+import { characterVisualResponseSchema } from "../../src/schema/api.js";
+import { buildMultipartBody, pngBytes } from "../fixtures/asset-fixtures.js";
 
 const catalogSnapshot = characterVisualCatalogSnapshotSchema.parse([
   {
@@ -42,6 +48,24 @@ const catalogSnapshot = characterVisualCatalogSnapshotSchema.parse([
   }
 ]);
 
+function makeCatalogService(
+  overrides: Partial<CharacterVisualCatalogServicePort> = {}
+): CharacterVisualCatalogServicePort {
+  return {
+    list: () => catalogSnapshot,
+    get: (visualId) =>
+      catalogSnapshot.find((visual) => visual.visualId === visualId),
+    create: () => catalogSnapshot[0]!,
+    update: () => catalogSnapshot[0]!,
+    createVariant: async () => catalogSnapshot[0]!,
+    updateVariant: async () => catalogSnapshot[0]!,
+    deactivateVariant: () => catalogSnapshot[0]!,
+    activateVariant: () => catalogSnapshot[0]!,
+    readManagedFile: async () => undefined,
+    ...overrides
+  };
+}
+
 describe("character visual catalog routes", () => {
   let app = buildApp();
 
@@ -53,10 +77,7 @@ describe("character visual catalog routes", () => {
   it("returns the database snapshot through the read-only catalog API", async () => {
     await app.close();
     app = buildApp({
-      characterVisualCatalogService: {
-        list: () => catalogSnapshot,
-        readManagedFile: async () => undefined
-      }
+      characterVisualCatalogService: makeCatalogService()
     });
 
     const response = await app.inject({
@@ -77,10 +98,7 @@ describe("character visual catalog routes", () => {
     }));
     await app.close();
     app = buildApp({
-      characterVisualCatalogService: {
-        list: () => catalogSnapshot,
-        readManagedFile
-      }
+      characterVisualCatalogService: makeCatalogService({ readManagedFile })
     });
 
     const response = await app.inject({
@@ -101,10 +119,7 @@ describe("character visual catalog routes", () => {
   it("returns 404 for a file that is not in the catalog", async () => {
     await app.close();
     app = buildApp({
-      characterVisualCatalogService: {
-        list: () => catalogSnapshot,
-        readManagedFile: async () => undefined
-      }
+      characterVisualCatalogService: makeCatalogService()
     });
 
     const response = await app.inject({
@@ -153,6 +168,149 @@ describe("character visual catalog routes", () => {
       });
       expect(fileResponse.statusCode).toBe(200);
       expect(fileResponse.headers["content-type"]).toMatch(/^image\/png/);
+    } finally {
+      await initialized?.app.close();
+      await fs.rm(workspaceRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("persists variant status through create, deactivate, reactivate, and update API calls", async () => {
+    const workspaceRoot = await fs.mkdtemp(
+      path.join(tmpdir(), "subdub-character-visual-api-status-")
+    );
+    let initialized: Awaited<ReturnType<typeof initializeServer>> | undefined;
+    try {
+      initialized = await initializeServer({ workspaceRoot });
+      const createResponse = await initialized.app.inject({
+        method: "POST",
+        url: "/api/character-visuals",
+        headers: { "content-type": "application/json" },
+        payload: JSON.stringify({
+          name: "API status visual",
+          description: "",
+          status: "active"
+        })
+      });
+      expect(createResponse.statusCode).toBe(200);
+      const created = characterVisualResponseSchema.parse(
+        createResponse.json()
+      ).data;
+      expect(created.variants).toEqual([]);
+
+      const deactivateVisualResponse = await initialized.app.inject({
+        method: "PUT",
+        url: `/api/character-visuals/${created.visualId}`,
+        headers: { "content-type": "application/json" },
+        payload: JSON.stringify({
+          name: "API status visual",
+          description: "temporarily disabled",
+          status: "inactive"
+        })
+      });
+      expect(deactivateVisualResponse.statusCode).toBe(200);
+      expect(
+        characterVisualResponseSchema.parse(deactivateVisualResponse.json())
+          .data.status
+      ).toBe("inactive");
+
+      const reactivateVisualResponse = await initialized.app.inject({
+        method: "PUT",
+        url: `/api/character-visuals/${created.visualId}`,
+        headers: { "content-type": "application/json" },
+        payload: JSON.stringify({
+          name: "API status visual",
+          description: "",
+          status: "active"
+        })
+      });
+      expect(reactivateVisualResponse.statusCode).toBe(200);
+
+      const multipart = buildMultipartBody([
+        { name: "label", value: "API status variant" },
+        { name: "renderType", value: "single-image" },
+        { name: "tags", value: "api" },
+        {
+          name: "single",
+          filename: "client-name.png",
+          mimeType: "image/png",
+          data: pngBytes
+        }
+      ]);
+      const variantResponse = await initialized.app.inject({
+        method: "POST",
+        url: `/api/character-visuals/${created.visualId}/variants`,
+        headers: { "content-type": multipart.contentType },
+        payload: multipart.body
+      });
+      expect(variantResponse.statusCode).toBe(200);
+      const withVariant = characterVisualResponseSchema.parse(
+        variantResponse.json()
+      ).data;
+      const variantId = withVariant.variants[0]!.variantId;
+      expect(withVariant.variants[0]?.status).toBe("active");
+
+      const deactivateResponse = await initialized.app.inject({
+        method: "POST",
+        url: `/api/character-visuals/${created.visualId}/variants/${variantId}/deactivate`
+      });
+      expect(deactivateResponse.statusCode).toBe(200);
+      const inactive = characterVisualResponseSchema.parse(
+        deactivateResponse.json()
+      ).data;
+      expect(inactive.variants[0]?.status).toBe("inactive");
+      expect(
+        initialized.database.connection
+          .prepare("SELECT COUNT(*) AS count FROM character_variants")
+          .get()
+      ).toEqual({ count: 7 });
+
+      const listed = characterVisualCatalogResponseSchema.parse(
+        (
+          await initialized.app.inject({
+            method: "GET",
+            url: "/api/character-visuals"
+          })
+        ).json()
+      ).data;
+      expect(
+        listed.find((visual) => visual.visualId === created.visualId)
+          ?.variants[0]?.status
+      ).toBe("inactive");
+
+      const activateResponse = await initialized.app.inject({
+        method: "POST",
+        url: `/api/character-visuals/${created.visualId}/variants/${variantId}/activate`
+      });
+      expect(activateResponse.statusCode).toBe(200);
+      const active = characterVisualResponseSchema.parse(
+        activateResponse.json()
+      ).data;
+      expect(active.variants[0]?.status).toBe("active");
+
+      const updateMultipart = buildMultipartBody([
+        { name: "label", value: "API status variant updated" },
+        { name: "renderType", value: "single-image" },
+        {
+          name: "single",
+          filename: "another-client-name.png",
+          mimeType: "image/png",
+          data: pngBytes
+        }
+      ]);
+      const updateResponse = await initialized.app.inject({
+        method: "PUT",
+        url: `/api/character-visuals/${created.visualId}/variants/${variantId}`,
+        headers: { "content-type": updateMultipart.contentType },
+        payload: updateMultipart.body
+      });
+      expect(updateResponse.statusCode).toBe(200);
+      expect(
+        characterVisualResponseSchema.parse(updateResponse.json()).data
+          .variants[0]?.label
+      ).toBe("API status variant updated");
+      characterVisualSetSchema.parse(
+        characterVisualResponseSchema.parse(updateResponse.json()).data
+      );
     } finally {
       await initialized?.app.close();
       await fs.rm(workspaceRoot, { recursive: true, force: true });
