@@ -47,3 +47,10 @@ export function shouldInitializeSelectedVisualDraft(
     initializedVisualId !== selectedVisualId
   );
 }
+
+export function isCharacterVisualMutationForSelectedVisual(
+  mutationVisualId: string | undefined,
+  selectedVisualId: string | null
+): boolean {
+  return selectedVisualId !== null && mutationVisualId === selectedVisualId;
+}

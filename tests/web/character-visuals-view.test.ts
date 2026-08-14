@@ -10,6 +10,7 @@ import {
 import {
   characterVisualDraftFromSet,
   characterVisualFileUrl,
+  isCharacterVisualMutationForSelectedVisual,
   shouldInitializeSelectedVisualDraft
 } from "../../src/web/character-visuals-view";
 import type { CharacterVisualSet } from "../../src/schema/character-visual.js";
@@ -120,5 +121,17 @@ describe("character visual view behavior", () => {
       name: "霊夢",
       status: "inactive"
     });
+  });
+
+  it("does not associate a save result with a different selected visual", () => {
+    expect(
+      isCharacterVisualMutationForSelectedVisual("visual-a", "visual-a")
+    ).toBe(true);
+    expect(
+      isCharacterVisualMutationForSelectedVisual("visual-a", "visual-b")
+    ).toBe(false);
+    expect(
+      isCharacterVisualMutationForSelectedVisual(undefined, "visual-b")
+    ).toBe(false);
   });
 });

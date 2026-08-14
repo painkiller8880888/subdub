@@ -29,6 +29,7 @@ import {
   characterVisualDraftFromSet,
   characterVisualFileUrl,
   createEmptyCharacterVisualDraft,
+  isCharacterVisualMutationForSelectedVisual,
   shouldInitializeSelectedVisualDraft,
   type CharacterVisualDraft
 } from "./character-visuals-view";
@@ -811,6 +812,11 @@ export function CharacterVisualsPage() {
     (selectedVisual === undefined
       ? null
       : characterVisualDraftFromSet(selectedVisual));
+  const updateMutationTargetsSelectedVisual =
+    isCharacterVisualMutationForSelectedVisual(
+      updateMutation.variables?.visualId,
+      selectedVisual?.visualId ?? null
+    );
   const createErrorMessage =
     createValidationMessage ??
     (createMutation.isError
@@ -818,7 +824,9 @@ export function CharacterVisualsPage() {
       : null);
   const selectedErrorMessage =
     selectedValidationMessage ??
-    (updateMutation.isError && selectedVisual !== undefined
+    (updateMutationTargetsSelectedVisual &&
+    updateMutation.isError &&
+    selectedVisual !== undefined
       ? friendlyErrorMessage(updateMutation.error, selectedVisual)
       : null);
 
@@ -1062,7 +1070,10 @@ export function CharacterVisualsPage() {
                           ? true
                           : undefined
                       }
-                      disabled={updateMutation.isPending}
+                      disabled={
+                        updateMutationTargetsSelectedVisual &&
+                        updateMutation.isPending
+                      }
                       id="selected-character-visual-name"
                       type="text"
                       value={
@@ -1087,7 +1098,10 @@ export function CharacterVisualsPage() {
                           ? "selected-character-visual-error"
                           : undefined
                       }
-                      disabled={updateMutation.isPending}
+                      disabled={
+                        updateMutationTargetsSelectedVisual &&
+                        updateMutation.isPending
+                      }
                       id="selected-character-visual-status"
                       value={
                         selectedDraftForRender?.status ?? selectedVisual.status
@@ -1115,7 +1129,10 @@ export function CharacterVisualsPage() {
                         ? "selected-character-visual-error"
                         : undefined
                     }
-                    disabled={updateMutation.isPending}
+                    disabled={
+                      updateMutationTargetsSelectedVisual &&
+                      updateMutation.isPending
+                    }
                     id="selected-character-visual-description"
                     rows={3}
                     value={
@@ -1140,17 +1157,24 @@ export function CharacterVisualsPage() {
                     {selectedErrorMessage}
                   </p>
                 ) : null}
-                {updateMutation.isSuccess ? (
+                {updateMutationTargetsSelectedVisual &&
+                updateMutation.isSuccess ? (
                   <p className="form-success" role="status">
                     保存しました。
                   </p>
                 ) : null}
                 <button
                   className="button"
-                  disabled={updateMutation.isPending}
+                  disabled={
+                    updateMutationTargetsSelectedVisual &&
+                    updateMutation.isPending
+                  }
                   type="submit"
                 >
-                  {updateMutation.isPending ? "保存中…" : "visual情報を保存"}
+                  {updateMutationTargetsSelectedVisual &&
+                  updateMutation.isPending
+                    ? "保存中…"
+                    : "visual情報を保存"}
                 </button>
               </form>
 
