@@ -8,6 +8,10 @@ import {
   assetListQuerySchema,
   assetListResponseSchema,
   characterVisualCatalogResponseSchema,
+  characterVisualCreateRequestSchema,
+  characterVisualResponseSchema,
+  characterVisualUpdateRequestSchema,
+  characterVisualVariantMultipartRequestSchema,
   outlineApproveRequestSchema,
   outlineRejectRequestSchema,
   outlineGenerateRequestSchema,
@@ -91,13 +95,19 @@ import {
   type VoiceGenerateRequest,
   type VoiceGenerationAccepted,
   type VoiceGenerationStatusData,
-  type ManifestPreviewData
+  type ManifestPreviewData,
+  type CharacterVisualCreateRequest,
+  type CharacterVisualUpdateRequest,
+  type CharacterVisualVariantMultipartRequest
 } from "../../schema/api.js";
 import type { TerminologyTerm } from "../../schema/terminology.js";
 import type { AssetListResult } from "../../schema/asset.js";
 import type { AssetDetail } from "../../schema/asset.js";
 import type { VideoProject } from "../../schema/video-project.js";
-import type { CharacterVisualCatalogSnapshot } from "../../schema/character-visual.js";
+import type {
+  CharacterVisualCatalogSnapshot,
+  CharacterVisualSet
+} from "../../schema/character-visual.js";
 
 export type ApiClientErrorData = {
   readonly status: number;
@@ -336,6 +346,152 @@ export async function fetchCharacterVisualCatalog(): Promise<CharacterVisualCata
     characterVisualCatalogResponseSchema
   );
   return response.data;
+}
+
+export async function fetchCharacterVisualFile(
+  visualId: string,
+  variantId: string,
+  fileKey: string
+): Promise<Blob> {
+  let response: FetchResponse;
+  try {
+    response = await fetch(
+      `/api/character-visuals/${encodeURIComponent(visualId)}/${encodeURIComponent(variantId)}/${encodeURIComponent(fileKey)}`
+    );
+  } catch {
+    throw new ApiClientProtocolError();
+  }
+
+  if (!response.ok) {
+    const body = await readJson(response);
+    throwApiClientError(response, body);
+  }
+
+  try {
+    return await response.blob();
+  } catch {
+    throw new ApiClientProtocolError();
+  }
+}
+
+export async function createCharacterVisual(
+  input: CharacterVisualCreateRequest
+): Promise<CharacterVisualSet> {
+  const validatedInput = characterVisualCreateRequestSchema.parse(input);
+  const response = await fetchApi(
+    "/api/character-visuals",
+    characterVisualResponseSchema,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(validatedInput)
+    }
+  );
+  return response.data;
+}
+
+export async function updateCharacterVisual(
+  visualId: string,
+  input: CharacterVisualUpdateRequest
+): Promise<CharacterVisualSet> {
+  const validatedInput = characterVisualUpdateRequestSchema.parse(input);
+  const response = await fetchApi(
+    `/api/character-visuals/${encodeURIComponent(visualId)}`,
+    characterVisualResponseSchema,
+    {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(validatedInput)
+    }
+  );
+  return response.data;
+}
+
+export type CharacterVisualVariantUploadFiles = Partial<
+  Record<"single" | "closed" | "open", Blob | null>
+>;
+
+async function mutateCharacterVisualVariant(
+  method: "POST" | "PUT",
+  inputPath: string,
+  input: CharacterVisualVariantMultipartRequest,
+  files: CharacterVisualVariantUploadFiles
+): Promise<CharacterVisualSet> {
+  const validatedInput =
+    characterVisualVariantMultipartRequestSchema.parse(input);
+  const formData = new FormData();
+  formData.append("label", validatedInput.label);
+  formData.append("renderType", validatedInput.renderType);
+  for (const tag of validatedInput.tags) {
+    formData.append("tags", tag);
+  }
+
+  for (const key of ["single", "closed", "open"] as const) {
+    const file = files[key];
+    if (file !== null && file !== undefined) {
+      formData.append(key, file, `${key}.png`);
+    }
+  }
+
+  const response = await fetchApi(inputPath, characterVisualResponseSchema, {
+    method,
+    body: formData
+  });
+  return response.data;
+}
+
+export async function createCharacterVisualVariant(
+  visualId: string,
+  input: CharacterVisualVariantMultipartRequest,
+  files: CharacterVisualVariantUploadFiles
+): Promise<CharacterVisualSet> {
+  return mutateCharacterVisualVariant(
+    "POST",
+    `/api/character-visuals/${encodeURIComponent(visualId)}/variants`,
+    input,
+    files
+  );
+}
+
+export async function updateCharacterVisualVariant(
+  visualId: string,
+  variantId: string,
+  input: CharacterVisualVariantMultipartRequest,
+  files: CharacterVisualVariantUploadFiles
+): Promise<CharacterVisualSet> {
+  return mutateCharacterVisualVariant(
+    "PUT",
+    `/api/character-visuals/${encodeURIComponent(visualId)}/variants/${encodeURIComponent(variantId)}`,
+    input,
+    files
+  );
+}
+
+async function changeCharacterVisualVariantStatus(
+  visualId: string,
+  variantId: string,
+  action: "activate" | "deactivate"
+): Promise<CharacterVisualSet> {
+  const response = await fetchApi(
+    `/api/character-visuals/${encodeURIComponent(visualId)}/variants/${encodeURIComponent(variantId)}/${action}`,
+    characterVisualResponseSchema,
+    { method: "POST" }
+  );
+  return response.data;
+}
+
+export async function activateCharacterVisualVariant(
+  visualId: string,
+  variantId: string
+): Promise<CharacterVisualSet> {
+  return changeCharacterVisualVariantStatus(visualId, variantId, "activate");
+}
+
+export async function deactivateCharacterVisualVariant(
+  visualId: string,
+  variantId: string
+): Promise<CharacterVisualSet> {
+  return changeCharacterVisualVariantStatus(visualId, variantId, "deactivate");
 }
 
 export async function fetchProjectManifest(

@@ -43,12 +43,15 @@ import {
 } from "./brief-autosave";
 import { sameBriefDraft, type BriefDraft } from "./brief-draft";
 import { CharacterAssetsPage } from "./CharacterAssetsPage";
+import { AssetsPage } from "./AssetsPage";
+import { CharacterVisualsPage } from "./CharacterVisualsPage";
 import { OutlinePage } from "./OutlinePage";
 import { ScriptPage } from "./ScriptPage";
 import { TerminologyPage } from "./TerminologyPage";
 import { PreviewPage } from "./PreviewPage";
 import { AiRunsPage } from "./AiRunsPage";
 import { WorkflowIndicator } from "./WorkflowIndicator";
+import { WorkspaceLayout } from "./WorkspaceLayout";
 
 function projectBriefPath(projectId: string): string {
   return `/projects/${encodeURIComponent(projectId)}/brief`;
@@ -1013,27 +1016,31 @@ function NotFoundPage() {
 
 export function App() {
   return (
-    <Routes>
-      <Route element={<Navigate replace to="/projects" />} path="/" />
-      <Route element={<ProjectsPage />} path="/projects" />
-      <Route element={<NewProjectPage />} path="/projects/new" />
-      <Route element={<ProjectBriefPage />} path="/projects/:projectId/brief" />
-      <Route element={<OutlinePage />} path="/projects/:projectId/outline" />
-      <Route
-        element={<ScriptPage />}
-        path="/projects/:projectId/script"
-      />
-      <Route
-        element={<PreviewPage />}
-        path="/projects/:projectId/preview"
-      />
-      <Route
-        element={<CharacterAssetsPage />}
-        path="/projects/:projectId/characters"
-      />
-      <Route element={<TerminologyPage />} path="/terminology" />
-      <Route element={<AiRunsPage />} path="/ai-runs" />
-      <Route element={<NotFoundPage />} path="*" />
-    </Routes>
+    <WorkspaceLayout>
+      <Routes>
+        <Route element={<Navigate replace to="/projects" />} path="/" />
+        <Route element={<ProjectsPage />} path="/projects" />
+        <Route element={<NewProjectPage />} path="/projects/new" />
+        <Route element={<ProjectBriefPage />} path="/projects/:projectId/brief" />
+        <Route element={<OutlinePage />} path="/projects/:projectId/outline" />
+        <Route
+          element={<ScriptPage />}
+          path="/projects/:projectId/script"
+        />
+        <Route
+          element={<PreviewPage />}
+          path="/projects/:projectId/preview"
+        />
+        <Route
+          element={<CharacterAssetsPage />}
+          path="/projects/:projectId/characters"
+        />
+        <Route element={<CharacterVisualsPage />} path="/character-visuals" />
+        <Route element={<AssetsPage />} path="/assets" />
+        <Route element={<TerminologyPage />} path="/terminology" />
+        <Route element={<AiRunsPage />} path="/ai-runs" />
+        <Route element={<NotFoundPage />} path="*" />
+      </Routes>
+    </WorkspaceLayout>
   );
 }
