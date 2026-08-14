@@ -1310,33 +1310,35 @@ export class CharacterVisualCatalogService {
     readonly names?: Readonly<Record<string, string>>;
     readonly descriptions?: Readonly<Record<string, string>>;
   }): Promise<CharacterVisualCatalogSnapshot> {
-    const prepared = await prepareSeedCatalog(
-      options.sourceRoot,
-      options.catalog,
-      options.names ?? {},
-      options.descriptions ?? {}
-    );
     const existingCatalog = this.repository.list();
     const existingVisualIds = new Set(
       existingCatalog.map((visual) => visual.visualId)
     );
-    const visualsToSeed = prepared.filter(
-      (visual) => !existingVisualIds.has(visual.visualId)
+    const catalogToSeed = options.catalog.filter(
+      (variant) => !existingVisualIds.has(variant.characterId)
     );
-    const { createdPaths } =
-      visualsToSeed.length === 0
-        ? { createdPaths: [] as readonly string[] }
-        : await installSeedFiles(this.workspaceRoot, visualsToSeed);
+    if (catalogToSeed.length === 0) {
+      return existingCatalog;
+    }
+
+    const prepared = await prepareSeedCatalog(
+      options.sourceRoot,
+      catalogToSeed,
+      options.names ?? {},
+      options.descriptions ?? {}
+    );
+    const { createdPaths } = await installSeedFiles(
+      this.workspaceRoot,
+      prepared
+    );
     const timestamp = toIsoDate(this.now);
 
     try {
-      if (visualsToSeed.length > 0) {
-        const preparedSnapshot = preparedSeedSnapshot(visualsToSeed, timestamp);
-        assertCharacterVisualCatalog(preparedSnapshot);
-        await this.verifyFiles(preparedSnapshot);
-      }
+      const preparedSnapshot = preparedSeedSnapshot(prepared, timestamp);
+      assertCharacterVisualCatalog(preparedSnapshot);
+      await this.verifyFiles(preparedSnapshot);
       const finalSnapshot = this.repository.transaction((transaction) => {
-        for (const visual of visualsToSeed) {
+        for (const visual of prepared) {
           transaction.insertVisual(visualInsert(visual, timestamp));
           for (const variant of visual.variants) {
             transaction.insertVariant(variantInsert(variant, timestamp));

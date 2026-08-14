@@ -146,6 +146,37 @@ describe("character visual catalog", { timeout: 30_000 }, () => {
     expect(counts("character_variant_files")).toBe(10);
   });
 
+  it("does not require the legacy source after the initial seed", async () => {
+    const { service } = await makeService();
+    const sourceRoot = await fs.mkdtemp(
+      path.join(tmpdir(), "subdub-character-seed-source-")
+    );
+    try {
+      await fs.cp(path.join(process.cwd(), "doc", "assets"), sourceRoot, {
+        recursive: true
+      });
+      const first = await service.seedLegacyCatalog({
+        sourceRoot,
+        catalog: legacyCharacterVisualSeed,
+        names: legacyCharacterVisualNames,
+        descriptions: legacyCharacterVisualDescriptions
+      });
+
+      await fs.rm(sourceRoot, { recursive: true, force: true });
+
+      await expect(
+        service.seedLegacyCatalog({
+          sourceRoot,
+          catalog: legacyCharacterVisualSeed,
+          names: legacyCharacterVisualNames,
+          descriptions: legacyCharacterVisualDescriptions
+        })
+      ).resolves.toEqual(first);
+    } finally {
+      await fs.rm(sourceRoot, { recursive: true, force: true });
+    }
+  });
+
   it("allows an empty visual while rejecting incomplete variants", async () => {
     const { service } = await makeService();
     const visual = service.create({ name: "Partial visual" });
