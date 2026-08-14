@@ -1,8 +1,8 @@
-import {
-  legacyCharacterVariantCatalog,
-  type CharacterVariant
-} from "../../assets/character-asset-manifest.js";
+import { type CharacterVariant } from "../../assets/character-asset-manifest.js";
 import type { LegacyCharacterVisualVariant } from "./character-visual-service.js";
+import { legacyCharacterVariantCatalog } from "./legacy-character-visual-catalog.js";
+
+export { legacyCharacterVariantCatalog } from "./legacy-character-visual-catalog.js";
 
 /**
  * The legacy array is an input fixture for the one-time migration only. The

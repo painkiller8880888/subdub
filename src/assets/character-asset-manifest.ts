@@ -55,130 +55,6 @@ export const characterVariantMapping = {
   }
 } as const satisfies CharacterVariantMapping;
 
-/**
- * Legacy migration/compatibility fixture. New runtime registration data is
- * loaded from CharacterVisualCatalogService and adapted at the boundary.
- */
-export const legacyCharacterVariantCatalog = [
-  {
-    variantId: "character-mentor-stand-v1",
-    characterId: "character-mentor",
-    label: "非会話状態",
-    renderType: "single-image",
-    tags: ["stand"],
-    files: [
-      {
-        key: "single",
-        sourceFile: "char03_stand01.png",
-        destinationPath:
-          "shared-assets/characters/character-mentor/stand/stand.png"
-      }
-    ]
-  },
-  {
-    variantId: "character-mentor-speak-normal-v1",
-    characterId: "character-mentor",
-    label: "通常会話",
-    renderType: "mouth-pair",
-    tags: ["speak", "normal"],
-    files: [
-      {
-        key: "closed",
-        sourceFile: "char03_speak01_close.png",
-        destinationPath:
-          "shared-assets/characters/character-mentor/speak-normal/closed.png"
-      },
-      {
-        key: "open",
-        sourceFile: "char03_speak01_open.png",
-        destinationPath:
-          "shared-assets/characters/character-mentor/speak-normal/open.png"
-      }
-    ]
-  },
-  {
-    variantId: "character-mentor-speak-pointing-v1",
-    characterId: "character-mentor",
-    label: "指差し状態の会話",
-    renderType: "mouth-pair",
-    tags: ["speak", "pointing"],
-    files: [
-      {
-        key: "closed",
-        sourceFile: "char03_speak02_close.png",
-        destinationPath:
-          "shared-assets/characters/character-mentor/speak-pointing/closed.png"
-      },
-      {
-        key: "open",
-        sourceFile: "char03_speak02_open.png",
-        destinationPath:
-          "shared-assets/characters/character-mentor/speak-pointing/open.png"
-      }
-    ]
-  },
-  {
-    variantId: "character-learner-stand-v1",
-    characterId: "character-learner",
-    label: "非会話状態",
-    renderType: "single-image",
-    tags: ["stand"],
-    files: [
-      {
-        key: "single",
-        sourceFile: "char04_stand01.png",
-        destinationPath:
-          "shared-assets/characters/character-learner/stand/stand.png"
-      }
-    ]
-  },
-  {
-    variantId: "character-learner-speak-normal-v1",
-    characterId: "character-learner",
-    label: "通常会話",
-    renderType: "mouth-pair",
-    tags: ["speak", "normal"],
-    files: [
-      {
-        key: "closed",
-        sourceFile: "char04_speak01_close.png",
-        destinationPath:
-          "shared-assets/characters/character-learner/speak-normal/closed.png"
-      },
-      {
-        key: "open",
-        sourceFile: "char04_speak01_open.png",
-        destinationPath:
-          "shared-assets/characters/character-learner/speak-normal/open.png"
-      }
-    ]
-  },
-  {
-    variantId: "character-learner-speak-pointing-v1",
-    characterId: "character-learner",
-    label: "指差し状態の会話",
-    renderType: "mouth-pair",
-    tags: ["speak", "pointing"],
-    files: [
-      {
-        key: "closed",
-        sourceFile: "char04_speak02_close.png",
-        destinationPath:
-          "shared-assets/characters/character-learner/speak-pointing/closed.png"
-      },
-      {
-        key: "open",
-        sourceFile: "char04_speak02_open.png",
-        destinationPath:
-          "shared-assets/characters/character-learner/speak-pointing/open.png"
-      }
-    ]
-  }
-] as const satisfies CharacterVariantCatalog;
-
-/** @deprecated Use the database snapshot adapter for runtime catalog data. */
-export const characterVariantCatalog = legacyCharacterVariantCatalog;
-
 export function characterVisualSnapshotToVariantCatalog(
   snapshot: CharacterVisualCatalogSnapshot
 ): CharacterVariantCatalog {
@@ -198,12 +74,31 @@ export function characterVisualSnapshotToVariantCatalog(
   );
 }
 
-export type CharacterAssetId =
-  (typeof characterVariantCatalog)[number]["characterId"];
+export function characterVisualSnapshotToAssetMetadata(
+  snapshot: CharacterVisualCatalogSnapshot
+): readonly {
+  readonly path: string;
+  readonly kind: "character";
+  readonly sha256: string;
+  readonly durationMs: null;
+}[] {
+  return snapshot.flatMap((visual) =>
+    visual.variants.flatMap((variant) =>
+      variant.files.map((file) => ({
+        path: file.libraryPath,
+        kind: "character" as const,
+        sha256: file.checksum,
+        durationMs: null
+      }))
+    )
+  );
+}
+
+export type CharacterAssetId = string;
 
 export function characterVariantsForCharacter(
   characterId: string,
-  catalog: CharacterVariantCatalog = characterVariantCatalog
+  catalog: CharacterVariantCatalog
 ): readonly CharacterVariant[] {
   return catalog.filter((variant) => variant.characterId === characterId);
 }

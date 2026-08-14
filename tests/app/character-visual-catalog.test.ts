@@ -2,13 +2,16 @@ import { promises as fs } from "node:fs";
 import { tmpdir } from "node:os";
 import * as path from "node:path";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   CharacterVisualCatalogService,
   CharacterVisualRepository
 } from "../../src/app/character-visuals/index.js";
-import { characterVisualSnapshotToVariantCatalog } from "../../src/assets/character-asset-manifest.js";
+import {
+  characterVisualSnapshotToAssetMetadata,
+  characterVisualSnapshotToVariantCatalog
+} from "../../src/assets/character-asset-manifest.js";
 import {
   legacyCharacterVisualDescriptions,
   legacyCharacterVisualNames,
@@ -17,8 +20,10 @@ import {
 import { initializeWorkspaceDatabase } from "../../src/db/initialize.js";
 import { characterVisualSetSchema } from "../../src/schema/character-visual.js";
 import { validateCharacterVisualCatalog } from "../../src/validation/character-visuals.js";
+import { compileRenderManifest } from "../../src/app/rendering/render-manifest-compiler.js";
+import { createRenderManifestInput } from "../fixtures/render-manifest-input.js";
 
-describe("character visual catalog", () => {
+describe("character visual catalog", { timeout: 30_000 }, () => {
   const workspaceRoots: string[] = [];
   const databases: Awaited<ReturnType<typeof initializeWorkspaceDatabase>>[] =
     [];
@@ -88,6 +93,23 @@ describe("character visual catalog", () => {
         )
     ).toBe(true);
 
+    const compilerInput = createRenderManifestInput(undefined, {
+      characterVariantCatalog: compatibilityCatalog,
+      assetMetadata: [
+        ...(createRenderManifestInput().assetMetadata ?? []),
+        ...characterVisualSnapshotToAssetMetadata(first)
+      ]
+    });
+    const compiled = compileRenderManifest(compilerInput);
+    expect(compiled.success).toBe(true);
+    if (compiled.success) {
+      expect(
+        compiled.manifest.characterVariants
+          .flatMap((variant) => Object.values(variant.files))
+          .every((file) => file.path.startsWith("library/character-visuals/"))
+      ).toBe(true);
+    }
+
     for (const visual of first) {
       for (const variant of visual.variants) {
         for (const file of variant.files) {
@@ -146,6 +168,111 @@ describe("character visual catalog", () => {
       baseHeight: 1000
     });
     expect(invalid.success).toBe(false);
+  });
+
+  it("rejects duplicate slots, missing mouth slots, duplicate visual IDs, and duplicate paths", () => {
+    const file = (visualId: string, variantId: string, key: string) => ({
+      key,
+      libraryPath: `library/character-visuals/${visualId}/${variantId}/${key}.png`,
+      mimeType: "image/png" as const,
+      checksum: "a".repeat(64),
+      sizeBytes: 1,
+      width: 600,
+      height: 1000
+    });
+    const singleVisual = {
+      visualId: "validation-visual",
+      name: "Validation",
+      description: "",
+      status: "active" as const,
+      baseWidth: 600,
+      baseHeight: 1000,
+      variants: [
+        {
+          variantId: "validation-single",
+          label: "Single",
+          renderType: "single-image" as const,
+          tags: [],
+          files: [file("validation-visual", "validation-single", "single")]
+        }
+      ],
+      createdAt: "2026-08-14T00:00:00.000Z",
+      updatedAt: "2026-08-14T00:00:00.000Z"
+    };
+    const duplicateSlot = validateCharacterVisualCatalog([
+      {
+        ...singleVisual,
+        variants: [
+          {
+            ...singleVisual.variants[0]!,
+            files: [
+              file("validation-visual", "validation-single", "single"),
+              file("validation-visual", "validation-single", "single")
+            ]
+          }
+        ]
+      }
+    ]);
+    expect(duplicateSlot.valid).toBe(false);
+
+    const missingMouthSlot = validateCharacterVisualCatalog([
+      {
+        ...singleVisual,
+        variants: [
+          {
+            variantId: "validation-mouth",
+            label: "Mouth",
+            renderType: "mouth-pair" as const,
+            tags: [],
+            files: [file("validation-visual", "validation-mouth", "closed")]
+          }
+        ]
+      }
+    ]);
+    expect(missingMouthSlot.valid).toBe(false);
+
+    const duplicateGlobalEntries = validateCharacterVisualCatalog([
+      singleVisual,
+      singleVisual
+    ]);
+    const duplicateMessages = duplicateGlobalEntries.issues.map(
+      (issue) => issue.message
+    );
+    expect(duplicateMessages).toEqual(
+      expect.arrayContaining([
+        "visualId must be unique",
+        "variantId must be unique",
+        "libraryPath must be unique"
+      ])
+    );
+  });
+
+  it("returns deterministic ordering regardless of seed input order", async () => {
+    const { service } = await makeService();
+    const sourceRoot = path.join(process.cwd(), "doc", "assets");
+    const reversedCatalog = [...legacyCharacterVisualSeed].reverse();
+    const snapshot = await service.seedLegacyCatalog({
+      sourceRoot,
+      catalog: reversedCatalog,
+      names: legacyCharacterVisualNames,
+      descriptions: legacyCharacterVisualDescriptions
+    });
+
+    expect(snapshot.map((visual) => visual.visualId)).toEqual([
+      "character-learner",
+      "character-mentor"
+    ]);
+    expect(
+      snapshot.flatMap((visual) =>
+        visual.variants.map((variant) => variant.variantId)
+      )
+    ).toEqual(
+      snapshot
+        .flatMap((visual) =>
+          visual.variants.map((variant) => variant.variantId)
+        )
+        .sort()
+    );
   });
 
   it("rejects unsafe managed paths, duplicate IDs, and mismatched canvas metadata", async () => {
@@ -215,6 +342,56 @@ describe("character visual catalog", () => {
         throw new Error("force rollback");
       })
     ).toThrow("force rollback");
+    expect(repository.list()).toEqual([]);
+  });
+
+  it("does not remove committed files when the post-commit read path fails", async () => {
+    const { repository, service, workspaceRoot } = await makeService();
+    const sourceRoot = path.join(process.cwd(), "doc", "assets");
+    const listSpy = vi.spyOn(repository, "list").mockImplementation(() => {
+      throw new Error("post-commit read failed");
+    });
+
+    const snapshot = await service.seedLegacyCatalog({
+      sourceRoot,
+      catalog: legacyCharacterVisualSeed,
+      names: legacyCharacterVisualNames,
+      descriptions: legacyCharacterVisualDescriptions
+    });
+
+    expect(snapshot).toHaveLength(2);
+    expect(listSpy).not.toHaveBeenCalled();
+    const managedPath = path.join(
+      workspaceRoot,
+      snapshot[0]!.variants[0]!.files[0]!.libraryPath
+    );
+    const stats = await fs.stat(managedPath);
+    expect(stats.isFile()).toBe(true);
+  });
+
+  it("removes newly installed files when the metadata transaction fails", async () => {
+    const { repository, service, workspaceRoot } = await makeService();
+    vi.spyOn(repository, "transaction").mockImplementation(() => {
+      throw new Error("database write failed");
+    });
+
+    await expect(
+      service.seedLegacyCatalog({
+        sourceRoot: path.join(process.cwd(), "doc", "assets"),
+        catalog: legacyCharacterVisualSeed,
+        names: legacyCharacterVisualNames,
+        descriptions: legacyCharacterVisualDescriptions
+      })
+    ).rejects.toThrow("database write failed");
+
+    await expect(
+      fs.stat(
+        path.join(
+          workspaceRoot,
+          "library/character-visuals/character-mentor/character-mentor-stand-v1/single.png"
+        )
+      )
+    ).rejects.toMatchObject({ code: "ENOENT" });
     expect(repository.list()).toEqual([]);
   });
 });

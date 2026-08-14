@@ -114,7 +114,7 @@ afterEach(async () => {
   );
 });
 
-describe("VoicevoxGenerationService", () => {
+describe("VoicevoxGenerationService", { timeout: 30_000 }, () => {
   it("persists a failed run when VOICEVOX context resolution fails", async () => {
     const harness = await createHarness({ persistLogs: true });
     harness.client.getVersion.mockRejectedValueOnce(

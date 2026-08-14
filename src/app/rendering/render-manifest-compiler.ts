@@ -2,7 +2,6 @@ import { createHash } from "node:crypto";
 import { z } from "zod";
 
 import {
-  legacyCharacterVariantCatalog as defaultCharacterVariantCatalog,
   characterVariantMapping as defaultCharacterVariantMapping,
   CHARACTER_VARIANT_CATALOG_VERSION,
   CHARACTER_VARIANT_MAPPING_VERSION,
@@ -308,14 +307,9 @@ function recordInputAssets(input: RenderManifestCompilerInput): unknown {
 }
 
 function recordInputCatalog(input: RenderManifestCompilerInput): unknown {
-  // Existing projects can still compile without a resolved DB snapshot. The
-  // legacy fallback is compatibility-only; callers with a dynamic catalog
-  // pass it through characterVariantCatalog explicitly.
-  return (
-    input.characterVariantCatalog ??
-    input.catalog ??
-    defaultCharacterVariantCatalog
-  );
+  // Catalog metadata is a required runtime boundary input. The legacy seed
+  // fixture is intentionally not available from this production path.
+  return input.characterVariantCatalog ?? input.catalog ?? null;
 }
 
 function recordInputMapping(input: RenderManifestCompilerInput): unknown {

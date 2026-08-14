@@ -3,7 +3,6 @@ import * as path from "node:path";
 
 import {
   CHARACTER_CANVAS_SIZE,
-  characterVariantCatalog,
   type CharacterVariant,
   type CharacterVariantCatalog,
   type CharacterVariantFile
@@ -38,7 +37,7 @@ export type CharacterAssetValidationResult = {
 export type CharacterAssetValidationOptions = {
   readonly sourceRoot: string;
   readonly publicRoot: string;
-  readonly catalog?: CharacterVariantCatalog;
+  readonly catalog: CharacterVariantCatalog;
 };
 
 function issueForFile(
@@ -297,7 +296,7 @@ function checkCatalog(
 export async function validateCharacterAssets(
   options: CharacterAssetValidationOptions
 ): Promise<CharacterAssetValidationResult> {
-  const catalog = options.catalog ?? characterVariantCatalog;
+  const catalog = options.catalog;
   const issues: CharacterAssetIssue[] = [];
   const files: CharacterAssetInspection[] = [];
   const parsedByVariantAndKey = new Map<string, PngMetadata>();

@@ -1,5 +1,5 @@
 import { computeOutlineHash } from "../../src/app/projects/script-domain.js";
-import { characterVariantCatalog } from "../../src/assets/character-asset-manifest.js";
+import { legacyCharacterVariantCatalog } from "../../src/app/character-visuals/character-visual-seed.js";
 import type {
   RenderManifestAssetMetadata,
   RenderManifestCompilerInput
@@ -85,7 +85,7 @@ export function createRenderManifestAssetMetadata(
     sha256: effect.assetChecksum,
     durationMs: 400
   }));
-  const characters = characterVariantCatalog.flatMap((variant, index) =>
+  const characters = legacyCharacterVariantCatalog.flatMap((variant, index) =>
     variant.files.map((file, fileIndex) => ({
       path: file.destinationPath,
       kind: "character",
@@ -115,6 +115,7 @@ export function createRenderManifestInput(
   return {
     project: currentProject,
     audioIndex,
+    characterVariantCatalog: legacyCharacterVariantCatalog,
     assetMetadata: createRenderManifestAssetMetadata(
       currentProject,
       audioIndex

@@ -1,9 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import {
-  characterVariantCatalog,
-  type CharacterVariant
-} from "../../src/assets/character-asset-manifest.js";
+import { legacyCharacterVariantCatalog as characterVariantCatalog } from "../../src/app/character-visuals/character-visual-seed.js";
+import type { CharacterVariant } from "../../src/assets/character-asset-manifest.js";
 import { createEmptyVideoProject } from "../../src/app/projects/empty-video-project.js";
 import {
   characterAssetUrl,
@@ -16,7 +14,10 @@ describe("character asset view model", () => {
       projectId: "character-view-project",
       createdAt: "2026-08-05T00:00:00.000Z"
     });
-    const characters = toCharacterAssetViewModels(project);
+    const characters = toCharacterAssetViewModels(
+      project,
+      characterVariantCatalog
+    );
 
     expect(characters.map((character) => character.name)).toEqual([
       "四国めたん",

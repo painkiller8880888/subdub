@@ -223,7 +223,9 @@ export function CharacterAssetsPage() {
     );
   }
 
-  const characters = toCharacterAssetViewModels(projectQuery.data);
+  // CV-02 will inject the read-only catalog API into this page. Keep the
+  // catalog explicit so the legacy seed fixture cannot become a UI fallback.
+  const characters = toCharacterAssetViewModels(projectQuery.data, []);
   const handleAssetError = (assetPath: string): void => {
     setFailedAssetPaths((current) =>
       current.includes(assetPath) ? current : [...current, assetPath]

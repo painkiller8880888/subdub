@@ -1,5 +1,4 @@
 import {
-  characterVariantCatalog,
   characterVariantsForCharacter,
   type CharacterVariantCatalog,
   type CharacterVariantRenderType
@@ -30,7 +29,7 @@ export type CharacterAssetViewModel = {
 
 export function toCharacterAssetViewModel(
   character: Character,
-  catalog: CharacterVariantCatalog = characterVariantCatalog
+  catalog: CharacterVariantCatalog
 ): CharacterAssetViewModel {
   return {
     id: character.id,
@@ -55,7 +54,7 @@ export function toCharacterAssetViewModel(
 
 export function toCharacterAssetViewModels(
   project: VideoProject,
-  catalog: CharacterVariantCatalog = characterVariantCatalog
+  catalog: CharacterVariantCatalog
 ): CharacterAssetViewModel[] {
   return project.characters.map((character) =>
     toCharacterAssetViewModel(character, catalog)

@@ -611,7 +611,7 @@ export class CharacterVisualCatalogService {
       const preparedSnapshot = preparedSeedSnapshot(prepared, timestamp);
       assertCharacterVisualCatalog(preparedSnapshot);
       await this.verifyFiles(preparedSnapshot);
-      this.repository.transaction((transaction) => {
+      const finalSnapshot = this.repository.transaction((transaction) => {
         const existingCatalog = transaction.list();
         for (const visual of prepared) {
           const existing = existingCatalog.find(
@@ -657,9 +657,11 @@ export class CharacterVisualCatalogService {
           }
         }
 
-        assertCharacterVisualCatalog(transaction.list());
+        const snapshot = transaction.list();
+        assertCharacterVisualCatalog(snapshot);
+        return snapshot;
       });
-      return this.repository.list();
+      return finalSnapshot;
     } catch (error) {
       await Promise.all(
         createdPaths.map((filePath) => rm(filePath, { force: true }))
