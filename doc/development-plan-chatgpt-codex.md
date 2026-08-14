@@ -33,6 +33,8 @@ Web版ChatGPTは、次に実装する範囲を仕様書から切り出し、Code
 | Phase 5 | 動画としてプレビュー・出力する | 同じマニフェストからプレビュー、MP4、サムネイルを作れる |
 | Phase 6 | 利用結果を記録して改善判断につなげる | AIや編集結果を検索・集計し、MVP後の改善材料を蓄積できる |
 
+P2-01 の実装内容は過去の実装履歴として残す。キャラクタービジュアルの現在仕様は、その後続として CV-00〜CV-03 で動的 `CharacterVisualSet`、workspace SQLite、管理領域、`/character-visuals` を追加する。これは Issue #87 の `/projects/{projectId}/script` 制作画面とは別のワークスペース共通ライブラリであり、既存の script-centric 制作フローを分割しない。
+
 ## 1. この計画の使い方
 
 この計画は、完成日を予測する日程表ではない。次にCodexへ何を頼み、何を確認したらその作業を完了とみなせるかを決めるための実行手順書である。
@@ -368,6 +370,8 @@ MVPではAIに台本初稿を書かせる機能は対象外である。AI関連�
 
 #### P2-01 2キャラクター初期設定と素材確認
 
+以下は P2-01 実装時点の作業内容と判断を記録した履歴であり、現在のキャラクタービジュアル登録の正本を定義する節ではない。現在仕様と後続作業は 8.5 に記載する。
+
 `doc/assets` に用意された 2 人分のキャラクターデータを調査し、`character-mentor` と `character-learner` へ対応付ける。初期キャラクター設定、TypeScript で管理する `characterVariantCatalog`、専用 PNG 検証、読み取り専用の素材確認画面を実装する。カタログは `variantId`、`characterId`、`label`、`renderType`、`tags`、`files` を物理素材の正本として持ち、`renderType` は `single-image` と `mouth-pair` だけを固定する。
 
 実在素材は各キャラクターについて、非会話状態の `single-image` 1 variant、通常会話の `mouth-pair` 1 variant、指差し状態の会話の `mouth-pair` 1 variant、合計 5 ファイルである。キャンバスは 600 × 1000 とし、2 キャラクターで 10 ファイルを検証する。
@@ -442,6 +446,52 @@ VOICEVOXへ渡すresolvedSpokenTextを決定論的に作ってください。
 ### 8.4 利用者が手動確認すること
 
 社内用語を一つ登録し、その表記を含むセリフを作る。字幕は元の表記のまま、読み上げプレビューだけがカタカナへ変わることを確認する。用語を利用停止すると再生成が必要な状態へ変わること、`literal`を選ぶと置換されないことも確認する。
+
+### 8.5 P2-01後続: キャラクタービジュアル登録
+
+P2-01 の記述は、当時の TypeScript 静的 `characterVariantCatalog` と読み取り専用確認画面を実装した履歴として変更しない。現在仕様では、実在する登録項目の正本を workspace SQLite の `CharacterVisualSet` へ移し、TypeScript の catalog は型または DB から生成した snapshot に限定する。
+
+登録時点で全表情・全ポーズの variant が揃っている必要はない。未登録 variant は set の部分状態として許可するが、永続化する variant は必須 slot が揃った完成状態に限る。`single-image` の作成は `single` 1 件、`mouth-pair` の作成は `closed` と `open` 各 1 件を同一リクエストで検証・登録し、必須 slot 欠落の variant を残さない。作成後の差し替えは既存 variant の 1 slot 単位で許可するが、必須 slot の削除は行わない。visual は `mentor` / `learner` や特定 project に固定せず、`ScriptLine.expression` と物理 variant の mapping は後続設計へ分離する。最初の完成 variant のキャンバスサイズを visual 単位の基準とし、既存 seed の 600 × 1000 px は全体固定値にしない。新規ファイルは `library/character-visuals/{visualId}/{variantId}/` に保存し、`public/` へ直接保存しない。
+
+#### CV-00 仕様書改訂
+
+3文書（`doc/doc.md`、`doc/implementation-spec.md`、この計画書）を、動的 `CharacterVisualSet` と workspace SQLite を正本とする現行仕様へ揃える。CV-00 ではコード、SQLite migration、登録 API、登録 UI を実装しない。
+
+完了条件は、3文書で静的カタログと SQLite が同時にメタデータ正本として扱われず、一部 variant が未登録の set、永続化済み variant の必須 slot、expression 分離、role 非固定、visual 単位キャンバス、2 visual / 6 variant / 10 PNG の seed、`public/` 非保存、依存方向、CV-01〜CV-03 の境界が判断できることである。
+
+#### CV-01 動的カタログ基盤
+
+`CharacterVisualSet`、variant、file slot、checksum、canvas metadata、status、作成・更新日時を workspace SQLite へ保存する schema / migration と repository を実装する。P2-01 の既存 2 キャラクター、6 variant、10 PNG を idempotent に seed / migration し、移行後は DB を一覧・検証・配信のメタデータ正本にする。TypeScript の静的配列を実在項目の正本として残さない。
+
+対象外:
+
+- ファイルアップロード API
+- `/character-visuals` 登録画面
+- プロジェクトごとの visual 選択、expression mapping
+- `RenderManifest` の character variant フィールド追加
+
+#### CV-02 登録 API・ファイル管理
+
+Fastify に `CharacterVisualSet` の一覧・詳細・作成・更新と variant file の登録・差し替え API を追加する。variant 作成は `single-image` の `single`、または `mouth-pair` の `closed` / `open` を一括で受け取り、全必須 slot を検証できた場合だけ永続化する。作成後の既存 variant は 1 slot 単位で差し替えできるが、必須 slot の削除 API は追加しない。ファイルは一時領域で受信し、許可形式、PNG 構造、slot、checksum、visual 単位のキャンバスをバックエンドで検証してから `library/character-visuals/{visualId}/{variantId}/` へ保存する。1つのアプリケーション操作として staged file、atomic rename、SQLite transaction、失敗時の compensating cleanup を組み合わせ、SQLite とファイルシステムを単一 transaction と誤認しない。WebUI に OS 絶対パスを返さず、画像は管理された配信経路で返す。既存の有効データを新規操作の失敗で壊さない。
+
+対象外:
+
+- `/character-visuals` の画面とサイドバー導線
+- プロジェクトへの自動紐付け
+- `mentor` / `learner` の役割付与
+- `ScriptLine.expression` からの自動 mapping
+
+#### CV-03 折りたたみサイドバー・登録 UI
+
+サイドバーから `/character-visuals` を開けるようにし、workspace 共通の visual 一覧、作成、名称・説明編集、完全な variant の作成、既存 file slot の差し替え、status 表示を実装する。未登録 variant は未登録として表示し、variant 作成フォームでは `single-image` / `mouth-pair` の必須 slot を揃えるまで送信を完了できない。必須 slot 欠落や visual 基準キャンバス不一致はフォームの validation として表示するが、不完全な variant は永続化しない。既存の完成 variant は 1 slot 単位で差し替えでき、必須 slot の削除は行わない。プロジェクトの `/script` 画面は登録済み visual を参照するだけにし、登録画面と制作画面の正本を分ける。
+
+対象外:
+
+- プロジェクトごとの visual 選択 UI
+- `neutral` / `smile` / `explain` / `caution` と物理 variant の mapping UI / 自動 mapping
+- `RenderManifest` の型変更
+- 口パク方式、VOICEVOX 話者設定の変更
+- 現場動画・写真・帳票素材ライブラリとの統合
 
 ## 9. Phase 3: 素材とビジュアル
 
@@ -637,21 +687,21 @@ Phase 5では、validation 可能な `VideoProject` の台本、音声、ビジ�
 
 #### P5-02 RenderManifestコンパイラ
 
-検証済み `VideoProject`、audio index、素材メタデータ、`characterVariantCatalog` を読み、`RenderManifest` を生成する。構成案の承認・最新性、台本の構造、音声の current/missing/stale、ビジュアル assignment の範囲・参照・checksum、Manifest の整合性を validation する。台本・ビジュアルが `draft` または `needs_review` でも、内容と参照が有効ならコンパイルできる。現行 `RenderManifest 1.0.0` の `RenderLine.expression` は論理表情であり、P5-02 / P5-04 着手前に、論理表情から物理 variant へ解決する決定論的な規則または人間の選択方法を確定する。安定した `variantId` とカタログ版を参照し、解決済みの character ID、renderType、ファイルパス、checksum、`mouth-pair` の `closed` / `open` を manifest へ固定する。具体的な保存フィールドと manifestVersion 互換性は設計ゲートで決定する。
+検証済み `VideoProject`、audio index、素材メタデータ、バックエンドが解決した `CharacterVisualSet` snapshot を読み、`RenderManifest` を生成する。コンパイラは SQLite や `library/character-visuals/` を直接検索しない。構成案の承認・最新性、台本の構造、音声の current/missing/stale、ビジュアル assignment の範囲・参照・checksum、Manifest の整合性を validation する。台本・ビジュアルが `draft` または `needs_review` でも、内容と参照が有効ならコンパイルできる。現行 `RenderManifest 1.0.0` の `RenderLine.expression` は論理表情であり、P5-02 / P5-04 着手前に、論理表情から物理 variant へ解決する決定論的な規則または人間の選択方法を確定する。安定した `variantId` と解決元 visual の版または更新時点を参照し、解決済みの character ID、renderType、ファイルパス、checksum、`mouth-pair` の `closed` / `open` を manifest へ固定する。具体的な保存フィールドと manifestVersion 互換性は設計ゲートで決定する。
 
-mapping 不能、variant 欠落、mouth slot 欠落、ファイルまたは checksum の不一致時は自動代替せず、複数のエラーを line ID や assignment ID へ関連付けて返す。Remotion や WebUI の描画処理からカタログまたは SQLite を直接検索しない。
+mapping 不能、variant 欠落、mouth slot 欠落、ファイルまたは checksum の不一致時は自動代替せず、複数のエラーを line ID や assignment ID へ関連付けて返す。Remotion や WebUI の描画処理から `CharacterVisualSet`、catalog snapshot、SQLite を直接検索しない。
 
 完了条件は、入力ハッシュまたは素材checksumが変わると古いキャッシュを使わないことである。
 
 #### P5-03 基本Remotion composition
 
-背景、キャラクター、字幕、写真・動画・帳票を解決済みの `RenderManifest` だけから描画する。Remotion コンポーネントから `characterVariantCatalog`、SQLite、DB 検索、ファイル探索、音声長測定を行わない。
+背景、キャラクター、字幕、写真・動画・帳票を解決済みの `RenderManifest` だけから描画する。Remotion コンポーネントから `CharacterVisualSet`、catalog snapshot、SQLite、DB 検索、ファイル探索、音声長測定を行わない。
 
 完了条件は、fixture manifestだけで代表フレームを描画できることである。
 
 #### P5-04 キャラクター・字幕・定周期口パク
 
-P5-02 の設計ゲートで決定した mapping または人間の選択に従い、論理表情から安定した `variantId` を決定して `RenderManifest` へ解決する。解決済み `mouth-pair` variant の `closed` / `open` だけを `lipSyncPeriodFrames` で定周期切り替えする。`single-image` に存在しない口差分を自動補完しない。Remotion はカタログまたは SQLite を直接参照せず、manifest の解決済み情報だけを使用する。話者は色だけでなく名前と配置でも区別する。
+P5-02 の設計ゲートで決定した mapping または人間の選択に従い、バックエンドから渡された `CharacterVisualSet` snapshot を使って論理表情から安定した `variantId` を決定し、`RenderManifest` へ解決する。解決済み `mouth-pair` variant の `closed` / `open` だけを `lipSyncPeriodFrames` で定周期切り替えする。`single-image` に存在しない口差分を自動補完しない。Remotion は `CharacterVisualSet`、カタログ、SQLite を直接参照せず、manifest の解決済み情報だけを使用する。話者は色だけでなく名前と配置でも区別する。
 
 検証では、画像切替時に位置が揺れないこと、字幕が画面外へ出ないことを確認する。
 
@@ -713,10 +763,10 @@ fixture projectを使い、プロジェクト作成から短いMP4とサムネ�
 
 キャラクター素材を扱う場合の追加条件:
 - `RenderLine.expression` は論理表情として扱い、PNG や物理 variant と直接対応させない。
-- P5-02 / P5-04 の設計ゲートで確定した mapping または人間の選択から `variantId` を決定し、`characterVariantCatalog` からファイルスロットを解決する。
+- P5-02 / P5-04 の設計ゲートで確定した mapping または人間の選択から `variantId` を決定し、バックエンドが渡す `CharacterVisualSet` snapshot からファイルスロットを解決する。
 - 解決済みのファイルパス、checksum、`mouth-pair` の `closed` / `open` を manifest に固定する。具体的なフィールドは TBD とする。
 - mapping 不能、variant 欠落、mouth slot 欠落時は自動代替せずエラーにする。
-- Remotion からカタログや SQLite を直接検索しない。
+- コンパイラと Remotion から `CharacterVisualSet`、カタログ、SQLite を直接検索しない。
 
 重要条件:
 - 時間範囲は半開区間を使う。
