@@ -9,6 +9,7 @@ import {
 import {
   characterVisualCatalogSnapshotSchema,
   type CharacterVariant,
+  type CharacterVariantStatus,
   type CharacterVisualCatalogSnapshot,
   type CharacterVisualFile,
   type CharacterVisualSet,
@@ -32,6 +33,7 @@ export type CharacterVariantInsert = {
   readonly visualId: string;
   readonly label: string;
   readonly renderType: CharacterVariant["renderType"];
+  readonly status: CharacterVariantStatus;
   readonly tags: readonly string[];
   readonly createdAt: string;
   readonly updatedAt: string;
@@ -47,6 +49,20 @@ export type CharacterVisualFileInsert = {
   readonly width: CharacterVisualFile["width"];
   readonly height: CharacterVisualFile["height"];
   readonly createdAt: string;
+  readonly updatedAt: string;
+};
+
+export type CharacterVisualUpdate = {
+  readonly name: string;
+  readonly description: string;
+  readonly status: CharacterVisualStatus;
+  readonly updatedAt: string;
+};
+
+export type CharacterVariantUpdate = {
+  readonly label: string;
+  readonly renderType: CharacterVariant["renderType"];
+  readonly tags: readonly string[];
   readonly updatedAt: string;
 };
 
@@ -146,6 +162,7 @@ function toSnapshot(
       variantId: row.variantId,
       label: row.label,
       renderType: row.renderType,
+      status: row.status,
       tags: parseTags(row.tags),
       files: (filesByVariantId.get(row.variantId) ?? []).sort((left, right) =>
         left.key.localeCompare(right.key)
@@ -260,12 +277,74 @@ export class CharacterVisualRepository {
     });
   }
 
+  updateVisual(visualId: string, values: CharacterVisualUpdate): void {
+    withDatabaseErrors(() => {
+      this.database
+        .update(characterVisuals)
+        .set(values)
+        .where(eq(characterVisuals.visualId, visualId))
+        .run();
+    });
+  }
+
+  touchVisual(visualId: string, updatedAt: string): void {
+    withDatabaseErrors(() => {
+      this.database
+        .update(characterVisuals)
+        .set({ updatedAt })
+        .where(eq(characterVisuals.visualId, visualId))
+        .run();
+    });
+  }
+
   insertVariant(values: CharacterVariantInsert): void {
     withDatabaseErrors(() => {
       this.database
         .insert(characterVariants)
         .values({ ...values, tags: JSON.stringify(values.tags) })
         .run();
+    });
+  }
+
+  updateVariant(variantId: string, values: CharacterVariantUpdate): void {
+    withDatabaseErrors(() => {
+      this.database
+        .update(characterVariants)
+        .set({ ...values, tags: JSON.stringify(values.tags) })
+        .where(eq(characterVariants.variantId, variantId))
+        .run();
+    });
+  }
+
+  updateVariantStatus(
+    variantId: string,
+    status: CharacterVariantStatus,
+    updatedAt: string
+  ): void {
+    withDatabaseErrors(() => {
+      this.database
+        .update(characterVariants)
+        .set({ status, updatedAt })
+        .where(eq(characterVariants.variantId, variantId))
+        .run();
+    });
+  }
+
+  replaceFiles(
+    variantId: string,
+    files: readonly CharacterVisualFileInsert[]
+  ): void {
+    withDatabaseErrors(() => {
+      this.database
+        .delete(characterVariantFiles)
+        .where(eq(characterVariantFiles.variantId, variantId))
+        .run();
+      if (files.length > 0) {
+        this.database
+          .insert(characterVariantFiles)
+          .values([...files])
+          .run();
+      }
     });
   }
 

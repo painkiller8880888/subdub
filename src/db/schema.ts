@@ -348,6 +348,9 @@ export const characterVariants = sqliteTable(
     renderType: text("render_type", {
       enum: ["single-image", "mouth-pair"]
     }).notNull(),
+    status: text("status", { enum: ["active", "inactive"] })
+      .notNull()
+      .default("active"),
     tags: text("tags").notNull(),
     createdAt: text("created_at").notNull(),
     updatedAt: text("updated_at").notNull()
@@ -357,6 +360,10 @@ export const characterVariants = sqliteTable(
     check(
       "character_variants_render_type_check",
       sql`${table.renderType} IN ('single-image', 'mouth-pair')`
+    ),
+    check(
+      "character_variants_status_check",
+      sql`${table.status} IN ('active', 'inactive')`
     )
   ]
 );

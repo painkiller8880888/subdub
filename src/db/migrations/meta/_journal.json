@@ -57,6 +57,13 @@
       "when": 1786709055620,
       "tag": "0007_massive_madame_web",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1786716188634,
+      "tag": "0008_small_blockbuster",
+      "breakpoints": true
     }
   ]
 }

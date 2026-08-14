@@ -107,7 +107,7 @@ describe("workspace SQLite", () => {
     const first = await initializeWorkspaceDatabase({ workspaceRoot });
     const firstHistory = migrationHistory(first.connection);
     expect(first.migrationResult.applied).toBe(true);
-    expect(firstHistory).toHaveLength(8);
+    expect(firstHistory).toHaveLength(9);
     first.close();
 
     const second = await initializeWorkspaceDatabase({ workspaceRoot });
@@ -383,7 +383,8 @@ describe("workspace SQLite", () => {
       "0004_asset-search",
       "0005_decision-log-golden-examples",
       "0006_decision-log-single-final-decision",
-      "0007_massive_madame_web"
+      "0007_massive_madame_web",
+      "0008_small_blockbuster"
     ];
     const definitions: MigrationDefinition[] = [];
     for (let index = 0; index < migrationTags.length; index++) {
@@ -468,7 +469,8 @@ describe("workspace SQLite", () => {
       "0004_asset-search",
       "0005_decision-log-golden-examples",
       "0006_decision-log-single-final-decision",
-      "0007_massive_madame_web"
+      "0007_massive_madame_web",
+      "0008_small_blockbuster"
     ];
     const definitions: MigrationDefinition[] = [];
     for (let index = 0; index < migrationTags.length; index += 1) {
@@ -507,7 +509,7 @@ describe("workspace SQLite", () => {
       workspaceRoot
     });
     expect(first.migrationResult.applied).toBe(true);
-    expect(migrationHistory(first.connection)).toHaveLength(8);
+    expect(migrationHistory(first.connection)).toHaveLength(9);
     expect(
       first.connection
         .prepare(
@@ -599,6 +601,91 @@ describe("workspace SQLite", () => {
     third.close();
   });
 
+  it("preserves existing character variants and backfills active status", async () => {
+    const workspaceRoot = await makeWorkspace();
+    const migrationsRoot = path.join(process.cwd(), "src", "db", "migrations");
+    const migrationTags = [
+      "0000_baseline",
+      "0001_curved_colleen_wing",
+      "0002_asset-library",
+      "0003_asset-processing-metadata",
+      "0004_asset-search",
+      "0005_decision-log-golden-examples",
+      "0006_decision-log-single-final-decision",
+      "0007_massive_madame_web",
+      "0008_small_blockbuster"
+    ];
+    const definitions: MigrationDefinition[] = [];
+    for (let index = 0; index < migrationTags.length; index += 1) {
+      definitions.push({
+        sql: await fs.readFile(
+          path.join(migrationsRoot, `${migrationTags[index]}.sql`),
+          "utf8"
+        ),
+        tag: migrationTags[index]!,
+        when: BASE_MIGRATION_TIME + index
+      });
+    }
+
+    const before = await initializeWorkspaceDatabase({
+      migrationsFolder: await makeMigrationFolder(
+        workspaceRoot,
+        definitions.slice(0, 8)
+      ),
+      workspaceRoot
+    });
+    const now = "2026-08-14T00:00:00.000Z";
+    before.connection
+      .prepare(
+        `INSERT INTO character_visuals
+          (visual_id, name, description, status, base_width, base_height, created_at, updated_at)
+         VALUES ('legacy-visual', 'Legacy', '', 'active', 600, 1000, ?, ?)`
+      )
+      .run(now, now);
+    before.connection
+      .prepare(
+        `INSERT INTO character_variants
+          (variant_id, visual_id, label, render_type, tags, created_at, updated_at)
+         VALUES ('legacy-variant', 'legacy-visual', 'Legacy', 'single-image', '[]', ?, ?)`
+      )
+      .run(now, now);
+    before.connection
+      .prepare(
+        `INSERT INTO character_variant_files
+          (variant_id, file_key, library_path, mime_type, checksum, size_bytes, width, height, created_at, updated_at)
+         VALUES ('legacy-variant', 'single', 'library/character-visuals/legacy-visual/legacy-variant/single.png', 'image/png', ?, 3, 600, 1000, ?, ?)`
+      )
+      .run("a".repeat(64), now, now);
+    before.close();
+
+    const after = await initializeWorkspaceDatabase({
+      migrationsFolder: await makeMigrationFolder(workspaceRoot, definitions),
+      workspaceRoot
+    });
+    expect(after.migrationResult.applied).toBe(true);
+    const variant = after.connection
+      .prepare(
+        "SELECT variant_id, visual_id, label, render_type, status, tags FROM character_variants WHERE variant_id = ?"
+      )
+      .get("legacy-variant");
+    expect(variant).toEqual({
+      variant_id: "legacy-variant",
+      visual_id: "legacy-visual",
+      label: "Legacy",
+      render_type: "single-image",
+      status: "active",
+      tags: "[]"
+    });
+    expect(countRows(after.connection, "character_variant_files")).toBe(1);
+    const tableSql = after.connection
+      .prepare(
+        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'character_variants'"
+      )
+      .get() as { sql: string };
+    expect(tableSql.sql).toContain("character_variants_status_check");
+    after.close();
+  });
+
   it("backfills assets, tags, and aliases that predate the search migration", async () => {
     const workspaceRoot = await makeWorkspace();
     const migrationsRoot = path.join(process.cwd(), "src", "db", "migrations");
@@ -610,7 +697,8 @@ describe("workspace SQLite", () => {
       "0004_asset-search",
       "0005_decision-log-golden-examples",
       "0006_decision-log-single-final-decision",
-      "0007_massive_madame_web"
+      "0007_massive_madame_web",
+      "0008_small_blockbuster"
     ];
     const definitions: MigrationDefinition[] = [];
     for (let index = 0; index < migrationTags.length; index++) {

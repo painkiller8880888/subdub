@@ -1,4 +1,5 @@
 import fastifyStatic from "@fastify/static";
+import fastifyMultipart from "@fastify/multipart";
 import Fastify, {
   type FastifyInstance,
   type FastifyServerOptions
@@ -9,6 +10,7 @@ import { ProjectService } from "../app/projects/project-service.js";
 import { createOpenRouterModelService } from "../openrouter/model-service.js";
 import { OutlineGenerationService } from "../app/projects/outline-generation-service.js";
 import type { AssetUploadLimits } from "../app/assets/asset-upload-limits.js";
+import { DEFAULT_ASSET_UPLOAD_LIMITS } from "../app/assets/asset-upload-limits.js";
 import { registerApiErrorHandler } from "./middleware/error-handler.js";
 import { registerNotFoundHandler } from "./middleware/not-found-handler.js";
 import { registerModelRoutes } from "./routes/models.js";
@@ -104,6 +106,24 @@ export function buildApp(options: AppOptions = {}): FastifyInstance {
   app.get("/api/health", async () =>
     createApiSuccessResponse({ status: "ok" })
   );
+
+  if (
+    options.assetService !== undefined ||
+    options.characterVisualCatalogService !== undefined
+  ) {
+    const assetLimits =
+      options.assetUploadLimits ?? DEFAULT_ASSET_UPLOAD_LIMITS;
+    app.register(fastifyMultipart, {
+      limits: {
+        files: Math.max(2, assetLimits.maxFileCount),
+        parts: Math.max(64, assetLimits.maxPartCount),
+        fields: 1000,
+        fieldNameSize: Math.max(64, assetLimits.maxFieldNameLength),
+        fieldSize: Math.max(8192, assetLimits.maxFieldValueLength),
+        fileSize: assetLimits.maxGlobalFileBytes
+      }
+    });
+  }
 
   if (options.projectService !== undefined) {
     registerProjectRoutes(app, options.projectService);

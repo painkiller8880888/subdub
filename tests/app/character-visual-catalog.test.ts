@@ -1,6 +1,8 @@
 import { promises as fs } from "node:fs";
+import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import * as path from "node:path";
+import { Readable } from "node:stream";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -22,6 +24,7 @@ import { characterVisualSetSchema } from "../../src/schema/character-visual.js";
 import { validateCharacterVisualCatalog } from "../../src/validation/character-visuals.js";
 import { compileRenderManifest } from "../../src/app/rendering/render-manifest-compiler.js";
 import { createRenderManifestInput } from "../fixtures/render-manifest-input.js";
+import { makeTransparentPng, pngBytes } from "../fixtures/asset-fixtures.js";
 
 describe("character visual catalog", { timeout: 30_000 }, () => {
   const workspaceRoots: string[] = [];
@@ -143,6 +146,37 @@ describe("character visual catalog", { timeout: 30_000 }, () => {
     expect(counts("character_variant_files")).toBe(10);
   });
 
+  it("does not require the legacy source after the initial seed", async () => {
+    const { service } = await makeService();
+    const sourceRoot = await fs.mkdtemp(
+      path.join(tmpdir(), "subdub-character-seed-source-")
+    );
+    try {
+      await fs.cp(path.join(process.cwd(), "doc", "assets"), sourceRoot, {
+        recursive: true
+      });
+      const first = await service.seedLegacyCatalog({
+        sourceRoot,
+        catalog: legacyCharacterVisualSeed,
+        names: legacyCharacterVisualNames,
+        descriptions: legacyCharacterVisualDescriptions
+      });
+
+      await fs.rm(sourceRoot, { recursive: true, force: true });
+
+      await expect(
+        service.seedLegacyCatalog({
+          sourceRoot,
+          catalog: legacyCharacterVisualSeed,
+          names: legacyCharacterVisualNames,
+          descriptions: legacyCharacterVisualDescriptions
+        })
+      ).resolves.toEqual(first);
+    } finally {
+      await fs.rm(sourceRoot, { recursive: true, force: true });
+    }
+  });
+
   it("allows an empty visual while rejecting incomplete variants", async () => {
     const { service } = await makeService();
     const visual = service.create({ name: "Partial visual" });
@@ -168,6 +202,52 @@ describe("character visual catalog", { timeout: 30_000 }, () => {
       baseHeight: 1000
     });
     expect(invalid.success).toBe(false);
+  });
+
+  it("persists variant deactivation, keeps the row, and allows reactivation", async () => {
+    const { service, repository, database, workspaceRoot } =
+      await makeService();
+    const visual = service.create({ name: "Status visual" });
+    const withVariant = await service.createVariant(visual.visualId, {
+      label: "Status variant",
+      renderType: "single-image",
+      tags: [],
+      files: [
+        {
+          key: "single",
+          content: pngBytes,
+          mimeType: "image/png",
+          filename: "ignored-by-server.png"
+        }
+      ]
+    });
+    const variantId = withVariant.variants[0]!.variantId;
+    const countRows = (): number => {
+      const row = database.connection
+        .prepare("SELECT COUNT(*) AS count FROM character_variants")
+        .get() as { count: number };
+      return row.count;
+    };
+
+    expect(countRows()).toBe(1);
+    const inactive = service.deactivateVariant(visual.visualId, variantId);
+    expect(inactive.variants[0]?.status).toBe("inactive");
+    expect(countRows()).toBe(1);
+    expect(characterVisualSnapshotToVariantCatalog(repository.list())).toEqual(
+      []
+    );
+    await expect(
+      fs.stat(
+        path.join(workspaceRoot, inactive.variants[0]!.files[0]!.libraryPath)
+      )
+    ).resolves.toBeDefined();
+
+    const active = service.activateVariant(visual.visualId, variantId);
+    expect(active.variants[0]?.status).toBe("active");
+    expect(
+      characterVisualSnapshotToVariantCatalog(repository.list())
+    ).toHaveLength(1);
+    expect(countRows()).toBe(1);
   });
 
   it("rejects duplicate slots, missing mouth slots, duplicate visual IDs, and duplicate paths", () => {
@@ -245,6 +325,22 @@ describe("character visual catalog", { timeout: 30_000 }, () => {
         "libraryPath must be unique"
       ])
     );
+  });
+
+  it("streams a multipart file into staging and cleans the staging root", async () => {
+    const { service, workspaceRoot } = await makeService();
+    const staged = await service.stageUpload({
+      stream: Readable.from([pngBytes]),
+      mimeType: "image/png",
+      filename: "client-name.png"
+    });
+    const stagedPath = path.join(workspaceRoot, staged.fileRelativePath);
+    await expect(fs.readFile(stagedPath)).resolves.toEqual(pngBytes);
+
+    await service.discardStaged(staged);
+    await expect(
+      fs.stat(path.join(workspaceRoot, staged.stagingRelativePath))
+    ).rejects.toMatchObject({ code: "ENOENT" });
   });
 
   it("returns deterministic ordering regardless of seed input order", async () => {
@@ -345,28 +441,219 @@ describe("character visual catalog", { timeout: 30_000 }, () => {
     expect(repository.list()).toEqual([]);
   });
 
-  it("does not remove committed files when the post-commit read path fails", async () => {
+  it("keeps the previous ready file when a variant replacement transaction fails", async () => {
+    const { repository, service, workspaceRoot } = await makeService();
+    const visual = service.create({ name: "Replacement visual" });
+    const before = await service.createVariant(visual.visualId, {
+      label: "Before",
+      renderType: "single-image",
+      tags: [],
+      files: [{ key: "single", content: pngBytes, mimeType: "image/png" }]
+    });
+    const variant = before.variants[0]!;
+    const filePath = path.join(workspaceRoot, variant.files[0]!.libraryPath);
+    vi.spyOn(repository, "transaction").mockImplementation(() => {
+      throw new Error("database replacement failed");
+    });
+
+    await expect(
+      service.updateVariant(visual.visualId, variant.variantId, {
+        label: "After",
+        renderType: "single-image",
+        tags: [],
+        files: [{ key: "single", content: pngBytes, mimeType: "image/png" }]
+      })
+    ).rejects.toThrow("database replacement failed");
+    await expect(fs.readFile(filePath)).resolves.toEqual(pngBytes);
+    expect(repository.list()).toEqual([before]);
+  });
+
+  it("does not overwrite concurrent visual metadata during variant registration", async () => {
+    const { repository, service } = await makeService();
+    const visual = service.create({ name: "Original visual" });
+    const originalTransaction = repository.transaction.bind(repository);
+    vi.spyOn(repository, "transaction").mockImplementation((operation) => {
+      repository.updateVisual(visual.visualId, {
+        name: "Concurrent visual",
+        description: "Concurrent description",
+        status: "inactive",
+        updatedAt: "2026-08-14T00:00:01.000Z"
+      });
+      return originalTransaction(operation);
+    });
+
+    const result = await service.createVariant(visual.visualId, {
+      label: "Concurrent-safe variant",
+      renderType: "single-image",
+      tags: [],
+      files: [
+        {
+          key: "single",
+          content: makeTransparentPng(600, 1000, 1),
+          mimeType: "image/png"
+        }
+      ]
+    });
+
+    expect(result).toMatchObject({
+      name: "Concurrent visual",
+      description: "Concurrent description",
+      status: "inactive",
+      baseWidth: 600,
+      baseHeight: 1000
+    });
+  });
+
+  it("rechecks a concurrently initialized base canvas before committing a variant", async () => {
+    const { repository, service } = await makeService();
+    const visual = service.create({ name: "Concurrent canvas visual" });
+    const originalTransaction = repository.transaction.bind(repository);
+    vi.spyOn(repository, "transaction").mockImplementation((operation) => {
+      repository.updateBaseCanvas(
+        visual.visualId,
+        600,
+        1000,
+        "2026-08-14T00:00:01.000Z"
+      );
+      return originalTransaction(operation);
+    });
+
+    await expect(
+      service.createVariant(visual.visualId, {
+        label: "Wrong canvas",
+        renderType: "single-image",
+        tags: [],
+        files: [
+          {
+            key: "single",
+            content: makeTransparentPng(700, 1000, 1),
+            mimeType: "image/png"
+          }
+        ]
+      })
+    ).rejects.toMatchObject({ code: "CHARACTER_VISUAL_CANVAS_SIZE_MISMATCH" });
+    expect(repository.findById(visual.visualId)).toMatchObject({
+      baseWidth: 600,
+      baseHeight: 1000,
+      variants: []
+    });
+    await expect(service.findOrphanedFiles()).resolves.toEqual([]);
+  });
+
+  it("promotes replacements to immutable paths while the old path remains ready", async () => {
+    const { repository, service, workspaceRoot } = await makeService();
+    const visual = service.create({ name: "Immutable replacement visual" });
+    const before = await service.createVariant(visual.visualId, {
+      label: "Before",
+      renderType: "single-image",
+      tags: [],
+      files: [{ key: "single", content: pngBytes, mimeType: "image/png" }]
+    });
+    const beforeFile = before.variants[0]!.files[0]!;
+    const beforePath = path.join(workspaceRoot, beforeFile.libraryPath);
+    let oldFileWasReadyAtTransactionBoundary = false;
+    vi.spyOn(repository, "transaction").mockImplementation(() => {
+      oldFileWasReadyAtTransactionBoundary = existsSync(beforePath);
+      throw new Error("simulate process interruption before metadata commit");
+    });
+
+    await expect(
+      service.updateVariant(visual.visualId, before.variants[0]!.variantId, {
+        label: "After",
+        renderType: "single-image",
+        tags: [],
+        files: [
+          {
+            key: "single",
+            content: makeTransparentPng(1, 1, 1),
+            mimeType: "image/png"
+          }
+        ]
+      })
+    ).rejects.toThrow("simulate process interruption");
+    expect(oldFileWasReadyAtTransactionBoundary).toBe(true);
+    await expect(fs.readFile(beforePath)).resolves.toEqual(pngBytes);
+  });
+
+  it("switches metadata to a new immutable path after a successful replacement", async () => {
+    const { service, workspaceRoot } = await makeService();
+    const visual = service.create({ name: "Successful immutable replacement" });
+    const before = await service.createVariant(visual.visualId, {
+      label: "Before",
+      renderType: "single-image",
+      tags: [],
+      files: [{ key: "single", content: pngBytes, mimeType: "image/png" }]
+    });
+    const beforeFile = before.variants[0]!.files[0]!;
+    const replacement = makeTransparentPng(1, 1, 1);
+    const after = await service.updateVariant(
+      visual.visualId,
+      before.variants[0]!.variantId,
+      {
+        label: "After",
+        renderType: "single-image",
+        tags: [],
+        files: [{ key: "single", content: replacement, mimeType: "image/png" }]
+      }
+    );
+    const afterFile = after.variants[0]!.files[0]!;
+    expect(afterFile.libraryPath).not.toBe(beforeFile.libraryPath);
+    await expect(
+      fs.readFile(path.join(workspaceRoot, afterFile.libraryPath))
+    ).resolves.toEqual(replacement);
+    await expect(
+      fs.stat(path.join(workspaceRoot, beforeFile.libraryPath))
+    ).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("diagnoses unreferenced final and staging files without deleting them", async () => {
+    const { service, workspaceRoot } = await makeService();
+    const orphanFinalPath = path.join(
+      workspaceRoot,
+      "library/character-visuals/orphan-visual/orphan-variant/orphan.png"
+    );
+    const orphanStagingPath = path.join(
+      workspaceRoot,
+      "library/staging/character-visual-upload-crashed/upload.bin"
+    );
+    await fs.mkdir(path.dirname(orphanFinalPath), { recursive: true });
+    await fs.mkdir(path.dirname(orphanStagingPath), { recursive: true });
+    await fs.writeFile(orphanFinalPath, pngBytes);
+    await fs.writeFile(orphanStagingPath, pngBytes);
+
+    await expect(service.findOrphanedFiles()).resolves.toEqual([
+      "library/character-visuals/orphan-visual/orphan-variant/orphan.png",
+      "library/staging/character-visual-upload-crashed/upload.bin"
+    ]);
+    await expect(fs.readFile(orphanFinalPath)).resolves.toEqual(pngBytes);
+    await expect(fs.readFile(orphanStagingPath)).resolves.toEqual(pngBytes);
+  });
+
+  it("does not install seed files when the existing catalog read fails", async () => {
     const { repository, service, workspaceRoot } = await makeService();
     const sourceRoot = path.join(process.cwd(), "doc", "assets");
     const listSpy = vi.spyOn(repository, "list").mockImplementation(() => {
-      throw new Error("post-commit read failed");
+      throw new Error("existing catalog read failed");
     });
 
-    const snapshot = await service.seedLegacyCatalog({
-      sourceRoot,
-      catalog: legacyCharacterVisualSeed,
-      names: legacyCharacterVisualNames,
-      descriptions: legacyCharacterVisualDescriptions
-    });
+    await expect(
+      service.seedLegacyCatalog({
+        sourceRoot,
+        catalog: legacyCharacterVisualSeed,
+        names: legacyCharacterVisualNames,
+        descriptions: legacyCharacterVisualDescriptions
+      })
+    ).rejects.toThrow("existing catalog read failed");
 
-    expect(snapshot).toHaveLength(2);
-    expect(listSpy).not.toHaveBeenCalled();
-    const managedPath = path.join(
-      workspaceRoot,
-      snapshot[0]!.variants[0]!.files[0]!.libraryPath
-    );
-    const stats = await fs.stat(managedPath);
-    expect(stats.isFile()).toBe(true);
+    expect(listSpy).toHaveBeenCalledTimes(1);
+    await expect(
+      fs.stat(
+        path.join(
+          workspaceRoot,
+          "library/character-visuals/character-mentor/character-mentor-stand-v1/single.png"
+        )
+      )
+    ).rejects.toMatchObject({ code: "ENOENT" });
   });
 
   it("removes newly installed files when the metadata transaction fails", async () => {

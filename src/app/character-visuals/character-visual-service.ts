@@ -1,10 +1,24 @@
 import { createHash, randomUUID } from "node:crypto";
-import { copyFile, lstat, mkdir, readFile, rename, rm } from "node:fs/promises";
+import { createWriteStream } from "node:fs";
+import {
+  copyFile,
+  lstat,
+  mkdir,
+  readFile,
+  readdir,
+  rename,
+  rm,
+  stat,
+  writeFile as writeFileNode
+} from "node:fs/promises";
 import * as path from "node:path";
+import { Readable, Transform } from "node:stream";
+import { pipeline } from "node:stream/promises";
 
 import {
   characterVisualSetSchema,
   type CharacterVariant,
+  type CharacterVariantStatus,
   type CharacterVisualCatalogSnapshot,
   type CharacterVisualFile,
   type CharacterVisualSet,
@@ -18,7 +32,18 @@ import {
 import { parsePng, type PngMetadata } from "../../validation/png.js";
 import type { CharacterVariantRenderType } from "../../assets/character-asset-manifest.js";
 import {
+  CharacterVisualApiError,
+  CharacterVisualCanvasSizeMismatchError,
+  CharacterVisualConflictError,
+  CharacterVisualFileTooLargeError,
+  CharacterVisualInvalidPngError,
+  CharacterVisualMissingSlotError,
+  CharacterVisualNotFoundError,
+  CharacterVisualStorageError,
   CharacterVisualSeedConflictError,
+  CharacterVisualUnsafePathError,
+  CharacterVisualUnsupportedFileTypeError,
+  CharacterVariantNotFoundError,
   CharacterVisualValidationError
 } from "./character-visual-errors.js";
 import {
@@ -47,12 +72,50 @@ export type CharacterVisualCatalogServiceOptions = {
   readonly workspaceRoot: string;
   readonly createId?: () => string;
   readonly now?: () => Date;
+  readonly onOrphanDetected?: (
+    paths: readonly string[],
+    cause: unknown
+  ) => void;
 };
+
+/** A per-file cap for character PNG uploads, independent of video asset limits. */
+export const CHARACTER_VISUAL_MAX_FILE_BYTES = 32 * 1024 * 1024;
 
 export type CharacterVisualCreateInput = {
   readonly name: string;
   readonly description?: string;
   readonly status?: CharacterVisualStatus;
+};
+
+export type CharacterVisualUpdateInput = {
+  readonly name: string;
+  readonly description: string;
+  readonly status: CharacterVisualStatus;
+};
+
+export type CharacterVisualStagedUpload = {
+  /** Staging directory relative to the workspace root. */
+  readonly stagingRelativePath: string;
+  /** Staged file path relative to the workspace root. */
+  readonly fileRelativePath: string;
+  readonly sizeBytes: number;
+};
+
+export type CharacterVisualUploadFile = {
+  readonly key: string;
+  /** Used by the HTTP route after streaming the part into workspace staging. */
+  readonly staged?: CharacterVisualStagedUpload;
+  /** Kept for direct in-process callers and existing service tests. */
+  readonly content?: Buffer;
+  readonly mimeType?: string;
+  readonly filename?: string;
+};
+
+export type CharacterVisualVariantInput = {
+  readonly label: string;
+  readonly renderType: CharacterVariant["renderType"];
+  readonly tags: readonly string[];
+  readonly files: readonly CharacterVisualUploadFile[];
 };
 
 export type CharacterVisualManagedFile = {
@@ -77,6 +140,7 @@ type PreparedSeedVariant = {
   readonly variantId: string;
   readonly label: string;
   readonly renderType: CharacterVariant["renderType"];
+  readonly status: CharacterVariantStatus;
   readonly tags: readonly string[];
   readonly files: readonly PreparedSeedFile[];
 };
@@ -89,6 +153,22 @@ type PreparedSeedVisual = {
   readonly baseWidth: number;
   readonly baseHeight: number;
   readonly variants: readonly PreparedSeedVariant[];
+};
+
+type PreparedUploadedFile = {
+  readonly key: CharacterVisualFile["key"];
+  readonly stagePath: string;
+  readonly targetPath: string;
+  readonly libraryPath: CharacterVisualFile["libraryPath"];
+  readonly checksum: string;
+  readonly sizeBytes: number;
+  readonly width: number;
+  readonly height: number;
+};
+
+type PreparedVariantFiles = {
+  readonly stagingRoots: readonly string[];
+  readonly files: readonly PreparedUploadedFile[];
 };
 
 function toIsoDate(now: () => Date): string {
@@ -111,7 +191,7 @@ function isSafeRelativePath(value: string): boolean {
 
 function resolveInside(root: string, relativePath: string): string {
   if (!isSafeRelativePath(relativePath)) {
-    throw new CharacterVisualValidationError(
+    throw new CharacterVisualUnsafePathError(
       `unsafe relative path: ${relativePath}`
     );
   }
@@ -123,7 +203,7 @@ function resolveInside(root: string, relativePath: string): string {
     relative.startsWith("..") ||
     path.isAbsolute(relative)
   ) {
-    throw new CharacterVisualValidationError(
+    throw new CharacterVisualUnsafePathError(
       `path escapes managed root: ${relativePath}`
     );
   }
@@ -137,6 +217,68 @@ function isMissingPath(error: unknown): boolean {
     "code" in error &&
     error.code === "ENOENT"
   );
+}
+
+function isTruncated(stream: Readable): boolean {
+  return (stream as Readable & { truncated?: unknown }).truncated === true;
+}
+
+function isMultipartUploadError(error: unknown): boolean {
+  if (typeof error !== "object" || error === null || !("code" in error)) {
+    return false;
+  }
+  return (
+    error.code === "FST_REQ_FILE_TOO_LARGE" ||
+    error.code === "FST_MP_PREMATURE_CLOSE" ||
+    error.code === "ERR_STREAM_PREMATURE_CLOSE"
+  );
+}
+
+function createUploadSizeLimiter(): Transform {
+  let bytes = 0;
+  return new Transform({
+    transform(chunk, encoding, callback) {
+      const chunkBytes =
+        typeof chunk === "string"
+          ? Buffer.byteLength(chunk, encoding)
+          : chunk instanceof Uint8Array
+            ? chunk.byteLength
+            : Buffer.byteLength(String(chunk), encoding);
+      bytes += chunkBytes;
+      if (bytes > CHARACTER_VISUAL_MAX_FILE_BYTES) {
+        callback(new CharacterVisualFileTooLargeError());
+        return;
+      }
+      callback(null, chunk);
+    }
+  });
+}
+
+async function collectFiles(
+  absoluteRoot: string,
+  relativeRoot: string
+): Promise<string[]> {
+  let entries;
+  try {
+    entries = await readdir(absoluteRoot, { withFileTypes: true });
+  } catch (error) {
+    if (isMissingPath(error)) {
+      return [];
+    }
+    throw error;
+  }
+
+  const files: string[] = [];
+  for (const entry of entries) {
+    const absolutePath = path.join(absoluteRoot, entry.name);
+    const relativePath = `${relativeRoot}/${entry.name}`;
+    if (entry.isDirectory()) {
+      files.push(...(await collectFiles(absolutePath, relativePath)));
+    } else if (entry.isFile() || entry.isSymbolicLink()) {
+      files.push(relativePath);
+    }
+  }
+  return files;
 }
 
 async function readRegularFile(filePath: string): Promise<Buffer> {
@@ -167,7 +309,7 @@ async function assertNoSymlinkComponents(
     try {
       const currentStats = await lstat(currentPath);
       if (currentStats.isSymbolicLink()) {
-        throw new CharacterVisualValidationError(
+        throw new CharacterVisualUnsafePathError(
           `managed character visual path must not contain a symlink: ${relativePath}`
         );
       }
@@ -197,6 +339,23 @@ function inspectPng(
     throw new CharacterVisualValidationError(
       `PNG at ${sourcePath} must declare alpha transparency`
     );
+  }
+  return {
+    metadata: parsed,
+    checksum: createHash("sha256").update(buffer).digest("hex")
+  };
+}
+
+function inspectUploadedPng(
+  buffer: Buffer,
+  mimeType: string | undefined
+): { readonly metadata: PngMetadata; readonly checksum: string } {
+  if (mimeType !== "image/png") {
+    throw new CharacterVisualUnsupportedFileTypeError();
+  }
+  const parsed = parsePng(buffer);
+  if (typeof parsed === "string" || !parsed.hasAlpha) {
+    throw new CharacterVisualInvalidPngError();
   }
   return {
     metadata: parsed,
@@ -312,6 +471,7 @@ async function prepareSeedCatalog(
         variantId: variant.variantId,
         label: variant.label,
         renderType: variant.renderType,
+        status: "active",
         tags: [...variant.tags],
         files
       });
@@ -356,6 +516,25 @@ function fileInsert(
   };
 }
 
+function uploadedFileInsert(
+  variantId: string,
+  file: PreparedUploadedFile,
+  timestamp: string
+): CharacterVisualFileInsert {
+  return {
+    variantId,
+    fileKey: file.key,
+    libraryPath: file.libraryPath,
+    mimeType: "image/png",
+    checksum: file.checksum,
+    sizeBytes: file.sizeBytes,
+    width: file.width,
+    height: file.height,
+    createdAt: timestamp,
+    updatedAt: timestamp
+  };
+}
+
 function variantInsert(
   variant: PreparedSeedVariant,
   timestamp: string
@@ -365,6 +544,7 @@ function variantInsert(
     visualId: variant.visualId,
     label: variant.label,
     renderType: variant.renderType,
+    status: variant.status,
     tags: variant.tags,
     createdAt: timestamp,
     updatedAt: timestamp
@@ -458,44 +638,6 @@ async function installSeedFiles(
   }
 }
 
-function assertSeedVisualMatches(
-  existing: CharacterVisualSet,
-  incoming: PreparedSeedVisual
-): void {
-  if (
-    existing.name !== incoming.name ||
-    existing.description !== incoming.description ||
-    existing.status !== incoming.status
-  ) {
-    throw new CharacterVisualSeedConflictError(
-      `visual ${incoming.visualId} already exists with different metadata`
-    );
-  }
-  if (
-    existing.baseWidth !== incoming.baseWidth ||
-    existing.baseHeight !== incoming.baseHeight
-  ) {
-    throw new CharacterVisualSeedConflictError(
-      `visual ${incoming.visualId} already exists with a different base canvas`
-    );
-  }
-}
-
-function assertSeedVariantMatches(
-  existing: CharacterVariant,
-  incoming: PreparedSeedVariant
-): void {
-  if (
-    existing.label !== incoming.label ||
-    existing.renderType !== incoming.renderType ||
-    JSON.stringify(existing.tags) !== JSON.stringify(incoming.tags)
-  ) {
-    throw new CharacterVisualSeedConflictError(
-      `variant ${incoming.variantId} already exists with different metadata`
-    );
-  }
-}
-
 function preparedSeedSnapshot(
   visuals: readonly PreparedSeedVisual[],
   timestamp: string
@@ -511,6 +653,7 @@ function preparedSeedSnapshot(
       variantId: variant.variantId,
       label: variant.label,
       renderType: variant.renderType,
+      status: variant.status,
       tags: [...variant.tags],
       files: variant.files.map((file) => ({
         key: file.fileKey,
@@ -532,12 +675,15 @@ export class CharacterVisualCatalogService {
   private readonly workspaceRoot: string;
   private readonly createId: () => string;
   private readonly now: () => Date;
+  private readonly onOrphanDetected:
+    ((paths: readonly string[], cause: unknown) => void) | undefined;
 
   constructor(options: CharacterVisualCatalogServiceOptions) {
     this.repository = options.repository;
     this.workspaceRoot = path.resolve(options.workspaceRoot);
     this.createId = options.createId ?? (() => randomUUID().toLowerCase());
     this.now = options.now ?? (() => new Date());
+    this.onOrphanDetected = options.onOrphanDetected;
   }
 
   list(): CharacterVisualCatalogSnapshot {
@@ -578,6 +724,78 @@ export class CharacterVisualCatalogService {
     return this.repository.findById(visualId);
   }
 
+  async stageUpload(file: {
+    readonly stream: Readable;
+    readonly mimeType?: string;
+    readonly filename?: string;
+  }): Promise<CharacterVisualStagedUpload> {
+    await assertNoSymlinkComponents(this.workspaceRoot, "library/staging");
+    const stagingRelativePath = `library/staging/character-visual-upload-${randomUUID().toLowerCase()}`;
+    const fileRelativePath = `${stagingRelativePath}/upload.bin`;
+    const stagingRoot = resolveInside(this.workspaceRoot, stagingRelativePath);
+    const filePath = resolveInside(this.workspaceRoot, fileRelativePath);
+    await mkdir(stagingRoot, { recursive: true });
+
+    try {
+      await pipeline(
+        file.stream,
+        createUploadSizeLimiter(),
+        createWriteStream(filePath, { flags: "wx" })
+      );
+      const fileStats = await stat(filePath);
+      if (
+        isTruncated(file.stream) ||
+        fileStats.size > CHARACTER_VISUAL_MAX_FILE_BYTES
+      ) {
+        throw new CharacterVisualFileTooLargeError();
+      }
+      return {
+        stagingRelativePath,
+        fileRelativePath,
+        sizeBytes: fileStats.size
+      };
+    } catch (error) {
+      await this.cleanupStagingRoots([stagingRelativePath], error);
+      if (
+        error instanceof CharacterVisualApiError ||
+        isMultipartUploadError(error)
+      ) {
+        throw error;
+      }
+      throw new CharacterVisualStorageError(error);
+    }
+  }
+
+  async discardStaged(staged: CharacterVisualStagedUpload): Promise<void> {
+    await this.cleanupStagingRoots([staged.stagingRelativePath], staged);
+  }
+
+  async findOrphanedFiles(): Promise<readonly string[]> {
+    const referencedPaths = new Set(
+      this.repository
+        .list()
+        .flatMap((visual) =>
+          visual.variants.flatMap((variant) =>
+            variant.files.map((file) => file.libraryPath)
+          )
+        )
+    );
+    const managedFiles = await collectFiles(
+      resolveInside(this.workspaceRoot, "library/character-visuals"),
+      "library/character-visuals"
+    );
+    const stagingFiles = (
+      await collectFiles(
+        resolveInside(this.workspaceRoot, "library/staging"),
+        "library/staging"
+      )
+    ).filter((file) => file.startsWith("library/staging/character-visual-"));
+    return [
+      ...managedFiles.filter((file) => !referencedPaths.has(file)),
+      ...stagingFiles
+    ].sort();
+  }
+
   async readManagedFile(
     visualId: string,
     variantId: string,
@@ -596,6 +814,478 @@ export class CharacterVisualCatalogService {
     await assertNoSymlinkComponents(this.workspaceRoot, file.libraryPath);
     const content = await readRegularFile(managedPath);
     return { content, mimeType: file.mimeType };
+  }
+
+  private requireVisual(visualId: string): CharacterVisualSet {
+    const visual = this.get(visualId);
+    if (visual === undefined) {
+      throw new CharacterVisualNotFoundError();
+    }
+    return visual;
+  }
+
+  private requireVariant(
+    visualId: string,
+    variantId: string
+  ): {
+    readonly visual: CharacterVisualSet;
+    readonly variant: CharacterVariant;
+  } {
+    const visual = this.requireVisual(visualId);
+    const variant = visual.variants.find(
+      (candidate) => candidate.variantId === variantId
+    );
+    if (variant === undefined) {
+      throw new CharacterVariantNotFoundError();
+    }
+    return { visual, variant };
+  }
+
+  private async cleanupPathsBestEffort(
+    paths: readonly string[],
+    cause: unknown,
+    recursive = false
+  ): Promise<void> {
+    const failedPaths: string[] = [];
+    for (const targetPath of paths) {
+      try {
+        await rm(targetPath, { force: true, recursive });
+      } catch {
+        failedPaths.push(
+          path
+            .relative(this.workspaceRoot, targetPath)
+            .replaceAll(path.sep, "/")
+        );
+      }
+    }
+    if (failedPaths.length > 0) {
+      this.reportOrphans(failedPaths, cause);
+    }
+  }
+
+  private reportOrphans(paths: readonly string[], cause: unknown): void {
+    try {
+      this.onOrphanDetected?.(paths, cause);
+    } catch {
+      // Diagnostics must never change the result of the storage operation.
+    }
+  }
+
+  private async cleanupStagingRoots(
+    stagingRoots: readonly string[],
+    cause: unknown
+  ): Promise<void> {
+    await this.cleanupPathsBestEffort(
+      stagingRoots.map((relativePath) =>
+        resolveInside(this.workspaceRoot, relativePath)
+      ),
+      cause,
+      true
+    );
+  }
+
+  private async stageInlineContent(
+    key: string,
+    content: Buffer
+  ): Promise<{
+    readonly stagingRelativePath: string;
+    readonly stagePath: string;
+  }> {
+    if (content.length > CHARACTER_VISUAL_MAX_FILE_BYTES) {
+      throw new CharacterVisualFileTooLargeError();
+    }
+    await assertNoSymlinkComponents(this.workspaceRoot, "library/staging");
+    const stagingRelativePath = `library/staging/character-visual-upload-${randomUUID().toLowerCase()}`;
+    const stagingRoot = resolveInside(this.workspaceRoot, stagingRelativePath);
+    await mkdir(stagingRoot, { recursive: true });
+    const stagePath = path.join(stagingRoot, `${key}.upload`);
+    try {
+      await writeFileNode(stagePath, content, { flag: "wx" });
+      return { stagingRelativePath, stagePath };
+    } catch (error) {
+      await this.cleanupStagingRoots([stagingRelativePath], error);
+      throw new CharacterVisualStorageError(error);
+    }
+  }
+
+  private async stageVariantFiles(
+    visual: CharacterVisualSet,
+    variantId: string,
+    input: CharacterVisualVariantInput,
+    excludedVariantId?: string
+  ): Promise<PreparedVariantFiles> {
+    const expectedKeys = expectedCharacterVariantFileKeys(input.renderType);
+    const filesByKey = new Map<string, CharacterVisualUploadFile>();
+    for (const file of input.files) {
+      if (filesByKey.has(file.key)) {
+        throw new CharacterVisualMissingSlotError();
+      }
+      filesByKey.set(file.key, file);
+    }
+    if (
+      input.files.length !== expectedKeys.length ||
+      expectedKeys.some((key) => !filesByKey.has(key)) ||
+      [...filesByKey.keys()].some((key) => !expectedKeys.includes(key))
+    ) {
+      throw new CharacterVisualMissingSlotError();
+    }
+
+    const stagingRoots = new Set<string>();
+    const generationId = randomUUID().toLowerCase();
+    try {
+      const prepared: PreparedUploadedFile[] = [];
+      for (const key of expectedKeys) {
+        const upload = filesByKey.get(key);
+        if (upload === undefined) {
+          throw new CharacterVisualMissingSlotError();
+        }
+
+        let stagePath: string;
+        if (upload.staged !== undefined) {
+          if (
+            !upload.staged.fileRelativePath.startsWith(
+              `${upload.staged.stagingRelativePath}/`
+            )
+          ) {
+            throw new CharacterVisualUnsafePathError();
+          }
+          await assertNoSymlinkComponents(
+            this.workspaceRoot,
+            upload.staged.stagingRelativePath
+          );
+          await assertNoSymlinkComponents(
+            this.workspaceRoot,
+            upload.staged.fileRelativePath
+          );
+          stagingRoots.add(upload.staged.stagingRelativePath);
+          stagePath = resolveInside(
+            this.workspaceRoot,
+            upload.staged.fileRelativePath
+          );
+        } else if (upload.content !== undefined) {
+          const inline = await this.stageInlineContent(key, upload.content);
+          stagingRoots.add(inline.stagingRelativePath);
+          stagePath = inline.stagePath;
+        } else {
+          throw new CharacterVisualStorageError(
+            new Error("character visual upload has no staged content")
+          );
+        }
+
+        let buffer: Buffer;
+        try {
+          buffer = await readFile(stagePath);
+        } catch (error) {
+          throw new CharacterVisualStorageError(error);
+        }
+        const inspected = inspectUploadedPng(buffer, upload.mimeType);
+        const libraryPath =
+          `library/character-visuals/${visual.visualId}/${variantId}/${generationId}-${key}.png` as CharacterVisualFile["libraryPath"];
+        prepared.push({
+          key: key as CharacterVisualFile["key"],
+          stagePath,
+          targetPath: resolveInside(this.workspaceRoot, libraryPath),
+          libraryPath,
+          checksum: inspected.checksum,
+          sizeBytes: buffer.length,
+          width: inspected.metadata.width,
+          height: inspected.metadata.height
+        });
+      }
+
+      const first = prepared[0];
+      if (
+        first === undefined ||
+        prepared.some(
+          (file) => file.width !== first.width || file.height !== first.height
+        )
+      ) {
+        throw new CharacterVisualCanvasSizeMismatchError();
+      }
+      if (
+        visual.baseWidth !== null &&
+        (first.width !== visual.baseWidth || first.height !== visual.baseHeight)
+      ) {
+        throw new CharacterVisualCanvasSizeMismatchError();
+      }
+
+      const existingFiles = this.repository
+        .list()
+        .flatMap((candidateVisual) =>
+          candidateVisual.variants
+            .filter((variant) => variant.variantId !== excludedVariantId)
+            .flatMap((variant) => variant.files)
+        );
+      const existingChecksums = new Set(
+        existingFiles.map((file) => file.checksum)
+      );
+      const checksums = new Set<string>();
+      for (const file of prepared) {
+        if (
+          checksums.has(file.checksum) ||
+          existingChecksums.has(file.checksum)
+        ) {
+          throw new CharacterVisualConflictError(
+            "The uploaded character visual file is already registered."
+          );
+        }
+        checksums.add(file.checksum);
+      }
+
+      return { stagingRoots: [...stagingRoots], files: prepared };
+    } catch (error) {
+      await this.cleanupStagingRoots([...stagingRoots], error);
+      throw error;
+    }
+  }
+
+  private async rollbackPromotion(
+    installedPaths: readonly string[],
+    cause: unknown
+  ): Promise<void> {
+    await this.cleanupPathsBestEffort(installedPaths, cause);
+  }
+
+  private async promoteFiles(
+    files: readonly PreparedUploadedFile[]
+  ): Promise<{ readonly installedPaths: readonly string[] }> {
+    const installedPaths: string[] = [];
+    try {
+      for (const file of files) {
+        await assertNoSymlinkComponents(
+          this.workspaceRoot,
+          path
+            .relative(this.workspaceRoot, file.targetPath)
+            .replaceAll(path.sep, "/")
+        );
+        try {
+          await lstat(file.targetPath);
+          throw new CharacterVisualConflictError(
+            "The managed character visual path is already registered."
+          );
+        } catch (error) {
+          if (!isMissingPath(error)) {
+            throw error;
+          }
+        }
+        await mkdir(path.dirname(file.targetPath), { recursive: true });
+        await rename(file.stagePath, file.targetPath);
+        installedPaths.push(file.targetPath);
+      }
+      return { installedPaths };
+    } catch (error) {
+      await this.rollbackPromotion(installedPaths, error);
+      if (error instanceof CharacterVisualApiError) {
+        throw error;
+      }
+      throw new CharacterVisualStorageError(error);
+    }
+  }
+
+  private async commitVariant(
+    visual: CharacterVisualSet,
+    variantId: string,
+    input: CharacterVisualVariantInput,
+    staged: PreparedVariantFiles,
+    existingVariant: CharacterVariant | undefined
+  ): Promise<CharacterVisualSet> {
+    const timestamp = toIsoDate(this.now);
+    const status = existingVariant?.status ?? "active";
+    const candidateVariant = {
+      variantId,
+      label: input.label.trim(),
+      renderType: input.renderType,
+      status,
+      tags: [...input.tags],
+      files: staged.files.map((file) => ({
+        key: file.key,
+        libraryPath: file.libraryPath,
+        mimeType: "image/png" as const,
+        checksum: file.checksum,
+        sizeBytes: file.sizeBytes,
+        width: file.width,
+        height: file.height
+      }))
+    } satisfies CharacterVariant;
+    const baseWidth = visual.baseWidth ?? staged.files[0]?.width ?? null;
+    const baseHeight = visual.baseHeight ?? staged.files[0]?.height ?? null;
+    let obsoletePaths: readonly string[];
+    try {
+      characterVisualSetSchema.parse({
+        ...visual,
+        baseWidth,
+        baseHeight,
+        variants:
+          existingVariant === undefined
+            ? [...visual.variants, candidateVariant]
+            : visual.variants.map((variant) =>
+                variant.variantId === variantId ? candidateVariant : variant
+              ),
+        updatedAt: timestamp
+      });
+      obsoletePaths =
+        existingVariant?.files.map((file) =>
+          resolveInside(this.workspaceRoot, file.libraryPath)
+        ) ?? [];
+    } catch (error) {
+      await this.cleanupStagingRoots(staged.stagingRoots, error);
+      throw error;
+    }
+
+    let promotion: { readonly installedPaths: readonly string[] } | undefined;
+    try {
+      promotion = await this.promoteFiles(staged.files);
+      this.repository.transaction((transaction) => {
+        const currentVisual = transaction.findById(visual.visualId);
+        if (currentVisual === undefined) {
+          throw new CharacterVisualNotFoundError();
+        }
+        const firstStagedFile = staged.files[0];
+        if (firstStagedFile === undefined) {
+          throw new CharacterVisualMissingSlotError();
+        }
+        if (
+          currentVisual.baseWidth === null ||
+          currentVisual.baseHeight === null
+        ) {
+          transaction.updateBaseCanvas(
+            visual.visualId,
+            firstStagedFile.width,
+            firstStagedFile.height,
+            timestamp
+          );
+        } else if (
+          staged.files.some(
+            (file) =>
+              file.width !== currentVisual.baseWidth ||
+              file.height !== currentVisual.baseHeight
+          )
+        ) {
+          throw new CharacterVisualCanvasSizeMismatchError();
+        }
+        transaction.touchVisual(visual.visualId, timestamp);
+        if (existingVariant === undefined) {
+          transaction.insertVariant({
+            variantId,
+            visualId: visual.visualId,
+            label: candidateVariant.label,
+            renderType: candidateVariant.renderType,
+            status: candidateVariant.status,
+            tags: candidateVariant.tags,
+            createdAt: timestamp,
+            updatedAt: timestamp
+          });
+        } else {
+          transaction.updateVariant(variantId, {
+            label: candidateVariant.label,
+            renderType: candidateVariant.renderType,
+            tags: candidateVariant.tags,
+            updatedAt: timestamp
+          });
+          transaction.replaceFiles(
+            variantId,
+            staged.files.map((file) =>
+              uploadedFileInsert(variantId, file, timestamp)
+            )
+          );
+        }
+        if (existingVariant === undefined) {
+          for (const file of staged.files) {
+            transaction.insertFile(
+              uploadedFileInsert(variantId, file, timestamp)
+            );
+          }
+        }
+      });
+    } catch (error) {
+      if (promotion !== undefined) {
+        await this.rollbackPromotion(promotion.installedPaths, error);
+      }
+      throw error;
+    } finally {
+      await this.cleanupStagingRoots(
+        staged.stagingRoots,
+        new Error("variant upload completed")
+      );
+    }
+
+    if (obsoletePaths.length > 0) {
+      await this.cleanupPathsBestEffort(
+        obsoletePaths,
+        new Error("replaced character visual files are no longer referenced")
+      );
+    }
+
+    return this.requireVisual(visual.visualId);
+  }
+
+  async createVariant(
+    visualId: string,
+    input: CharacterVisualVariantInput
+  ): Promise<CharacterVisualSet> {
+    const visual = this.requireVisual(visualId);
+    const variantId = idSchema.parse(this.createId());
+    const staged = await this.stageVariantFiles(visual, variantId, input);
+    return this.commitVariant(visual, variantId, input, staged, undefined);
+  }
+
+  async updateVariant(
+    visualId: string,
+    variantId: string,
+    input: CharacterVisualVariantInput
+  ): Promise<CharacterVisualSet> {
+    const { visual, variant } = this.requireVariant(visualId, variantId);
+    const staged = await this.stageVariantFiles(
+      visual,
+      variantId,
+      input,
+      variantId
+    );
+    return this.commitVariant(visual, variantId, input, staged, variant);
+  }
+
+  update(
+    visualId: string,
+    input: CharacterVisualUpdateInput
+  ): CharacterVisualSet {
+    const visual = this.requireVisual(visualId);
+    const timestamp = toIsoDate(this.now);
+    const next = characterVisualSetSchema.parse({
+      ...visual,
+      name: input.name.trim(),
+      description: input.description.trim(),
+      status: input.status,
+      updatedAt: timestamp
+    });
+    this.repository.updateVisual(visualId, {
+      name: next.name,
+      description: next.description,
+      status: next.status,
+      updatedAt: next.updatedAt
+    });
+    return this.requireVisual(visualId);
+  }
+
+  private setVariantStatus(
+    visualId: string,
+    variantId: string,
+    status: CharacterVariantStatus
+  ): CharacterVisualSet {
+    const { visual, variant } = this.requireVariant(visualId, variantId);
+    const timestamp = toIsoDate(this.now);
+    this.repository.transaction((transaction) => {
+      transaction.updateVariantStatus(variant.variantId, status, timestamp);
+      transaction.touchVisual(visual.visualId, timestamp);
+    });
+    return this.requireVisual(visualId);
+  }
+
+  deactivateVariant(visualId: string, variantId: string): CharacterVisualSet {
+    return this.setVariantStatus(visualId, variantId, "inactive");
+  }
+
+  activateVariant(visualId: string, variantId: string): CharacterVisualSet {
+    return this.setVariantStatus(visualId, variantId, "active");
   }
 
   create(input: CharacterVisualCreateInput): CharacterVisualSet {
@@ -620,9 +1310,20 @@ export class CharacterVisualCatalogService {
     readonly names?: Readonly<Record<string, string>>;
     readonly descriptions?: Readonly<Record<string, string>>;
   }): Promise<CharacterVisualCatalogSnapshot> {
+    const existingCatalog = this.repository.list();
+    const existingVisualIds = new Set(
+      existingCatalog.map((visual) => visual.visualId)
+    );
+    const catalogToSeed = options.catalog.filter(
+      (variant) => !existingVisualIds.has(variant.characterId)
+    );
+    if (catalogToSeed.length === 0) {
+      return existingCatalog;
+    }
+
     const prepared = await prepareSeedCatalog(
       options.sourceRoot,
-      options.catalog,
+      catalogToSeed,
       options.names ?? {},
       options.descriptions ?? {}
     );
@@ -637,46 +1338,11 @@ export class CharacterVisualCatalogService {
       assertCharacterVisualCatalog(preparedSnapshot);
       await this.verifyFiles(preparedSnapshot);
       const finalSnapshot = this.repository.transaction((transaction) => {
-        const existingCatalog = transaction.list();
         for (const visual of prepared) {
-          const existing = existingCatalog.find(
-            (candidate) => candidate.visualId === visual.visualId
-          );
-          if (existing === undefined) {
-            transaction.insertVisual(visualInsert(visual, timestamp));
-          } else {
-            assertSeedVisualMatches(existing, visual);
-          }
-
+          transaction.insertVisual(visualInsert(visual, timestamp));
           for (const variant of visual.variants) {
-            const existingVariant = existing?.variants.find(
-              (candidate) => candidate.variantId === variant.variantId
-            );
-            if (existingVariant === undefined) {
-              transaction.insertVariant(variantInsert(variant, timestamp));
-            } else {
-              assertSeedVariantMatches(existingVariant, variant);
-            }
-
-            const existingFiles = new Map(
-              (existingVariant?.files ?? []).map((file) => [file.key, file])
-            );
+            transaction.insertVariant(variantInsert(variant, timestamp));
             for (const file of variant.files) {
-              const existingFile = existingFiles.get(file.fileKey);
-              if (existingFile !== undefined) {
-                if (
-                  existingFile.libraryPath !== file.libraryPath ||
-                  existingFile.checksum !== file.checksum ||
-                  existingFile.sizeBytes !== file.sizeBytes ||
-                  existingFile.width !== file.width ||
-                  existingFile.height !== file.height
-                ) {
-                  throw new CharacterVisualSeedConflictError(
-                    `file ${variant.variantId}/${file.fileKey} already exists with different metadata`
-                  );
-                }
-                continue;
-              }
               transaction.insertFile(fileInsert(file, timestamp));
             }
           }

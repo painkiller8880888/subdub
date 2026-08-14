@@ -1,4 +1,3 @@
-import fastifyMultipart from "@fastify/multipart";
 import type { FastifyInstance } from "fastify";
 import { createReadStream } from "node:fs";
 
@@ -103,17 +102,6 @@ export function registerAssetRoutes(
 ): void {
   const limits = options.limits ?? DEFAULT_ASSET_UPLOAD_LIMITS;
 
-  app.register(fastifyMultipart, {
-    limits: {
-      files: limits.maxFileCount,
-      parts: limits.maxPartCount,
-      fields: 1000, // we enforce our own field count limit
-      fieldNameSize: limits.maxFieldNameLength,
-      fieldSize: limits.maxFieldValueLength,
-      fileSize: limits.maxGlobalFileBytes
-    }
-  });
-
   app.get("/api/assets", async (request) => {
     const query = assetListQuerySchema.parse(request.query);
     return assetListResponseSchema.parse(
@@ -129,7 +117,19 @@ export function registerAssetRoutes(
     let fileCount = 0;
 
     try {
-      for await (const part of request.parts()) {
+      for await (const part of request.parts({
+        limits: {
+          fileSize: limits.maxGlobalFileBytes,
+          // Keep one parser slot for the route-level checks below so the
+          // domain-specific limit errors are returned instead of a premature
+          // multipart close from busboy.
+          files: limits.maxFileCount + 1,
+          fields: limits.maxFieldCount + 1,
+          parts: limits.maxPartCount + 1,
+          fieldNameSize: limits.maxFieldNameLength,
+          fieldSize: limits.maxFieldValueLength
+        }
+      })) {
         partCount++;
         if (partCount > limits.maxPartCount) {
           throw new AssetTooManyPartsError();
@@ -139,13 +139,21 @@ export function registerAssetRoutes(
           if (fieldCount > limits.maxFieldCount) {
             throw new AssetTooManyFieldsError();
           }
+          if (
+            Buffer.byteLength(part.fieldname, "utf8") >
+              limits.maxFieldNameLength ||
+            part.fieldnameTruncated
+          ) {
+            throw new AssetInvalidFieldError();
+          }
           if (!allowedFieldNames.has(part.fieldname)) {
             throw new AssetInvalidFieldError();
           }
-          if (part.fieldnameTruncated) {
-            throw new AssetInvalidFieldError();
-          }
-          if (part.valueTruncated) {
+          if (
+            part.valueTruncated ||
+            Buffer.byteLength(String(part.value), "utf8") >
+              limits.maxFieldValueLength
+          ) {
             throw new AssetFieldTooLargeError();
           }
           accumulateField(fields, part.fieldname, String(part.value));

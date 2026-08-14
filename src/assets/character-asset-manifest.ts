@@ -59,18 +59,22 @@ export function characterVisualSnapshotToVariantCatalog(
   snapshot: CharacterVisualCatalogSnapshot
 ): CharacterVariantCatalog {
   return snapshot.flatMap((visual) =>
-    visual.variants.map((variant) => ({
-      variantId: variant.variantId,
-      characterId: visual.visualId,
-      label: variant.label,
-      renderType: variant.renderType,
-      tags: variant.tags,
-      files: variant.files.map((file) => ({
-        key: file.key,
-        sourceFile: file.libraryPath,
-        destinationPath: file.libraryPath
-      }))
-    }))
+    visual.status === "active"
+      ? visual.variants
+          .filter((variant) => variant.status === "active")
+          .map((variant) => ({
+            variantId: variant.variantId,
+            characterId: visual.visualId,
+            label: variant.label,
+            renderType: variant.renderType,
+            tags: variant.tags,
+            files: variant.files.map((file) => ({
+              key: file.key,
+              sourceFile: file.libraryPath,
+              destinationPath: file.libraryPath
+            }))
+          }))
+      : []
   );
 }
 
@@ -83,14 +87,18 @@ export function characterVisualSnapshotToAssetMetadata(
   readonly durationMs: null;
 }[] {
   return snapshot.flatMap((visual) =>
-    visual.variants.flatMap((variant) =>
-      variant.files.map((file) => ({
-        path: file.libraryPath,
-        kind: "character" as const,
-        sha256: file.checksum,
-        durationMs: null
-      }))
-    )
+    visual.status === "active"
+      ? visual.variants
+          .filter((variant) => variant.status === "active")
+          .flatMap((variant) =>
+            variant.files.map((file) => ({
+              path: file.libraryPath,
+              kind: "character" as const,
+              sha256: file.checksum,
+              durationMs: null
+            }))
+          )
+      : []
   );
 }
 

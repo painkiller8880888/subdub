@@ -61,7 +61,12 @@ import {
   improvementDecisionSummarySchema,
   improvementReasonSchema
 } from "./improvement-log.js";
-import { characterVisualCatalogSnapshotSchema } from "./character-visual.js";
+import {
+  characterVariantRenderTypeSchema,
+  characterVisualCatalogSnapshotSchema,
+  characterVisualSetSchema,
+  characterVisualStatusSchema
+} from "./character-visual.js";
 
 const optionalImprovementReasonSchema = improvementReasonSchema
   .nullable()
@@ -112,6 +117,62 @@ export const healthResponseSchema = z
 export const characterVisualCatalogResponseSchema = strictObject({
   data: characterVisualCatalogSnapshotSchema,
   revision: nonNegativeIntegerSchema.optional()
+});
+
+const nonBlankCharacterVisualTextSchema = z
+  .string()
+  .transform((value) => value.normalize("NFC").trim())
+  .refine((value) => value.length > 0, "value must not be blank");
+
+const characterVisualTagsInputSchema = z
+  .union([z.string(), z.array(z.string())])
+  .optional()
+  .default([])
+  .transform((value) =>
+    (Array.isArray(value) ? value : [value])
+      .map((tag) => tag.normalize("NFC").trim())
+      .filter((tag) => tag.length > 0)
+  )
+  .superRefine((tags, ctx) => {
+    if (new Set(tags).size !== tags.length) {
+      ctx.addIssue({ code: "custom", message: "tags must be unique" });
+    }
+  });
+
+export const characterVisualCreateRequestSchema = strictObject({
+  name: nonBlankCharacterVisualTextSchema,
+  description: z
+    .string()
+    .transform((value) => value.normalize("NFC").trim())
+    .optional()
+    .default(""),
+  status: characterVisualStatusSchema.optional().default("active")
+});
+
+export const characterVisualUpdateRequestSchema = strictObject({
+  name: nonBlankCharacterVisualTextSchema,
+  description: z.string().transform((value) => value.normalize("NFC").trim()),
+  status: characterVisualStatusSchema
+});
+
+export const characterVisualResponseSchema = strictObject({
+  data: characterVisualSetSchema,
+  revision: nonNegativeIntegerSchema.optional()
+});
+
+export const characterVisualParamsSchema = strictObject({
+  visualId: idSchema
+});
+
+export const characterVisualVariantParamsSchema = strictObject({
+  visualId: idSchema,
+  variantId: idSchema
+});
+
+export const characterVisualVariantMultipartRequestSchema = strictObject({
+  label: nonBlankCharacterVisualTextSchema,
+  renderType: characterVariantRenderTypeSchema,
+  tags: characterVisualTagsInputSchema
 });
 
 export const characterVisualFileParamsSchema = strictObject({
@@ -821,6 +882,24 @@ export type ApiErrorResponse = z.infer<typeof apiErrorResponseSchema>;
 export type HealthResponse = z.infer<typeof healthResponseSchema>;
 export type CharacterVisualCatalogResponse = z.infer<
   typeof characterVisualCatalogResponseSchema
+>;
+export type CharacterVisualCreateRequest = z.infer<
+  typeof characterVisualCreateRequestSchema
+>;
+export type CharacterVisualUpdateRequest = z.infer<
+  typeof characterVisualUpdateRequestSchema
+>;
+export type CharacterVisualResponse = z.infer<
+  typeof characterVisualResponseSchema
+>;
+export type CharacterVisualParams = z.infer<
+  typeof characterVisualParamsSchema
+>;
+export type CharacterVisualVariantParams = z.infer<
+  typeof characterVisualVariantParamsSchema
+>;
+export type CharacterVisualVariantMultipartRequest = z.infer<
+  typeof characterVisualVariantMultipartRequestSchema
 >;
 export type VoicevoxStatusData = z.infer<typeof voicevoxStatusDataSchema>;
 export type VoicevoxStatusResponse = z.infer<

@@ -572,6 +572,66 @@ describe("asset upload API", () => {
     }
   });
 
+  it("enforces configured field name and value byte limits at the asset route", async () => {
+    const fieldNameWorkspaceRoot = await fs.mkdtemp(
+      path.join(tmpdir(), "subdub-assets-field-name-limit-")
+    );
+    const fieldNameServer = await initializeServer({
+      workspaceRoot: fieldNameWorkspaceRoot,
+      assetUploadLimits: {
+        ...DEFAULT_ASSET_UPLOAD_LIMITS,
+        maxFieldNameLength: 4
+      }
+    });
+    try {
+      const { body, contentType } = buildMultipartBody([
+        field("kind", "photo"),
+        field("title", "title"),
+        file(pngBytes, "image/png", "shot.png")
+      ]);
+      const response = await fieldNameServer.app.inject({
+        method: "POST",
+        url: "/api/assets",
+        payload: body,
+        headers: { "content-type": contentType }
+      });
+      expect(response.statusCode).toBe(400);
+      expect(apiError(response).code).toBe("ASSET_INVALID_FIELD");
+    } finally {
+      await fieldNameServer.app.close();
+      await fs.rm(fieldNameWorkspaceRoot, { recursive: true, force: true });
+    }
+
+    const fieldValueWorkspaceRoot = await fs.mkdtemp(
+      path.join(tmpdir(), "subdub-assets-field-value-limit-")
+    );
+    const fieldValueServer = await initializeServer({
+      workspaceRoot: fieldValueWorkspaceRoot,
+      assetUploadLimits: {
+        ...DEFAULT_ASSET_UPLOAD_LIMITS,
+        maxFieldValueLength: 4
+      }
+    });
+    try {
+      const { body, contentType } = buildMultipartBody([
+        field("kind", "photo"),
+        field("title", "title"),
+        file(pngBytes, "image/png", "shot.png")
+      ]);
+      const response = await fieldValueServer.app.inject({
+        method: "POST",
+        url: "/api/assets",
+        payload: body,
+        headers: { "content-type": contentType }
+      });
+      expect(response.statusCode).toBe(422);
+      expect(apiError(response).code).toBe("ASSET_FIELD_TOO_LARGE");
+    } finally {
+      await fieldValueServer.app.close();
+      await fs.rm(fieldValueWorkspaceRoot, { recursive: true, force: true });
+    }
+  });
+
   it("rejects files exceeding maxGlobalFileBytes with 413 ASSET_FILE_TOO_LARGE", async () => {
     const serverWithLimits = await initializeServer({
       workspaceRoot: await fs.mkdtemp(
