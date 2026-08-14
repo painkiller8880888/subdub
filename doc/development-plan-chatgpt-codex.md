@@ -451,13 +451,13 @@ VOICEVOXへ渡すresolvedSpokenTextを決定論的に作ってください。
 
 P2-01 の記述は、当時の TypeScript 静的 `characterVariantCatalog` と読み取り専用確認画面を実装した履歴として変更しない。現在仕様では、実在する登録項目の正本を workspace SQLite の `CharacterVisualSet` へ移し、TypeScript の catalog は型または DB から生成した snapshot に限定する。
 
-登録時点で全表情・全ポーズの variant が揃っている必要はない。`single-image` は `single`、`mouth-pair` は `closed` と `open` が揃った場合だけ完成 variant とし、variant 内の必須 slot 欠落だけをエラーとする。visual は `mentor` / `learner` や特定 project に固定せず、`ScriptLine.expression` と物理 variant の mapping は後続設計へ分離する。最初の完成 variant のキャンバスサイズを visual 単位の基準とし、既存 seed の 600 × 1000 px は全体固定値にしない。新規ファイルは `library/character-visuals/{visualId}/{variantId}/` に保存し、`public/` へ直接保存しない。
+登録時点で全表情・全ポーズの variant が揃っている必要はない。未登録 variant は set の部分状態として許可するが、永続化する variant は必須 slot が揃った完成状態に限る。`single-image` の作成は `single` 1 件、`mouth-pair` の作成は `closed` と `open` 各 1 件を同一リクエストで検証・登録し、必須 slot 欠落の variant を残さない。作成後の差し替えは既存 variant の 1 slot 単位で許可するが、必須 slot の削除は行わない。visual は `mentor` / `learner` や特定 project に固定せず、`ScriptLine.expression` と物理 variant の mapping は後続設計へ分離する。最初の完成 variant のキャンバスサイズを visual 単位の基準とし、既存 seed の 600 × 1000 px は全体固定値にしない。新規ファイルは `library/character-visuals/{visualId}/{variantId}/` に保存し、`public/` へ直接保存しない。
 
 #### CV-00 仕様書改訂
 
 3文書（`doc/doc.md`、`doc/implementation-spec.md`、この計画書）を、動的 `CharacterVisualSet` と workspace SQLite を正本とする現行仕様へ揃える。CV-00 ではコード、SQLite migration、登録 API、登録 UI を実装しない。
 
-完了条件は、3文書で静的カタログと SQLite が同時にメタデータ正本として扱われず、部分的な variant、variant 内必須 slot、expression 分離、role 非固定、visual 単位キャンバス、2 visual / 6 variant / 10 PNG の seed、`public/` 非保存、依存方向、CV-01〜CV-03 の境界が判断できることである。
+完了条件は、3文書で静的カタログと SQLite が同時にメタデータ正本として扱われず、一部 variant が未登録の set、永続化済み variant の必須 slot、expression 分離、role 非固定、visual 単位キャンバス、2 visual / 6 variant / 10 PNG の seed、`public/` 非保存、依存方向、CV-01〜CV-03 の境界が判断できることである。
 
 #### CV-01 動的カタログ基盤
 
@@ -472,7 +472,7 @@ P2-01 の記述は、当時の TypeScript 静的 `characterVariantCatalog` と�
 
 #### CV-02 登録 API・ファイル管理
 
-Fastify に `CharacterVisualSet` の一覧・詳細・作成・更新と variant file の登録・差し替え API を追加する。ファイルは一時領域で受信し、許可形式、PNG 構造、slot、checksum、visual 単位のキャンバスをバックエンドで検証してから `library/character-visuals/{visualId}/{variantId}/` へ保存する。WebUI に OS 絶対パスを返さず、画像は管理された配信経路で返す。SQLite 更新とファイル保存の失敗時に既存の有効データを壊さない。
+Fastify に `CharacterVisualSet` の一覧・詳細・作成・更新と variant file の登録・差し替え API を追加する。variant 作成は `single-image` の `single`、または `mouth-pair` の `closed` / `open` を一括で受け取り、全必須 slot を検証できた場合だけ永続化する。作成後の既存 variant は 1 slot 単位で差し替えできるが、必須 slot の削除 API は追加しない。ファイルは一時領域で受信し、許可形式、PNG 構造、slot、checksum、visual 単位のキャンバスをバックエンドで検証してから `library/character-visuals/{visualId}/{variantId}/` へ保存する。1つのアプリケーション操作として staged file、atomic rename、SQLite transaction、失敗時の compensating cleanup を組み合わせ、SQLite とファイルシステムを単一 transaction と誤認しない。WebUI に OS 絶対パスを返さず、画像は管理された配信経路で返す。既存の有効データを新規操作の失敗で壊さない。
 
 対象外:
 
@@ -483,7 +483,7 @@ Fastify に `CharacterVisualSet` の一覧・詳細・作成・更新と variant
 
 #### CV-03 折りたたみサイドバー・登録 UI
 
-サイドバーから `/character-visuals` を開けるようにし、workspace 共通の visual 一覧、作成、名称・説明編集、variant 追加、file slot 登録・差し替え、status 表示を実装する。未登録 variant は未登録として表示し、`single-image` / `mouth-pair` の必須 slot エラーと visual 基準キャンバス不一致を対象 variant に関連付けて表示する。プロジェクトの `/script` 画面は登録済み visual を参照するだけにし、登録画面と制作画面の正本を分ける。
+サイドバーから `/character-visuals` を開けるようにし、workspace 共通の visual 一覧、作成、名称・説明編集、完全な variant の作成、既存 file slot の差し替え、status 表示を実装する。未登録 variant は未登録として表示し、variant 作成フォームでは `single-image` / `mouth-pair` の必須 slot を揃えるまで送信を完了できない。必須 slot 欠落や visual 基準キャンバス不一致はフォームの validation として表示するが、不完全な variant は永続化しない。既存の完成 variant は 1 slot 単位で差し替えでき、必須 slot の削除は行わない。プロジェクトの `/script` 画面は登録済み visual を参照するだけにし、登録画面と制作画面の正本を分ける。
 
 対象外:
 

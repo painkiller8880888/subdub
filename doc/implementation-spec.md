@@ -616,7 +616,7 @@ P2-01 の当時の静的カタログには各キャラクター 3 variant、5 �
 
 ### 7.5.2 キャラクター素材検証
 
-検証処理は、注入された管理ルート、SQLite の `CharacterVisualSet` snapshot、variant/file を走査する。set 全体に全表情・全ポーズが揃っていることは要求しない。検証項目は次のとおりである。
+検証処理は、注入された管理ルート、SQLite の `CharacterVisualSet` snapshot、variant/file を走査する。set 全体に全表情・全ポーズが揃っていることは要求しない。一方、snapshot に含まれる永続化済み variant は必須 slot が揃った完成状態でなければならない。作成リクエストの slot 欠落は variant を不完全なまま保存するのではなく、ファイル移動と DB 更新の前に拒否する。検証項目は次のとおりである。
 
 - `visualId`、`variantId`、file slot の重複
 - visual、variant、library path の unsafe relative path
@@ -630,7 +630,7 @@ P2-01 の当時の静的カタログには各キャラクター 3 variant、5 �
 - `mouth-pair` の `closed` / `open` キャンバス一致
 - alpha channel または `tRNS`
 
-初期 seed / migration では `doc/assets` の既存 10 PNG を管理領域へコピーし、checksum と技術情報を DB へ保存する。新規登録では未登録 variant の存在をエラーにせず、必須 slot 欠落や基準キャンバス不一致だけを対象 variant のエラーとして返す。PNG の完全デコードによる透明ピクセル量や alpha bounding box の数値解析は行わない。身体の基準位置は、同じ visual の代表画像を並べた手動確認で扱い、根拠のない alpha bounding box 許容値は導入しない。
+初期 seed / migration では `doc/assets` の既存 10 PNG を管理領域へコピーし、checksum と技術情報を DB へ保存する。新規登録では未登録 variant の存在をエラーにせず、`single-image` の `single`、`mouth-pair` の `closed` / `open` を揃えた作成リクエストだけを永続化する。必須 slot 欠落、形式不正、checksum 不一致、基準キャンバス不一致は、variant 行や最終ファイルを残さず操作全体を失敗させる。既存の完成 variant の差し替えは 1 slot 単位で行い、必須 slot を削除する操作は提供しない。PNG の完全デコードによる透明ピクセル量や alpha bounding box の数値解析は行わない。身体の基準位置は、同じ visual の代表画像を並べた手動確認で扱い、根拠のない alpha bounding box 許容値は導入しない。
 
 ### 7.6 構成案
 
@@ -1186,19 +1186,20 @@ character_visual_sets
       └─ created_at / updated_at
 ```
 
-`tags[]` は variant とタグの関連として保持し、既存素材のタグ辞書と共有できる。`renderType` と必須 slot の検証はアプリケーション層で行う。visual 全体は一部 variant が未登録でも有効にできるが、`single-image` は `single` 1 件、`mouth-pair` は `closed` と `open` 各 1 件が揃う場合だけ完成 variant とする。最初の完成 variant で `canvas_width` / `canvas_height` を設定し、以後の file 登録時に同じ visual の値と比較する。異なるサイズは保存せず、既存レコードとファイルを壊さない。
+`tags[]` は variant とタグの関連として保持し、既存素材のタグ辞書と共有できる。`renderType` と必須 slot の検証はアプリケーション層で行う。visual 全体は一部 variant が未登録でも有効にできるが、永続化する variant は必須 slot が揃った完成状態に限る。`single-image` の作成は `single` 1 件、`mouth-pair` の作成は `closed` と `open` 各 1 件を同一リクエストで検証・登録し、必須 slot 欠落の variant 行や file を残さない。登録後の差し替えは 1 slot 単位で許可するが、必須 slot の削除は許可しない。最初の完成 variant で `canvas_width` / `canvas_height` を設定し、以後の file 登録時に同じ visual の値と比較する。異なるサイズは保存せず、既存レコードとファイルを壊さない。
 
 `status` の具体的な enum・遷移と、slot key の将来拡張は CV-01 で確定する。ただし、未登録 variant の存在だけで `CharacterVisualSet` を error にしないこと、登録時点で `mentor` / `learner` や project ID を持たせないことは確定する。
 
 ### 10.2 既存素材の seed / migration
 
-CV-01 では、P2-01 の当時の TypeScript 静的カタログと `doc/assets` を migration の入力として扱う。次の処理を transaction 単位で idempotent に実行する。
+CV-01 では、P2-01 の当時の TypeScript 静的カタログと `doc/assets` を migration の入力として扱う。ファイルシステム操作と SQLite transaction を単一 transaction とはみなさず、seed visual 単位のアプリケーション操作として idempotent に実行する。
 
-1. 2 つの初期 `CharacterVisualSet` と配下の 6 variant を安定 ID で upsert する。
-2. 10 PNG を `library/character-visuals/{visualId}/{variantId}/` 以下へコピーする。
-3. ファイル slot、PNG 技術情報、checksum、作成・更新日時を upsert する。
-4. 既存 DB に同じ seed ID と checksum がある場合は再登録せず、差分がある場合だけ migration エラーとして報告する。
-5. migration 成功後の一覧、検証、配信は SQLite と管理領域だけを正本として使用する。
+1. 2 つの初期 `CharacterVisualSet` と配下の 6 variant、10 PNG を安定 ID と checksum で検査し、各 variant の必須 slot が揃うことを確認する。
+2. PNG を staging 領域へコピーし、形式、PNG 構造、キャンバス、checksum を検証する。
+3. 検証済みのファイルを `library/character-visuals/{visualId}/{variantId}/` へ atomic rename し、SQLite transaction で完全な variant と file metadata を upsert する。SQLite transaction 自体はファイルコピーや rename をロールバックしない。
+4. 既存 DB に同じ seed ID と checksum がある場合は再登録せず、差分がある場合は最終領域を変更する前に migration エラーとして報告する。
+5. DB 更新に失敗した場合は今回作成した未参照ファイルを compensating cleanup し、クラッシュで残った staging/final の未参照ファイルは orphan として診断・回収する。
+6. migration 成功後の一覧、検証、配信は SQLite と管理領域だけを正本として使用する。
 
 seed は「2 キャラクターしか登録できない」という制約を作らない。初期素材の 600 × 1000 px は seed visual の基準サイズであり、新規 visual の全体固定値ではない。
 
@@ -1341,18 +1342,19 @@ GET    /api/character-visuals
 POST   /api/character-visuals
 GET    /api/character-visuals/{visualId}
 PUT    /api/character-visuals/{visualId}
-POST   /api/character-visuals/{visualId}/variants/{variantId}/files
-DELETE /api/character-visuals/{visualId}/variants/{variantId}/files/{fileKey}
+POST   /api/character-visuals/{visualId}/variants
+PUT    /api/character-visuals/{visualId}/variants/{variantId}/files/{slotKey}
 ```
 
 CV-02 で実装する API の責務は次のとおりとする。
 
 - 一覧・詳細は SQLite から `CharacterVisualSet` を読み、variant と管理された画像 URL を返す。TypeScript の静的配列を実在項目の一覧として使用しない。
-- 作成・更新は `visualId`、`variantId`、file slot、`renderType`、相対パス、checksum の重複と安全性を検証する。
-- アップロード受信は一時領域で行い、形式・PNG 構造・必須 slot・visual 基準キャンバスを検証してから `library/character-visuals/{visualId}/{variantId}/` へ移動する。
-- ファイル保存と SQLite metadata 更新は、片方だけが成功した状態を残さない transaction / rollback 境界で扱う。既存の有効ファイルを新規アップロード失敗で壊さない。
+- `POST /api/character-visuals/{visualId}/variants` は variant metadata と完全な file set を受け取る。`single-image` は `single`、`mouth-pair` は `closed` と `open` を同一リクエストに含め、全ファイルを検証できた場合だけ variant row と file metadata を永続化する。
+- `PUT /api/character-visuals/{visualId}/variants/{variantId}/files/{slotKey}` は、既存の完成 variant の 1 slot だけを差し替える。対象 variant が存在しない場合、slot key が renderType に適合しない場合、または必須 slot を削除しようとする場合は拒否する。
+- 作成・差し替えは一時領域で受信し、形式・PNG 構造・必須 slot・visual 基準キャンバス・checksum を検証してから管理領域へ移す。作成リクエストの slot 欠落は DB 行や最終ファイルを残さず失敗させる。
+- ファイル保存と SQLite metadata 更新は、単一の SQLite/filesystem transaction とはみなさない。1つのアプリケーション操作として staged file、atomic rename、SQLite transaction、失敗時の compensating cleanup を組み合わせ、作成時の全ファイルまたは差し替え対象の新ファイルだけが未参照で残る場合は回収する。既存の有効ファイルを新規アップロード失敗で壊さない。クラッシュ残骸は orphan として診断する。
 - `public/` へ直接保存せず、画像は Fastify の管理された配信経路から返す。WebUI に OS 絶対パスを返さない。
-- 未登録の variant があることはエラーにせず、variant 内 slot 欠落、checksum 不一致、基準キャンバス不一致は対象 variant に関連付けた validation detail として返す。
+- 未登録の variant があることはエラーにしない。作成リクエストの必須 slot 欠落、checksum 不一致、基準キャンバス不一致は validation detail として返すが、variant を不完全な状態で永続化しない。
 - `mentor` / `learner`、project ID、`ScriptLine.expression` の mapping はこの API の入力に含めない。
 
 multipart の細部、status の enum/遷移、エラーコード、既存ファイル差し替えの版管理は CV-02 で固定する。
@@ -1488,7 +1490,7 @@ POST   /api/projects/{projectId}/thumbnail/render
 
 `/projects/{projectId}/script` は台本・ビジュアル・音声を一体に扱う制作画面である。キャラクター素材の確認部分では、`GET /api/projects/{projectId}` で取得した `VideoProject` と、バックエンドが解決した `CharacterVisualSet` snapshot を組み合わせて表示する。画像読込失敗時は管理された配信 URL と対象 ID を表示し、DB に登録されていない物理素材を表示しない。台本、素材 assignment、音声状態は同じ `project.json` の revision と自動保存で扱い、ワークスペース共通の visual metadata は `project.json` へ保存しない。
 
-`/character-visuals` はプロジェクトに依存しないワークスペース共通の登録・管理画面である。サイドバーから開き、一覧、作成、基本情報編集、variant 追加、file slot 登録・差し替え、status 更新を行う。全表情・全ポーズの一括登録は要求しない。未登録 variant は未登録として表示し、`single-image` の `single`、`mouth-pair` の `closed` / `open` は variant 内の validation として表示する。`mentor` / `learner` の役割付与、プロジェクトへの自動紐付け、`ScriptLine.expression` との mapping はこの画面の責務に含めない。
+`/character-visuals` はプロジェクトに依存しないワークスペース共通の登録・管理画面である。サイドバーから開き、一覧、作成、基本情報編集、完全な variant の作成、既存 file slot の差し替え、status 更新を行う。全表情・全ポーズの一括登録は要求しない。未登録 variant は未登録として表示し、variant 作成フォームでは `single-image` の `single`、`mouth-pair` の `closed` / `open` を揃えるまで登録操作を完了できない。必須 slot 欠落や形式不正はフォームの validation として表示するが、不完全な variant は DB や管理領域へ保存しない。既存の完成 variant は 1 slot 単位で差し替えでき、必須 slot の削除は行わない。`mentor` / `learner` の役割付与、プロジェクトへの自動紐付け、`ScriptLine.expression` との mapping はこの画面の責務に含めない。
 
 WebUI は SQLite、`library/character-visuals/`、ローカルファイルシステムを直接操作しない。Character Visual API が返す metadata と管理された画像 URL だけを使用する。
 
@@ -1575,6 +1577,8 @@ WebUI は SQLite、`library/character-visuals/`、ローカルファイルシス
 - `CharacterVisualSet` の `visualId`、`variantId`、file slot、library path の重複
 - `library/character-visuals/{visualId}/{variantId}/` namespace と安全な相対パス
 - `single-image` の `single`、`mouth-pair` の `closed` / `open` スロット
+- 必須 slot 欠落の variant 作成リクエストを拒否し、variant row や最終ファイルを残さないこと
+- 既存の完成 variant の 1 slot 差し替え失敗時に、旧ファイルと旧 metadata を維持すること
 - 管理領域のファイル存在、許可 MIME type、checksum、PNG 技術情報
 - PNG signature、chunk 構造、CRC、IHDR、IDAT/IEND、alpha / `tRNS`
 - visual ごとの最初の完成 variant から決まる基準キャンバスとの一致
@@ -1659,7 +1663,8 @@ SQLite にはキー入力単位ではなく、保存、構成案の承認、レ�
 
 - 全 Zod スキーマの正常・異常系
 - SQLite の `CharacterVisualSet` へ variant を追加すると、API の snapshot、検証結果、確認画面の view model へ反映されること
-- `single-image` と `mouth-pair` の正常系、`closed` / `open` スロット不足
+- `single-image` と `mouth-pair` の完全な作成、必須 slot 欠落リクエストの拒否
+- 既存の完成 variant の 1 slot 差し替え、差し替え失敗時の旧ファイル維持、必須 slot 削除の拒否
 - visual namespace 違反、非 PNG 配置先、未登録 library file、checksum 不一致
 - duplicate `visualId`、duplicate `variantId`、duplicate file slot、duplicate library path
 - visual 単位のキャンバス基準、異なるサイズの追加拒否、variant 不足を許可する set 状態
@@ -1679,7 +1684,7 @@ SQLite にはキー入力単位ではなく、保存、構成案の承認、レ�
 - Markdown と hash の一体保存
 - 素材コピーと project update の成功、ロールバック
 - SQLite migration と P2-01 の 2 visual / 6 variant / 10 PNG seed の idempotency
-- キャラクタービジュアルのファイル保存、checksum 検証、DB 更新の transaction / rollback
+- キャラクタービジュアルの staged file、atomic rename、checksum 検証、SQLite transaction、compensating cleanup、orphan 診断
 - OpenRouter 成功、schema 違反、429、認証失敗
 - VOICEVOX query と WAV のキャッシュ
 - 音声調整の保存、再読込、リセット、base hash 不一致時の適用拒否
@@ -1698,7 +1703,7 @@ SQLite にはキー入力単位ではなく、保存、構成案の承認、レ�
 1. プロジェクト作成
 2. Markdown と企画条件保存
 3. 構成案の取り込み、編集、承認・最新性確認
-4. `/character-visuals` で初期 seed の確認と、部分的な variant を持つ visual の登録・再読込
+4. ワークスペース準備として `/character-visuals` の初期 seed を確認し、一部 variant が未登録の visual と完全な mouth-pair variant を再読込する
 5. 2 キャラクター、複数セリフの台本作成と、台本画面からのビジュアル・音声制作
 6. 台本・ビジュアルの承認操作なしで制作を続け、stale/missing validation を確認する
 7. 固有名詞登録と読み上げ解決
