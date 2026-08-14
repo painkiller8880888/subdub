@@ -401,7 +401,12 @@ input:focus-visible {
   align-items: start;
   display: grid;
   gap: 1.2rem;
+  grid-template-areas: "main sidebar";
   grid-template-columns: minmax(0, 1.35fr) minmax(20rem, 0.85fr);
+}
+
+.script-production-main {
+  grid-area: main;
 }
 
 .script-production-main,
@@ -412,6 +417,7 @@ input:focus-visible {
 }
 
 .script-visual-sidebar {
+  grid-area: sidebar;
   max-height: calc(100vh - 2rem);
   overflow-y: auto;
   position: sticky;
@@ -1647,6 +1653,9 @@ input:focus-visible {
 
 @media (max-width: 900px) {
   .script-production-layout {
+    grid-template-areas:
+      "main"
+      "sidebar";
     grid-template-columns: 1fr;
   }
 

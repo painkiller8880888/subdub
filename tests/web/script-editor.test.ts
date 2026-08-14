@@ -5,6 +5,8 @@ import type { Script } from "../../src/schema/index.js";
 import {
   appendScriptLines,
   captureVisualSuggestionRequestAfterFlush,
+  createScriptLineLocator,
+  createScriptLineRangeLocator,
   createDefaultScriptLine,
   deleteScriptLine,
   duplicateScriptLine,
@@ -13,6 +15,8 @@ import {
   moveScriptLine,
   parseBulkScript,
   reconcileScriptLineIds,
+  resolveScriptLineId,
+  resolveScriptLineRange,
   scriptStatusAfterEdit,
   updateScriptLine,
   validateScriptDraft
@@ -217,6 +221,85 @@ describe("script editor helpers", () => {
     );
   });
 
+  it("resolves visual and voice requests to formal IDs after autosave", async () => {
+    const submitted = updateScriptLine(script, 0, 0, {
+      id: "draft-line-1"
+    });
+    const saved = updateScriptLine(submitted, 0, 0, {
+      id: "script-line-formal"
+    });
+    const lineLocator = createScriptLineLocator(
+      submitted,
+      "script-section-main",
+      "draft-line-1"
+    );
+    const rangeLocator = createScriptLineRangeLocator(
+      submitted,
+      "script-section-main",
+      "draft-line-1",
+      "draft-line-1"
+    );
+
+    expect(lineLocator).toBeDefined();
+    expect(rangeLocator).toBeDefined();
+    let latestDraft = submitted;
+    let revision = 4;
+    const visualSuggestionRequest =
+      await captureVisualSuggestionRequestAfterFlush(
+        async () => {
+          latestDraft = saved;
+          revision = 5;
+          return true;
+        },
+        () => {
+          const resolvedRange = resolveScriptLineRange(
+            latestDraft,
+            rangeLocator!
+          );
+          if (resolvedRange === undefined) {
+            return undefined;
+          }
+          return {
+            projectId: "project-a",
+            projectGeneration: 1,
+            sectionId: "script-section-main",
+            ...resolvedRange,
+            startLineIndex: rangeLocator!.start.lineIndex,
+            endLineIndex: rangeLocator!.end.lineIndex
+          };
+        },
+        () => revision
+      );
+    expect(visualSuggestionRequest).toMatchObject({
+      startLineId: "script-line-formal",
+      endLineId: "script-line-formal",
+      expectedRevision: 5
+    });
+    expect(resolveScriptLineId(saved, lineLocator!)).toBe("script-line-formal");
+    expect(resolveScriptLineRange(saved, rangeLocator!)).toEqual({
+      startLineId: "script-line-formal",
+      endLineId: "script-line-formal"
+    });
+
+    const resolvedLineId = resolveScriptLineId(saved, lineLocator!);
+    const resolvedRange = resolveScriptLineRange(saved, rangeLocator!);
+    expect({
+      visualSuggestion: resolvedRange,
+      visualAssignment: resolvedRange,
+      voice: { lineId: resolvedLineId }
+    }).toEqual({
+      visualSuggestion: {
+        startLineId: "script-line-formal",
+        endLineId: "script-line-formal"
+      },
+      visualAssignment: {
+        startLineId: "script-line-formal",
+        endLineId: "script-line-formal"
+      },
+      voice: { lineId: "script-line-formal" }
+    });
+  });
+
   it("ignores a delayed save response after switching projects", async () => {
     let resolveSave: (() => void) | undefined;
     const saveCompleted = new Promise<void>((resolve) => {
@@ -282,6 +365,8 @@ describe("script editor helpers", () => {
       sectionId: "section-a",
       startLineId: "line-one",
       endLineId: "line-two",
+      startLineIndex: 0,
+      endLineIndex: 1,
       expectedRevision: 4
     };
 
@@ -293,6 +378,23 @@ describe("script editor helpers", () => {
           sectionId: "section-a",
           startLineId: "line-one",
           endLineId: "line-two",
+          startLineIndex: 0,
+          endLineIndex: 1,
+          revision: 4
+        },
+        requested
+      )
+    ).toBe(true);
+    expect(
+      isVisualSuggestionContextCurrent(
+        {
+          projectId: "project-a",
+          projectGeneration: 1,
+          sectionId: "section-a",
+          startLineId: "script-line-formal",
+          endLineId: "script-line-formal",
+          startLineIndex: 0,
+          endLineIndex: 1,
           revision: 4
         },
         requested
@@ -303,7 +405,8 @@ describe("script editor helpers", () => {
         {
           ...requested,
           revision: 4,
-          startLineId: "line-two"
+          startLineId: "line-two",
+          startLineIndex: 1
         },
         requested
       )
@@ -337,13 +440,15 @@ describe("script editor helpers", () => {
         revision = 5;
         return true;
       },
-      {
+      () => ({
         projectId: "project-a",
         projectGeneration: 1,
         sectionId: "section-a",
         startLineId: "line-one",
-        endLineId: "line-two"
-      },
+        endLineId: "line-two",
+        startLineIndex: 0,
+        endLineIndex: 1
+      }),
       () => revision
     );
 
@@ -353,6 +458,8 @@ describe("script editor helpers", () => {
       sectionId: "section-a",
       startLineId: "line-one",
       endLineId: "line-two",
+      startLineIndex: 0,
+      endLineIndex: 1,
       expectedRevision: 5
     });
   });

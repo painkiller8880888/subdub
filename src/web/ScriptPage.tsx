@@ -60,6 +60,8 @@ import {
   appendScriptLines,
   captureVisualSuggestionRequestAfterFlush,
   cloneScript,
+  createScriptLineLocator,
+  createScriptLineRangeLocator,
   createDefaultScriptLine,
   deleteScriptLine,
   duplicateScriptLine,
@@ -69,6 +71,8 @@ import {
   moveScriptLine,
   parseBulkScript,
   reconcileScriptLineIds,
+  resolveScriptLineId,
+  resolveScriptLineRange,
   scriptStatusAfterEdit,
   updateScriptLine,
   validateScriptDraft,
@@ -627,12 +631,25 @@ export function ScriptPage() {
   const projectIdRef = useRef(projectId ?? "");
   const projectGenerationRef = useRef(0);
   const revisionRef = useRef(0);
+  const currentSuggestionSection = draft?.sections.find(
+    (section) => section.id === suggestionSectionId
+  );
+  const currentSuggestionStartLineIndex =
+    currentSuggestionSection?.lines.findIndex(
+      (line) => line.id === suggestionStartLineId
+    ) ?? -1;
+  const currentSuggestionEndLineIndex =
+    currentSuggestionSection?.lines.findIndex(
+      (line) => line.id === suggestionEndLineId
+    ) ?? -1;
   const visualSuggestionContextRef = useRef<VisualSuggestionCurrentContext>({
     projectId: projectId ?? "",
     projectGeneration: 0,
     sectionId: "",
     startLineId: "",
     endLineId: "",
+    startLineIndex: -1,
+    endLineIndex: -1,
     revision: 0
   });
   visualSuggestionContextRef.current = {
@@ -641,6 +658,8 @@ export function ScriptPage() {
     sectionId: suggestionSectionId,
     startLineId: suggestionStartLineId,
     endLineId: suggestionEndLineId,
+    startLineIndex: currentSuggestionStartLineIndex,
+    endLineIndex: currentSuggestionEndLineIndex,
     revision: revisionRef.current
   };
   const draftRef = useRef<Script | null>(null);
@@ -929,6 +948,8 @@ export function ScriptPage() {
       sectionId: "",
       startLineId: "",
       endLineId: "",
+      startLineIndex: -1,
+      endLineIndex: -1,
       revision: 0
     };
     setAssetSearchResult(null);
@@ -1417,6 +1438,23 @@ export function ScriptPage() {
       setVisualSaveState("idle");
       return;
     }
+    const currentDraft = draftRef.current;
+    if (currentDraft === null) {
+      setVisualError(new Error("台本を読み込んでから操作してください。"));
+      setVisualSaveState("idle");
+      return;
+    }
+    const requestRange = createScriptLineRangeLocator(
+      currentDraft,
+      suggestionSection.id,
+      suggestionStartLineId,
+      suggestionEndLineId
+    );
+    if (requestRange === undefined) {
+      setVisualError(new Error("対象セリフを保存後の台本から解決できません。"));
+      setVisualSaveState("idle");
+      return;
+    }
     const displayResult = defaultDisplayForAsset(asset);
     if (displayResult.display === undefined) {
       setVisualError(new Error(displayResult.reason));
@@ -1443,6 +1481,18 @@ export function ScriptPage() {
     const latestProject =
       queryClient.getQueryData<VideoProject>(["projects", requestProjectId]) ??
       project;
+    const latestDraft = draftRef.current;
+    const resolvedRange =
+      latestDraft === null
+        ? undefined
+        : resolveScriptLineRange(latestDraft, requestRange);
+    if (resolvedRange === undefined) {
+      setVisualError(new Error("対象セリフを保存後の台本から解決できません。"));
+      setVisualSaveState("idle");
+      return;
+    }
+    setSuggestionStartLineId(resolvedRange.startLineId);
+    setSuggestionEndLineId(resolvedRange.endLineId);
     if (latestProject === undefined) {
       setVisualError(new Error("プロジェクトを再読み込みしてください。"));
       setVisualSaveState("idle");
@@ -1466,8 +1516,8 @@ export function ScriptPage() {
             }),
         assignment: {
           id: nextVisualAssignmentId(latestProject.visuals.assignments),
-          startLineId: suggestionStartLineId,
-          endLineId: suggestionEndLineId,
+          startLineId: resolvedRange.startLineId,
+          endLineId: resolvedRange.endLineId,
           assetId: asset.assetId,
           display: displayResult.display
         }
@@ -1555,17 +1605,48 @@ export function ScriptPage() {
     }
     const requestProjectId = projectIdRef.current;
     const requestGeneration = projectGenerationRef.current;
-    const requestSectionId = suggestionSection.id;
-    const requestStartLineId = suggestionStartLineId;
-    const requestEndLineId = suggestionEndLineId;
+    const currentDraft = draftRef.current;
+    if (currentDraft === null) {
+      setSuggestionError(new Error("台本を読み込んでから操作してください。"));
+      return;
+    }
+    const requestRange = createScriptLineRangeLocator(
+      currentDraft,
+      suggestionSection.id,
+      suggestionStartLineId,
+      suggestionEndLineId
+    );
+    if (requestRange === undefined) {
+      setSuggestionError(
+        new Error("対象セリフを保存後の台本から解決できません。")
+      );
+      return;
+    }
     const requestContext = await captureVisualSuggestionRequestAfterFlush(
       () => coordinatorRef.current?.flush() ?? Promise.resolve(false),
-      {
-        projectId: requestProjectId,
-        projectGeneration: requestGeneration,
-        sectionId: requestSectionId,
-        startLineId: requestStartLineId,
-        endLineId: requestEndLineId
+      () => {
+        const latestDraft = draftRef.current;
+        const resolvedRange =
+          latestDraft === null
+            ? undefined
+            : resolveScriptLineRange(latestDraft, requestRange);
+        if (resolvedRange === undefined) {
+          setSuggestionError(
+            new Error("対象セリフを保存後の台本から解決できません。")
+          );
+          return undefined;
+        }
+        setSuggestionStartLineId(resolvedRange.startLineId);
+        setSuggestionEndLineId(resolvedRange.endLineId);
+        return {
+          projectId: requestProjectId,
+          projectGeneration: requestGeneration,
+          sectionId: requestRange.sectionId,
+          startLineId: resolvedRange.startLineId,
+          endLineId: resolvedRange.endLineId,
+          startLineIndex: requestRange.start.lineIndex,
+          endLineIndex: requestRange.end.lineIndex
+        };
       },
       () => revisionRef.current
     );
@@ -1601,18 +1682,56 @@ export function ScriptPage() {
     assetSearchMutation.mutate({ query: assetSearchQuery, tagIds });
   }
 
-  async function generateVoiceLine(lineId: string): Promise<void> {
+  async function generateVoiceLine(
+    sectionId: string,
+    lineId: string
+  ): Promise<void> {
     if (generateVoiceMutation.isPending || generateAllVoiceMutation.isPending) {
       return;
     }
+    const currentDraft = draftRef.current;
+    if (currentDraft === null) {
+      setVoiceError(new Error("台本を読み込んでから操作してください。"));
+      return;
+    }
+    const lineLocator = createScriptLineLocator(
+      currentDraft,
+      sectionId,
+      lineId
+    );
+    if (lineLocator === undefined) {
+      setVoiceError(new Error("対象セリフを台本から解決できません。"));
+      return;
+    }
+    const requestProjectId = projectIdRef.current;
+    const requestGeneration = projectGenerationRef.current;
     const flushed = await coordinatorRef.current?.flush();
     if (flushed !== true) {
       return;
     }
+    if (
+      !isProjectContextCurrent(
+        projectIdRef.current,
+        projectGenerationRef.current,
+        requestProjectId,
+        requestGeneration
+      )
+    ) {
+      return;
+    }
+    const latestDraft = draftRef.current;
+    const resolvedLineId =
+      latestDraft === null
+        ? undefined
+        : resolveScriptLineId(latestDraft, lineLocator);
+    if (resolvedLineId === undefined) {
+      setVoiceError(new Error("対象セリフを保存後の台本から解決できません。"));
+      return;
+    }
     setVoiceError(null);
     generateVoiceMutation.mutate({
-      projectId: projectIdRef.current,
-      lineId
+      projectId: requestProjectId,
+      lineId: resolvedLineId
     });
   }
 
@@ -2342,7 +2461,9 @@ export function ScriptPage() {
                             deleteScriptLine(draft, sectionIndex, lineIndex)
                           )
                         }
-                        onGenerateVoice={() => void generateVoiceLine(line.id)}
+                        onGenerateVoice={() =>
+                          void generateVoiceLine(section.id, line.id)
+                        }
                         onSelectVisualRange={() =>
                           selectVisualRange(section.id, line.id)
                         }
