@@ -18,6 +18,7 @@ type AssetView = AssetDetail | AssetListItem;
 export type VisualAssignmentPanelProps = {
   readonly project: VideoProject;
   readonly assets: ReadonlyMap<string, AssetView | undefined>;
+  readonly focusLineId?: string;
   readonly onSave: (assignment: VisualAssignment) => Promise<boolean>;
   readonly onRemove: (assignmentId: string) => Promise<void>;
   readonly isMutating: boolean;
@@ -82,16 +83,16 @@ function confidentialityLabel(value: string): string {
   }
 }
 
-function approvalStatusLabel(
+function productionStatusLabel(
   status: VideoProject["visuals"]["status"]
 ): string {
   switch (status) {
     case "approved":
-      return "承認済み";
+      return "互換 status（approved）";
     case "needs_review":
       return "要確認";
     default:
-      return "下書き";
+      return "編集中";
   }
 }
 
@@ -120,6 +121,31 @@ function assignmentSection(
       (line) =>
         line.id === assignment.startLineId || line.id === assignment.endLineId
     )
+  );
+}
+
+function assignmentContainsLine(
+  project: VideoProject,
+  assignment: VisualAssignment,
+  lineId: string
+): boolean {
+  const section = assignmentSection(project, assignment);
+  if (section === undefined) {
+    return false;
+  }
+  const lineIndex = section.lines.findIndex((line) => line.id === lineId);
+  const startIndex = section.lines.findIndex(
+    (line) => line.id === assignment.startLineId
+  );
+  const endIndex = section.lines.findIndex(
+    (line) => line.id === assignment.endLineId
+  );
+  return (
+    lineIndex >= 0 &&
+    startIndex >= 0 &&
+    endIndex >= startIndex &&
+    lineIndex >= startIndex &&
+    lineIndex <= endIndex
   );
 }
 
@@ -265,7 +291,8 @@ function VisualAssignmentEditor({
   asset,
   onSave,
   onRemove,
-  isMutating
+  isMutating,
+  isFocused
 }: {
   readonly assignment: VisualAssignment;
   readonly project: VideoProject;
@@ -273,6 +300,7 @@ function VisualAssignmentEditor({
   readonly onSave: (assignment: VisualAssignment) => Promise<boolean>;
   readonly onRemove: (assignmentId: string) => Promise<void>;
   readonly isMutating: boolean;
+  readonly isFocused: boolean;
 }) {
   const [draft, setDraft] = useState<VisualAssignment>(() =>
     structuredClone(assignment)
@@ -351,7 +379,11 @@ function VisualAssignmentEditor({
   const thumbnailPath = asset?.thumbnailPaths[0];
 
   return (
-    <article className="visual-assignment-card">
+    <article
+      className={`visual-assignment-card${
+        isFocused ? " visual-assignment-card-focused" : ""
+      }`}
+    >
       <header className="visual-assignment-header">
         <div>
           <p className="eyebrow">割り当て済みビジュアル</p>
@@ -727,10 +759,18 @@ function VisualAssignmentEditor({
 export function VisualAssignmentPanel({
   project,
   assets,
+  focusLineId,
   onSave,
   onRemove,
   isMutating
 }: VisualAssignmentPanelProps) {
+  const assignments =
+    focusLineId === undefined
+      ? project.visuals.assignments
+      : project.visuals.assignments.filter((assignment) =>
+          assignmentContainsLine(project, assignment, focusLineId)
+        );
+
   return (
     <section
       id="visual-plan"
@@ -739,20 +779,29 @@ export function VisualAssignmentPanel({
     >
       <header className="visual-subsection-header">
         <div>
-          <p className="eyebrow">手順3-6 表示設定</p>
-          <h2 id="visual-plan-title">割り当て済み素材の表示設定</h2>
+          <p className="eyebrow">制作素材・表示設定</p>
+          <h2 id="visual-plan-title">
+            {focusLineId === undefined
+              ? "割り当て済み素材の表示設定"
+              : "選択中セリフの表示設定"}
+          </h2>
         </div>
         <span
           className={`visual-status visual-status-${project.visuals.status}`}
+          aria-label="ビジュアル制作状態"
         >
-          {approvalStatusLabel(project.visuals.status)}
+          {productionStatusLabel(project.visuals.status)}
         </span>
       </header>
-      {project.visuals.assignments.length === 0 ? (
-        <p className="status-message">割り当て済みビジュアルはありません。</p>
+      {assignments.length === 0 ? (
+        <p className="status-message">
+          {focusLineId === undefined
+            ? "割り当て済みビジュアルはありません。"
+            : "選択中のセリフには割り当て済みビジュアルがありません。右上の検索から素材を割り当てられます。"}
+        </p>
       ) : (
         <div className="visual-assignment-list">
-          {project.visuals.assignments.map((assignment) => (
+          {assignments.map((assignment) => (
             <VisualAssignmentEditor
               key={assignment.id}
               assignment={assignment}
@@ -761,6 +810,7 @@ export function VisualAssignmentPanel({
               onSave={onSave}
               onRemove={onRemove}
               isMutating={isMutating}
+              isFocused={focusLineId !== undefined}
             />
           ))}
         </div>

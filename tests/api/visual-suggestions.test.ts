@@ -69,7 +69,7 @@ async function setupProject(workspaceRoot: string): Promise<VideoProject> {
   };
   candidate.script = {
     ...candidate.script,
-    status: "approved",
+    status: "draft",
     outlineHash: computeOutlineHash(candidate.outline)
   };
   candidate.aiSettings = {

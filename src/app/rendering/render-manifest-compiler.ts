@@ -1109,22 +1109,6 @@ export function compileRenderManifest(
       "outline must be approved before manifest compilation"
     );
   }
-  if (project.script.status !== "approved") {
-    addDiagnostic(
-      diagnostics,
-      RENDER_MANIFEST_ERROR_CODE.scriptNotApproved,
-      ["script", "status"],
-      "script must be approved before manifest compilation"
-    );
-  }
-  if (project.visuals.status !== "approved") {
-    addDiagnostic(
-      diagnostics,
-      RENDER_MANIFEST_ERROR_CODE.visualsNotApproved,
-      ["visuals", "status"],
-      "visual plan must be approved before manifest compilation"
-    );
-  }
   if (project.outline.sourceHash !== project.source.sha256) {
     addDiagnostic(
       diagnostics,

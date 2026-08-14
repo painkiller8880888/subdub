@@ -4,6 +4,9 @@ import { createEmptyVideoProject } from "../../src/app/projects/empty-video-proj
 import type { Script } from "../../src/schema/index.js";
 import {
   appendScriptLines,
+  captureVisualSuggestionRequestAfterFlush,
+  createScriptLineLocator,
+  createScriptLineRangeLocator,
   createDefaultScriptLine,
   deleteScriptLine,
   duplicateScriptLine,
@@ -12,6 +15,10 @@ import {
   moveScriptLine,
   parseBulkScript,
   reconcileScriptLineIds,
+  reconcileScriptLineIdsWithMap,
+  reconcileVisualLineSelection,
+  resolveScriptLineId,
+  resolveScriptLineRange,
   scriptStatusAfterEdit,
   updateScriptLine,
   validateScriptDraft
@@ -191,6 +198,42 @@ describe("script editor helpers", () => {
     });
   });
 
+  it("keeps visual selection on a newly saved line after ID reconciliation", () => {
+    const submitted = appendScriptLines(script, 0, [
+      createDefaultScriptLine("character-mentor", "draft-line-3", "荳ｭ逶ｮ")
+    ]);
+    const saved = appendScriptLines(script, 0, [
+      createDefaultScriptLine(
+        "character-mentor",
+        "script-line-formal-3",
+        "荳ｭ逶ｮ"
+      )
+    ]);
+    const reconciliation = reconcileScriptLineIdsWithMap(
+      submitted,
+      saved,
+      submitted
+    );
+    const selection = reconcileVisualLineSelection(
+      {
+        suggestionSectionId: "script-section-main",
+        suggestionStartLineId: "draft-line-3",
+        suggestionEndLineId: "draft-line-3",
+        selectedVisualLineId: "draft-line-3"
+      },
+      reconciliation.lineIdMap
+    );
+
+    expect(reconciliation.script.sections[0]?.lines.at(-1)?.id).toBe(
+      "script-line-formal-3"
+    );
+    expect(selection).toMatchObject({
+      suggestionStartLineId: "script-line-formal-3",
+      suggestionEndLineId: "script-line-formal-3",
+      selectedVisualLineId: "script-line-formal-3"
+    });
+  });
+
   it("keeps the formal ID stable across a second save", () => {
     const submitted = updateScriptLine(script, 0, 0, {
       id: "draft-line-1"
@@ -214,6 +257,85 @@ describe("script editor helpers", () => {
     expect(secondSaved.sections[0]?.lines[0]?.id).toBe(
       firstSaved.sections[0]?.lines[0]?.id
     );
+  });
+
+  it("resolves visual and voice requests to formal IDs after autosave", async () => {
+    const submitted = updateScriptLine(script, 0, 0, {
+      id: "draft-line-1"
+    });
+    const saved = updateScriptLine(submitted, 0, 0, {
+      id: "script-line-formal"
+    });
+    const lineLocator = createScriptLineLocator(
+      submitted,
+      "script-section-main",
+      "draft-line-1"
+    );
+    const rangeLocator = createScriptLineRangeLocator(
+      submitted,
+      "script-section-main",
+      "draft-line-1",
+      "draft-line-1"
+    );
+
+    expect(lineLocator).toBeDefined();
+    expect(rangeLocator).toBeDefined();
+    let latestDraft = submitted;
+    let revision = 4;
+    const visualSuggestionRequest =
+      await captureVisualSuggestionRequestAfterFlush(
+        async () => {
+          latestDraft = saved;
+          revision = 5;
+          return true;
+        },
+        () => {
+          const resolvedRange = resolveScriptLineRange(
+            latestDraft,
+            rangeLocator!
+          );
+          if (resolvedRange === undefined) {
+            return undefined;
+          }
+          return {
+            projectId: "project-a",
+            projectGeneration: 1,
+            sectionId: "script-section-main",
+            ...resolvedRange,
+            startLineIndex: rangeLocator!.start.lineIndex,
+            endLineIndex: rangeLocator!.end.lineIndex
+          };
+        },
+        () => revision
+      );
+    expect(visualSuggestionRequest).toMatchObject({
+      startLineId: "script-line-formal",
+      endLineId: "script-line-formal",
+      expectedRevision: 5
+    });
+    expect(resolveScriptLineId(saved, lineLocator!)).toBe("script-line-formal");
+    expect(resolveScriptLineRange(saved, rangeLocator!)).toEqual({
+      startLineId: "script-line-formal",
+      endLineId: "script-line-formal"
+    });
+
+    const resolvedLineId = resolveScriptLineId(saved, lineLocator!);
+    const resolvedRange = resolveScriptLineRange(saved, rangeLocator!);
+    expect({
+      visualSuggestion: resolvedRange,
+      visualAssignment: resolvedRange,
+      voice: { lineId: resolvedLineId }
+    }).toEqual({
+      visualSuggestion: {
+        startLineId: "script-line-formal",
+        endLineId: "script-line-formal"
+      },
+      visualAssignment: {
+        startLineId: "script-line-formal",
+        endLineId: "script-line-formal"
+      },
+      voice: { lineId: "script-line-formal" }
+    });
   });
 
   it("ignores a delayed save response after switching projects", async () => {
@@ -281,6 +403,8 @@ describe("script editor helpers", () => {
       sectionId: "section-a",
       startLineId: "line-one",
       endLineId: "line-two",
+      startLineIndex: 0,
+      endLineIndex: 1,
       expectedRevision: 4
     };
 
@@ -292,6 +416,23 @@ describe("script editor helpers", () => {
           sectionId: "section-a",
           startLineId: "line-one",
           endLineId: "line-two",
+          startLineIndex: 0,
+          endLineIndex: 1,
+          revision: 4
+        },
+        requested
+      )
+    ).toBe(true);
+    expect(
+      isVisualSuggestionContextCurrent(
+        {
+          projectId: "project-a",
+          projectGeneration: 1,
+          sectionId: "section-a",
+          startLineId: "script-line-formal",
+          endLineId: "script-line-formal",
+          startLineIndex: 0,
+          endLineIndex: 1,
           revision: 4
         },
         requested
@@ -302,7 +443,8 @@ describe("script editor helpers", () => {
         {
           ...requested,
           revision: 4,
-          startLineId: "line-two"
+          startLineId: "line-two",
+          startLineIndex: 1
         },
         requested
       )
@@ -327,6 +469,37 @@ describe("script editor helpers", () => {
         requested
       )
     ).toBe(false);
+  });
+
+  it("captures the visual suggestion revision after autosave completes", async () => {
+    let revision = 4;
+    const request = await captureVisualSuggestionRequestAfterFlush(
+      async () => {
+        revision = 5;
+        return true;
+      },
+      () => ({
+        projectId: "project-a",
+        projectGeneration: 1,
+        sectionId: "section-a",
+        startLineId: "line-one",
+        endLineId: "line-two",
+        startLineIndex: 0,
+        endLineIndex: 1
+      }),
+      () => revision
+    );
+
+    expect(request).toMatchObject({
+      projectId: "project-a",
+      projectGeneration: 1,
+      sectionId: "section-a",
+      startLineId: "line-one",
+      endLineId: "line-two",
+      startLineIndex: 0,
+      endLineIndex: 1,
+      expectedRevision: 5
+    });
   });
 
   it("ignores a delayed initialization success after switching projects", async () => {

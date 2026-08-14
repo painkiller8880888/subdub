@@ -10,19 +10,9 @@ export const WORKFLOW_STEPS = [
     description: "章立てと要点"
   },
   {
-    id: "script",
-    label: "台本",
-    description: "セリフと話者"
-  },
-  {
-    id: "visual",
-    label: "ビジュアル",
-    description: "素材の検索と割り当て"
-  },
-  {
-    id: "voice",
-    label: "音声",
-    description: "VOICEVOX音声"
+    id: "production",
+    label: "制作",
+    description: "台本・ビジュアル・VOICEVOX音声"
   },
   {
     id: "output",
@@ -33,11 +23,6 @@ export const WORKFLOW_STEPS = [
 
 export type WorkflowStepId = (typeof WORKFLOW_STEPS)[number]["id"];
 export type WorkflowStepStatus = "past" | "current" | "future";
-
-const SCRIPT_SECTION_HASHES: Partial<Record<WorkflowStepId, string>> = {
-  visual: "#workflow-visual",
-  voice: "#workflow-voice"
-};
 
 export function workflowStepPath(
   projectId: string,
@@ -53,7 +38,7 @@ export function workflowStepPath(
           ? `${projectPath}/preview`
           : `${projectPath}/script`;
 
-  return `${path}${SCRIPT_SECTION_HASHES[step] ?? ""}`;
+  return path;
 }
 
 export function workflowStepStatus(

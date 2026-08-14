@@ -3,8 +3,17 @@
 
 文書版: 1.0  
 作成日: 2026-08-02  
-基礎資料: `implementation-spec-revised.md`  
+基礎資料: [`implementation-spec.md`](./implementation-spec.md)<br>
 対象: アプリ開発の初心者が、Web版ChatGPTと相談しながらCodexへ実装を依頼し、段階的にMVPを完成させるための計画
+
+## 0. Issue #87 による計画の更新
+
+この計画の旧 P2/P3/P5 文言より、Issue #87 と [`implementation-spec.md`](./implementation-spec.md) の更新内容を優先する。台本・ビジュアル・音声は、`/projects/{projectId}/script` を中心とした一体型の制作範囲として扱う。
+
+- `outline` の承認済みかつ最新であることは、台本の初期化と現在の制作コンテキストの前提として残す。この文書の対象範囲では、構成案の承認が唯一の明示的な工程境界である。
+- 台本承認とビジュアル承認は制作フローから削除する。script/visual の `approved`、`draft`、`needs_review` は互換性、レビュー結果、stale、再生成要否の表示に残せるが、候補表示、素材割り当て、音声操作、プレビュー、`RenderManifest`、レンダリングの前提には使わない。
+- 台本・ビジュアル・音声の保存、自動保存、revision 競合拒否は維持する。変更によって依存生成物を stale と表示し、出力時は status ではなく、台本、音声、素材参照、assignment 範囲、checksum、Manifest の validation をゲートにする。
+- この計画に旧来の「台本承認」「ビジュアル承認」「未承認なら次工程へ進めない」という表現が残っている場合は、構成案の承認を除き、Issue #87 の validation モデルへ読み替える。将来の Codex 依頼でこれらの承認 UI/API 前提を再導入しない。
 
 ## tl;dr
 
@@ -18,7 +27,7 @@ Web版ChatGPTは、次に実装する範囲を仕様書から切り出し、Code
 |---|---|---|
 | Phase 0 | 壊れにくい土台を作る | 空のプロジェクトを安全に保存でき、DBとテストが動く |
 | Phase 1 | 企画と構成案を作れるようにする | 資料と企画条件を保存し、構成案を生成または手入力して編集・承認できる |
-| Phase 2 | 人が台本を作り、社内用語を管理できるようにする | 2人会話の台本と読み方を登録・承認できる |
+| Phase 2 | 人が台本を作り、社内用語を管理できるようにする | 2人会話の台本と読み方を登録し、依存状態を確認できる |
 | Phase 3 | 動画・画像・帳票を登録して台本へ割り当てる | 素材を検索し、セリフ範囲へ表示設定を割り当てられる |
 | Phase 4 | VOICEVOXで音声を作る | 各セリフの読み上げ音声を生成し、再生成状態を管理できる |
 | Phase 5 | 動画としてプレビュー・出力する | 同じマニフェストからプレビュー、MP4、サムネイルを作れる |
@@ -68,7 +77,7 @@ Codexは、指定された作業範囲だけを実装する。仕様にない機
 
 ### 3.3 各PRにテストを含める
 
-コードだけが動いているように見えても、後の変更で壊れる可能性がある。保存、ID、承認、ハッシュ、時間計算など、画面から見えにくい処理ほど自動テストを必須とする。
+コードだけが動いているように見えても、後の変更で壊れる可能性がある。保存、ID、構成案の承認、status、ハッシュ、時間計算など、画面から見えにくい処理ほど自動テストを必須とする。
 
 ### 3.4 Phaseを飛ばさない
 
@@ -84,7 +93,7 @@ OpenRouterとVOICEVOXのテストにはfixtureまたはローカルstubを使う
 
 ```text
 あなたはこのリポジトリの実装担当です。
-implementation-spec-revised.md と development-plan-chatgpt-codex.md を正本として扱ってください。
+implementation-spec.md と development-plan-chatgpt-codex.md を正本として扱ってください。Issue #87 の制作工程はこの計画の旧工程記述に優先します。
 
 今回の目的:
 [利用者から見て何ができるようになるかを一文で記載]
@@ -126,7 +135,7 @@ implementation-spec-revised.md と development-plan-chatgpt-codex.md を正本�
 ## 5. ChatGPTへレビューを依頼する共通テンプレート
 
 ```text
-以下のCodex実装を implementation-spec-revised.md と
+以下のCodex実装を implementation-spec.md と
 development-plan-chatgpt-codex.md に照らしてレビューしてください。
 
 今回の作業ID:
@@ -391,11 +400,13 @@ SQLiteへ用語テーブルを追加し、一覧、検索、登録、編集、�
 
 完了条件は、同じ入力とDB状態から常に同じ`resolvedSpokenText`が表示されることである。
 
-#### P2-05 台本承認と後工程のstale化
+#### P2-05 台本中心の制作状態と依存アーティファクトのstale検知
 
-台本承認条件を実装し、構成案と`outlineHash`が一致しない場合は承認を拒否する。承認後のセリフ追加・削除・順序変更では、ビジュアル、音声、マニフェストを見直し対象へ戻す。
+台本承認を追加しない。構成案が承認済みかつ最新であること、台本の構造、話者、発話、`outlineHash`を検証する。台本が`draft`または`needs_review`でも、保存済みで対象セリフが有効なら、同じ制作画面からビジュアル候補、素材割り当て、音声生成・調整を利用できる。セリフ追加・削除・順序変更や発話変更では、依存するビジュアル範囲、音声、`RenderManifest`を stale または `needs_review` として表示する。
 
-完了条件は、古い構成案に基づく台本を承認できず、台本変更後に後工程の状態が適切にstaleになることである。
+検証では、不正な台本だけが該当する保存・候補・音声操作で拒否されること、台本未承認でもビジュアル候補と音声操作が可能なこと、revision 競合と自動保存が維持されること、変更後に音声・素材・Manifest の stale/missing が検出されることを確認する。
+
+完了条件は、台本を明示承認せずにビジュアルと音声を同じ制作画面で設定でき、出力時 validation が不足データだけを機械的に拒否することである。
 
 ### 8.3 Phase 2のCodex指示例
 
@@ -474,13 +485,13 @@ active素材をプロジェクトの一時パスへコピーし、コピー後�
 
 完了条件は、成功時にJSONとファイルがそろい、失敗時に片方だけが残らないことである。
 
-#### P3-06 表示設定・静的注釈・ビジュアル承認
+#### P3-06 表示設定・静的注釈・範囲検証
 
 セリフ開始・終了範囲、contain/cover、crop、scale、position、動画の開始・終了、帳票ページ、静的なラベル・枠・矢印を編集する。
 
 検証では、セリフ範囲、動画尺、帳票ページ、0から1の正規化座標、チェックサム、機密区分を確認する。
 
-完了条件は、同じセクション内の正しいセリフ範囲だけへ素材を割り当て、検証を通ったビジュアル計画だけを承認できることである。
+完了条件は、同じセクション内の正しいセリフ範囲へ素材を割り当て、`crop`、`scale`、`position`、prioritizeVisual、注釈を保存できることである。ビジュアル計画は `draft` や `needs_review` のままでも制作を継続でき、出力時 validation が参照切れ、範囲不正、checksum 不一致を検出する。
 
 ### 9.3 Phase 3のCodex指示例
 
@@ -612,7 +623,7 @@ VOICEVOX ENGINEを起動した状態と停止した状態の両方を試す。�
 
 ### 11.1 目的
 
-Phase 5では、承認済み台本、音声、ビジュアル、背景、BGM、効果音、挿入プレースホルダーを`RenderManifest`へまとめ、同じマニフェストからWebプレビュー、MP4、サムネイルを作る。
+Phase 5では、validation 可能な `VideoProject` の台本、音声、ビジュアル、背景、BGM、効果音、挿入プレースホルダーを`RenderManifest`へまとめ、同じマニフェストからWebプレビュー、MP4、サムネイルを作る。台本・ビジュアルの `approved` status はコンパイル条件にしない。
 
 このPhaseでは、見た目より先に時間計算の正しさを作る。画面上で自然に見えても、フレーム計算が不安定だと、プレビューとMP4で位置や音がずれるためである。
 
@@ -626,7 +637,7 @@ Phase 5では、承認済み台本、音声、ビジュアル、背景、BGM、�
 
 #### P5-02 RenderManifestコンパイラ
 
-検証済み `VideoProject`、audio index、素材メタデータ、`characterVariantCatalog` を読み、`RenderManifest` を生成する。現行 `RenderManifest 1.0.0` の `RenderLine.expression` は論理表情であり、P5-02 / P5-04 着手前に、論理表情から物理 variant へ解決する決定論的な規則または人間の選択方法を確定する。安定した `variantId` とカタログ版を参照し、解決済みの character ID、renderType、ファイルパス、checksum、`mouth-pair` の `closed` / `open` を manifest へ固定する。具体的な保存フィールドと manifestVersion 互換性は設計ゲートで決定する。
+検証済み `VideoProject`、audio index、素材メタデータ、`characterVariantCatalog` を読み、`RenderManifest` を生成する。構成案の承認・最新性、台本の構造、音声の current/missing/stale、ビジュアル assignment の範囲・参照・checksum、Manifest の整合性を validation する。台本・ビジュアルが `draft` または `needs_review` でも、内容と参照が有効ならコンパイルできる。現行 `RenderManifest 1.0.0` の `RenderLine.expression` は論理表情であり、P5-02 / P5-04 着手前に、論理表情から物理 variant へ解決する決定論的な規則または人間の選択方法を確定する。安定した `variantId` とカタログ版を参照し、解決済みの character ID、renderType、ファイルパス、checksum、`mouth-pair` の `closed` / `open` を manifest へ固定する。具体的な保存フィールドと manifestVersion 互換性は設計ゲートで決定する。
 
 mapping 不能、variant 欠落、mouth slot 欠落、ファイルまたは checksum の不一致時は自動代替せず、複数のエラーを line ID や assignment ID へ関連付けて返す。Remotion や WebUI の描画処理からカタログまたは SQLite を直接検索しない。
 
@@ -656,7 +667,7 @@ P5-02 の設計ゲートで決定した mapping または人間の選択に従�
 
 #### P5-06 WebUIプレビュー
 
-`@remotion/player`を埋め込み、現在の最新マニフェストを表示する。前工程が未承認またはstaleの場合は、実行操作を無効にし、理由と修正先を表示する。
+`@remotion/player`を埋め込み、現在の validation 済みマニフェストを表示する。構成案が未承認・stale、台本が不正、音声や素材が missing/stale、assignment/checksum が不整合の場合は、該当する実行操作を無効にし、理由と修正先を表示する。台本・ビジュアルの承認操作は要求しない。
 
 完了条件は、プレビューがMP4と同じマニフェストを使い、独自の時間計算を画面側に持たないことである。
 
@@ -689,7 +700,7 @@ fixture projectを使い、プロジェクト作成から短いMP4とサムネ�
 
 処理順:
 1. project schemaを検証する。
-2. 承認状態と参照整合性を検証する。
+2. 出力条件と参照整合性を検証する。構成案の承認・最新性は確認するが、台本・ビジュアルの status `approved` は要求しない。
 3. 全セリフに有効な音声indexがあるか確認する。
 4. 無音時間と音声長をフレームへ変換する。
 5. セリフ範囲を累積計算する。
@@ -804,7 +815,7 @@ AI構成案を一度採用し、一部を修正し、一度却下する。ログ
 Phase [番号] の完了判定をしてください。
 
 基礎資料:
-- implementation-spec-revised.md
+- implementation-spec.md
 - development-plan-chatgpt-codex.md
 
 完了したPR:
@@ -854,8 +865,8 @@ Phase 0からPhase 6まで完了した後、最終的なMVP確認用fixtureを�
 1. 新規プロジェクトを作る。
 2. Markdownと企画条件を保存する。
 3. AI構成案を生成するか、手入力で構成案を作成し、人間が修正して承認する。
-4. 人間が2人会話の台本を作り、用語を登録して承認する。
-5. 素材を登録し、台本範囲へ割り当てて承認する。
+4. 人間が2人会話の台本を作り、用語を登録し、同じ制作画面でビジュアルと音声を整える。
+5. 素材を登録し、台本範囲へ割り当て、出力前 validation で検証する。
 6. VOICEVOXで音声を生成する。
 7. `RenderManifest`を作り、検証する。
 8. Webプレビューを確認する。
@@ -869,6 +880,6 @@ Phase 0からPhase 6まで完了した後、最終的なMVP確認用fixtureを�
 
 最初の依頼はP0-01だけにする。P0-01でリポジトリの起動方法、テスト方法、ディレクトリ境界が固定されてから、P0-02のZodスキーマへ進む。
 
-最初の依頼時には、`implementation-spec-revised.md`とこの計画書をリポジトリの`doc/`など、Codexが常に参照できる場所へ置く。Codexには、実装前に対象節を読み、実装後に参照した節番号を報告するよう求める。
+最初の依頼時には、[`implementation-spec.md`](./implementation-spec.md) とこの計画書を Codex が常に参照できる場所へ置く。Codex には、実装前に対象節を読み、Issue #87 の制作モデルと出力 validation に反する旧承認ゲートを再導入しないこと、実装後に参照した節番号を報告するよう求める。
 
 P0-01を完了するまでは、プロジェクト画面、OpenRouter、VOICEVOX、Remotionの本格実装を始めない。

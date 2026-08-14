@@ -237,7 +237,7 @@ export function CharacterAssetsPage() {
           企画画面へ戻る
         </Link>
       </p>
-      <WorkflowIndicator projectId={projectId} currentStep="script" />
+      <WorkflowIndicator projectId={projectId} currentStep="production" />
       <header className="page-header page-header-stacked">
         <p className="eyebrow">手順2-1</p>
         <h1>キャラクター素材の確認</h1>

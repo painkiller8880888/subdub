@@ -11,9 +11,7 @@ describe("workflow indicator", () => {
     expect(WORKFLOW_STEPS.map((step) => step.id)).toEqual([
       "brief",
       "outline",
-      "script",
-      "visual",
-      "voice",
+      "production",
       "output"
     ]);
   });
@@ -25,14 +23,8 @@ describe("workflow indicator", () => {
     expect(workflowStepPath("project/1", "outline")).toBe(
       "/projects/project%2F1/outline"
     );
-    expect(workflowStepPath("project/1", "script")).toBe(
+    expect(workflowStepPath("project/1", "production")).toBe(
       "/projects/project%2F1/script"
-    );
-    expect(workflowStepPath("project/1", "visual")).toBe(
-      "/projects/project%2F1/script#workflow-visual"
-    );
-    expect(workflowStepPath("project/1", "voice")).toBe(
-      "/projects/project%2F1/script#workflow-voice"
     );
     expect(workflowStepPath("project/1", "output")).toBe(
       "/projects/project%2F1/preview"
@@ -40,8 +32,8 @@ describe("workflow indicator", () => {
   });
 
   it("marks earlier, current, and later steps distinctly", () => {
-    expect(workflowStepStatus("visual", "outline")).toBe("past");
-    expect(workflowStepStatus("visual", "visual")).toBe("current");
-    expect(workflowStepStatus("visual", "output")).toBe("future");
+    expect(workflowStepStatus("production", "outline")).toBe("past");
+    expect(workflowStepStatus("production", "production")).toBe("current");
+    expect(workflowStepStatus("production", "output")).toBe("future");
   });
 });

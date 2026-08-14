@@ -116,11 +116,112 @@ export function cloneScript(script: Script): Script {
   };
 }
 
-export function reconcileScriptLineIds(
+export type ScriptLineLocator = {
+  readonly sectionId: string;
+  readonly lineIndex: number;
+  readonly lineId: string;
+};
+
+export type ScriptLineRangeLocator = {
+  readonly sectionId: string;
+  readonly start: ScriptLineLocator;
+  readonly end: ScriptLineLocator;
+};
+
+export type ResolvedScriptLineRange = {
+  readonly startLineId: string;
+  readonly endLineId: string;
+};
+
+export type ScriptLineIdReconciliation = {
+  readonly script: Script;
+  readonly lineIdMap: ReadonlyMap<string, string>;
+};
+
+export type VisualLineSelection = {
+  readonly suggestionSectionId: string;
+  readonly suggestionStartLineId: string;
+  readonly suggestionEndLineId: string;
+  readonly selectedVisualLineId: string;
+};
+
+export function reconcileVisualLineSelection(
+  selection: VisualLineSelection,
+  lineIdMap: ReadonlyMap<string, string>
+): VisualLineSelection {
+  const reconcile = (lineId: string): string => lineIdMap.get(lineId) ?? lineId;
+  return {
+    ...selection,
+    suggestionStartLineId: reconcile(selection.suggestionStartLineId),
+    suggestionEndLineId: reconcile(selection.suggestionEndLineId),
+    selectedVisualLineId: reconcile(selection.selectedVisualLineId)
+  };
+}
+
+export function createScriptLineLocator(
+  script: Script,
+  sectionId: string,
+  lineId: string
+): ScriptLineLocator | undefined {
+  const section = script.sections.find(
+    (candidate) => candidate.id === sectionId
+  );
+  const lineIndex =
+    section?.lines.findIndex((line) => line.id === lineId) ?? -1;
+  if (section === undefined || lineIndex < 0) {
+    return undefined;
+  }
+  return { sectionId, lineIndex, lineId };
+}
+
+export function createScriptLineRangeLocator(
+  script: Script,
+  sectionId: string,
+  startLineId: string,
+  endLineId: string
+): ScriptLineRangeLocator | undefined {
+  const start = createScriptLineLocator(script, sectionId, startLineId);
+  const end = createScriptLineLocator(script, sectionId, endLineId);
+  if (start === undefined || end === undefined) {
+    return undefined;
+  }
+  return { sectionId, start, end };
+}
+
+export function resolveScriptLineId(
+  script: Script,
+  locator: ScriptLineLocator
+): string | undefined {
+  const section = script.sections.find(
+    (candidate) => candidate.id === locator.sectionId
+  );
+  if (section === undefined) {
+    return undefined;
+  }
+
+  const lineWithOriginalId = section.lines.find(
+    (line) => line.id === locator.lineId
+  );
+  return lineWithOriginalId?.id ?? section.lines[locator.lineIndex]?.id;
+}
+
+export function resolveScriptLineRange(
+  script: Script,
+  locator: ScriptLineRangeLocator
+): ResolvedScriptLineRange | undefined {
+  const startLineId = resolveScriptLineId(script, locator.start);
+  const endLineId = resolveScriptLineId(script, locator.end);
+  if (startLineId === undefined || endLineId === undefined) {
+    return undefined;
+  }
+  return { startLineId, endLineId };
+}
+
+export function reconcileScriptLineIdsWithMap(
   submitted: Script,
   saved: Script,
   latest: Script
-): Script {
+): ScriptLineIdReconciliation {
   const submittedToSaved = new Map<string, string>();
 
   for (const [sectionIndex, submittedSection] of submitted.sections.entries()) {
@@ -149,7 +250,15 @@ export function reconcileScriptLineIds(
       }
     }
   }
-  return reconciled;
+  return { script: reconciled, lineIdMap: submittedToSaved };
+}
+
+export function reconcileScriptLineIds(
+  submitted: Script,
+  saved: Script,
+  latest: Script
+): Script {
+  return reconcileScriptLineIdsWithMap(submitted, saved, latest).script;
 }
 
 export function isProjectContextCurrent(
@@ -170,6 +279,8 @@ export type VisualSuggestionRequestContext = {
   readonly sectionId: string;
   readonly startLineId: string;
   readonly endLineId: string;
+  readonly startLineIndex: number;
+  readonly endLineIndex: number;
   readonly expectedRevision: number;
 };
 
@@ -179,8 +290,30 @@ export type VisualSuggestionCurrentContext = {
   readonly sectionId: string;
   readonly startLineId: string;
   readonly endLineId: string;
+  readonly startLineIndex: number;
+  readonly endLineIndex: number;
   readonly revision: number;
 };
+
+export async function captureVisualSuggestionRequestAfterFlush(
+  flush: () => Promise<boolean | undefined>,
+  getRequest: () =>
+    Omit<VisualSuggestionRequestContext, "expectedRevision"> | undefined,
+  getCurrentRevision: () => number
+): Promise<VisualSuggestionRequestContext | undefined> {
+  const flushed = await flush();
+  if (flushed !== true) {
+    return undefined;
+  }
+  const request = getRequest();
+  if (request === undefined) {
+    return undefined;
+  }
+  return {
+    ...request,
+    expectedRevision: getCurrentRevision()
+  };
+}
 
 export function isVisualSuggestionContextCurrent(
   current: VisualSuggestionCurrentContext,
@@ -194,8 +327,8 @@ export function isVisualSuggestionContextCurrent(
       requested.projectGeneration
     ) &&
     current.sectionId === requested.sectionId &&
-    current.startLineId === requested.startLineId &&
-    current.endLineId === requested.endLineId &&
+    current.startLineIndex === requested.startLineIndex &&
+    current.endLineIndex === requested.endLineIndex &&
     current.revision === requested.expectedRevision
   );
 }

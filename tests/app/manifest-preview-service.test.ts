@@ -200,19 +200,9 @@ describe("ManifestPreviewService", () => {
       "OUTLINE_SOURCE_HASH_MISMATCH"
     ],
     [
-      "script approval",
-      (project: VideoProject) => (project.script.status = "draft"),
-      "SCRIPT_NOT_APPROVED"
-    ],
-    [
       "script freshness",
       (project: VideoProject) => (project.script.outlineHash = "f".repeat(64)),
       "SCRIPT_OUTLINE_HASH_MISMATCH"
-    ],
-    [
-      "visual approval",
-      (project: VideoProject) => (project.visuals.status = "draft"),
-      "VISUALS_NOT_APPROVED"
     ]
   ])("distinguishes %s blockers", async (_name, change, expectedCode) => {
     const root = await createRoot();
@@ -225,6 +215,21 @@ describe("ManifestPreviewService", () => {
     expect(result.blockers.map((blocker) => blocker.code)).toContain(
       expectedCode
     );
+  });
+
+  it("does not gate preview on script or visual approval status", async () => {
+    const root = await createRoot();
+    const project = createProject();
+    project.script.status = "draft";
+    project.visuals.status = "needs_review";
+    const manifest = createManifest(project);
+    const service = await createService(root, project, { manifest });
+
+    await expect(service.get(projectId)).resolves.toMatchObject({
+      state: "current",
+      canPlay: true,
+      blockers: []
+    });
   });
 
   it("treats invalid JSON safely without exposing a file path", async () => {

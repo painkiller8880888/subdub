@@ -44,11 +44,12 @@ const blockerMessages: Readonly<Record<string, string>> = {
   OUTLINE_NOT_APPROVED: "構成案を承認してからプレビューを生成してください。",
   OUTLINE_SOURCE_HASH_MISMATCH:
     "元資料が更新されているため、構成案を確認して再承認してください。",
-  SCRIPT_NOT_APPROVED: "台本を承認してからプレビューを生成してください。",
+  SCRIPT_NOT_APPROVED:
+    "台本の内容を検証できません。入力と構成案との整合性を確認してください。",
   SCRIPT_OUTLINE_HASH_MISMATCH:
     "構成案が更新されているため、台本を確認して再承認してください。",
   VISUALS_NOT_APPROVED:
-    "ビジュアル割り当てを承認してからプレビューを生成してください。",
+    "素材の割り当てを検証できません。範囲・素材状態・表示設定を確認してください。",
   AUDIO_INDEX_ENTRY_MISSING: "必要な音声が未生成です。音声を生成してください。",
   AUDIO_ENTRY_STALE:
     "音声が現在の台本と一致しません。音声を再生成してください。",
@@ -311,14 +312,8 @@ export class ManifestPreviewService {
     if (project.outline.sourceHash !== project.source.sha256) {
       addBlocker(blockers, "OUTLINE_SOURCE_HASH_MISMATCH", toTarget("outline"));
     }
-    if (project.script.status !== "approved") {
-      addBlocker(blockers, "SCRIPT_NOT_APPROVED", toTarget("script"));
-    }
     if (computeOutlineHash(project.outline) !== project.script.outlineHash) {
       addBlocker(blockers, "SCRIPT_OUTLINE_HASH_MISMATCH", toTarget("script"));
-    }
-    if (project.visuals.status !== "approved") {
-      addBlocker(blockers, "VISUALS_NOT_APPROVED", toTarget("visuals"));
     }
   }
 

@@ -20,7 +20,6 @@ import type {
   VisualAssignmentRequest,
   VisualAssignmentUpdateRequest,
   VisualAssignmentDeleteRequest,
-  VisualApprovalRequest,
   VisualSuggestionResponse,
   VoiceLineGenerationStatus
 } from "../schema/api.js";
@@ -38,8 +37,6 @@ import {
 import {
   ApiClientError,
   ApiClientProtocolError,
-  approveProjectVisuals,
-  approveProjectScript,
   assignProjectVisual,
   rejectProjectVisualSuggestionCandidate,
   deleteProjectVisualAssignment,
@@ -61,7 +58,10 @@ import {
 } from "./brief-autosave";
 import {
   appendScriptLines,
+  captureVisualSuggestionRequestAfterFlush,
   cloneScript,
+  createScriptLineLocator,
+  createScriptLineRangeLocator,
   createDefaultScriptLine,
   deleteScriptLine,
   duplicateScriptLine,
@@ -70,12 +70,16 @@ import {
   isVisualSuggestionContextCurrent,
   moveScriptLine,
   parseBulkScript,
-  reconcileScriptLineIds,
+  reconcileScriptLineIdsWithMap,
+  reconcileVisualLineSelection,
+  resolveScriptLineId,
+  resolveScriptLineRange,
   scriptStatusAfterEdit,
   updateScriptLine,
   validateScriptDraft,
   type BulkPasteError,
   type ScriptDraftIssue,
+  type VisualLineSelection,
   type VisualSuggestionCurrentContext,
   type VisualSuggestionRequestContext
 } from "./script-editor";
@@ -115,11 +119,11 @@ function getErrorMessage(error: unknown, fallback: string): string {
 function scriptStatusLabel(status: Script["status"]): string {
   switch (status) {
     case "approved":
-      return "承認済み";
+      return "互換 status（approved）";
     case "needs_review":
       return "要確認";
     default:
-      return "下書き";
+      return "編集中";
   }
 }
 
@@ -230,27 +234,50 @@ function lineIssueText(
     .map((issue) => issue.message);
 }
 
-function unassignedLineCount(project: VideoProject): number {
-  let count = 0;
-  for (const section of project.script.sections) {
-    const covered = new Set<number>();
-    for (const assignment of project.visuals.assignments) {
-      const startIndex = section.lines.findIndex(
-        (line) => line.id === assignment.startLineId
-      );
-      const endIndex = section.lines.findIndex(
-        (line) => line.id === assignment.endLineId
-      );
-      if (startIndex < 0 || endIndex < 0 || startIndex > endIndex) {
-        continue;
-      }
-      for (let lineIndex = startIndex; lineIndex <= endIndex; lineIndex += 1) {
-        covered.add(lineIndex);
-      }
-    }
-    count += section.lines.length - covered.size;
+function visualAssignmentsForLine(
+  project: VideoProject,
+  lineId: string
+): VisualAssignment[] {
+  const section = project.script.sections.find((candidate) =>
+    candidate.lines.some((line) => line.id === lineId)
+  );
+  if (section === undefined) {
+    return [];
   }
-  return count;
+  const lineIndex = section.lines.findIndex((line) => line.id === lineId);
+  return project.visuals.assignments.filter((assignment) => {
+    const startIndex = section.lines.findIndex(
+      (line) => line.id === assignment.startLineId
+    );
+    const endIndex = section.lines.findIndex(
+      (line) => line.id === assignment.endLineId
+    );
+    return (
+      startIndex >= 0 &&
+      endIndex >= startIndex &&
+      lineIndex >= startIndex &&
+      lineIndex <= endIndex
+    );
+  });
+}
+
+function visualAssignmentRangeLabel(
+  project: VideoProject,
+  assignment: VisualAssignment
+): string {
+  const section = project.script.sections.find((candidate) =>
+    candidate.lines.some(
+      (line) =>
+        line.id === assignment.startLineId || line.id === assignment.endLineId
+    )
+  );
+  return section === undefined
+    ? `${assignment.startLineId} ～ ${assignment.endLineId}`
+    : `${section.name}: ${assignment.startLineId} ～ ${assignment.endLineId}`;
+}
+
+function assetThumbnailUrl(assetId: string, index: number): string {
+  return `/api/assets/${encodeURIComponent(assetId)}/thumbnails/${index}`;
 }
 
 function nextTemporaryLineId(script: Script): string {
@@ -271,6 +298,8 @@ function ScriptLineCard({
   sectionIndex,
   lineIndex,
   project,
+  assignmentAssets,
+  isVisualSelected,
   issues,
   voiceStatus,
   voiceGenerationDisabled,
@@ -280,12 +309,15 @@ function ScriptLineCard({
   onMove,
   onDuplicate,
   onDelete,
-  onGenerateVoice
+  onGenerateVoice,
+  onSelectVisualRange
 }: {
   readonly line: ScriptLine;
   readonly sectionIndex: number;
   readonly lineIndex: number;
   readonly project: VideoProject;
+  readonly assignmentAssets: ReadonlyMap<string, AssetDetail | undefined>;
+  readonly isVisualSelected: boolean;
   readonly issues: readonly ScriptDraftIssue[];
   readonly voiceStatus: VoiceLineGenerationStatus | undefined;
   readonly voiceGenerationDisabled: boolean;
@@ -296,13 +328,21 @@ function ScriptLineCard({
   readonly onDuplicate: () => void;
   readonly onDelete: () => void;
   readonly onGenerateVoice: () => void;
+  readonly onSelectVisualRange: () => void;
 }) {
   const lineIssues = lineIssueText(issues, sectionIndex, lineIndex);
+  const lineVisualAssignments = visualAssignmentsForLine(project, line.id);
   const numberValue = (value: number): string =>
     Number.isFinite(value) ? String(value) : "";
 
   return (
-    <article className="script-line-card" aria-label={`セリフ ${line.id}`}>
+    <article
+      className={`script-line-card${
+        isVisualSelected ? " script-line-card-visual-selected" : ""
+      }`}
+      aria-label={`セリフ ${line.id}`}
+      aria-current={isVisualSelected ? "true" : undefined}
+    >
       <header className="script-line-card-header">
         <div>
           <p className="eyebrow">セリフ識別子</p>
@@ -428,6 +468,60 @@ function ScriptLineCard({
           />
         </div>
       </div>
+      <section
+        className="script-line-visual-summary"
+        aria-label={`${line.id}のビジュアル設定`}
+      >
+        <div className="script-line-visual-summary-content">
+          <span className="eyebrow">ビジュアル</span>
+          {lineVisualAssignments.length === 0 ? (
+            <span className="status-message">未割り当て</span>
+          ) : (
+            <div className="script-line-visual-assignments">
+              {lineVisualAssignments.map((assignment) => {
+                const asset = assignmentAssets.get(assignment.assetId);
+                const thumbnailPath = asset?.thumbnailPaths[0];
+                return (
+                  <div
+                    className="script-line-visual-assignment"
+                    key={assignment.id}
+                  >
+                    {thumbnailPath !== undefined ? (
+                      <img
+                        className="script-line-visual-thumbnail"
+                        src={assetThumbnailUrl(assignment.assetId, 0)}
+                        alt={`${asset?.title ?? assignment.assetId}のサムネイル`}
+                      />
+                    ) : (
+                      <div
+                        className="script-line-visual-thumbnail script-line-visual-thumbnail-empty"
+                        aria-hidden="true"
+                      >
+                        素材
+                      </div>
+                    )}
+                    <span className="script-line-visual-assignment-details">
+                      <strong>{asset?.title ?? assignment.assetId}</strong>
+                      <span>
+                        適用範囲：
+                        {visualAssignmentRangeLabel(project, assignment)}
+                      </span>
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+        <button
+          className="button button-small"
+          type="button"
+          aria-pressed={isVisualSelected}
+          onClick={onSelectVisualRange}
+        >
+          {isVisualSelected ? "このセリフを選択中" : "このセリフの素材を編集"}
+        </button>
+      </section>
       <div className="script-line-voice-status" aria-label="音声状態">
         <span className="eyebrow">音声状態</span>
         {voiceStatus === undefined ? (
@@ -446,6 +540,7 @@ function ScriptLineCard({
           type="button"
           disabled={
             voiceGenerationDisabled ||
+            lineIssues.length > 0 ||
             voiceStatus?.status === "current" ||
             voiceStatus?.status === "generating" ||
             voiceStatus?.status === "needs_review"
@@ -514,10 +609,22 @@ export function ScriptPage() {
   const [bulkErrors, setBulkErrors] = useState<BulkPasteError[]>([]);
   const [pendingNavigation, setPendingNavigation] = useState(false);
   const [initializationError, setInitializationError] = useState<unknown>(null);
-  const [approvalError, setApprovalError] = useState<unknown>(null);
   const [suggestionSectionId, setSuggestionSectionId] = useState("");
   const [suggestionStartLineId, setSuggestionStartLineId] = useState("");
   const [suggestionEndLineId, setSuggestionEndLineId] = useState("");
+  const [selectedVisualLineId, setSelectedVisualLineId] = useState("");
+  const visualLineSelectionRef = useRef<VisualLineSelection>({
+    suggestionSectionId: "",
+    suggestionStartLineId: "",
+    suggestionEndLineId: "",
+    selectedVisualLineId: ""
+  });
+  visualLineSelectionRef.current = {
+    suggestionSectionId,
+    suggestionStartLineId,
+    suggestionEndLineId,
+    selectedVisualLineId
+  };
   const [suggestionResponse, setSuggestionResponse] =
     useState<VisualSuggestionResponse | null>(null);
   const [visualSuggestionStale, setVisualSuggestionStale] = useState(false);
@@ -538,12 +645,25 @@ export function ScriptPage() {
   const projectIdRef = useRef(projectId ?? "");
   const projectGenerationRef = useRef(0);
   const revisionRef = useRef(0);
+  const currentSuggestionSection = draft?.sections.find(
+    (section) => section.id === suggestionSectionId
+  );
+  const currentSuggestionStartLineIndex =
+    currentSuggestionSection?.lines.findIndex(
+      (line) => line.id === suggestionStartLineId
+    ) ?? -1;
+  const currentSuggestionEndLineIndex =
+    currentSuggestionSection?.lines.findIndex(
+      (line) => line.id === suggestionEndLineId
+    ) ?? -1;
   const visualSuggestionContextRef = useRef<VisualSuggestionCurrentContext>({
     projectId: projectId ?? "",
     projectGeneration: 0,
     sectionId: "",
     startLineId: "",
     endLineId: "",
+    startLineIndex: -1,
+    endLineIndex: -1,
     revision: 0
   });
   visualSuggestionContextRef.current = {
@@ -552,6 +672,8 @@ export function ScriptPage() {
     sectionId: suggestionSectionId,
     startLineId: suggestionStartLineId,
     endLineId: suggestionEndLineId,
+    startLineIndex: currentSuggestionStartLineIndex,
+    endLineIndex: currentSuggestionEndLineIndex,
     revision: revisionRef.current
   };
   const draftRef = useRef<Script | null>(null);
@@ -604,17 +726,6 @@ export function ScriptPage() {
       });
     },
     onError: setVoiceError,
-    retry: false
-  });
-
-  const approveMutation = useMutation({
-    mutationFn: ({
-      projectId,
-      expectedRevision
-    }: {
-      projectId: string;
-      expectedRevision: number;
-    }) => approveProjectScript(projectId, { expectedRevision }),
     retry: false
   });
 
@@ -738,15 +849,6 @@ export function ScriptPage() {
     retry: false
   });
 
-  const visualApproveMutation = useMutation({
-    mutationFn: ({
-      projectId,
-      expectedRevision
-    }: VisualApprovalRequest & { projectId: string }) =>
-      approveProjectVisuals(projectId, { expectedRevision }),
-    retry: false
-  });
-
   function updateMutationCaches(project: VideoProject): void {
     queryClient.setQueryData(["projects", project.metadata.id], project);
     void queryClient.invalidateQueries({
@@ -800,13 +902,31 @@ export function ScriptPage() {
     }
     revisionRef.current = project.revision;
     const latestDraft = draftRef.current ?? nextDraft;
+    const reconciliation = reconcileScriptLineIdsWithMap(
+      nextDraft,
+      project.script,
+      latestDraft
+    );
     const reconciledDraft = {
-      ...reconcileScriptLineIds(nextDraft, project.script, latestDraft),
+      ...reconciliation.script,
       status: project.script.status
+    };
+    const reconciledSelection = reconcileVisualLineSelection(
+      visualLineSelectionRef.current,
+      reconciliation.lineIdMap
+    );
+    visualLineSelectionRef.current = reconciledSelection;
+    visualSuggestionContextRef.current = {
+      ...visualSuggestionContextRef.current,
+      startLineId: reconciledSelection.suggestionStartLineId,
+      endLineId: reconciledSelection.suggestionEndLineId
     };
     lastSavedRef.current = cloneScript(project.script);
     draftRef.current = reconciledDraft;
     coordinatorRef.current?.replaceDraft(reconciledDraft);
+    setSuggestionStartLineId(reconciledSelection.suggestionStartLineId);
+    setSuggestionEndLineId(reconciledSelection.suggestionEndLineId);
+    setSelectedVisualLineId(reconciledSelection.selectedVisualLineId);
     setDraft(reconciledDraft);
   }
 
@@ -848,6 +968,7 @@ export function ScriptPage() {
     setSuggestionSectionId("");
     setSuggestionStartLineId("");
     setSuggestionEndLineId("");
+    setSelectedVisualLineId("");
     setSuggestionResponse(null);
     setVisualSuggestionStale(false);
     setSuggestionError(null);
@@ -859,6 +980,8 @@ export function ScriptPage() {
       sectionId: "",
       startLineId: "",
       endLineId: "",
+      startLineIndex: -1,
+      endLineIndex: -1,
       revision: 0
     };
     setAssetSearchResult(null);
@@ -913,7 +1036,18 @@ export function ScriptPage() {
     ) {
       setSuggestionEndLineId(lastLineId);
     }
-  }, [draft, suggestionEndLineId, suggestionSectionId, suggestionStartLineId]);
+    if (
+      !selectedSection.lines.some((line) => line.id === selectedVisualLineId)
+    ) {
+      setSelectedVisualLineId(firstLineId);
+    }
+  }, [
+    draft,
+    selectedVisualLineId,
+    suggestionEndLineId,
+    suggestionSectionId,
+    suggestionStartLineId
+  ]);
 
   const initializeMutation = useMutation({
     mutationFn: ({
@@ -1012,46 +1146,13 @@ export function ScriptPage() {
     }
   }
 
-  async function approve(): Promise<void> {
-    if (coordinatorRef.current === null) {
-      return;
-    }
-    setApprovalError(null);
-    const flushed = await coordinatorRef.current.flush();
-    if (!flushed) {
-      return;
-    }
-    const approvingProjectId = projectIdRef.current;
-    const approvingGeneration = projectGenerationRef.current;
-    try {
-      const saved = await approveMutation.mutateAsync({
-        projectId: approvingProjectId,
-        expectedRevision: revisionRef.current
-      });
-      updateMutationCaches(saved);
-      if (
-        !isProjectContextCurrent(
-          projectIdRef.current,
-          projectGenerationRef.current,
-          approvingProjectId,
-          approvingGeneration
-        )
-      ) {
-        return;
-      }
-      adoptProject(saved);
-    } catch (error) {
-      if (
-        isProjectContextCurrent(
-          projectIdRef.current,
-          projectGenerationRef.current,
-          approvingProjectId,
-          approvingGeneration
-        )
-      ) {
-        setApprovalError(error);
-      }
-    }
+  function selectVisualRange(sectionId: string, lineId: string): void {
+    setSelectedVisualLineId(lineId);
+    setSuggestionSectionId(sectionId);
+    setSuggestionStartLineId(lineId);
+    setSuggestionEndLineId(lineId);
+    setSuggestionResponse(null);
+    setSuggestionError(null);
   }
 
   function updateDraft(nextDraft: Script): void {
@@ -1128,8 +1229,6 @@ export function ScriptPage() {
       assignmentAssetQueries[index]?.data
     );
   });
-  const unassignedLines =
-    project === undefined ? 0 : unassignedLineCount(project);
   const isReadyToInitialize =
     project !== undefined && isScriptInitializationAllowed(project);
   const issues =
@@ -1200,11 +1299,13 @@ export function ScriptPage() {
         <p className="back-link">
           <Link to={outlinePath(projectId)}>構成案へ戻る</Link>
         </p>
-        <WorkflowIndicator projectId={projectId} currentStep="script" />
+        <WorkflowIndicator projectId={projectId} currentStep="production" />
         <header className="page-header page-header-stacked">
-          <p className="eyebrow">手順2-2 台本</p>
+          <p className="eyebrow">制作 台本・ビジュアル・音声</p>
           <h1>{project.metadata.title}</h1>
-          <p>承認済み構成案のセクション構造を引き継いで台本を開始します。</p>
+          <p>
+            構成案のセクション構造を引き継いで、台本中心の制作を開始します。
+          </p>
           <div className="page-header-actions">
             <Link className="button" to={outlinePath(projectId)}>
               構成案を確認
@@ -1262,16 +1363,24 @@ export function ScriptPage() {
     draft.sections.find((section) => section.id === suggestionSectionId) ??
     draft.sections.find((section) => section.lines.length > 0) ??
     draft.sections[0];
-  const canSuggest =
-    project.script.status === "approved" && draft.status === "approved";
-  const canApproveVisuals =
-    project.script.status === "approved" && draft.status === "approved";
+  const selectedVisualSection =
+    draft.sections.find((section) =>
+      section.lines.some((line) => line.id === selectedVisualLineId)
+    ) ?? suggestionSection;
+  const selectedVisualLine =
+    selectedVisualSection?.lines.find(
+      (line) => line.id === selectedVisualLineId
+    ) ??
+    suggestionSection?.lines.find(
+      (line) => line.id === suggestionStartLineId
+    ) ??
+    suggestionSection?.lines[0];
+  const canSuggest = issues.length === 0;
   const visualMutationPending =
     visualAssignMutation.isPending ||
     visualRejectMutation.isPending ||
     visualUpdateMutation.isPending ||
-    visualDeleteMutation.isPending ||
-    visualApproveMutation.isPending;
+    visualDeleteMutation.isPending;
 
   function isVisualMutationCurrent(context: VisualMutationContext): boolean {
     return (
@@ -1361,6 +1470,23 @@ export function ScriptPage() {
       setVisualSaveState("idle");
       return;
     }
+    const currentDraft = draftRef.current;
+    if (currentDraft === null) {
+      setVisualError(new Error("台本を読み込んでから操作してください。"));
+      setVisualSaveState("idle");
+      return;
+    }
+    const requestRange = createScriptLineRangeLocator(
+      currentDraft,
+      suggestionSection.id,
+      suggestionStartLineId,
+      suggestionEndLineId
+    );
+    if (requestRange === undefined) {
+      setVisualError(new Error("対象セリフを保存後の台本から解決できません。"));
+      setVisualSaveState("idle");
+      return;
+    }
     const displayResult = defaultDisplayForAsset(asset);
     if (displayResult.display === undefined) {
       setVisualError(new Error(displayResult.reason));
@@ -1387,6 +1513,18 @@ export function ScriptPage() {
     const latestProject =
       queryClient.getQueryData<VideoProject>(["projects", requestProjectId]) ??
       project;
+    const latestDraft = draftRef.current;
+    const resolvedRange =
+      latestDraft === null
+        ? undefined
+        : resolveScriptLineRange(latestDraft, requestRange);
+    if (resolvedRange === undefined) {
+      setVisualError(new Error("対象セリフを保存後の台本から解決できません。"));
+      setVisualSaveState("idle");
+      return;
+    }
+    setSuggestionStartLineId(resolvedRange.startLineId);
+    setSuggestionEndLineId(resolvedRange.endLineId);
     if (latestProject === undefined) {
       setVisualError(new Error("プロジェクトを再読み込みしてください。"));
       setVisualSaveState("idle");
@@ -1410,8 +1548,8 @@ export function ScriptPage() {
             }),
         assignment: {
           id: nextVisualAssignmentId(latestProject.visuals.assignments),
-          startLineId: suggestionStartLineId,
-          endLineId: suggestionEndLineId,
+          startLineId: resolvedRange.startLineId,
+          endLineId: resolvedRange.endLineId,
           assetId: asset.assetId,
           display: displayResult.display
         }
@@ -1452,13 +1590,16 @@ export function ScriptPage() {
     }
     const requestProjectId = projectIdRef.current;
     const requestGeneration = projectGenerationRef.current;
+    const flushed = await coordinatorRef.current?.flush();
+    if (flushed !== true) {
+      return;
+    }
     const context: VisualMutationContext = {
       projectId: requestProjectId,
       projectGeneration: requestGeneration,
       expectedRevision: revisionRef.current
     };
-    const flushed = await coordinatorRef.current?.flush();
-    if (flushed !== true || !isVisualMutationCurrent(context)) {
+    if (!isVisualMutationCurrent(context)) {
       return;
     }
     setVisualError(null);
@@ -1484,41 +1625,6 @@ export function ScriptPage() {
     }
   }
 
-  async function approveVisuals(): Promise<void> {
-    const requestProjectId = projectIdRef.current;
-    const requestGeneration = projectGenerationRef.current;
-    setVisualError(null);
-    setVisualSaveState("idle");
-    const flushed = await coordinatorRef.current?.flush();
-    if (flushed !== true) {
-      return;
-    }
-    if (
-      !isProjectContextCurrent(
-        projectIdRef.current,
-        projectGenerationRef.current,
-        requestProjectId,
-        requestGeneration
-      )
-    ) {
-      return;
-    }
-    const context: VisualMutationContext = {
-      projectId: requestProjectId,
-      projectGeneration: requestGeneration,
-      expectedRevision: revisionRef.current
-    };
-    try {
-      const saved = await visualApproveMutation.mutateAsync(context);
-      acceptVisualMutationResult(saved, context);
-    } catch (error) {
-      if (isVisualMutationCurrent(context)) {
-        setVisualError(error);
-        setVisualSaveState("idle");
-      }
-    }
-  }
-
   async function runVisualSuggestion(): Promise<void> {
     if (
       suggestionSection === undefined ||
@@ -1529,24 +1635,63 @@ export function ScriptPage() {
     ) {
       return;
     }
-    const requestContext: VisualSuggestionRequestContext = {
-      projectId: projectIdRef.current,
-      projectGeneration: projectGenerationRef.current,
-      sectionId: suggestionSection.id,
-      startLineId: suggestionStartLineId,
-      endLineId: suggestionEndLineId,
-      expectedRevision: revisionRef.current
-    };
-    const flushed = await coordinatorRef.current?.flush();
-    if (flushed !== true) {
+    const requestProjectId = projectIdRef.current;
+    const requestGeneration = projectGenerationRef.current;
+    const currentDraft = draftRef.current;
+    if (currentDraft === null) {
+      setSuggestionError(new Error("台本を読み込んでから操作してください。"));
       return;
     }
-    if (
-      !isVisualSuggestionContextCurrent(
-        visualSuggestionContextRef.current,
-        requestContext
-      )
-    ) {
+    const requestRange = createScriptLineRangeLocator(
+      currentDraft,
+      suggestionSection.id,
+      suggestionStartLineId,
+      suggestionEndLineId
+    );
+    if (requestRange === undefined) {
+      setSuggestionError(
+        new Error("対象セリフを保存後の台本から解決できません。")
+      );
+      return;
+    }
+    const requestContext = await captureVisualSuggestionRequestAfterFlush(
+      () => coordinatorRef.current?.flush() ?? Promise.resolve(false),
+      () => {
+        const latestDraft = draftRef.current;
+        const resolvedRange =
+          latestDraft === null
+            ? undefined
+            : resolveScriptLineRange(latestDraft, requestRange);
+        if (resolvedRange === undefined) {
+          setSuggestionError(
+            new Error("対象セリフを保存後の台本から解決できません。")
+          );
+          return undefined;
+        }
+        setSuggestionStartLineId(resolvedRange.startLineId);
+        setSuggestionEndLineId(resolvedRange.endLineId);
+        return {
+          projectId: requestProjectId,
+          projectGeneration: requestGeneration,
+          sectionId: requestRange.sectionId,
+          startLineId: resolvedRange.startLineId,
+          endLineId: resolvedRange.endLineId,
+          startLineIndex: requestRange.start.lineIndex,
+          endLineIndex: requestRange.end.lineIndex
+        };
+      },
+      () => revisionRef.current
+    );
+    if (requestContext === undefined) {
+      return;
+    }
+    const currentContext: VisualSuggestionCurrentContext = {
+      ...visualSuggestionContextRef.current,
+      projectId: projectIdRef.current,
+      projectGeneration: projectGenerationRef.current,
+      revision: revisionRef.current
+    };
+    if (!isVisualSuggestionContextCurrent(currentContext, requestContext)) {
       return;
     }
     setSuggestionResponse(null);
@@ -1569,18 +1714,56 @@ export function ScriptPage() {
     assetSearchMutation.mutate({ query: assetSearchQuery, tagIds });
   }
 
-  async function generateVoiceLine(lineId: string): Promise<void> {
+  async function generateVoiceLine(
+    sectionId: string,
+    lineId: string
+  ): Promise<void> {
     if (generateVoiceMutation.isPending || generateAllVoiceMutation.isPending) {
       return;
     }
+    const currentDraft = draftRef.current;
+    if (currentDraft === null) {
+      setVoiceError(new Error("台本を読み込んでから操作してください。"));
+      return;
+    }
+    const lineLocator = createScriptLineLocator(
+      currentDraft,
+      sectionId,
+      lineId
+    );
+    if (lineLocator === undefined) {
+      setVoiceError(new Error("対象セリフを台本から解決できません。"));
+      return;
+    }
+    const requestProjectId = projectIdRef.current;
+    const requestGeneration = projectGenerationRef.current;
     const flushed = await coordinatorRef.current?.flush();
     if (flushed !== true) {
       return;
     }
+    if (
+      !isProjectContextCurrent(
+        projectIdRef.current,
+        projectGenerationRef.current,
+        requestProjectId,
+        requestGeneration
+      )
+    ) {
+      return;
+    }
+    const latestDraft = draftRef.current;
+    const resolvedLineId =
+      latestDraft === null
+        ? undefined
+        : resolveScriptLineId(latestDraft, lineLocator);
+    if (resolvedLineId === undefined) {
+      setVoiceError(new Error("対象セリフを保存後の台本から解決できません。"));
+      return;
+    }
     setVoiceError(null);
     generateVoiceMutation.mutate({
-      projectId: projectIdRef.current,
-      lineId
+      projectId: requestProjectId,
+      lineId: resolvedLineId
     });
   }
 
@@ -1619,10 +1802,10 @@ export function ScriptPage() {
           プロジェクト一覧へ戻る
         </Link>
       </p>
-      <WorkflowIndicator projectId={projectId} currentStep="script" />
+      <WorkflowIndicator projectId={projectId} currentStep="production" />
       <header className="page-header page-header-stacked">
         <div className="page-header-actions">
-          <p className="eyebrow">手順2-2 台本編集</p>
+          <p className="eyebrow">制作 台本・ビジュアル・音声</p>
           <Link
             className="button"
             to={charactersPath(projectId)}
@@ -1635,7 +1818,7 @@ export function ScriptPage() {
         </div>
         <h1>{project.metadata.title}</h1>
         <p>
-          話者、表情、読み上げる文章、字幕、発話前後の間を編集します。入力内容を確認してから音声とビジュアルを設定します。
+          台本を書きながら、セリフごとのビジュアルとVOICEVOX音声を設定・確認します。保存と検証の状態はこの画面で確認できます。
         </p>
       </header>
 
@@ -1700,7 +1883,7 @@ export function ScriptPage() {
         aria-labelledby="voice-generation-title"
       >
         <div>
-          <p className="eyebrow">手順4-4 音声</p>
+          <p className="eyebrow">制作 音声</p>
           <h2 id="voice-generation-title">差分のあるセリフだけを生成</h2>
           <p>
             台本、話者、音声設定、用語、音声エンジンの版を比較し、更新が必要なセリフだけを対象にします。
@@ -1738,587 +1921,592 @@ export function ScriptPage() {
         </button>
       </section>
 
-      <section
-        id="workflow-visual"
-        className="visual-suggestion-panel"
-        aria-labelledby="visual-suggestion-title"
-      >
-        <div>
-          <p className="eyebrow">手順3-4 ビジュアル候補</p>
-          <h2 id="visual-suggestion-title">AIでビジュアル候補を探す</h2>
-          <p>
-            AIが検索条件を作成し、登録済みで利用可能な素材から候補を検索します。素材の割り当ては最後に手動で確定します。
-          </p>
-        </div>
-        {!canSuggest ? (
-          <p className="message-panel message-panel-warning">
-            台本を承認するとAIでビジュアル候補を検索できます。承認前も通常の素材検索は利用できます。
-          </p>
-        ) : null}
-        <div className="form-field">
-          <label htmlFor="visual-suggestion-section">
-            候補を探すセクション
-          </label>
-          <select
-            id="visual-suggestion-section"
-            value={suggestionSection?.id ?? ""}
-            onChange={(event) => {
-              const nextSection = draft.sections.find(
-                (section) => section.id === event.target.value
-              );
-              setSuggestionSectionId(event.target.value);
-              setSuggestionStartLineId(nextSection?.lines[0]?.id ?? "");
-              setSuggestionEndLineId(nextSection?.lines.at(-1)?.id ?? "");
-              setSuggestionResponse(null);
-              setSuggestionError(null);
-            }}
-            disabled={suggestionMutation.isPending}
-          >
-            {draft.sections.map((section) => (
-              <option key={section.id} value={section.id}>
-                {section.name}（{section.lines.length}セリフ）
-              </option>
-            ))}
-          </select>
-        </div>
-        <div className="form-field-group">
-          <div className="form-field">
-            <label htmlFor="visual-suggestion-start">開始セリフ</label>
-            <select
-              id="visual-suggestion-start"
-              value={suggestionStartLineId}
-              onChange={(event) => {
-                setSuggestionStartLineId(event.target.value);
-                setSuggestionResponse(null);
-                setSuggestionError(null);
-              }}
-              disabled={
-                suggestionSection === undefined || suggestionMutation.isPending
-              }
-            >
-              {suggestionSection?.lines.map((line) => (
-                <option key={line.id} value={line.id}>
-                  {line.id}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="form-field">
-            <label htmlFor="visual-suggestion-end">終了セリフ</label>
-            <select
-              id="visual-suggestion-end"
-              value={suggestionEndLineId}
-              onChange={(event) => {
-                setSuggestionEndLineId(event.target.value);
-                setSuggestionResponse(null);
-                setSuggestionError(null);
-              }}
-              disabled={
-                suggestionSection === undefined || suggestionMutation.isPending
-              }
-            >
-              {suggestionSection?.lines.map((line) => (
-                <option key={line.id} value={line.id}>
-                  {line.id}
-                </option>
-              ))}
-            </select>
-          </div>
-        </div>
-        <button
-          className="button button-primary"
-          type="button"
-          onClick={() => void runVisualSuggestion()}
-          disabled={
-            !canSuggest ||
-            suggestionSection === undefined ||
-            suggestionStartLineId.length === 0 ||
-            suggestionEndLineId.length === 0 ||
-            suggestionMutation.isPending
-          }
+      <div className="script-production-layout">
+        <aside
+          className="script-visual-sidebar"
+          aria-label="セリフのビジュアル編集"
         >
-          {suggestionMutation.isPending
-            ? "ビジュアル候補を検索中…"
-            : "AIでビジュアル候補を検索"}
-        </button>
-        {suggestionError !== null ? (
-          <section className="message-panel message-panel-error" role="alert">
-            <p>
-              {getErrorMessage(
-                suggestionError,
-                "AIによるビジュアル候補の検索に失敗しました。"
-              )}
-            </p>
-            {errorDetails(suggestionError).length > 0 ? (
-              <ul>
-                {errorDetails(suggestionError).map((detail) => (
-                  <li key={detail}>{detail}</li>
-                ))}
-              </ul>
-            ) : null}
-            <p>通常の素材検索は引き続き利用できます。</p>
-          </section>
-        ) : null}
-        {suggestionResponse !== null ? (
-          <div className="visual-suggestion-result">
-            <p className="eyebrow">AIが作成した検索条件</p>
-            <dl className="definition-list">
-              <dt>必須タグ</dt>
-              <dd>
-                {suggestionResponse.data.aiIntent.requiredTags.join("、") ||
-                  "なし"}
-              </dd>
-              <dt>任意タグ</dt>
-              <dd>
-                {suggestionResponse.data.aiIntent.optionalTags.join("、") ||
-                  "なし"}
-              </dd>
-              <dt>除外タグ</dt>
-              <dd>
-                {suggestionResponse.data.aiIntent.excludedTags.join("、") ||
-                  "なし"}
-              </dd>
-              <dt>素材の種類</dt>
-              <dd>
-                {suggestionResponse.data.aiIntent.mediaKinds
-                  .map(assetKindLabel)
-                  .join("、")}
-              </dd>
-              <dt>キーワード検索</dt>
-              <dd>
-                {suggestionResponse.data.aiIntent.freeTextQuery || "なし"}
-              </dd>
-              <dt>提案理由</dt>
-              <dd>{suggestionResponse.data.aiIntent.reason}</dd>
-            </dl>
-            <p className="eyebrow">登録情報に照合した検索条件</p>
-            <dl className="definition-list">
-              <dt>必須タグ</dt>
-              <dd>
-                {suggestionResponse.data.resolvedSearch.requiredTags
-                  .map((tag) => `${tag.canonicalName}（${tag.tagId}）`)
-                  .join("、") || "なし"}
-              </dd>
-              <dt>任意タグ</dt>
-              <dd>
-                {suggestionResponse.data.resolvedSearch.optionalTags
-                  .map((tag) => `${tag.canonicalName}（${tag.tagId}）`)
-                  .join("、") || "なし"}
-              </dd>
-              <dt>除外タグ</dt>
-              <dd>
-                {suggestionResponse.data.resolvedSearch.excludedTags
-                  .map((tag) => `${tag.canonicalName}（${tag.tagId}）`)
-                  .join("、") || "なし"}
-              </dd>
-              <dt>キーワード検索</dt>
-              <dd>
-                {suggestionResponse.data.resolvedSearch.freeTextQuery || "なし"}
-              </dd>
-            </dl>
-            {suggestionResponse.data.diagnostics.unresolvedTags.length > 0 ? (
-              <div className="message-panel message-panel-warning">
-                <h3>未解決条件</h3>
-                <ul>
-                  {suggestionResponse.data.diagnostics.unresolvedTags.map(
-                    (tag) => (
-                      <li key={`${tag.group}-${tag.value}`}>
-                        {visualTagGroupLabel(tag.group)}：{tag.value}（
-                        {unresolvedTagReasonLabel(tag.reason)}）
-                      </li>
-                    )
-                  )}
-                </ul>
-                {suggestionResponse.data.diagnostics
-                  .requiredTagResolutionFailed ? (
-                  <p>必須タグを解決できないため候補は返していません。</p>
-                ) : null}
+          <section
+            className="selected-script-line-panel"
+            aria-labelledby="selected-script-line-title"
+          >
+            <div className="visual-subsection-header">
+              <div>
+                <p className="eyebrow">現在の編集対象</p>
+                <h2 id="selected-script-line-title">
+                  {selectedVisualLine?.id ?? "セリフを選択してください"}
+                </h2>
               </div>
-            ) : null}
-            <div className="form-field">
-              <label htmlFor="visual-decision-reason">
-                候補の採否理由（任意）
-              </label>
-              <textarea
-                id="visual-decision-reason"
-                rows={3}
-                value={visualDecisionReason}
-                onChange={(event) =>
-                  setVisualDecisionReason(event.target.value)
-                }
-                placeholder="理由を入力しなくても採用・却下の事実は記録されます。"
-                maxLength={2000}
-              />
-              <small>理由未入力でも採用・却下の事実は記録されます。</small>
+              <span className="status-message">台本と同じ画面で編集</span>
             </div>
-            <p className="eyebrow">
-              利用可能な素材候補（
-              {suggestionResponse.data.diagnostics.candidateCount}件）
-            </p>
-            {visualSuggestionStale ? (
+            {selectedVisualLine !== undefined ? (
+              <dl className="selected-script-line-details">
+                <div>
+                  <dt>読み上げ文</dt>
+                  <dd>{selectedVisualLine.spokenText || "未入力"}</dd>
+                </div>
+                <div>
+                  <dt>字幕</dt>
+                  <dd>{selectedVisualLine.subtitleText || "未入力"}</dd>
+                </div>
+                <div>
+                  <dt>対象範囲</dt>
+                  <dd>
+                    {suggestionSection?.name ?? "不明"}：
+                    {suggestionStartLineId || "—"} ～{" "}
+                    {suggestionEndLineId || "—"}
+                  </dd>
+                </div>
+              </dl>
+            ) : (
               <p className="status-message">
-                候補を採用したためプロジェクト版が更新されました。残りの候補は無効です。再生成してください。
+                左のセリフカードを選ぶと、対象範囲と割り当て済み素材をここで編集できます。
+              </p>
+            )}
+          </section>
+
+          <section
+            id="workflow-visual"
+            className="visual-suggestion-panel"
+            aria-labelledby="visual-suggestion-title"
+          >
+            <div>
+              <p className="eyebrow">制作 ビジュアル候補</p>
+              <h2 id="visual-suggestion-title">AIでビジュアル候補を探す</h2>
+              <p>
+                AIが検索条件を作成し、登録済みで利用可能な素材から候補を検索します。素材の割り当ては最後に手動で確定します。
+              </p>
+            </div>
+            {!canSuggest ? (
+              <p className="message-panel message-panel-warning">
+                台本の入力エラーを解消するとAIでビジュアル候補を検索できます。通常の素材検索と素材の割り当ては編集中も利用できます。
               </p>
             ) : null}
-            {suggestionResponse.data.candidates.length === 0 ? (
-              <p className="status-message">候補なし</p>
-            ) : (
-              <ul className="asset-candidate-list">
-                {suggestionResponse.data.candidates.map((candidate) => {
-                  const decision =
-                    candidateDecisionByAssetId[candidate.asset.assetId];
-                  return (
-                    <li key={candidate.asset.assetId}>
-                      <strong>{candidate.asset.title}</strong>（
-                      {assetKindLabel(candidate.asset.kind)}）
-                      <span>
-                        タグ：{" "}
-                        {candidate.asset.tags
-                          .map((tag) => tag.canonicalName)
-                          .join("、") || "なし"}
-                      </span>
-                      <span>
-                        {candidate.matchReasons
-                          .map(visualMatchReasonLabel)
-                          .join(" / ")}
-                      </span>
-                      {decision === "accepted" ? (
-                        <span className="status-message">採用済み</span>
-                      ) : null}
-                      {decision === "rejected" ? (
-                        <span className="status-message">却下済み</span>
-                      ) : null}
-                      {decision === "stale" ? (
-                        <span className="status-message">古い候補</span>
-                      ) : null}
-                      <button
-                        className="button button-small"
-                        type="button"
-                        disabled={
-                          visualMutationPending || decision !== undefined
-                        }
-                        onClick={() =>
-                          void assignVisualCandidate(
-                            candidate.asset,
-                            suggestionResponse.data.runId
-                          )
-                        }
-                      >
-                        この素材を採用して割り当て
-                      </button>
-                      <button
-                        className="button button-small"
-                        type="button"
-                        disabled={
-                          visualMutationPending || decision !== undefined
-                        }
-                        onClick={() =>
-                          void rejectVisualCandidate(candidate.asset.assetId)
-                        }
-                      >
-                        この候補を却下
-                      </button>
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
-          </div>
-        ) : null}
-      </section>
-
-      <section
-        className="asset-search-panel"
-        aria-labelledby="asset-search-title"
-      >
-        <p className="eyebrow">手順3-3 素材検索</p>
-        <h2 id="asset-search-title">素材をキーワードやタグで探す</h2>
-        <form onSubmit={runAssetSearch}>
-          <div className="form-field-group">
             <div className="form-field">
-              <label htmlFor="asset-search-query">キーワード</label>
-              <input
-                id="asset-search-query"
-                value={assetSearchQuery}
-                onChange={(event) => setAssetSearchQuery(event.target.value)}
-              />
-            </div>
-            <div className="form-field">
-              <label htmlFor="asset-search-tag-ids">
-                タグ識別子（カンマまたは空白で区切る）
+              <label htmlFor="visual-suggestion-section">
+                候補を探すセクション
               </label>
-              <input
-                id="asset-search-tag-ids"
-                value={assetSearchTagIds}
-                onChange={(event) => setAssetSearchTagIds(event.target.value)}
-                placeholder="例：tag-daily tag-inspection"
-              />
+              <select
+                id="visual-suggestion-section"
+                value={suggestionSection?.id ?? ""}
+                onChange={(event) => {
+                  const nextSection = draft.sections.find(
+                    (section) => section.id === event.target.value
+                  );
+                  setSuggestionSectionId(event.target.value);
+                  setSuggestionStartLineId(nextSection?.lines[0]?.id ?? "");
+                  setSuggestionEndLineId(nextSection?.lines.at(-1)?.id ?? "");
+                  setSelectedVisualLineId(nextSection?.lines[0]?.id ?? "");
+                  setSuggestionResponse(null);
+                  setSuggestionError(null);
+                }}
+                disabled={suggestionMutation.isPending}
+              >
+                {draft.sections.map((section) => (
+                  <option key={section.id} value={section.id}>
+                    {section.name}（{section.lines.length}セリフ）
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="form-field-group">
+              <div className="form-field">
+                <label htmlFor="visual-suggestion-start">開始セリフ</label>
+                <select
+                  id="visual-suggestion-start"
+                  value={suggestionStartLineId}
+                  onChange={(event) => {
+                    setSuggestionStartLineId(event.target.value);
+                    setSelectedVisualLineId(event.target.value);
+                    setSuggestionResponse(null);
+                    setSuggestionError(null);
+                  }}
+                  disabled={
+                    suggestionSection === undefined ||
+                    suggestionMutation.isPending
+                  }
+                >
+                  {suggestionSection?.lines.map((line) => (
+                    <option key={line.id} value={line.id}>
+                      {line.id}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="form-field">
+                <label htmlFor="visual-suggestion-end">終了セリフ</label>
+                <select
+                  id="visual-suggestion-end"
+                  value={suggestionEndLineId}
+                  onChange={(event) => {
+                    setSuggestionEndLineId(event.target.value);
+                    setSuggestionResponse(null);
+                    setSuggestionError(null);
+                  }}
+                  disabled={
+                    suggestionSection === undefined ||
+                    suggestionMutation.isPending
+                  }
+                >
+                  {suggestionSection?.lines.map((line) => (
+                    <option key={line.id} value={line.id}>
+                      {line.id}
+                    </option>
+                  ))}
+                </select>
+              </div>
             </div>
             <button
-              className="button"
-              type="submit"
-              disabled={assetSearchMutation.isPending}
+              className="button button-primary"
+              type="button"
+              onClick={() => void runVisualSuggestion()}
+              disabled={
+                !canSuggest ||
+                suggestionSection === undefined ||
+                suggestionStartLineId.length === 0 ||
+                suggestionEndLineId.length === 0 ||
+                suggestionMutation.isPending
+              }
             >
-              {assetSearchMutation.isPending ? "検索中…" : "通常検索"}
+              {suggestionMutation.isPending
+                ? "ビジュアル候補を検索中…"
+                : "AIでビジュアル候補を検索"}
             </button>
-          </div>
-        </form>
-        {assetSearchError !== null ? (
-          <p className="form-error" role="alert">
-            {getErrorMessage(assetSearchError, "素材検索に失敗しました。")}
-          </p>
-        ) : null}
-        {assetSearchResult !== null ? (
-          assetSearchResult.items.length === 0 ? (
-            <p className="status-message">候補なし</p>
-          ) : (
-            <ul className="asset-candidate-list">
-              {assetSearchResult.items.map((asset) => (
-                <li key={asset.assetId}>
-                  <strong>{asset.title}</strong>（{assetKindLabel(asset.kind)}）
-                  <span>
-                    {asset.tags.map((tag) => tag.canonicalName).join("、") ||
-                      "タグなし"}
-                  </span>
-                  <button
-                    className="button button-small"
-                    type="button"
-                    disabled={visualMutationPending}
-                    onClick={() => void assignVisualCandidate(asset)}
-                  >
-                    この素材を割り当て
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )
-        ) : null}
-      </section>
+            {suggestionError !== null ? (
+              <section
+                className="message-panel message-panel-error"
+                role="alert"
+              >
+                <p>
+                  {getErrorMessage(
+                    suggestionError,
+                    "AIによるビジュアル候補の検索に失敗しました。"
+                  )}
+                </p>
+                {errorDetails(suggestionError).length > 0 ? (
+                  <ul>
+                    {errorDetails(suggestionError).map((detail) => (
+                      <li key={detail}>{detail}</li>
+                    ))}
+                  </ul>
+                ) : null}
+                <p>通常の素材検索は引き続き利用できます。</p>
+              </section>
+            ) : null}
+            {suggestionResponse !== null ? (
+              <div className="visual-suggestion-result">
+                <p className="eyebrow">AIが作成した検索条件</p>
+                <dl className="definition-list">
+                  <dt>必須タグ</dt>
+                  <dd>
+                    {suggestionResponse.data.aiIntent.requiredTags.join("、") ||
+                      "なし"}
+                  </dd>
+                  <dt>任意タグ</dt>
+                  <dd>
+                    {suggestionResponse.data.aiIntent.optionalTags.join("、") ||
+                      "なし"}
+                  </dd>
+                  <dt>除外タグ</dt>
+                  <dd>
+                    {suggestionResponse.data.aiIntent.excludedTags.join("、") ||
+                      "なし"}
+                  </dd>
+                  <dt>素材の種類</dt>
+                  <dd>
+                    {suggestionResponse.data.aiIntent.mediaKinds
+                      .map(assetKindLabel)
+                      .join("、")}
+                  </dd>
+                  <dt>キーワード検索</dt>
+                  <dd>
+                    {suggestionResponse.data.aiIntent.freeTextQuery || "なし"}
+                  </dd>
+                  <dt>提案理由</dt>
+                  <dd>{suggestionResponse.data.aiIntent.reason}</dd>
+                </dl>
+                <p className="eyebrow">登録情報に照合した検索条件</p>
+                <dl className="definition-list">
+                  <dt>必須タグ</dt>
+                  <dd>
+                    {suggestionResponse.data.resolvedSearch.requiredTags
+                      .map((tag) => `${tag.canonicalName}（${tag.tagId}）`)
+                      .join("、") || "なし"}
+                  </dd>
+                  <dt>任意タグ</dt>
+                  <dd>
+                    {suggestionResponse.data.resolvedSearch.optionalTags
+                      .map((tag) => `${tag.canonicalName}（${tag.tagId}）`)
+                      .join("、") || "なし"}
+                  </dd>
+                  <dt>除外タグ</dt>
+                  <dd>
+                    {suggestionResponse.data.resolvedSearch.excludedTags
+                      .map((tag) => `${tag.canonicalName}（${tag.tagId}）`)
+                      .join("、") || "なし"}
+                  </dd>
+                  <dt>キーワード検索</dt>
+                  <dd>
+                    {suggestionResponse.data.resolvedSearch.freeTextQuery ||
+                      "なし"}
+                  </dd>
+                </dl>
+                {suggestionResponse.data.diagnostics.unresolvedTags.length >
+                0 ? (
+                  <div className="message-panel message-panel-warning">
+                    <h3>未解決条件</h3>
+                    <ul>
+                      {suggestionResponse.data.diagnostics.unresolvedTags.map(
+                        (tag) => (
+                          <li key={`${tag.group}-${tag.value}`}>
+                            {visualTagGroupLabel(tag.group)}：{tag.value}（
+                            {unresolvedTagReasonLabel(tag.reason)}）
+                          </li>
+                        )
+                      )}
+                    </ul>
+                    {suggestionResponse.data.diagnostics
+                      .requiredTagResolutionFailed ? (
+                      <p>必須タグを解決できないため候補は返していません。</p>
+                    ) : null}
+                  </div>
+                ) : null}
+                <div className="form-field">
+                  <label htmlFor="visual-decision-reason">
+                    候補の採否理由（任意）
+                  </label>
+                  <textarea
+                    id="visual-decision-reason"
+                    rows={3}
+                    value={visualDecisionReason}
+                    onChange={(event) =>
+                      setVisualDecisionReason(event.target.value)
+                    }
+                    placeholder="理由を入力しなくても採用・却下の事実は記録されます。"
+                    maxLength={2000}
+                  />
+                  <small>理由未入力でも採用・却下の事実は記録されます。</small>
+                </div>
+                <p className="eyebrow">
+                  利用可能な素材候補（
+                  {suggestionResponse.data.diagnostics.candidateCount}件）
+                </p>
+                {visualSuggestionStale ? (
+                  <p className="status-message">
+                    候補を採用したためプロジェクト版が更新されました。残りの候補は無効です。再生成してください。
+                  </p>
+                ) : null}
+                {suggestionResponse.data.candidates.length === 0 ? (
+                  <p className="status-message">候補なし</p>
+                ) : (
+                  <ul className="asset-candidate-list">
+                    {suggestionResponse.data.candidates.map((candidate) => {
+                      const decision =
+                        candidateDecisionByAssetId[candidate.asset.assetId];
+                      return (
+                        <li key={candidate.asset.assetId}>
+                          <strong>{candidate.asset.title}</strong>（
+                          {assetKindLabel(candidate.asset.kind)}）
+                          <span>
+                            タグ：{" "}
+                            {candidate.asset.tags
+                              .map((tag) => tag.canonicalName)
+                              .join("、") || "なし"}
+                          </span>
+                          <span>
+                            {candidate.matchReasons
+                              .map(visualMatchReasonLabel)
+                              .join(" / ")}
+                          </span>
+                          {decision === "accepted" ? (
+                            <span className="status-message">採用済み</span>
+                          ) : null}
+                          {decision === "rejected" ? (
+                            <span className="status-message">却下済み</span>
+                          ) : null}
+                          {decision === "stale" ? (
+                            <span className="status-message">古い候補</span>
+                          ) : null}
+                          <button
+                            className="button button-small"
+                            type="button"
+                            disabled={
+                              visualMutationPending || decision !== undefined
+                            }
+                            onClick={() =>
+                              void assignVisualCandidate(
+                                candidate.asset,
+                                suggestionResponse.data.runId
+                              )
+                            }
+                          >
+                            この素材を採用して割り当て
+                          </button>
+                          <button
+                            className="button button-small"
+                            type="button"
+                            disabled={
+                              visualMutationPending || decision !== undefined
+                            }
+                            onClick={() =>
+                              void rejectVisualCandidate(
+                                candidate.asset.assetId
+                              )
+                            }
+                          >
+                            この候補を却下
+                          </button>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
+              </div>
+            ) : null}
+          </section>
 
-      {visualError !== null ? (
-        <section className="message-panel message-panel-error" role="alert">
-          <h2>ビジュアル設定を保存・承認できません</h2>
-          <p>
-            {getErrorMessage(
-              visualError,
-              "入力内容または素材の状態を確認してください。"
-            )}
-          </p>
-          {errorDetails(visualError).length > 0 ? (
-            <ul>
-              {errorDetails(visualError).map((detail) => (
-                <li key={detail}>{detail}</li>
-              ))}
-            </ul>
+          <section
+            className="asset-search-panel"
+            aria-labelledby="asset-search-title"
+          >
+            <p className="eyebrow">手順3-3 素材検索</p>
+            <h2 id="asset-search-title">素材をキーワードやタグで探す</h2>
+            <form onSubmit={runAssetSearch}>
+              <div className="form-field-group">
+                <div className="form-field">
+                  <label htmlFor="asset-search-query">キーワード</label>
+                  <input
+                    id="asset-search-query"
+                    value={assetSearchQuery}
+                    onChange={(event) =>
+                      setAssetSearchQuery(event.target.value)
+                    }
+                  />
+                </div>
+                <div className="form-field">
+                  <label htmlFor="asset-search-tag-ids">
+                    タグ識別子（カンマまたは空白で区切る）
+                  </label>
+                  <input
+                    id="asset-search-tag-ids"
+                    value={assetSearchTagIds}
+                    onChange={(event) =>
+                      setAssetSearchTagIds(event.target.value)
+                    }
+                    placeholder="例：tag-daily tag-inspection"
+                  />
+                </div>
+                <button
+                  className="button"
+                  type="submit"
+                  disabled={assetSearchMutation.isPending}
+                >
+                  {assetSearchMutation.isPending ? "検索中…" : "通常検索"}
+                </button>
+              </div>
+            </form>
+            {assetSearchError !== null ? (
+              <p className="form-error" role="alert">
+                {getErrorMessage(assetSearchError, "素材検索に失敗しました。")}
+              </p>
+            ) : null}
+            {assetSearchResult !== null ? (
+              assetSearchResult.items.length === 0 ? (
+                <p className="status-message">候補なし</p>
+              ) : (
+                <ul className="asset-candidate-list">
+                  {assetSearchResult.items.map((asset) => (
+                    <li key={asset.assetId}>
+                      <strong>{asset.title}</strong>（
+                      {assetKindLabel(asset.kind)}）
+                      <span>
+                        {asset.tags
+                          .map((tag) => tag.canonicalName)
+                          .join("、") || "タグなし"}
+                      </span>
+                      <button
+                        className="button button-small"
+                        type="button"
+                        disabled={visualMutationPending}
+                        onClick={() => void assignVisualCandidate(asset)}
+                      >
+                        この素材を割り当て
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )
+            ) : null}
+          </section>
+
+          {visualError !== null ? (
+            <section className="message-panel message-panel-error" role="alert">
+              <h2>ビジュアル設定を保存できません</h2>
+              <p>
+                {getErrorMessage(
+                  visualError,
+                  "入力内容または素材の状態を確認してください。"
+                )}
+              </p>
+              {errorDetails(visualError).length > 0 ? (
+                <ul>
+                  {errorDetails(visualError).map((detail) => (
+                    <li key={detail}>{detail}</li>
+                  ))}
+                </ul>
+              ) : null}
+              {visualError instanceof ApiClientError &&
+              visualError.status === 409 ? (
+                <p>
+                  競合のため、入力中の表示設定は保持しています。最新データで上書きしません。
+                </p>
+              ) : null}
+            </section>
           ) : null}
-          {visualError instanceof ApiClientError &&
-          visualError.status === 409 ? (
-            <p>
-              競合のため、入力中の表示設定は保持しています。最新データで上書きしません。
+
+          {visualSaveState === "saved" ? (
+            <p className="status-message" role="status">
+              ビジュアル設定を保存済みです（更新番号 {revisionRef.current}）。
             </p>
           ) : null}
-        </section>
-      ) : null}
 
-      {visualSaveState === "saved" ? (
-        <p className="status-message" role="status">
-          ビジュアル設定を保存済みです（更新番号 {revisionRef.current}）。
-        </p>
-      ) : null}
-
-      <VisualAssignmentPanel
-        project={project}
-        assets={assignmentAssets}
-        onSave={saveVisualAssignment}
-        onRemove={removeVisualAssignment}
-        isMutating={visualMutationPending}
-      />
-
-      <section
-        className="visual-approval-panel"
-        aria-labelledby="visual-approval-title"
-      >
-        <div>
-          <p className="eyebrow">手順3-6 ビジュアル承認</p>
-          <h2 id="visual-approval-title">検証済みビジュアル計画を承認</h2>
-          <p>
-            承認時に台本、素材の状態・照合値（チェックサム）、取り込み済みファイル、動画の長さ、帳票ページ、表示設定を再確認します。
-          </p>
-          <p className="status-message">
-            機密区分は素材ごとに表示しています。区分の順位や権限判定は行いません。
-          </p>
-        </div>
-        {unassignedLines > 0 ? (
-          <p className="message-panel message-panel-warning">
-            {unassignedLines}
-            件のセリフにはビジュアルが未割当です。未割当区間は承認をブロックせず、警告として表示しています。
-          </p>
-        ) : null}
-        {!canApproveVisuals ? (
-          <p className="message-panel message-panel-warning">
-            ビジュアル承認には、先に台本の承認が必要です。
-          </p>
-        ) : null}
-        <button
-          className="button button-primary"
-          type="button"
-          disabled={!canApproveVisuals || visualMutationPending}
-          onClick={() => void approveVisuals()}
-        >
-          {visualApproveMutation.isPending
-            ? "ビジュアルを検証・承認中…"
-            : "ビジュアルを承認"}
-        </button>
-      </section>
-
-      <form className="bulk-paste-panel" onSubmit={pasteLines}>
-        <div>
-          <h2>話者付きテキストの一括貼り付け</h2>
-          <p>
-            1行に1セリフを入力し、話者名と本文を半角または全角のコロンで区切ります。
-          </p>
-        </div>
-        <div className="form-field">
-          <label htmlFor="bulk-script-section">追加先セクション</label>
-          <select
-            id="bulk-script-section"
-            value={bulkSectionIndex}
-            onChange={(event) =>
-              setBulkSectionIndex(Number(event.target.value))
-            }
-          >
-            {draft.sections.map((section, index) => (
-              <option key={section.id} value={index}>
-                {section.name}（{section.id}）
-              </option>
-            ))}
-          </select>
-        </div>
-        <div className="form-field">
-          <label htmlFor="bulk-script-text">貼り付ける台本本文</label>
-          <textarea
-            id="bulk-script-text"
-            rows={5}
-            value={bulkText}
-            onChange={(event: ChangeEvent<HTMLTextAreaElement>) =>
-              setBulkText(event.target.value)
-            }
-            placeholder="四国めたん：最初に申請画面を開きます。\nずんだもん: 右上の新規作成を押すのだ。"
+          <VisualAssignmentPanel
+            project={project}
+            assets={assignmentAssets}
+            focusLineId={selectedVisualLine?.id}
+            onSave={saveVisualAssignment}
+            onRemove={removeVisualAssignment}
+            isMutating={visualMutationPending}
           />
-        </div>
-        {bulkErrors.length > 0 ? (
-          <ul className="form-error" role="alert">
-            {bulkErrors.map((error) => (
-              <li key={`${error.lineNumber}-${error.message}`}>
-                {error.lineNumber}行目: {error.message}
-              </li>
-            ))}
-          </ul>
-        ) : null}
-        <button className="button" type="submit">
-          セリフカードへ追加
-        </button>
-      </form>
-
-      <section className="script-section-list" aria-label="台本セクション">
-        {draft.sections.map((section, sectionIndex) => (
-          <section className="script-section-card" key={section.id}>
-            <header className="script-section-header">
-              <div>
-                <p className="eyebrow">セクション</p>
-                <h2>{section.name}</h2>
-                <code>
-                  {section.id} / 構成案ID: {section.outlineSectionId}
-                </code>
-              </div>
-              <button
-                className="button"
-                type="button"
-                onClick={() => addLine(sectionIndex)}
+        </aside>
+        <div className="script-production-main">
+          <form className="bulk-paste-panel" onSubmit={pasteLines}>
+            <div>
+              <h2>話者付きテキストの一括貼り付け</h2>
+              <p>
+                1行に1セリフを入力し、話者名と本文を半角または全角のコロンで区切ります。
+              </p>
+            </div>
+            <div className="form-field">
+              <label htmlFor="bulk-script-section">追加先セクション</label>
+              <select
+                id="bulk-script-section"
+                value={bulkSectionIndex}
+                onChange={(event) =>
+                  setBulkSectionIndex(Number(event.target.value))
+                }
               >
-                セリフを追加
-              </button>
-            </header>
-            {section.lines.length === 0 ? (
-              <p className="status-message">セリフはまだありません。</p>
-            ) : (
-              <div className="script-line-list">
-                {section.lines.map((line, lineIndex) => (
-                  <ScriptLineCard
-                    key={line.id}
-                    line={line}
-                    sectionIndex={sectionIndex}
-                    lineIndex={lineIndex}
-                    project={project}
-                    issues={issues}
-                    voiceStatus={voiceStatusByLine.get(line.id)}
-                    voiceGenerationDisabled={
-                      voiceGenerationDisabled || issues.length > 0
-                    }
-                    voiceAvailable={voiceStatusQuery.data?.available === true}
-                    projectId={project.metadata.id}
-                    onChange={(update) =>
-                      updateLine(sectionIndex, lineIndex, update)
-                    }
-                    onMove={(direction) =>
-                      updateDraft(
-                        moveScriptLine(
-                          draft,
-                          sectionIndex,
-                          lineIndex,
-                          direction
-                        )
-                      )
-                    }
-                    onDuplicate={() =>
-                      updateDraft(
-                        duplicateScriptLine(draft, sectionIndex, lineIndex)
-                      )
-                    }
-                    onDelete={() =>
-                      updateDraft(
-                        deleteScriptLine(draft, sectionIndex, lineIndex)
-                      )
-                    }
-                    onGenerateVoice={() => void generateVoiceLine(line.id)}
-                  />
+                {draft.sections.map((section, index) => (
+                  <option key={section.id} value={index}>
+                    {section.name}（{section.id}）
+                  </option>
                 ))}
-              </div>
-            )}
+              </select>
+            </div>
+            <div className="form-field">
+              <label htmlFor="bulk-script-text">貼り付ける台本本文</label>
+              <textarea
+                id="bulk-script-text"
+                rows={5}
+                value={bulkText}
+                onChange={(event: ChangeEvent<HTMLTextAreaElement>) =>
+                  setBulkText(event.target.value)
+                }
+                placeholder="四国めたん：最初に申請画面を開きます。\nずんだもん: 右上の新規作成を押すのだ。"
+              />
+            </div>
+            {bulkErrors.length > 0 ? (
+              <ul className="form-error" role="alert">
+                {bulkErrors.map((error) => (
+                  <li key={`${error.lineNumber}-${error.message}`}>
+                    {error.lineNumber}行目: {error.message}
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+            <button className="button" type="submit">
+              セリフカードへ追加
+            </button>
+          </form>
+
+          <section className="script-section-list" aria-label="台本セクション">
+            {draft.sections.map((section, sectionIndex) => (
+              <section className="script-section-card" key={section.id}>
+                <header className="script-section-header">
+                  <div>
+                    <p className="eyebrow">セクション</p>
+                    <h2>{section.name}</h2>
+                    <code>
+                      {section.id} / 構成案ID: {section.outlineSectionId}
+                    </code>
+                  </div>
+                  <button
+                    className="button"
+                    type="button"
+                    onClick={() => addLine(sectionIndex)}
+                  >
+                    セリフを追加
+                  </button>
+                </header>
+                {section.lines.length === 0 ? (
+                  <p className="status-message">セリフはまだありません。</p>
+                ) : (
+                  <div className="script-line-list">
+                    {section.lines.map((line, lineIndex) => (
+                      <ScriptLineCard
+                        key={line.id}
+                        line={line}
+                        sectionIndex={sectionIndex}
+                        lineIndex={lineIndex}
+                        project={project}
+                        assignmentAssets={assignmentAssets}
+                        isVisualSelected={selectedVisualLineId === line.id}
+                        issues={issues}
+                        voiceStatus={voiceStatusByLine.get(line.id)}
+                        voiceGenerationDisabled={
+                          voiceGenerationDisabled || issues.length > 0
+                        }
+                        voiceAvailable={
+                          voiceStatusQuery.data?.available === true
+                        }
+                        projectId={project.metadata.id}
+                        onChange={(update) =>
+                          updateLine(sectionIndex, lineIndex, update)
+                        }
+                        onMove={(direction) =>
+                          updateDraft(
+                            moveScriptLine(
+                              draft,
+                              sectionIndex,
+                              lineIndex,
+                              direction
+                            )
+                          )
+                        }
+                        onDuplicate={() =>
+                          updateDraft(
+                            duplicateScriptLine(draft, sectionIndex, lineIndex)
+                          )
+                        }
+                        onDelete={() =>
+                          updateDraft(
+                            deleteScriptLine(draft, sectionIndex, lineIndex)
+                          )
+                        }
+                        onGenerateVoice={() =>
+                          void generateVoiceLine(section.id, line.id)
+                        }
+                        onSelectVisualRange={() =>
+                          selectVisualRange(section.id, line.id)
+                        }
+                      />
+                    ))}
+                  </div>
+                )}
+              </section>
+            ))}
           </section>
-        ))}
-      </section>
-      {approvalError !== null ? (
-        <section className="message-panel message-panel-error" role="alert">
-          <h2>台本を承認できません</h2>
-          <p>
-            {getErrorMessage(
-              approvalError,
-              "台本の承認条件を満たしていません。"
-            )}
-          </p>
-          {errorDetails(approvalError).length > 0 ? (
-            <ul>
-              {errorDetails(approvalError).map((detail) => (
-                <li key={detail}>{detail}</li>
-              ))}
-            </ul>
-          ) : null}
-        </section>
-      ) : null}
-      <div className="form-actions outline-actions">
-        <button
-          className="button button-primary"
-          type="button"
-          onClick={() => void approve()}
-          disabled={
-            approveMutation.isPending ||
-            autosaveState.status === "conflict" ||
-            autosaveState.status === "error"
-          }
-        >
-          {approveMutation.isPending ? "承認中…" : "台本を承認"}
-        </button>
+        </div>
       </div>
     </main>
   );

@@ -596,7 +596,7 @@ describe("VisualSuggestionService", () => {
     ).toEqual(["asset-normal"]);
   });
 
-  it("rejects invalid ranges, unapproved stages, unsupported models, and OpenRouter failures", async () => {
+  it("rejects invalid ranges, unsupported models, and OpenRouter failures", async () => {
     const setup = await readySetup();
     const chat = createService(setup, intent());
     await expect(
@@ -637,16 +637,15 @@ describe("VisualSuggestionService", () => {
       { ...draftProject, script: { ...draftProject.script, status: "draft" } },
       draftProject.revision
     );
-    await expect(
-      createService(draftSetup, intent()).service.generate(
-        draftSetup.project.metadata.id,
-        {
-          startLineId: "main-mentor-1",
-          endLineId: "main-mentor-1",
-          expectedRevision: draftSaved.revision
-        }
-      )
-    ).rejects.toMatchObject({ code: "VISUAL_SUGGESTION_NOT_ALLOWED" });
+    const draftSuggestion = await createService(
+      draftSetup,
+      intent()
+    ).service.generate(draftSetup.project.metadata.id, {
+      startLineId: "main-mentor-1",
+      endLineId: "main-mentor-1",
+      expectedRevision: draftSaved.revision
+    });
+    expect(draftSuggestion.data.target.lineIds).toEqual(["main-mentor-1"]);
 
     const noModel = await readySetup({
       defaultModelId: null,
