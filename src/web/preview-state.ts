@@ -34,8 +34,8 @@ export type PreviewPlayerProps = {
 };
 
 const stateLabels: Readonly<Record<ManifestPreviewState, string>> = {
-  current: "最新マニフェスト",
-  stale: "以前の成功プレビュー（stale）",
+  current: "最新のプレビュー",
+  stale: "以前の成功プレビュー（要更新）",
   missing: "未生成",
   invalid: "読み込み不可"
 };
@@ -44,8 +44,8 @@ const stateDescriptions: Readonly<Record<ManifestPreviewState, string>> = {
   current: "現在のプロジェクト入力に対応したプレビューです。",
   stale:
     "保存済みの以前の成功結果を表示できますが、現在の入力では再生できません。",
-  missing: "保存済みのRenderManifestがありません。",
-  invalid: "保存済みのRenderManifestを読み込めません。"
+  missing: "保存済みの動画構成情報がありません。",
+  invalid: "保存済みの動画構成情報を読み込めません。"
 };
 
 const blockerMessages: Readonly<Record<string, string>> = {

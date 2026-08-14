@@ -61,6 +61,10 @@ function getValidationMessage(error: unknown): string {
   return "入力内容を確認してください。";
 }
 
+function terminologyStatusLabel(status: "active" | "inactive"): string {
+  return status === "active" ? "有効" : "無効";
+}
+
 function formField(
   form: TerminologyFormState,
   setForm: (next: TerminologyFormState) => void,
@@ -92,7 +96,9 @@ function TerminologyFields({
   return (
     <>
       <div className="form-field">
-        <label htmlFor={`${idPrefix}-surface`}>表記</label>
+        <label htmlFor={`${idPrefix}-surface`}>
+          表記（画面や台本に表示する文字）
+        </label>
         <input
           id={`${idPrefix}-surface`}
           type="text"
@@ -102,7 +108,7 @@ function TerminologyFields({
         />
       </div>
       <div className="form-field">
-        <label htmlFor={`${idPrefix}-reading`}>読み</label>
+        <label htmlFor={`${idPrefix}-reading`}>読み（全角カタカナ）</label>
         <input
           id={`${idPrefix}-reading`}
           type="text"
@@ -118,7 +124,9 @@ function TerminologyFields({
         ) : null}
       </div>
       <div className="form-field">
-        <label htmlFor={`${idPrefix}-category`}>カテゴリ</label>
+        <label htmlFor={`${idPrefix}-category`}>
+          カテゴリ（例：製品名、部署名）
+        </label>
         <input
           id={`${idPrefix}-category`}
           type="text"
@@ -134,7 +142,7 @@ function TerminologyFields({
         </datalist>
       </div>
       <div className="form-field">
-        <label htmlFor={`${idPrefix}-priority`}>優先度</label>
+        <label htmlFor={`${idPrefix}-priority`}>読み替えの優先度</label>
         <input
           id={`${idPrefix}-priority`}
           type="number"
@@ -143,9 +151,12 @@ function TerminologyFields({
           disabled={disabled}
           required
         />
+        <small>
+          数字が大きい用語を優先して読み替えます。通常は0で構いません。
+        </small>
       </div>
       <div className="form-field">
-        <label htmlFor={`${idPrefix}-notes`}>メモ</label>
+        <label htmlFor={`${idPrefix}-notes`}>補足メモ（任意）</label>
         <textarea
           id={`${idPrefix}-notes`}
           rows={3}
@@ -277,9 +288,11 @@ export function TerminologyPage() {
         <Link to="/projects">プロジェクト一覧へ</Link>
       </p>
       <header className="page-header page-header-stacked">
-        <p className="eyebrow">workspace</p>
+        <p className="eyebrow">共通用語管理</p>
         <h1>固有名詞・社内用語</h1>
-        <p>ワークスペース共通の表記と読みを管理します。</p>
+        <p>
+          台本の読み上げで使う固有名詞や社内用語と、その読み方を登録します。有効な用語は音声生成に反映されます。
+        </p>
       </header>
 
       <section
@@ -331,8 +344,8 @@ export function TerminologyPage() {
               }
             >
               <option value="">すべて</option>
-              <option value="active">active</option>
-              <option value="inactive">inactive</option>
+              <option value="active">有効</option>
+              <option value="inactive">無効</option>
             </select>
           </div>
           <div className="form-actions terminology-filter-actions">
@@ -441,7 +454,7 @@ export function TerminologyPage() {
                     <span
                       className={`terminology-status terminology-status-${term.status}`}
                     >
-                      {term.status}
+                      {terminologyStatusLabel(term.status)}
                     </span>
                   </div>
                   {isEditing ? (
@@ -485,7 +498,7 @@ export function TerminologyPage() {
                           <dd>{term.category}</dd>
                         </div>
                         <div>
-                          <dt>優先度</dt>
+                          <dt>読み替えの優先度</dt>
                           <dd>{term.priority}</dd>
                         </div>
                         <div>
@@ -493,7 +506,7 @@ export function TerminologyPage() {
                           <dd>{term.notes || "—"}</dd>
                         </div>
                         <div>
-                          <dt>ID</dt>
+                          <dt>識別子</dt>
                           <dd>
                             <code>{term.termId}</code>
                           </dd>

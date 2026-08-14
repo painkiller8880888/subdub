@@ -29,7 +29,7 @@ function formatLocalDateTime(value: string): string {
 }
 
 function formatDuration(value: number | null): string {
-  return value === null ? "—" : `${Math.round(value)} ms`;
+  return value === null ? "—" : `${Math.round(value)}ミリ秒`;
 }
 
 function formatRate(value: number | null): string {
@@ -58,6 +58,23 @@ function getExportErrorMessage(error: unknown): string {
     return error.message;
   }
   return "AI実行ログのエクスポートに失敗しました。";
+}
+
+function taskKindLabel(kind: AiRunSearchItem["taskKind"]): string {
+  switch (kind) {
+    case "outline_generation":
+      return "構成案の生成";
+    case "script_generation":
+      return "台本の生成";
+    case "script_review":
+      return "台本の確認";
+    case "visual_search_intent":
+      return "ビジュアル候補の検索条件作成";
+    case "layout_review":
+      return "レイアウトの確認";
+    case "opencode":
+      return "コード生成";
+  }
 }
 
 function modifiedLabel(value: AiRunSearchItem["modified"]): string {
@@ -128,11 +145,11 @@ function RunRow({ item }: { readonly item: AiRunSearchItem }) {
         <strong>{item.projectId}</strong>
         <span className="ai-runs-cell-subtext">{item.runId}</span>
       </td>
-      <td>{item.taskKind}</td>
+      <td>{taskKindLabel(item.taskKind)}</td>
       <td>
         <span>{item.modelId ?? "未解決"}</span>
         <span className="ai-runs-cell-subtext">
-          応答: {item.responseModel ?? "—"}
+          応答モデル：{item.responseModel ?? "—"}
         </span>
       </td>
       <td>
@@ -143,7 +160,7 @@ function RunRow({ item }: { readonly item: AiRunSearchItem }) {
           {validationLabel(item.schemaValidation)}
         </span>
         <span className="ai-runs-cell-subtext">
-          error: {item.errorCode ?? "—"}
+          エラー：{item.errorCode ?? "—"}
         </span>
       </td>
       <td>
@@ -249,11 +266,10 @@ export function AiRunsPage() {
     <main className="page-shell ai-runs-page">
       <header className="page-header ai-runs-header">
         <div>
-          <p className="eyebrow">P6-03</p>
+          <p className="eyebrow">手順6-3</p>
           <h1>AI実行ログ</h1>
           <p>
-            複数プロジェクトの AI 実行と候補判断を検索します。モデル ID
-            は実行時に解決された値です。
+            複数プロジェクトで実行したAI処理と、その候補の採否を検索します。モデルIDは実際に実行されたモデルを示します。
           </p>
         </div>
         <Link className="button" to="/projects">
@@ -286,7 +302,7 @@ export function AiRunsPage() {
             />
           </div>
           <div className="form-field">
-            <label htmlFor="ai-runs-task-kind">task kind</label>
+            <label htmlFor="ai-runs-task-kind">実行内容</label>
             <select
               id="ai-runs-task-kind"
               value={draft.taskKind}
@@ -297,13 +313,13 @@ export function AiRunsPage() {
               <option value="">すべて</option>
               {aiRunTaskKinds.map((taskKind) => (
                 <option key={taskKind} value={taskKind}>
-                  {taskKind}
+                  {taskKindLabel(taskKind)}
                 </option>
               ))}
             </select>
           </div>
           <div className="form-field">
-            <label htmlFor="ai-runs-model-id">model ID</label>
+            <label htmlFor="ai-runs-model-id">使用モデルの識別子（任意）</label>
             <input
               id="ai-runs-model-id"
               type="text"
@@ -344,7 +360,7 @@ export function AiRunsPage() {
             </select>
           </div>
           <div className="form-field">
-            <label htmlFor="ai-runs-error-code">error code</label>
+            <label htmlFor="ai-runs-error-code">エラーコード（任意）</label>
             <input
               id="ai-runs-error-code"
               type="text"
@@ -374,7 +390,7 @@ export function AiRunsPage() {
             disabled={isExporting}
             onClick={() => void exportAppliedSearch()}
           >
-            {isExporting ? "エクスポート中…" : "JSON Linesをエクスポート"}
+            {isExporting ? "出力中…" : "検索結果をJSON Lines形式で出力"}
           </button>
         </div>
         {exportError !== null ? (
@@ -428,8 +444,7 @@ export function AiRunsPage() {
           </div>
 
           <p className="ai-runs-modified-note">
-            「修正あり」は、候補生成後に project revision
-            が進んだかを人間による修正の代理指標として表示しています。
+            「修正あり」は、候補生成後にプロジェクトの更新番号が進んだかを、人による修正の有無を推測する目安として表示しています。
           </p>
 
           {data.items.length === 0 ? (
@@ -446,14 +461,14 @@ export function AiRunsPage() {
                 <table className="ai-runs-table">
                   <thead>
                     <tr>
-                      <th scope="col">プロジェクト / run</th>
-                      <th scope="col">task kind</th>
-                      <th scope="col">model ID / 応答モデル</th>
-                      <th scope="col">結果 / 検証 / error</th>
-                      <th scope="col">キュー日時</th>
+                      <th scope="col">プロジェクト / 実行識別子</th>
+                      <th scope="col">実行内容</th>
+                      <th scope="col">モデル識別子 / 応答モデル</th>
+                      <th scope="col">結果 / 検証 / エラー</th>
+                      <th scope="col">実行待ち日時</th>
                       <th scope="col">応答時間</th>
                       <th scope="col">候補判断</th>
-                      <th scope="col">修正代理</th>
+                      <th scope="col">修正の有無</th>
                     </tr>
                   </thead>
                   <tbody>

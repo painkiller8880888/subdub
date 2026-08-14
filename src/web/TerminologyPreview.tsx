@@ -17,12 +17,14 @@ import {
 
 function getPreviewErrorMessage(error: unknown): string {
   if (error instanceof ApiClientError) {
-    return `${error.message} (error code: ${error.code})`;
+    return `${error.message}（エラーコード: ${error.code}）`;
   }
   if (error instanceof ZodError) {
-    return error.issues[0]?.message ?? "Please enter valid preview input.";
+    return (
+      error.issues[0]?.message ?? "プレビューする内容を正しく入力してください。"
+    );
   }
-  return "The terminology preview could not be completed.";
+  return "読み上げプレビューを実行できませんでした。";
 }
 
 export function TerminologyPreview({
@@ -109,7 +111,7 @@ export function TerminologyPreview({
       <form onSubmit={submitPreview}>
         <div className="form-field">
           <label htmlFor="terminology-preview-spoken-text">
-            読み上げる文章
+            読み上げる文章（確認したい台本の一節）
           </label>
           <textarea
             id="terminology-preview-spoken-text"
@@ -123,7 +125,7 @@ export function TerminologyPreview({
           />
         </div>
         <div className="form-field">
-          <label htmlFor="terminology-preview-mode">読み上げモード</label>
+          <label htmlFor="terminology-preview-mode">用語辞書の扱い</label>
           <select
             id="terminology-preview-mode"
             value={mode}
@@ -133,16 +135,16 @@ export function TerminologyPreview({
               setMode(event.target.value as TerminologyPreviewMode);
             }}
           >
-            <option value="dictionary">用語辞書を適用 (dictionary)</option>
-            <option value="literal">入力をそのまま読む (literal)</option>
+            <option value="dictionary">用語辞書を適用する</option>
+            <option value="literal">入力をそのまま読む</option>
           </select>
         </div>
         <fieldset disabled={exclusionsDisabled || previewMutation.isPending}>
-          <legend>除外する有効な用語</legend>
+          <legend>今回のプレビューで除外する用語</legend>
           <p className="field-hint">
             {exclusionsDisabled
-              ? "literal モードでは除外指定は結果に影響しません。選択値は保持されます。"
-              : "選択した用語はこのプレビューだけ除外します。"}
+              ? "入力をそのまま読む設定では、除外指定は結果に影響しません。選択状態は保持されます。"
+              : "選択した用語は、このプレビューに限って読み替えません。"}
           </p>
           {activeTermsLoading ? (
             <p className="status-message" role="status">

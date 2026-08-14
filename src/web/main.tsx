@@ -10,7 +10,7 @@ const queryClient = new QueryClient();
 const rootElement = document.getElementById("root");
 
 if (rootElement === null) {
-  throw new Error("The application root element was not found.");
+  throw new Error("アプリケーションの表示領域が見つかりません。");
 }
 
 createRoot(rootElement).render(

@@ -39,12 +39,12 @@ type VoiceAdjustmentEditorProps = {
 };
 
 const scalarLabels: Record<VoiceAdjustmentScalarKey, string> = {
-  speedScale: "話速",
+  speedScale: "話速（1.0が標準）",
   pitchScale: "音高",
-  intonationScale: "抑揚",
-  volumeScale: "音量",
-  prePhonemeLength: "文前無音",
-  postPhonemeLength: "文後無音"
+  intonationScale: "抑揚（1.0が標準）",
+  volumeScale: "音量（1.0が標準）",
+  prePhonemeLength: "文頭の無音",
+  postPhonemeLength: "文末の無音"
 };
 
 const moraLabels: Record<VoiceAdjustmentMoraKey, string> = {
@@ -206,7 +206,7 @@ export function VoiceAdjustmentEditor({
         aria-expanded={open}
         onClick={() => setOpen((current) => !current)}
       >
-        {open ? "音声調整を閉じる" : "音声を調整"}
+        {open ? "音声設定を閉じる" : "このセリフの音声を調整"}
       </button>
 
       {open ? (
@@ -333,7 +333,7 @@ export function VoiceAdjustmentEditor({
                       )
                     }
                   >
-                    アクセントを未編集queryへ戻す
+                    アクセントを元の読み上げ設定へ戻す
                   </button>
                   {editor.query.accent_phrases.map((phrase, phraseIndex) => (
                     <div
@@ -398,7 +398,7 @@ export function VoiceAdjustmentEditor({
                       )
                     }
                   >
-                    モーラ詳細を未編集queryへ戻す
+                    モーラの詳細を元の読み上げ設定へ戻す
                   </button>
                   {editor.query.accent_phrases.map((phrase, phraseIndex) => (
                     <fieldset

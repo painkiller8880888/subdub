@@ -14,17 +14,17 @@ describe("AI runs web route", () => {
     expect(pageSource).toContain("却下");
     expect(pageSource).toContain("未判断");
     expect(pageSource).toContain("判定不能");
-    expect(pageSource).toContain("project revision");
+    expect(pageSource).toContain("更新番号");
   });
 
   it("offers a JSON Lines export from the applied query with safe download handling", async () => {
     const pageSource = await fs.readFile("src/web/AiRunsPage.tsx", "utf8");
-    expect(pageSource).toContain("JSON Linesをエクスポート");
+    expect(pageSource).toContain("検索結果をJSON Lines形式で出力");
     expect(pageSource).toContain("buildAiRunExportQuery(searchQuery)");
     expect(pageSource).toContain("disabled={isExporting}");
     expect(pageSource).toContain("URL.createObjectURL(blob)");
     expect(pageSource).toContain("URL.revokeObjectURL(objectUrl)");
-    expect(pageSource).toContain("エクスポート中…");
+    expect(pageSource).toContain("出力中…");
     expect(pageSource).toContain("AI実行ログのエクスポートに失敗しました。");
   });
 });

@@ -33,7 +33,7 @@ describe("terminology preview UI state", () => {
           error: null
         })
       )
-    ).toContain("Run a preview");
+    ).toContain("プレビューを実行すると");
     expect(
       renderToStaticMarkup(
         createElement(TerminologyPreviewResultView, {
