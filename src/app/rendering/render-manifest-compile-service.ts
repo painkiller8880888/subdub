@@ -112,6 +112,40 @@ async function appendBgmMetadata(
   }
 }
 
+async function appendImageBackgroundMetadata(
+  metadata: RenderManifestAssetMetadata[],
+  workspaceRoot: string,
+  project: VideoProject
+): Promise<void> {
+  const projectRoot = path.resolve(
+    workspaceRoot,
+    "projects",
+    project.metadata.id
+  );
+  for (const section of project.script.sections) {
+    if (section.background.kind !== "image") {
+      continue;
+    }
+    const filePath = path.resolve(
+      projectRoot,
+      ...section.background.src.split("/")
+    );
+    if (!isPathInside(projectRoot, filePath)) {
+      continue;
+    }
+    try {
+      const contents = await readFile(filePath);
+      metadata.push({
+        path: section.background.src,
+        kind: "image",
+        sha256: createHash("sha256").update(contents).digest("hex")
+      });
+    } catch {
+      // Let the compiler report missing or unreadable background metadata.
+    }
+  }
+}
+
 async function assetMetadataForProject(
   workspaceRoot: string,
   project: VideoProject,
@@ -151,6 +185,8 @@ async function assetMetadataForProject(
       { includeDuration: true, includePageCount: false }
     );
   }
+
+  await appendImageBackgroundMetadata(metadata, workspaceRoot, project);
 
   for (const visual of snapshot) {
     for (const variant of visual.variants) {
