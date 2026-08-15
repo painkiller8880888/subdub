@@ -13,7 +13,10 @@ import {
   AssetRepository,
   type AssetProcessingKey
 } from "./asset-repository.js";
-import type { AssetMediaProcessingPort } from "./processing/types.js";
+import type {
+  AssetMediaAnalysis,
+  AssetMediaProcessingPort
+} from "./processing/types.js";
 
 export const DEFAULT_MAX_THUMBNAIL_EDGE_PX = 480;
 export const THUMBNAIL_TEMP_ROOT = "thumbnails-tmp" as const;
@@ -27,7 +30,9 @@ export type AssetProcessingServiceOptions = {
 };
 
 export type AssetProcessingOutcome =
-  { status: "processed" } | { status: "skipped" } | { status: "failed" };
+  | { status: "processed" }
+  | { status: "skipped" }
+  | { status: "failed" };
 
 function isErrnoCode(error: unknown, code: string): boolean {
   return (
@@ -79,6 +84,32 @@ function thumbnailFileNames(kind: AssetKind, count: number): string[] {
     );
   }
   return [kind === "photo" ? "image.png" : "frame.png"];
+}
+
+function isPositiveMetadataValue(value: number | null): value is number {
+  return value !== null && Number.isFinite(value) && value > 0;
+}
+
+function validateEditingAssetMetadata(
+  kind: AssetKind,
+  metadata: AssetMediaAnalysis
+): void {
+  if (
+    kind === "video" &&
+    (!isPositiveMetadataValue(metadata.width) ||
+      !isPositiveMetadataValue(metadata.height) ||
+      !isPositiveMetadataValue(metadata.durationMs))
+  ) {
+    throw new AssetProcessingError("PROCESSING_METADATA_FAILED");
+  }
+  if (
+    kind === "bgm" &&
+    (!isPositiveMetadataValue(metadata.durationMs) ||
+      metadata.width !== null ||
+      metadata.height !== null)
+  ) {
+    throw new AssetProcessingError("PROCESSING_METADATA_FAILED");
+  }
 }
 
 function toProcessingError(error: unknown): AssetProcessingError {
@@ -179,6 +210,7 @@ export class AssetProcessingService {
         kind: asset.kind,
         maxThumbnailEdgePx: this.maxThumbnailEdgePx
       });
+      validateEditingAssetMetadata(asset.kind, processed.metadata);
 
       const names = thumbnailFileNames(asset.kind, processed.thumbnails.length);
       tempRoot = `${THUMBNAIL_TEMP_ROOT}/${randomUUID().toLowerCase()}`;
