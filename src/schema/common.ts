@@ -110,7 +110,7 @@ export const commonDisplaySchema = strictObject({
   annotations: z.array(staticAnnotationSchema)
 });
 
-export const videoDisplaySchema = strictObject({
+const videoDisplayFields = {
   kind: z.literal("video"),
   fit: fitSchema,
   crop: cropSchema,
@@ -120,9 +120,13 @@ export const videoDisplaySchema = strictObject({
   annotations: z.array(staticAnnotationSchema),
   startMs: z.number().finite().int().nonnegative(),
   endMs: z.number().finite().int().nonnegative(),
-  playbackRate: positiveNumberSchema,
-  muted: z.boolean()
-}).superRefine((display, ctx) => {
+  playbackRate: positiveNumberSchema
+};
+
+function validateVideoDisplayRange(
+  display: { startMs: number; endMs: number },
+  ctx: z.RefinementCtx
+): void {
   if (display.endMs <= display.startMs) {
     ctx.addIssue({
       code: "custom",
@@ -130,7 +134,19 @@ export const videoDisplaySchema = strictObject({
       message: "endMs must be greater than startMs"
     });
   }
-});
+}
+
+/** The project-side video display used by VideoProject 1.2.0. */
+export const videoDisplaySchema = strictObject({
+  ...videoDisplayFields,
+  volume: unitIntervalSchema
+}).superRefine(validateVideoDisplayRange);
+
+/** Legacy VideoProject 1.0.0/1.1.0 input boundary. */
+export const legacyVideoDisplaySchema = strictObject({
+  ...videoDisplayFields,
+  muted: z.boolean()
+}).superRefine(validateVideoDisplayRange);
 
 export const imageDisplaySchema = strictObject({
   kind: z.literal("photo"),
@@ -159,6 +175,12 @@ export const displaySchema = z.discriminatedUnion("kind", [
   documentDisplaySchema
 ]);
 
+export const legacyDisplaySchema = z.discriminatedUnion("kind", [
+  legacyVideoDisplaySchema,
+  imageDisplaySchema,
+  documentDisplaySchema
+]);
+
 export const voiceSchema = strictObject({
   speedScale: finiteNumberSchema,
   pitchScale: finiteNumberSchema,
@@ -179,7 +201,9 @@ export type Position = z.infer<typeof positionSchema>;
 export type StaticAnnotation = z.infer<typeof staticAnnotationSchema>;
 export type CommonDisplay = z.infer<typeof commonDisplaySchema>;
 export type VideoDisplay = z.infer<typeof videoDisplaySchema>;
+export type LegacyVideoDisplay = z.infer<typeof legacyVideoDisplaySchema>;
 export type ImageDisplay = z.infer<typeof imageDisplaySchema>;
 export type DocumentDisplay = z.infer<typeof documentDisplaySchema>;
 export type Display = z.infer<typeof displaySchema>;
+export type LegacyDisplay = z.infer<typeof legacyDisplaySchema>;
 export type Voice = z.infer<typeof voiceSchema>;

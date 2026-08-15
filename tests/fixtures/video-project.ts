@@ -10,9 +10,11 @@ const DOCUMENT_CHECKSUM =
   "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd";
 const AUDIO_CHECKSUM =
   "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee";
+const BGM_CHECKSUM =
+  "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff";
 
 export const videoProjectFixture = {
-  schemaVersion: "1.1.0",
+  schemaVersion: "1.2.0",
   revision: 0,
   metadata: {
     id: "manual-video-project",
@@ -344,7 +346,7 @@ export const videoProjectFixture = {
           startMs: 0,
           endMs: 3000,
           playbackRate: 1,
-          muted: true
+          volume: 0
         }
       },
       {
@@ -385,26 +387,6 @@ export const videoProjectFixture = {
     ]
   },
   audio: {
-    sectionBgms: [
-      {
-        id: "bgm-intro",
-        sectionId: "section-intro",
-        path: "audio/bgm-intro.ogg",
-        volume: 0.25,
-        loop: true,
-        fadeInMs: 0,
-        fadeOutMs: 300
-      },
-      {
-        id: "bgm-main",
-        sectionId: "section-main",
-        path: "audio/bgm-main.ogg",
-        volume: 0.2,
-        loop: true,
-        fadeInMs: 300,
-        fadeOutMs: 300
-      }
-    ],
     soundEffects: [
       {
         id: "effect-confirm",
@@ -428,26 +410,26 @@ export const videoProjectFixture = {
       }
     ]
   },
-  inserts: {
-    opening: {
-      id: "insert-opening",
-      kind: "placeholder",
-      slot: "opening",
-      durationMs: 2000
-    },
-    ending: {
-      id: "insert-ending",
-      kind: "placeholder",
-      slot: "ending",
-      durationMs: 2000
-    },
-    eyeCatches: [
+  edit: {
+    videoElements: [],
+    sectionBgms: [
       {
-        id: "insert-eye-main",
-        kind: "placeholder",
-        slot: "eye_catch",
-        beforeSectionId: "section-main",
-        durationMs: 2000
+        id: "bgm-intro",
+        sectionId: "section-intro",
+        assetId: "asset-bgm-intro",
+        assetVersion: 1,
+        assetChecksum: BGM_CHECKSUM,
+        projectMediaPath: "media/bgm-intro.mp3",
+        volume: 0.25
+      },
+      {
+        id: "bgm-main",
+        sectionId: "section-main",
+        assetId: "asset-bgm-main",
+        assetVersion: 1,
+        assetChecksum: BGM_CHECKSUM,
+        projectMediaPath: "media/bgm-main.mp3",
+        volume: 0.2
       }
     ]
   },

@@ -5,6 +5,7 @@ import {
   backgroundDefinitionSchema,
   displaySchema,
   expressionSchema,
+  legacyDisplaySchema,
   sectionRoleSchema,
   voiceOverridesSchema,
   voiceSchema
@@ -13,6 +14,7 @@ import {
   finiteNumberSchema,
   idSchema,
   isoUtcDateTimeSchema,
+  nonNegativeIntegerSchema,
   positiveIntegerSchema,
   relativePosixPathSchema,
   sha256Schema,
@@ -202,13 +204,71 @@ export const visualAssignmentSchema = strictObject({
   display: displaySchema
 });
 
+const legacyVisualAssignmentSchema = strictObject({
+  id: idSchema,
+  startLineId: idSchema,
+  endLineId: idSchema,
+  assetId: idSchema,
+  assetChecksum: sha256Schema,
+  projectMediaPath: relativePosixPathSchema,
+  display: legacyDisplaySchema
+});
+
 export const visualPlanSchema = strictObject({
   status: approvalStatusSchema,
   suggestionRunIds: z.array(idSchema),
   assignments: z.array(visualAssignmentSchema)
 });
 
-export const sectionBgmSchema = strictObject({
+const legacyVisualPlanSchema = strictObject({
+  status: approvalStatusSchema,
+  suggestionRunIds: z.array(idSchema),
+  assignments: z.array(legacyVisualAssignmentSchema)
+});
+
+const projectAssetSnapshotFields = {
+  assetId: idSchema,
+  assetVersion: positiveIntegerSchema,
+  assetChecksum: sha256Schema,
+  projectMediaPath: relativePosixPathSchema
+};
+
+export const projectAssetSnapshotSchema = strictObject(
+  projectAssetSnapshotFields
+);
+
+export const editVideoPlacementSchema = z.discriminatedUnion("kind", [
+  strictObject({ kind: z.literal("before_first_section") }),
+  strictObject({
+    kind: z.literal("before_section"),
+    sectionId: idSchema,
+    order: nonNegativeIntegerSchema
+  }),
+  strictObject({ kind: z.literal("after_last_section") })
+]);
+
+export const editVideoElementSchema = strictObject({
+  ...projectAssetSnapshotFields,
+  id: idSchema,
+  role: z.enum(["intro", "outro", "cutin"]),
+  placement: editVideoPlacementSchema,
+  volume: unitIntervalSchema
+});
+
+export const sectionBgmAssignmentSchema = strictObject({
+  ...projectAssetSnapshotFields,
+  id: idSchema,
+  sectionId: idSchema,
+  volume: unitIntervalSchema
+});
+
+export const editPlanSchema = strictObject({
+  videoElements: z.array(editVideoElementSchema),
+  sectionBgms: z.array(sectionBgmAssignmentSchema)
+});
+
+/** `1.1.0` compatibility input only. */
+export const legacySectionBgmSchema = strictObject({
   id: idSchema,
   sectionId: idSchema,
   path: relativePosixPathSchema,
@@ -217,6 +277,9 @@ export const sectionBgmSchema = strictObject({
   fadeInMs: finiteNumberSchema.int().nonnegative(),
   fadeOutMs: finiteNumberSchema.int().nonnegative()
 });
+
+/** @deprecated Use legacySectionBgmSchema for 1.1.0 compatibility input. */
+export const sectionBgmSchema = legacySectionBgmSchema;
 
 export const soundEffectSchema = strictObject({
   id: idSchema,
@@ -232,7 +295,11 @@ export const soundEffectSchema = strictObject({
 export const DEFAULT_SOUND_EFFECT_VOLUME = 0.2 as const;
 
 export const audioPlanSchema = strictObject({
-  sectionBgms: z.array(sectionBgmSchema),
+  soundEffects: z.array(soundEffectSchema)
+});
+
+export const legacyAudioPlanSchema = strictObject({
+  sectionBgms: z.array(legacySectionBgmSchema),
   soundEffects: z.array(soundEffectSchema)
 });
 
@@ -283,7 +350,7 @@ export const thumbnailPlanSchema = strictObject({
 });
 
 const videoProjectBaseSchema = strictObject({
-  schemaVersion: z.literal("1.1.0"),
+  schemaVersion: z.literal("1.2.0"),
   revision: finiteNumberSchema.int().nonnegative(),
   metadata: projectMetadataSchema,
   source: projectSourceSchema,
@@ -294,9 +361,27 @@ const videoProjectBaseSchema = strictObject({
   script: scriptSchema,
   visuals: visualPlanSchema,
   audio: audioPlanSchema,
+  edit: editPlanSchema,
+  thumbnail: thumbnailPlanSchema
+});
+
+const legacyVideoProjectV11BaseSchema = strictObject({
+  schemaVersion: z.literal("1.1.0"),
+  revision: finiteNumberSchema.int().nonnegative(),
+  metadata: projectMetadataSchema,
+  source: projectSourceSchema,
+  brief: projectBriefSchema,
+  aiSettings: aiSettingsSchema,
+  characters: z.array(characterSchema).length(2),
+  outline: outlineSchema,
+  script: scriptSchema,
+  visuals: legacyVisualPlanSchema,
+  audio: legacyAudioPlanSchema,
   inserts: insertPlanSchema,
   thumbnail: thumbnailPlanSchema
 });
+
+export const legacyVideoProjectV11Schema = legacyVideoProjectV11BaseSchema;
 
 /**
  * The 1.0.0 input boundary is intentionally kept strict so that a project
@@ -316,7 +401,7 @@ const legacyScriptSchema = scriptSchema.extend({
   sections: z.array(legacyScriptSectionSchema)
 });
 
-export const legacyVideoProjectSchema = videoProjectBaseSchema.extend({
+export const legacyVideoProjectSchema = legacyVideoProjectV11BaseSchema.extend({
   schemaVersion: z.literal("1.0.0"),
   characters: z.array(legacyCharacterSchema).length(2),
   script: legacyScriptSchema
@@ -607,9 +692,107 @@ export const videoProjectSchema = videoProjectBaseSchema.superRefine(
     );
     addDuplicateIssues(annotationEntries, ctx, "annotation id");
 
-    const sectionBgmEntries = project.audio.sectionBgms.map((bgm, index) => ({
+    const scriptSectionIds = new Set(
+      project.script.sections.map((section) => section.id)
+    );
+    const firstScriptSectionId = project.script.sections[0]?.id;
+
+    const videoElementEntries = project.edit.videoElements.map(
+      (element, index) => ({
+        element,
+        path: ["edit", "videoElements", index]
+      })
+    );
+    addDuplicateIssues(
+      videoElementEntries.map((entry) => ({
+        value: entry.element.id,
+        path: [...entry.path, "id"]
+      })),
+      ctx,
+      "edit video element id"
+    );
+
+    const introElements = videoElementEntries.filter(
+      (entry) => entry.element.role === "intro"
+    );
+    const outroElements = videoElementEntries.filter(
+      (entry) => entry.element.role === "outro"
+    );
+    if (introElements.length > 1) {
+      addReferenceIssue(
+        ctx,
+        [...introElements[1]!.path, "role"],
+        "edit plan can contain at most one intro"
+      );
+    }
+    if (outroElements.length > 1) {
+      addReferenceIssue(
+        ctx,
+        [...outroElements[1]!.path, "role"],
+        "edit plan can contain at most one outro"
+      );
+    }
+
+    const cutinOrdersBySection = new Map<string, Set<number>>();
+    for (const entry of videoElementEntries) {
+      const placement = entry.element.placement;
+      if (entry.element.role === "intro") {
+        if (placement.kind !== "before_first_section") {
+          addReferenceIssue(
+            ctx,
+            [...entry.path, "placement"],
+            "intro must be placed before the first section"
+          );
+        }
+        continue;
+      }
+      if (entry.element.role === "outro") {
+        if (placement.kind !== "after_last_section") {
+          addReferenceIssue(
+            ctx,
+            [...entry.path, "placement"],
+            "outro must be placed after the last section"
+          );
+        }
+        continue;
+      }
+
+      if (placement.kind !== "before_section") {
+        addReferenceIssue(
+          ctx,
+          [...entry.path, "placement"],
+          "cutin must be placed before a section"
+        );
+        continue;
+      }
+      if (!scriptSectionIds.has(placement.sectionId)) {
+        addReferenceIssue(
+          ctx,
+          [...entry.path, "placement", "sectionId"],
+          "cutin sectionId must reference a script section"
+        );
+      } else if (placement.sectionId === firstScriptSectionId) {
+        addReferenceIssue(
+          ctx,
+          [...entry.path, "placement", "sectionId"],
+          "cutin cannot be placed before the first script section"
+        );
+      }
+      const orders = cutinOrdersBySection.get(placement.sectionId) ?? new Set();
+      if (orders.has(placement.order)) {
+        addReferenceIssue(
+          ctx,
+          [...entry.path, "placement", "order"],
+          "cutin order must be unique within a section boundary"
+        );
+      }
+      orders.add(placement.order);
+      cutinOrdersBySection.set(placement.sectionId, orders);
+    }
+
+    const sectionBgmEntries = project.edit.sectionBgms.map((bgm, index) => ({
       bgm,
-      path: ["audio", "sectionBgms", index]
+      path: ["edit", "sectionBgms", index]
     }));
     addDuplicateIssues(
       sectionBgmEntries.map((entry) => ({
@@ -620,9 +803,6 @@ export const videoProjectSchema = videoProjectBaseSchema.superRefine(
       "section BGM id"
     );
     const seenBgmSections = new Set<string>();
-    const scriptSectionIds = new Set(
-      project.script.sections.map((section) => section.id)
-    );
     for (const entry of sectionBgmEntries) {
       if (!scriptSectionIds.has(entry.bgm.sectionId)) {
         addReferenceIssue(
@@ -664,39 +844,6 @@ export const videoProjectSchema = videoProjectBaseSchema.superRefine(
       }
     }
 
-    const insertEntries = [
-      { insert: project.inserts.opening, path: ["inserts", "opening"] },
-      { insert: project.inserts.ending, path: ["inserts", "ending"] },
-      ...project.inserts.eyeCatches.map((insert, index) => ({
-        insert,
-        path: ["inserts", "eyeCatches", index]
-      }))
-    ];
-    addDuplicateIssues(
-      insertEntries.map((entry) => ({
-        value: entry.insert.id,
-        path: [...entry.path, "id"]
-      })),
-      ctx,
-      "insert id"
-    );
-    const firstScriptSectionId = project.script.sections[0]?.id;
-    for (const [index, eyeCatch] of project.inserts.eyeCatches.entries()) {
-      if (!scriptSectionIds.has(eyeCatch.beforeSectionId)) {
-        addReferenceIssue(
-          ctx,
-          ["inserts", "eyeCatches", index, "beforeSectionId"],
-          "eye catch must reference a script section"
-        );
-      } else if (eyeCatch.beforeSectionId === firstScriptSectionId) {
-        addReferenceIssue(
-          ctx,
-          ["inserts", "eyeCatches", index, "beforeSectionId"],
-          "eye catch cannot be placed before the first script section"
-        );
-      }
-    }
-
     if (
       project.thumbnail.characterId !== null &&
       !characterIds.has(project.thumbnail.characterId)
@@ -731,7 +878,16 @@ export type ScriptSection = z.infer<typeof scriptSectionSchema>;
 export type Script = z.infer<typeof scriptSchema>;
 export type VisualAssignment = z.infer<typeof visualAssignmentSchema>;
 export type VisualPlan = z.infer<typeof visualPlanSchema>;
-export type SectionBgm = z.infer<typeof sectionBgmSchema>;
+export type ProjectAssetSnapshot = z.infer<typeof projectAssetSnapshotSchema>;
+export type EditVideoPlacement = z.infer<typeof editVideoPlacementSchema>;
+export type EditVideoElement = z.infer<typeof editVideoElementSchema>;
+export type SectionBgmAssignment = z.infer<
+  typeof sectionBgmAssignmentSchema
+>;
+export type EditPlan = z.infer<typeof editPlanSchema>;
+export type LegacySectionBgm = z.infer<typeof legacySectionBgmSchema>;
+/** @deprecated Use SectionBgmAssignment for current projects. */
+export type SectionBgm = LegacySectionBgm;
 export type SoundEffect = z.infer<typeof soundEffectSchema>;
 export type SoundEffectDraft = Omit<SoundEffect, "volume"> & {
   volume?: number;

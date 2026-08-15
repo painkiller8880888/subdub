@@ -24,6 +24,60 @@ function clone(value: unknown): unknown {
   return JSON.parse(JSON.stringify(value));
 }
 
+function legacyVideoProjectV11(): Record<string, unknown> {
+  const legacy = clone(videoProjectFixture) as Record<string, unknown>;
+  const edit = legacy.edit as {
+    sectionBgms: Array<{
+      id: string;
+      sectionId: string;
+      projectMediaPath: string;
+      volume: number;
+    }>;
+  };
+  const audio = legacy.audio as { soundEffects: unknown[] };
+  legacy.schemaVersion = "1.1.0";
+  legacy.audio = {
+    sectionBgms: edit.sectionBgms.map((bgm) => ({
+      id: bgm.id,
+      sectionId: bgm.sectionId,
+      path: bgm.projectMediaPath,
+      volume: bgm.volume,
+      loop: true,
+      fadeInMs: 0,
+      fadeOutMs: 0
+    })),
+    soundEffects: audio.soundEffects
+  };
+  legacy.inserts = {
+    opening: {
+      id: "insert-opening",
+      kind: "placeholder",
+      slot: "opening",
+      durationMs: 2000
+    },
+    ending: {
+      id: "insert-ending",
+      kind: "placeholder",
+      slot: "ending",
+      durationMs: 2000
+    },
+    eyeCatches: []
+  };
+  delete legacy.edit;
+
+  const visuals = legacy.visuals as {
+    assignments: Array<{ display: Record<string, unknown> }>;
+  };
+  for (const assignment of visuals.assignments) {
+    if (assignment.display.kind !== "video") {
+      continue;
+    }
+    assignment.display.muted = assignment.display.volume === 0;
+    delete assignment.display.volume;
+  }
+  return legacy;
+}
+
 function asRepositoryError(error: unknown): ProjectRepositoryError {
   if (error instanceof ProjectRepositoryError) {
     return error;
@@ -77,6 +131,14 @@ describe("ProjectRepository", () => {
   });
 
   async function writeProject(project: VideoProject): Promise<void> {
+    await fs.writeFile(
+      projectFile,
+      `${JSON.stringify(project, null, 2)}\n`,
+      "utf8"
+    );
+  }
+
+  async function writeRawProject(project: unknown): Promise<void> {
     await fs.writeFile(
       projectFile,
       `${JSON.stringify(project, null, 2)}\n`,
@@ -329,6 +391,78 @@ describe("ProjectRepository", () => {
     expect(await listTemporaryFiles()).toEqual([]);
     expectSafeExternalError(readError);
     expectSafeExternalError(saveError);
+  });
+
+  it("persists migration diagnostics before replacing a legacy project", async () => {
+    const legacy = legacyVideoProjectV11();
+    legacy.revision = 7;
+    await writeRawProject(legacy);
+    const before = await readProjectBytes();
+    const repository = new ProjectRepository(workspaceRoot);
+
+    const migrated = await repository.read(projectId);
+    expect(migrated.schemaVersion).toBe("1.2.0");
+    expect(migrated.revision).toBe(7);
+    expect(migrated.edit).toEqual({ videoElements: [], sectionBgms: [] });
+    expect(migrated.audio).not.toHaveProperty("sectionBgms");
+
+    const migrationLogPath = path.join(
+      projectDirectory,
+      "logs",
+      "migration-log.jsonl"
+    );
+    const migrationLog = await fs.readFile(migrationLogPath, "utf8");
+    const entries = migrationLog
+      .trimEnd()
+      .split("\n")
+      .map((line) => JSON.parse(line) as Record<string, unknown>);
+    expect(entries).toHaveLength(2);
+    expect(entries[0]).toMatchObject({
+      fromSchemaVersion: "1.1.0",
+      toSchemaVersion: "1.2.0",
+      kind: "unresolved_legacy_bgm",
+      sectionId: "section-intro",
+      legacyPath: "media/bgm-intro.mp3",
+      legacyVolume: 0.25
+    });
+
+    const migratedBytes = await readProjectBytes();
+    expect(migratedBytes).not.toEqual(before);
+    expect(JSON.parse(migratedBytes.toString("utf8")).schemaVersion).toBe(
+      "1.2.0"
+    );
+
+    await repository.read(projectId);
+    expect(await fs.readFile(migrationLogPath, "utf8")).toBe(migrationLog);
+  });
+
+  it("keeps the legacy project untouched when migration diagnostics cannot be written", async () => {
+    await writeRawProject(legacyVideoProjectV11());
+    const before = await readProjectBytes();
+    const repository = new ProjectRepository({
+      workspaceRoot,
+      fileSystem: {
+        writeFile: async (filePath, contents) => {
+          if (path.basename(filePath).startsWith("migration-log.jsonl.")) {
+            throw new Error("injected migration log write failure");
+          }
+          await fs.writeFile(filePath, contents, {
+            encoding: "utf8",
+            flag: "wx"
+          });
+        }
+      }
+    });
+
+    const error = await expectRepositoryError(
+      () => repository.read(projectId),
+      "PROJECT_MIGRATION_LOG_WRITE_FAILED",
+      500
+    );
+
+    expect(await readProjectBytes()).toEqual(before);
+    expect(await listTemporaryFiles()).toEqual([]);
+    expectSafeExternalError(error);
   });
 
   it("reports write failures without calling rename or changing the original", async () => {

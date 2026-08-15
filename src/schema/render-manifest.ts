@@ -2,15 +2,19 @@ import { z } from "zod";
 
 import {
   backgroundDefinitionSchema,
+  cropSchema,
   documentDisplaySchema,
   expressionSchema,
+  fitSchema,
   imageDisplaySchema,
-  videoDisplaySchema
+  positionSchema,
+  staticAnnotationSchema
 } from "./common.js";
 import {
   idSchema,
   nonNegativeIntegerSchema,
   positiveIntegerSchema,
+  positiveNumberSchema,
   relativePosixPathSchema,
   sha256Schema,
   strictObject,
@@ -81,6 +85,29 @@ export const renderCharacterVariantSchema = z.discriminatedUnion(
   ]
 );
 
+/** Frozen RenderManifest 2.2.0 video display contract. */
+export const legacyRenderVideoDisplayV22Schema = strictObject({
+  kind: z.literal("video"),
+  fit: fitSchema,
+  crop: cropSchema,
+  scale: positiveNumberSchema,
+  position: positionSchema,
+  prioritizeVisual: z.boolean(),
+  annotations: z.array(staticAnnotationSchema),
+  startMs: nonNegativeIntegerSchema,
+  endMs: nonNegativeIntegerSchema,
+  playbackRate: positiveNumberSchema,
+  muted: z.boolean()
+}).superRefine((display, ctx) => {
+  if (display.endMs <= display.startMs) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["endMs"],
+      message: "endMs must be greater than startMs"
+    });
+  }
+});
+
 const renderVisualFields = {
   id: idSchema,
   from: nonNegativeIntegerSchema,
@@ -91,7 +118,7 @@ const renderVisualFields = {
 export const renderVideoSchema = strictObject({
   ...renderVisualFields,
   kind: z.literal("video"),
-  display: videoDisplaySchema
+  display: legacyRenderVideoDisplayV22Schema
 });
 
 export const renderPhotoSchema = strictObject({
@@ -610,6 +637,9 @@ export type RenderLine = z.infer<typeof renderLineSchema>;
 export type RenderCharacter = z.infer<typeof renderCharacterSchema>;
 export type RenderCharacterVariant = z.infer<
   typeof renderCharacterVariantSchema
+>;
+export type LegacyRenderVideoDisplayV22 = z.infer<
+  typeof legacyRenderVideoDisplayV22Schema
 >;
 export type RenderVisual = z.infer<typeof renderVisualSchema>;
 export type RenderBackground = z.infer<typeof renderBackgroundSchema>;

@@ -49,6 +49,26 @@ describe("renderManifestSchema", () => {
     expect(result.success).toBe(true);
   });
 
+  it("keeps the project volume field separate from the frozen muted field", () => {
+    const legacy = clone(renderManifestFixture);
+    const legacyDisplay = legacy.visuals[0]?.display;
+    if (legacyDisplay?.kind !== "video") {
+      throw new Error("fixture must contain a video display");
+    }
+    expect(legacyDisplay.muted).toBe(true);
+    expect(renderManifestSchema.safeParse(legacy).success).toBe(true);
+
+    const projectDisplay = clone(renderManifestFixture).visuals[0]?.display;
+    if (projectDisplay?.kind !== "video") {
+      throw new Error("fixture must contain a video display");
+    }
+    Reflect.deleteProperty(projectDisplay, "muted");
+    (projectDisplay as unknown as Record<string, unknown>).volume = 0;
+    const projectShape = clone(renderManifestFixture);
+    projectShape.visuals[0]!.display = projectDisplay;
+    expectInvalid(projectShape, ["visuals", 0, "display"]);
+  });
+
   it("requires resolved character display metadata and positive lip sync periods", () => {
     const invalidToken = clone(renderManifestFixture);
     (invalidToken.characters[0] as unknown as { themeColorToken: string }).themeColorToken =

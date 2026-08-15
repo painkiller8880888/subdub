@@ -32,7 +32,7 @@ describe("visual assignment editor helpers", () => {
       startMs: 0,
       endMs: 1200,
       playbackRate: 1,
-      muted: true,
+      volume: 0,
       annotations: []
     });
 

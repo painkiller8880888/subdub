@@ -639,9 +639,9 @@ function VisualAssignmentEditor({
             <label className="checkbox-field">
               <input
                 type="checkbox"
-                checked={display.muted}
+                checked={display.volume === 0}
                 onChange={(event) =>
-                  updateDisplay({ muted: event.target.checked })
+                  updateDisplay({ volume: event.target.checked ? 0 : 1 })
                 }
               />
               音声を消す

@@ -29,6 +29,7 @@ import {
   type RenderManifest,
   type RenderSoundEffect,
   type RenderVisual,
+  type Display,
   videoProjectSchema
 } from "../../schema/index.js";
 import {
@@ -83,6 +84,7 @@ export const RENDER_MANIFEST_ERROR_CODE = {
   assetDurationMissing: "ASSET_DURATION_MISSING",
   assetDurationInvalid: "ASSET_DURATION_INVALID",
   assetRangeInvalid: "ASSET_RANGE_INVALID",
+  legacyVideoVolumeUnsupported: "LEGACY_MANIFEST_VIDEO_VOLUME_UNREPRESENTABLE",
   assetPageCountMissing: "ASSET_PAGE_COUNT_MISSING",
   visualRangeInvalid: "VISUAL_RANGE_INVALID",
   fadeRangeInvalid: "AUDIO_FADE_RANGE_INVALID",
@@ -933,6 +935,41 @@ function orderedVisualDisplay(
   };
 }
 
+function toLegacyRenderDisplayV22(
+  display: Display,
+  diagnostics: RenderManifestDiagnostic[],
+  path: ReadonlyArray<string | number>,
+  assignmentId: string
+): RenderVisual["display"] {
+  if (display.kind !== "video") {
+    return display;
+  }
+
+  if (display.volume !== 0 && display.volume !== 1) {
+    addDiagnostic(
+      diagnostics,
+      RENDER_MANIFEST_ERROR_CODE.legacyVideoVolumeUnsupported,
+      [...path, "volume"],
+      "RenderManifest 2.2.0 cannot represent a non-binary video volume",
+      { assignmentId }
+    );
+  }
+
+  return {
+    kind: display.kind,
+    fit: display.fit,
+    crop: display.crop,
+    scale: display.scale,
+    position: display.position,
+    prioritizeVisual: display.prioritizeVisual,
+    annotations: display.annotations,
+    startMs: display.startMs,
+    endMs: display.endMs,
+    playbackRate: display.playbackRate,
+    muted: display.volume === 0
+  };
+}
+
 function orderedBackground(
   background: RenderBackground["background"]
 ): RenderBackground["background"] {
@@ -1398,15 +1435,15 @@ export function compileRenderManifest(
     }
   }
 
-  for (const [bgmIndex, bgm] of project.audio.sectionBgms.entries()) {
+  for (const [bgmIndex, bgm] of project.edit.sectionBgms.entries()) {
     const asset = requireAsset(
       assetLookup,
-      bgm.path,
+      bgm.projectMediaPath,
       ["audio", "bgm"],
       diagnostics,
-      ["audio", "sectionBgms", bgmIndex, "path"],
-      { sectionId: bgm.sectionId, assetPath: bgm.path },
-      undefined,
+      ["edit", "sectionBgms", bgmIndex, "projectMediaPath"],
+      { sectionId: bgm.sectionId, assetPath: bgm.projectMediaPath },
+      bgm.assetChecksum,
       true
     );
     if (asset !== undefined) {
@@ -1681,36 +1718,6 @@ export function compileRenderManifest(
     );
     sectionRanges = calculateSectionRanges(lineRanges);
 
-    const sectionRangeBySectionId = new Map(
-      sectionRanges.map((range) => [range.sectionId, range])
-    );
-    for (const [bgmIndex, bgm] of project.audio.sectionBgms.entries()) {
-      const sectionRange = sectionRangeBySectionId.get(bgm.sectionId);
-      if (sectionRange === undefined) {
-        continue;
-      }
-      const fadeInFrames = msToFrames(
-        bgm.fadeInMs,
-        project.metadata.outputSettings.fps
-      );
-      const fadeOutFrames = msToFrames(
-        bgm.fadeOutMs,
-        project.metadata.outputSettings.fps
-      );
-      if (
-        fadeInFrames > sectionRange.durationInFrames ||
-        fadeOutFrames > sectionRange.durationInFrames
-      ) {
-        addDiagnostic(
-          diagnostics,
-          RENDER_MANIFEST_ERROR_CODE.fadeRangeInvalid,
-          ["audio", "sectionBgms", bgmIndex],
-          "BGM fade must fit within the section timeline",
-          { sectionId: bgm.sectionId }
-        );
-      }
-    }
-
     let visualRangeError = false;
     for (const [
       assignmentIndex,
@@ -1762,37 +1769,10 @@ export function compileRenderManifest(
   const sectionIndexById = new Map(
     project.script.sections.map((section, index) => [section.id, index])
   );
+  // RenderManifest 2.2.0 is a frozen compatibility output. ED-08 will map
+  // current EditPlan video elements to real inserts; until then the legacy
+  // output keeps only its historical fixed opening/ending placeholders.
   const eyeCatches: EyeCatchEntry[] = [];
-  const seenEyeCatchSections = new Set<string>();
-  for (const [inputIndex, eyeCatch] of project.inserts.eyeCatches.entries()) {
-    const sectionIndex = sectionIndexById.get(eyeCatch.beforeSectionId);
-    if (sectionIndex === undefined) {
-      continue;
-    }
-    if (seenEyeCatchSections.has(eyeCatch.beforeSectionId)) {
-      addDiagnostic(
-        diagnostics,
-        RENDER_MANIFEST_ERROR_CODE.visualRangeInvalid,
-        ["inserts", "eyeCatches", inputIndex, "beforeSectionId"],
-        "at most one eye catch may be placed before a section",
-        { sectionId: eyeCatch.beforeSectionId }
-      );
-    }
-    seenEyeCatchSections.add(eyeCatch.beforeSectionId);
-    eyeCatches.push({
-      inputIndex,
-      id: eyeCatch.id,
-      beforeSectionId: eyeCatch.beforeSectionId,
-      sectionIndex,
-      label: eyeCatch.beforeSectionId
-    });
-  }
-  eyeCatches.sort((left, right) => {
-    const sectionDifference = left.sectionIndex - right.sectionIndex;
-    return sectionDifference === 0
-      ? left.inputIndex - right.inputIndex
-      : sectionDifference;
-  });
 
   if (
     diagnostics.length > 0 ||
@@ -1804,12 +1784,9 @@ export function compileRenderManifest(
   }
 
   const fps = project.metadata.outputSettings.fps;
-  const openingFrames = msToFrames(project.inserts.opening.durationMs, fps);
-  const endingFrames = msToFrames(project.inserts.ending.durationMs, fps);
-  const eyeCatchFrames =
-    eyeCatches.length > 0
-      ? msToFrames(project.inserts.eyeCatches[0]?.durationMs ?? 2000, fps)
-      : msToFrames(2000, fps);
+  const openingFrames = msToFrames(2000, fps);
+  const endingFrames = msToFrames(2000, fps);
+  const eyeCatchFrames = msToFrames(2000, fps);
   const eyeCatchSectionIndices = eyeCatches.map(
     ({ sectionIndex }) => sectionIndex
   );
@@ -1903,10 +1880,20 @@ export function compileRenderManifest(
   const assignmentById = new Map(
     project.visuals.assignments.map((assignment) => [assignment.id, assignment])
   );
+  const assignmentIndexById = new Map(
+    project.visuals.assignments.map((assignment, index) => [
+      assignment.id,
+      index
+    ])
+  );
   const visualValues = visualRanges.map((range) => {
     const assignment = assignmentById.get(range.id);
     if (assignment === undefined) {
       throw new Error(`visual assignment is missing: ${range.id}`);
+    }
+    const assignmentIndex = assignmentIndexById.get(range.id);
+    if (assignmentIndex === undefined) {
+      throw new Error(`visual assignment index is missing: ${range.id}`);
     }
     const sectionIndex = lineIndexById.get(
       assignment.startLineId
@@ -1926,7 +1913,12 @@ export function compileRenderManifest(
       durationInFrames: range.durationInFrames,
       kind: assignment.display.kind,
       src: assignment.projectMediaPath,
-      display: assignment.display
+      display: toLegacyRenderDisplayV22(
+        assignment.display,
+        diagnostics,
+        ["visuals", "assignments", assignmentIndex, "display"],
+        assignment.id
+      )
     } as RenderVisual;
   });
 
@@ -1951,7 +1943,7 @@ export function compileRenderManifest(
   });
 
   const renderAudioTracks = stableTimelineSort(
-    project.audio.sectionBgms.map((bgm, inputIndex) => {
+    project.edit.sectionBgms.map((bgm, inputIndex) => {
       const range = sectionRangeById.get(bgm.sectionId);
       const sectionIndex = sectionIndexById.get(bgm.sectionId);
       if (range === undefined || sectionIndex === undefined) {
@@ -1970,11 +1962,11 @@ export function compileRenderManifest(
             eyeCatchFrames
           ),
           durationInFrames: range.durationInFrames,
-          src: bgm.path,
+          src: bgm.projectMediaPath,
           volume: bgm.volume,
-          loop: bgm.loop,
-          fadeInFrames: msToFrames(bgm.fadeInMs, fps),
-          fadeOutFrames: msToFrames(bgm.fadeOutMs, fps)
+          loop: true,
+          fadeInFrames: 0,
+          fadeOutFrames: 0
         }
       };
     })
@@ -2041,7 +2033,7 @@ export function compileRenderManifest(
 
   const renderInserts = [
     {
-      id: project.inserts.opening.id,
+      id: "insert-opening",
       kind: "placeholder" as const,
       slot: "opening" as const,
       beforeSectionId: null,
@@ -2071,7 +2063,7 @@ export function compileRenderManifest(
       };
     }),
     {
-      id: project.inserts.ending.id,
+      id: "insert-ending",
       kind: "placeholder" as const,
       slot: "ending" as const,
       beforeSectionId: null,

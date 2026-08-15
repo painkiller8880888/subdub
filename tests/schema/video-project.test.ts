@@ -14,6 +14,21 @@ function clone(value: unknown): unknown {
   return JSON.parse(JSON.stringify(value));
 }
 
+const editVideoElementFixture = {
+  id: "edit-cutin-main",
+  role: "cutin" as const,
+  assetId: "asset-edit-cutin",
+  assetVersion: 1,
+  assetChecksum: "b".repeat(64),
+  projectMediaPath: "media/edit-cutin.mp4",
+  placement: {
+    kind: "before_section" as const,
+    sectionId: "section-main",
+    order: 0
+  },
+  volume: 0.5
+};
+
 function expectInvalid(
   value: unknown,
   expectedPath?: ReadonlyArray<string | number>
@@ -154,8 +169,8 @@ describe("videoProjectSchema", () => {
     ]);
 
     const invalidVolume = clone(videoProjectFixture);
-    invalidVolume.audio.sectionBgms[0].volume = 1.1;
-    expectInvalid(invalidVolume, ["audio", "sectionBgms", 0, "volume"]);
+    invalidVolume.edit.sectionBgms[0].volume = 1.1;
+    expectInvalid(invalidVolume, ["edit", "sectionBgms", 0, "volume"]);
 
     const invalidCrop = clone(videoProjectFixture);
     invalidCrop.visuals.assignments[0].display.crop.width = 1.1;
@@ -248,30 +263,99 @@ describe("videoProjectSchema", () => {
     expect(videoProjectSchema.safeParse(nullableSize).success).toBe(true);
   });
 
-  it("rejects non-literal placeholder durations and empty thumbnail fields", () => {
-    const invalidOpening = clone(videoProjectFixture);
-    Object.assign(invalidOpening.inserts.opening, { durationMs: 1000 });
-    expectInvalid(invalidOpening, [
-      "inserts",
-      "opening",
-      "durationMs"
-    ]);
+  it("validates EditPlan placement and empty thumbnail fields", () => {
+    const emptyEdit = clone(videoProjectFixture);
+    emptyEdit.edit = { videoElements: [], sectionBgms: [] };
+    expect(videoProjectSchema.safeParse(emptyEdit).success).toBe(true);
 
-    const invalidOpeningSlot = clone(videoProjectFixture);
-    Object.assign(invalidOpeningSlot.inserts.opening, { slot: "ending" });
-    expectInvalid(invalidOpeningSlot, [
-      "inserts",
-      "opening",
-      "slot"
-    ]);
-
-    const invalidEyeCatch = clone(videoProjectFixture);
-    Object.assign(invalidEyeCatch.inserts.eyeCatches[0], { durationMs: 1000 });
-    expectInvalid(invalidEyeCatch, [
-      "inserts",
-      "eyeCatches",
+    const invalidIntroPlacement = clone(videoProjectFixture);
+    invalidIntroPlacement.edit.videoElements = [
+      {
+        ...editVideoElementFixture,
+        id: "edit-intro",
+        role: "intro",
+        placement: {
+          kind: "before_section",
+          sectionId: "section-main",
+          order: 0
+        }
+      }
+    ];
+    expectInvalid(invalidIntroPlacement, [
+      "edit",
+      "videoElements",
       0,
-      "durationMs"
+      "placement"
+    ]);
+
+    const invalidOutroPlacement = clone(videoProjectFixture);
+    invalidOutroPlacement.edit.videoElements = [
+      {
+        ...editVideoElementFixture,
+        id: "edit-outro",
+        role: "outro",
+        placement: { kind: "before_first_section" }
+      }
+    ];
+    expectInvalid(invalidOutroPlacement, [
+      "edit",
+      "videoElements",
+      0,
+      "placement"
+    ]);
+
+    const invalidFirstCutin = clone(videoProjectFixture);
+    invalidFirstCutin.edit.videoElements = [
+      {
+        ...editVideoElementFixture,
+        placement: {
+          kind: "before_section",
+          sectionId: "section-intro",
+          order: 0
+        }
+      }
+    ];
+    expectInvalid(invalidFirstCutin, [
+      "edit",
+      "videoElements",
+      0,
+      "placement",
+      "sectionId"
+    ]);
+
+    const duplicateIntro = clone(videoProjectFixture);
+    duplicateIntro.edit.videoElements = [
+      {
+        ...editVideoElementFixture,
+        id: "edit-intro-1",
+        role: "intro",
+        placement: { kind: "before_first_section" }
+      },
+      {
+        ...editVideoElementFixture,
+        id: "edit-intro-2",
+        role: "intro",
+        placement: { kind: "before_first_section" }
+      }
+    ];
+    expectInvalid(duplicateIntro, ["edit", "videoElements", 1, "role"]);
+
+    const multipleCutins = clone(videoProjectFixture);
+    multipleCutins.edit.videoElements = [
+      editVideoElementFixture,
+      { ...editVideoElementFixture, id: "edit-cutin-main-2", placement: { ...editVideoElementFixture.placement, order: 1 } }
+    ];
+    expect(videoProjectSchema.safeParse(multipleCutins).success).toBe(true);
+
+    const invalidEditVolume = clone(videoProjectFixture);
+    invalidEditVolume.edit.videoElements = [
+      { ...editVideoElementFixture, volume: 1.1 }
+    ];
+    expectInvalid(invalidEditVolume, [
+      "edit",
+      "videoElements",
+      0,
+      "volume"
     ]);
 
     const emptyTitle = clone(videoProjectFixture);
@@ -343,18 +427,21 @@ describe("videoProjectSchema", () => {
     ]);
 
     const duplicateBgm = clone(videoProjectFixture);
-    duplicateBgm.audio.sectionBgms[1].id =
-      duplicateBgm.audio.sectionBgms[0].id;
-    expectInvalid(duplicateBgm, ["audio", "sectionBgms", 1, "id"]);
+    duplicateBgm.edit.sectionBgms[1].id =
+      duplicateBgm.edit.sectionBgms[0].id;
+    expectInvalid(duplicateBgm, ["edit", "sectionBgms", 1, "id"]);
 
     const duplicateEffect = clone(videoProjectFixture);
     duplicateEffect.audio.soundEffects[1].id =
       duplicateEffect.audio.soundEffects[0].id;
     expectInvalid(duplicateEffect, ["audio", "soundEffects", 1, "id"]);
 
-    const duplicateInsert = clone(videoProjectFixture);
-    duplicateInsert.inserts.ending.id = duplicateInsert.inserts.opening.id;
-    expectInvalid(duplicateInsert, ["inserts", "ending", "id"]);
+    const duplicateElement = clone(videoProjectFixture);
+    duplicateElement.edit.videoElements = [
+      editVideoElementFixture,
+      { ...editVideoElementFixture }
+    ];
+    expectInvalid(duplicateElement, ["edit", "videoElements", 1, "id"]);
   });
 
   it("rejects inconsistent character mappings", () => {
@@ -412,9 +499,9 @@ describe("videoProjectSchema", () => {
     ]);
 
     const invalidBgmReference = clone(videoProjectFixture);
-    invalidBgmReference.audio.sectionBgms[0].sectionId = "missing-section";
+    invalidBgmReference.edit.sectionBgms[0].sectionId = "missing-section";
     expectInvalid(invalidBgmReference, [
-      "audio",
+      "edit",
       "sectionBgms",
       0,
       "sectionId"
@@ -429,24 +516,42 @@ describe("videoProjectSchema", () => {
       "lineId"
     ]);
 
-    const invalidEyeCatchReference = clone(videoProjectFixture);
-    invalidEyeCatchReference.inserts.eyeCatches[0].beforeSectionId =
-      "missing-section";
-    expectInvalid(invalidEyeCatchReference, [
-      "inserts",
-      "eyeCatches",
+    const invalidCutinReference = clone(videoProjectFixture);
+    invalidCutinReference.edit.videoElements = [
+      {
+        ...editVideoElementFixture,
+        placement: {
+          kind: "before_section",
+          sectionId: "missing-section",
+          order: 0
+        }
+      }
+    ];
+    expectInvalid(invalidCutinReference, [
+      "edit",
+      "videoElements",
       0,
-      "beforeSectionId"
+      "placement",
+      "sectionId"
     ]);
 
-    const invalidFirstEyeCatch = clone(videoProjectFixture);
-    invalidFirstEyeCatch.inserts.eyeCatches[0].beforeSectionId =
-      "section-intro";
-    expectInvalid(invalidFirstEyeCatch, [
-      "inserts",
-      "eyeCatches",
+    const invalidFirstCutin = clone(videoProjectFixture);
+    invalidFirstCutin.edit.videoElements = [
+      {
+        ...editVideoElementFixture,
+        placement: {
+          kind: "before_section",
+          sectionId: "section-intro",
+          order: 0
+        }
+      }
+    ];
+    expectInvalid(invalidFirstCutin, [
+      "edit",
+      "videoElements",
       0,
-      "beforeSectionId"
+      "placement",
+      "sectionId"
     ]);
 
     const invalidThumbnailCharacter = clone(videoProjectFixture);
@@ -484,10 +589,10 @@ describe("videoProjectSchema", () => {
     ]);
 
     const duplicateSectionBgm = clone(videoProjectFixture);
-    duplicateSectionBgm.audio.sectionBgms[1].sectionId =
-      duplicateSectionBgm.audio.sectionBgms[0].sectionId;
+    duplicateSectionBgm.edit.sectionBgms[1].sectionId =
+      duplicateSectionBgm.edit.sectionBgms[0].sectionId;
     expectInvalid(duplicateSectionBgm, [
-      "audio",
+      "edit",
       "sectionBgms",
       1,
       "sectionId"
@@ -507,6 +612,15 @@ describe("videoProjectSchema", () => {
     expectInvalid(invalid, [
       "visuals",
       "assignments",
+      0,
+      "projectMediaPath"
+    ]);
+
+    const invalidEditPath = clone(videoProjectFixture);
+    invalidEditPath.edit.sectionBgms[0].projectMediaPath = path;
+    expectInvalid(invalidEditPath, [
+      "edit",
+      "sectionBgms",
       0,
       "projectMediaPath"
     ]);
