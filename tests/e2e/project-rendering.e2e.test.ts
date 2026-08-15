@@ -724,7 +724,7 @@ async function validateWebPreviewPath(
   const executable = browserExecutable();
   if (typeof executable !== "string") {
     throw new Error(
-      "A local Chrome/Edge executable is required for the Web preview E2E."
+      "A local Chrome/Chromium/Edge executable is required for the Web preview E2E."
     );
   }
 

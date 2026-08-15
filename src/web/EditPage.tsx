@@ -1117,12 +1117,16 @@ function EditPlanEditor({
       return;
     }
     const step = direction === "next" ? 1 : -1;
-    const cutinOrder = (plan: EditPlan): string[] =>
+    const cutinPositionSignature = (
+      plan: EditPlan
+    ): Array<readonly [string, string]> =>
       createEditSectionReadModels(
         project.script.sections,
         createEditPlanReadModel(plan)
-      ).flatMap((model) => model.cutins.map((cutin) => cutin.id));
-    const currentCutinOrder = cutinOrder(draftRef.current);
+      ).flatMap((model) =>
+        model.cutins.map((cutin) => [model.section.id, cutin.id] as const)
+      );
+    const currentCutinPosition = cutinPositionSignature(draftRef.current);
     let nextIndex = currentIndex + step;
     while (nextIndex >= 0 && nextIndex < cutinDropTargets.length) {
       const nextTarget = cutinDropTargets[nextIndex];
@@ -1136,8 +1140,8 @@ function EditPlanEditor({
         sectionIds
       );
       if (
-        JSON.stringify(cutinOrder(nextDraft)) !==
-        JSON.stringify(currentCutinOrder)
+        JSON.stringify(cutinPositionSignature(nextDraft)) !==
+        JSON.stringify(currentCutinPosition)
       ) {
         setActiveDropTarget(nextTarget);
         return;

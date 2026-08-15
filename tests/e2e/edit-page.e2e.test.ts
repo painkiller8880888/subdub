@@ -100,6 +100,14 @@ const initialEdit: EditPlan = {
   sectionBgms: []
 };
 
+const boundaryEdit: EditPlan = {
+  videoElements: [
+    cutin("cutin-a", "section-second", 5),
+    cutin("cutin-b", "section-third", 10)
+  ],
+  sectionBgms: []
+};
+
 const emptyProject = createEmptyVideoProject({
   projectId,
   title: "DnD UIテスト",
@@ -213,7 +221,7 @@ describe("edit page DnD UI", () => {
     const executable = browserExecutable();
     if (typeof executable !== "string") {
       throw new Error(
-        "A local Chrome/Edge executable is required for the edit page UI E2E."
+        "A local Chrome/Chromium/Edge executable is required for the edit page UI E2E."
       );
     }
 
@@ -239,7 +247,10 @@ describe("edit page DnD UI", () => {
     await webServer?.close();
   });
 
-  async function openPage(saveMode: "success" | "error" | "conflict"): Promise<{
+  async function openPage(
+    saveMode: "success" | "error" | "conflict",
+    editPlan: EditPlan = initialEdit
+  ): Promise<{
     readonly context: BrowserContext;
     readonly page: Page;
     readonly saveRequests: unknown[];
@@ -247,6 +258,7 @@ describe("edit page DnD UI", () => {
     const context = await browser.newContext();
     const page = await context.newPage();
     const saveRequests: unknown[] = [];
+    const project = projectWithEdit(editPlan, 0);
 
     await page.route("**/api/**", async (route) => {
       const request = route.request();
@@ -260,8 +272,8 @@ describe("edit page DnD UI", () => {
           status: 200,
           contentType: "application/json",
           body: JSON.stringify({
-            data: initialProject,
-            revision: initialProject.revision
+            data: project,
+            revision: project.revision
           })
         });
         return;
@@ -274,8 +286,8 @@ describe("edit page DnD UI", () => {
           status: 200,
           contentType: "application/json",
           body: JSON.stringify({
-            data: initialProject.edit,
-            revision: initialProject.revision
+            data: editPlan,
+            revision: project.revision
           })
         });
         return;
@@ -330,8 +342,8 @@ describe("edit page DnD UI", () => {
 
         const submittedEdit = body.edit as EditPlan;
         const savedEdit: EditPlan = {
-          ...initialEdit,
-          videoElements: initialEdit.videoElements.map((element) => {
+          ...editPlan,
+          videoElements: editPlan.videoElements.map((element) => {
             const submitted = submittedEdit.videoElements.find(
               (candidate) => candidate.id === element.id
             );
@@ -401,6 +413,64 @@ describe("edit page DnD UI", () => {
           ["cutin-b", 0]
         ]);
         expect(await readElementOrder(page)).toEqual(["cutin-b", "cutin-a"]);
+        expect(saveRequests).toHaveLength(1);
+      } finally {
+        await context.close();
+      }
+    }
+  );
+
+  it(
+    "moves a cutin to the next boundary before the existing cutin",
+    { timeout: 30_000 },
+    async () => {
+      const { context, page, saveRequests } = await openPage(
+        "success",
+        boundaryEdit
+      );
+      try {
+        const handle = page.locator(
+          '[data-edit-video-element-id="cutin-a"] .edit-drag-handle'
+        );
+        const saveRequestPromise = page.waitForRequest(
+          (request) =>
+            request.method() === "PUT" &&
+            new URL(request.url()).pathname ===
+              `/api/projects/${projectId}/edit`
+        );
+        await handle.focus();
+        await handle.press("Space");
+        await page.locator(".edit-dnd-status").waitFor({ state: "visible" });
+        await handle.press("ArrowDown");
+        expect(await page.locator(".edit-dnd-status").textContent()).toContain(
+          "三番目のセクション"
+        );
+        await handle.press("Enter");
+
+        const saveRequest = await saveRequestPromise;
+        const requestBody = JSON.parse(saveRequest.postData() ?? "{}");
+        await page.getByText("保存済み", { exact: true }).waitFor({
+          state: "visible"
+        });
+        expect(
+          requestBody.edit.videoElements.map(
+            (element: {
+              readonly id: string;
+              readonly placement: {
+                readonly sectionId: string;
+                readonly order: number;
+              };
+            }) => [
+              element.id,
+              element.placement.sectionId,
+              element.placement.order
+            ]
+          )
+        ).toEqual([
+          ["cutin-a", "section-third", 0],
+          ["cutin-b", "section-third", 1]
+        ]);
+        expect(await readElementOrder(page)).toEqual(["cutin-a", "cutin-b"]);
         expect(saveRequests).toHaveLength(1);
       } finally {
         await context.close();

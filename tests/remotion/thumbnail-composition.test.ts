@@ -1,4 +1,3 @@
-import { existsSync } from "node:fs";
 import { cp, mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import os from "node:os";
 import * as path from "node:path";
@@ -9,6 +8,7 @@ import { renderStill, selectComposition } from "@remotion/renderer";
 import sharp from "sharp";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
+import { browserExecutable as resolveBrowserExecutable } from "../../src/app/rendering/remotion-mp4-renderer.js";
 import type { ThumbnailPlan } from "../../src/schema/index.js";
 
 const repositoryRoot = fileURLToPath(new URL("../../", import.meta.url));
@@ -18,16 +18,7 @@ const remotionEntryPoint = path.join(
   "remotion",
   "entry-point.tsx"
 );
-const browserExecutable = [
-  process.env.CHROME_BIN,
-  "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
-  "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",
-  "C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe",
-  "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe"
-].find(
-  (candidate): candidate is string =>
-    candidate !== undefined && existsSync(candidate)
-);
+const browserExecutable = resolveBrowserExecutable();
 
 const minimalThumbnail: ThumbnailPlan = {
   backgroundImage: null,
@@ -114,7 +105,7 @@ describe("standard thumbnail composition", () => {
   beforeAll(async () => {
     if (browserExecutable === undefined) {
       throw new Error(
-        "A local Chrome/Edge executable is required for the offline thumbnail still test"
+        "A local Chrome/Chromium/Edge executable is required for the offline thumbnail still test"
       );
     }
     const root = await mkdtemp(path.join(os.tmpdir(), "subdub-thumbnail-"));
