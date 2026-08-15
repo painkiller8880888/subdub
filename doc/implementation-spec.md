@@ -59,10 +59,11 @@ ED-00 は docs-only の仕様改訂であり、この Issue の作業ではコ�
 
 現行 checkout のコードは ED-00 の文書変更だけでは version bump されない。ED-01 が明示的な migration を実装するまで、既存の `VideoProject 1.1.0` / `RenderManifest 2.2.0` を実装済み状態として扱い、以下の `1.2.0` / `2.3.0` は後続実装で採用する正本仕様として読む。
 
-- 編集素材は workspace SQLite に登録済みの Asset だけを使用する。
+- 編集素材は workspace SQLite に登録済みで、選択・差し替え時点に `active` な Asset だけを使用する。
 - intro / outro / cutin は MP4 の `video` Asset、BGM は MP3 の `bgm` Asset に限定する。
-- project data には Asset の `assetId`、`assetVersion`、`assetChecksum`、`projectMediaPath` を snapshot として固定し、OS path や任意ファイルを保存しない。
-- 動画と BGM は `0 <= volume <= 1` を持つ。旧 `muted` は `true → 0`、`false → 1` として移行する。
+- project data には Asset 本体の `version` / `checksum` を `assetVersion` / `assetChecksum` として、`assetId`、`projectMediaPath` とともに snapshot 固定する。OS path や任意ファイルを保存しない。
+- snapshot 作成後の Asset の差し替え・利用停止は既存 project の出力エラーにしない。出力時は project 内 `projectMediaPath` の存在、`assetChecksum`、MP4 / MP3 の実ファイル形式だけを検証し、live な Asset `status` や Asset Service の SQLite を必須入力にしない。
+- 動画と BGM は `0 <= volume <= 1` を持つ。generic `VideoDisplay.muted` の `true → 0`、`false → 1` 変換は ED-01 の `1.1.0 → 1.2.0` schema migration が担当し、ED-07 は変換後の `volume` の UI / API / compiler / Remotion 対応だけを担当する。
 
 ## 2. 今回確定した判断
 
@@ -393,6 +394,7 @@ project-root/
 │     ├─ runs/
 │     ├─ output/
 │     └─ logs/
+│        └─ migration-log.jsonl
 ├─ library/
 │  ├─ media/
 │  ├─ character-visuals/
@@ -481,8 +483,9 @@ ED-01 では `1.1.0` から `1.2.0` へ migration する。`1.1.0` の `audio.se
 ### 7.1.1 `VideoProject 1.1.0 → 1.2.0` migration 方針
 
 - 旧 `opening`、`ending`、`eyeCatches` は実 MP4 Asset の参照を持たないため、架空 Asset や動画要素へ変換せず、`edit.videoElements` の空状態へ移行する。placeholder を現行正本へ持ち越さない。
-- 旧 `AudioPlan.sectionBgms` が登録済み Asset の `assetId`、version、checksum を安全に復元できる場合だけ `edit.sectionBgms` へ変換する。旧 path しかなく Asset を一意に復元できない場合は架空 Asset を自動生成せず、BGM 未設定・再登録または再選択が必要な状態として migration diagnostics を返す。
-- 旧 BGM の `loop`、`fadeInMs`、`fadeOutMs`、開始オフセット、トリムなど、現行 `EditPlan` にない自由設定は持ち越さない。BGM は対象セクション全区間の固定 loop とし、音量だけを引き継ぐ。範囲外の音量は validation error とする。
+- ED-01 は ED-02 より先に実行され、`bgm` Asset がまだ現行入力として存在しないため、旧 `AudioPlan.sectionBgms` は `edit.sectionBgms` へ変換しない。旧 path から Asset を検索・推測・復元せず、`edit.sectionBgms` は未設定のままにして、ED-02 以降に再登録または再選択を要求する。
+- 未解決 BGM ごとに、`projects/{projectId}/logs/migration-log.jsonl` へ `migrationId`、`fromSchemaVersion`、`toSchemaVersion`、`kind: "unresolved_legacy_bgm"`、`sectionId`、`legacyPath`、`legacyVolume`、`reason` を永続化する。このログは strict な `VideoProject` の一部ではなく、再登録時に旧 BGM の section、path、volume を確認するための migration diagnostics とする。ログを永続化できない場合は `1.2.0` の project 保存を完了させず、同じ migration ID の再実行で重複記録しない。
+- 旧 BGM の `loop`、`fadeInMs`、`fadeOutMs`、開始オフセット、トリム、volume は現行 `EditPlan` へ持ち越さない。旧 volume は migration log にだけ記録し、新しい BGM を選択した時点で現行の `volume` と固定 loop を設定する。
 - generic `VisualAssignment` の旧 `VideoDisplay.muted` は `true → volume: 0`、`false → volume: 1` として変換し、`muted` は `1.2.0` の保存値に残さない。
 - migration は一時ファイルへ出力してから atomic rename し、失敗時に既存 `project.json` を壊さない。未解決 BGM がある場合も、架空の Asset や推測による path を保存しない。
 
@@ -893,7 +896,7 @@ type BackgroundDefinition =
 
 - `endMs` は `startMs` より大きく、素材の duration 以下とする。
 - `playbackRate` は `0` より大きい値とする。
-- `volume` は `0` 以上 `1` 以下とする。旧 `muted` は migration 時に `true → 0`、`false → 1` として変換し、`1.2.0` では保存しない。
+- `volume` は `0` 以上 `1` 以下とする。旧 generic `muted` は ED-01 migration 時に `true → 0`、`false → 1` として変換し、`1.2.0` では保存しない。ED-07 はこの変換後の `volume` を UI、API、compiler、Remotion で扱う。
 - 帳票の `page` は 1 始まりとし、素材の `pageCount` 以下とする。
 
 ### 7.9 音声、編集、サムネイル
@@ -1043,11 +1046,11 @@ type LegacyEyeCatchPlaceholder = {
 - 同時に 3 音以上の効果音が重なる場合は警告する。警告は保存を禁止しない。
 - セクション音声との合成試聴を提供し、ナレーションより効果音が大きく聞こえる場合は警告する。現行仕様では自動音量補正を行わず、保存を禁止しない。
 - 素材登録時のラウドネス解析と音量正規化は将来の評価事項とする。
-- `EditPlan.videoElements` の Asset は `kind: "video"` かつ `.mp4`、`video/mp4`、MP4 container を満たすこと。`role: "intro"` は `before_first_section` に最大 1 件、`role: "outro"` は `after_last_section` に最大 1 件、`role: "cutin"` は `before_section` にだけ置く。同じ境界の cutin は `order` の昇順で解決する。
+- `EditPlan.videoElements` の Asset は `kind: "video"` かつ `.mp4`、`video/mp4`、MP4 container を満たすこと。`role: "intro"` は `before_first_section` に最大 1 件、`role: "outro"` は `after_last_section` に最大 1 件、`role: "cutin"` は `before_section` にだけ置く。`cutin` の `sectionId` は `script.sections[0].id` と一致してはならず、最初のセクション直前の境界を拒否する。同じ境界の cutin は `order` の昇順で解決する。
 - `EditPlan.sectionBgms` は section ごとに 0 件または 1 件とし、同じ `sectionId` の重複を拒否する。Asset は `kind: "bgm"` かつ `.mp3`、`audio/mpeg`、MP3 を満たすこと。
 - BGM の再生範囲は、動画要素の shift 後に確定した対象セクションの全区間とする。素材の長さに関係なく固定 loop し、セクション終了で停止する。動画要素の区間では BGM を再生しない。
 - 動画要素と BGM の `volume` は `0` 以上 `1` 以下とする。`loop`、開始オフセット、トリム、`fadeInMs`、`fadeOutMs`、音量キーフレーム、自動ダッキング、曲同士のクロスフェードは `EditPlan` に持たせない。
-- 旧 `LegacySectionBgm` と `LegacyPlaceholderInsert` / `LegacyEyeCatchPlaceholder` は migration の入力境界だけで使用し、現行の project data や manifest へ placeholder を保存しない。
+- 旧 `LegacySectionBgm` と `LegacyPlaceholderInsert` / `LegacyEyeCatchPlaceholder` は migration の入力境界だけで使用し、現行の project data や manifest へ placeholder を保存しない。未解決の旧 BGM の sectionId、path、volume は `logs/migration-log.jsonl` へ記録する。
 - サムネイルは `title` と `departmentOrSystem` を必須の非空文字列とする。背景画像、補足、版数、キャラクター、代表ビジュアルは任意とし、未指定時は共通テンプレートの既定背景を使用する。
 
 ## 8. 派生データ
@@ -1145,7 +1148,7 @@ type LegacyRenderInsert = {
 
 CV-05 で導入した explicit variant 解決を引き継ぐ次期モデルは `RenderManifest 1.0.0` / `2.2.0` と意味を分離し、`manifestVersion: "2.3.0"` として保存する。`characterMappingVersion` は既存キャッシュ・run-log との互換メタデータとして残すが、expression や mapping table から physical variant を解決する入力ではない。
 
-production の compile endpoint は `POST /api/projects/{projectId}/manifest/compile` とする。endpoint の compile service は project と audio index を読み、`CharacterVisualCatalogService.verifyFiles()` が返す SQLite の validated snapshot から character file metadata を組み立て、checksum を保持したまま `RenderManifestStore.compileAndStore()` へ渡す。静的 legacy catalog をこの経路の入力にせず、snapshot checksum と asset metadata の不一致は validation error とする。
+production の compile endpoint は `POST /api/projects/{projectId}/manifest/compile` とする。endpoint の compile service は project と audio index を読み、`CharacterVisualCatalogService.verifyFiles()` が返す SQLite の validated snapshot から character file metadata を組み立て、checksum を保持したまま `RenderManifestStore.compileAndStore()` へ渡す。編集 Asset は `project.json` の `assetId` / `assetVersion` / `assetChecksum` / `projectMediaPath` snapshot と project 内ファイルから解決し、Asset Service の SQLite や live な Asset `status` を必須入力にしない。静的 legacy catalog をこの経路の入力にせず、snapshot checksum と実ファイルの不一致は validation error とする。
 
 ```ts
 type RenderManifest = {
@@ -1430,7 +1433,7 @@ type Asset = {
 | `video` | `.mp4` | `video/mp4` | MP4 container | intro / outro / cutin |
 | `bgm` | `.mp3` | `audio/mpeg` | MP3 | section BGM |
 
-拡張子だけで許可せず、MIME と実ファイル形式を登録時に検証する。`bgm` は generic `VisualAssignment` の候補に含めず、編集画面の BGM picker だけへ返す。動画要素と BGM の project snapshot には `assetId`、`version`、`checksum`、`projectMediaPath` を固定し、Asset の後続更新で既存 project を変更しない。
+拡張子だけで許可せず、MIME と実ファイル形式を登録時に検証する。`bgm` は generic `VisualAssignment` の候補に含めず、編集画面の BGM picker だけへ返す。Asset 本体の `version` / `checksum` は、動画要素と BGM の project snapshot では `assetVersion` / `assetChecksum` として `assetId`、`projectMediaPath` とともに固定し、Asset の後続更新で既存 project を変更しない。`active` は選択・差し替え時だけ要求し、出力時は project 内ファイルの存在、`assetChecksum`、MP4 / MP3 の実ファイル形式を検証する。
 
 ### 10.4 登録
 
@@ -1503,7 +1506,7 @@ GET    /api/projects/{projectId}/validation
 
 現行の project character mutation（CV-05 実装）は、VOICEVOX 話者と `CharacterVisualBinding` を `project.json` へ保存する責務を持つ。`CharacterVisualSet` の visual / variant / file metadata は `GET /api/character-visuals` 系の workspace catalog から取得し、project API が SQLite へ project binding を保存する設計にはしない。
 
-ED-03〜ED-05 の edit mutation は `EditPlan` を `expectedRevision` 付きで保存する。`PUT /api/projects/{projectId}/edit` は台本の section order を受け付けず、video element の role / placement / order、登録済み Asset の snapshot、section BGM 0/1、volume だけを更新する。Asset の取り込みと `project.json` 更新は、片方だけが成功した状態を残さない。
+ED-03〜ED-05 の edit mutation は `EditPlan` を `expectedRevision` 付きで保存する。`PUT /api/projects/{projectId}/edit` は台本の section order を受け付けず、video element の role / placement / order、登録済み Asset の `assetId` / `assetVersion` / `assetChecksum` / `projectMediaPath` snapshot、section BGM 0/1、volume だけを更新する。Asset の選択・差し替え時には `active` を要求するが、snapshot 後の live な status は出力条件にしない。Asset の取り込みと `project.json` 更新は、片方だけが成功した状態を残さない。
 
 ### 11.3 構成案と台本
 
@@ -1656,6 +1659,7 @@ POST   /api/projects/{projectId}/thumbnail/render
 - プロジェクトへ取り込んだ素材
 - 素材の技術メタデータ
 - `project.json` の `CharacterVisualBinding` と各 line の `characterVariantId`
+- `EditPlan` の `assetId` / `assetVersion` / `assetChecksum` / `projectMediaPath` snapshot と project 内の動画・BGMファイル
 - バックエンドが SQLite から取得して検証した `CharacterVisualCatalogSnapshot`
 
 処理:
@@ -1665,15 +1669,16 @@ POST   /api/projects/{projectId}/thumbnail/render
 3. 全セリフに有効な音声インデックスがあることを確認する。
 4. `CharacterVisualBinding.visualId` / `idleVariantId` と各 `ScriptLine.characterVariantId` を catalog snapshot と照合する。missing、inactive、cross-visual、speaker 不一致、必須 file slot 欠落、checksum 不一致は validation error とする。未選択 line に対して expression、tag、label、旧固定 mapping から代替しない。
 5. valid な explicit reference から `RenderManifest.characters[].idleVariantId`、`RenderManifest.lines[].characterVariantId`、`RenderManifest.characterVariants[]` を解決する。compiler は SQLite を直接検索せず、渡された snapshot だけを使う。
-6. 無音時間と音声長をフレームへ変換する。
-7. セリフを累積して line range を作る。
-8. visual assignment の line ID 範囲を frame range へ解決する。
-9. section background を frame range へ解決する。
-10. `EditPlan.videoElements` の cutin を section 境界へ挿入する。
-11. 先頭へ intro、末尾へ outro を挿入し、後続の section / line / visual / background の frame range を shift する。
-12. shift 後の section range へ `EditPlan.sectionBgms` を解決し、動画要素の区間では BGM を再生しない。効果音をセリフ基準の位置へ統合する。
-13. `RenderVideoInsert`、`RenderAudioTrack`、全体 duration、ハッシュ、チェックサムを確定し、Zod で検証する。
-14. 一時ファイルから `cache/render-manifest.json` へ置換する。
+6. `EditPlan` の snapshot について、project 内 `projectMediaPath` の存在、`assetChecksum` との一致、MP4 / MP3 の実ファイル形式を検証する。snapshot 作成後の live な Asset `status` は確認せず、Asset Service の SQLite を再検索しない。
+7. 無音時間と音声長をフレームへ変換する。
+8. セリフを累積して line range を作る。
+9. visual assignment の line ID 範囲を frame range へ解決する。
+10. section background を frame range へ解決する。
+11. `EditPlan.videoElements` の cutin を、最初のセクションを除く `before_section` 境界へ `order` 順に挿入する。最初のセクション直前の cutin は validation error とする。
+12. 先頭へ intro、末尾へ outro を挿入し、後続の section / line / visual / background の frame range を shift する。
+13. shift 後の section range へ `EditPlan.sectionBgms` を解決し、動画要素の区間では BGM を再生しない。効果音をセリフ基準の位置へ統合する。
+14. `RenderVideoInsert`、`RenderAudioTrack`、全体 duration、ハッシュ、チェックサムを確定し、Zod で検証する。
+15. 一時ファイルから `cache/render-manifest.json` へ置換する。
 
 失敗時は新しいマニフェストを保存せず、全エラーを line ID、assignment ID、パスと関連付けて返す。
 
@@ -1754,14 +1759,14 @@ WebUI は SQLite、`library/character-visuals/`、ローカルファイルシス
 `/projects/{projectId}/edit` では、台本の section card を固定したまま、登録済み Asset だけで編集する。
 
 - 未編集状態では `script.sections` から導出した section card だけを表示する。
-- `intro` は先頭セクション前に最大 1 件、`outro` は末尾セクション後に最大 1 件、`cutin` は section 境界に 0 件以上配置する。同じ境界の cutin は video element card の順序だけを drag & drop で変更できる。
+- `intro` は先頭セクション前に最大 1 件、`outro` は末尾セクション後に最大 1 件、`cutin` は最初のセクションを除く `before_section` 境界に 0 件以上配置する。同じ境界の cutin は video element card の順序だけを drag & drop で変更できる。最初のセクション直前への cutin は許可しない。
 - section 自体の追加、削除、並べ替え、内部任意時刻への cutin 配置はこの画面の責務に含めない。
-- video element picker は active な `video` Asset のうち `.mp4`、`video/mp4`、MP4 container を満たすものだけを候補にする。BGM picker は active な `bgm` Asset のうち `.mp3`、`audio/mpeg`、MP3 を満たすものだけを候補にする。OS path と任意ファイルは受け付けない。
+- video element picker は選択・差し替え時点で active な `video` Asset のうち `.mp4`、`video/mp4`、MP4 container を満たすものだけを候補にする。BGM picker も選択・差し替え時点で active な `bgm` Asset のうち `.mp3`、`audio/mpeg`、MP3 を満たすものだけを候補にする。OS path と任意ファイルは受け付けない。
 - video element は追加、差し替え、削除、音量調整を行い、BGM はセクションごとに追加、差し替え、解除、単体試聴、音量調整を行う。
 - 動画と BGM の volume は 0〜1 とする。BGM は対象 section の全区間を固定 loop し、動画要素の区間では前後 section の BGM を再生しない。開始オフセット、トリム、フェード、音量キーフレーム、自動ダッキング、クロスフェードは提供しない。
-- 選択した Asset は `assetId`、version、checksum、projectMediaPath を `project.json` の `edit` snapshot へ保存し、素材ライブラリの後続変更から切り離す。
+- 選択した Asset は、本体の `version` / `checksum` を `assetVersion` / `assetChecksum` として `assetId`、`projectMediaPath` とともに `project.json` の `edit` snapshot へ保存し、素材ライブラリの後続変更から切り離す。
 
-編集画面の保存時と出力前に、role と配置可能な境界、同一境界内の順序、intro / outro の重複、BGM の section 重複、Asset status、MP4 / MP3 の実ファイル形式、checksum、volume を validation する。
+編集画面の保存時と出力前に、role と配置可能な境界、同一境界内の順序、最初のセクション直前への cutin、intro / outro の重複、BGM の section 重複、project 内ファイルの存在、MP4 / MP3 の実ファイル形式、`assetChecksum`、volume を validation する。`active` は選択・差し替え時だけ要求し、snapshot 後の live な Asset `status` は出力時に検証しない。
 
 - サムネイル画面ではタイトルと部門名または対象システム名を必須入力とし、補足、版数、背景画像、代表ビジュアル、キャラクターは任意入力とする。
 - サムネイルは固定テンプレートの 1280 × 720 プレビューを常時表示し、キャラクターの表示・非表示と、四国めたん側・ずんだもん側の選択を可能にする。
@@ -1826,8 +1831,8 @@ WebUI は SQLite、`library/character-visuals/`、ローカルファイルシス
 - `mouth-pair` の `closed` / `open` キャンバス一致
 - 未登録 variant が set 全体のエラーになっていないこと
 - セクションとセリフの順序
-- `EditPlan` の video element の role / placement / order、intro / outro の最大 1 件制約、section BGM の 0/1 重複
-- 編集 Asset の `assetId`、version、checksum、projectMediaPath、active 状態、MP4 / MP3 の MIME・実ファイル形式
+- `EditPlan` の video element の role / placement / order、cutin の最初のセクション直前配置拒否、intro / outro の最大 1 件制約、section BGM の 0/1 重複
+- 編集 Asset の `assetId`、`assetVersion`、`assetChecksum`、`projectMediaPath`、選択・差し替え時の active 状態、MP4 / MP3 の MIME・実ファイル形式。出力時に live な Asset `status` を要求しないこと
 - 動画要素と BGM の volume が 0〜1 であること。`muted`、loop、開始オフセット、トリム、fade を現行 `EditPlan` へ保存しないこと
 - 効果音の素材種別、参照先、チェックサム、カテゴリ、オフセット、音量
 - サムネイルの必須タイトルと部門・対象システム名
@@ -1837,7 +1842,7 @@ WebUI は SQLite、`library/character-visuals/`、ローカルファイルシス
 - 構成案の role 順序、未解決質問、承認状態、source hash の最新性
 - 台本の空セリフ、話者、`outlineHash`、section/line 参照
 - ビジュアルの割り当て範囲、素材状態、チェックサム、機密区分
-- 編集要素の境界、実尺、Asset snapshot、MP4 / MP3 validation、BGM の最終 section 範囲、動画要素中の BGM 停止
+- 編集要素の境界、実尺、Asset snapshot、project 内ファイルの存在・`assetChecksum`、MP4 / MP3 validation、BGM の最終 section 範囲、動画要素中の BGM 停止。Asset Service の SQLite や snapshot 後の live な status を入力にしないこと
 - character binding の visual / idle variant、line の `characterVariantId` が存在し、active で、speaker に binding された同一 visual 配下であること。missing、inactive、cross-visual は自動代替しない。
 - 音声の current/stale/missing、生成エラー、音声 index の参照
 - 前工程の revision、assignment 範囲、Manifest の入力ハッシュ
@@ -1924,6 +1929,9 @@ SQLite にはキー入力単位ではなく、保存、構成案の承認、レ�
 - ミリ秒からフレームへの変換
 - セリフ累積と半開区間
 - assignment の line range 解決
+- `EditPlan` の role / placement validation、最初のセクション直前 cutin の拒否、intro / outro 最大 1 件、同一境界 order
+- 選択・差し替え時だけ active Asset を要求し、snapshot 後は project 内ファイルの存在・checksum・実形式だけで出力検証すること
+- `1.1.0 → 1.2.0` migration が旧 BGM を復元せず、sectionId・旧 path・旧 volume を `logs/migration-log.jsonl` へ永続化すること
 - source/project/asset hash
 - 構成案の承認・最新性、status/stale の遷移、依存生成物の validation
 - パストラバーサル拒否
@@ -1934,7 +1942,7 @@ SQLite にはキー入力単位ではなく、保存、構成案の承認、レ�
 - Markdown と hash の一体保存
 - 素材コピーと project update の成功、ロールバック
 - SQLite migration と P2-01 の 2 visual / 6 variant / 10 PNG seed の idempotency
-- project schema version bump と migration が `1.0.0` / `1.1.0` の意味を暗黙変更せず、`1.1.0 → 1.2.0` で旧 placeholder を空状態へ移し、解決不能な BGM path から架空 Asset を作らないこと
+- project schema version bump と migration が `1.0.0` / `1.1.0` の意味を暗黙変更せず、`1.1.0 → 1.2.0` で旧 placeholder を空状態へ移し、旧 BGM を `edit.sectionBgms` へ推測復元せず、sectionId・path・volume を `logs/migration-log.jsonl` へ永続化すること
 - キャラクタービジュアルの staged file、atomic rename、checksum 検証、SQLite transaction、compensating cleanup、orphan 診断
 - OpenRouter 成功、schema 違反、429、認証失敗
 - VOICEVOX query と WAV のキャッシュ
@@ -2136,12 +2144,12 @@ ED-00 はこの文書の仕様確定だけを行い、以下の後続 Issue へ�
 
 | Issue | 実装責務 |
 |---|---|
-| ED-01 | `VideoProject 1.2.0`、`EditPlan`、schema / Zod、`1.1.0 → 1.2.0` migration。旧 placeholder は空状態へ移し、解決不能な BGM path は架空 Asset にしない。 |
+| ED-01 | `VideoProject 1.2.0`、`EditPlan`、schema / Zod、`1.1.0 → 1.2.0` migration。旧 placeholder は空状態へ移し、generic `VideoDisplay.muted` を `volume` へ変換し、旧 BGM path は架空 Asset にせず `logs/migration-log.jsonl` へ sectionId・path・volume を記録する。 |
 | ED-02 | `Asset.kind = "bgm"`、MP4 / MP3 の拡張子・MIME・実ファイル形式 validation。 |
-| ED-03 | 編集 Asset の候補取得、安全な project 取り込み、assetId / version / checksum / projectMediaPath snapshot API。 |
+| ED-03 | 編集 Asset の候補取得、安全な project 取り込み、`assetId` / `assetVersion` / `assetChecksum` / `projectMediaPath` snapshot API。選択・差し替え時だけ Asset を active とし、出力時は project 内 snapshot を検証する。 |
 | ED-04 | workflow 表示の「制作」→「台本」、`/projects/{projectId}/edit` の画面骨格、section card の読み取り専用表示。 |
 | ED-05 | video element card、MP4 / BGM picker、追加・差し替え・削除・解除、volume UI、保存 validation。 |
 | ED-06 | section card を並べ替えず、video element card だけを同一境界内で drag & drop する処理。 |
-| ED-07 | generic `VisualAssignment` の `VideoDisplay.muted` から `volume` への互換移行。 |
+| ED-07 | ED-01 で変換済みの generic `VisualAssignment` の `VideoDisplay.volume` を UI、API、compiler、Remotion で扱う。`muted → volume` の schema / migration 変換は担当しない。 |
 | ED-08 | `RenderManifest 2.3.0`、実動画 `RenderVideoInsert`、timeline shift、最終 section BGM range の compiler。 |
 | ED-09 | Remotion、preview、MP4、編集画面の E2E、実素材形式・音量・BGM 停止の検証。 |
