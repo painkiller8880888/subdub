@@ -585,6 +585,7 @@ describe("character visual catalog", { timeout: 30_000 }, () => {
       files: [{ key: "single", content: pngBytes, mimeType: "image/png" }]
     });
     const beforeFile = before.variants[0]!.files[0]!;
+    const beforePath = path.join(workspaceRoot, beforeFile.libraryPath);
     const replacement = makeTransparentPng(1, 1, 1);
     const after = await service.updateVariant(
       visual.visualId,
@@ -604,6 +605,19 @@ describe("character visual catalog", { timeout: 30_000 }, () => {
     await expect(
       fs.stat(path.join(workspaceRoot, beforeFile.libraryPath))
     ).rejects.toMatchObject({ code: "ENOENT" });
+
+    await fs.mkdir(path.dirname(beforePath), { recursive: true });
+    await fs.writeFile(beforePath, pngBytes);
+    await expect(
+      service.readManagedFileByPath(
+        visual.visualId,
+        after.variants[0]!.variantId,
+        path.basename(beforeFile.libraryPath)
+      )
+    ).resolves.toEqual({
+      content: pngBytes,
+      mimeType: "image/png"
+    });
   });
 
   it("diagnoses unreferenced final and staging files without deleting them", async () => {
@@ -627,6 +641,16 @@ describe("character visual catalog", { timeout: 30_000 }, () => {
     ]);
     await expect(fs.readFile(orphanFinalPath)).resolves.toEqual(pngBytes);
     await expect(fs.readFile(orphanStagingPath)).resolves.toEqual(pngBytes);
+    await expect(
+      service.readManagedFileByPath(
+        "orphan-visual",
+        "orphan-variant",
+        "orphan.png"
+      )
+    ).resolves.toEqual({
+      content: pngBytes,
+      mimeType: "image/png"
+    });
   });
 
   it("does not install seed files when the existing catalog read fails", async () => {

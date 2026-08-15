@@ -1,4 +1,8 @@
-import type { RenderAudioTrack, RenderSoundEffect } from "../schema/index";
+import type {
+  RenderAudioTrack,
+  RenderLine,
+  RenderSoundEffect
+} from "../schema/index";
 import {
   defaultManifestAssetUrlResolver,
   resolveManifestAssetUrl,
@@ -60,5 +64,20 @@ export function soundEffectSequenceProps(
     durationInFrames: effect.durationInFrames,
     src: resolveManifestAssetUrl(effect.src, assetUrlResolver),
     volume: effect.volume
+  };
+}
+
+export function speechSequenceProps(
+  line: RenderLine,
+  assetUrlResolver: ManifestAssetUrlResolver = defaultManifestAssetUrlResolver
+): {
+  readonly from: number;
+  readonly durationInFrames: number;
+  readonly src: string;
+} {
+  return {
+    from: line.from + line.speechFrom,
+    durationInFrames: line.speechDurationInFrames,
+    src: resolveManifestAssetUrl(line.audioPath, assetUrlResolver)
   };
 }

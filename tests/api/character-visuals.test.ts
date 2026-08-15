@@ -75,6 +75,7 @@ function makeCatalogService(
     }),
     discardStaged: async () => undefined,
     readManagedFile: async () => undefined,
+    readManagedFileByPath: async () => undefined,
     ...overrides
   };
 }
@@ -126,6 +127,33 @@ describe("character visual catalog routes", () => {
       "character-mentor",
       "character-mentor-stand-v1",
       "single"
+    );
+  });
+
+  it("serves a manifest generation file by its exact managed path", async () => {
+    const readManagedFileByPath = vi.fn(async () => ({
+      content: Buffer.from("old-generation-png"),
+      mimeType: "image/png" as const
+    }));
+    await app.close();
+    app = buildApp({
+      characterVisualCatalogService: makeCatalogService({
+        readManagedFileByPath
+      })
+    });
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/api/character-visuals/character-mentor/character-mentor-stand-v1/generation-closed.png"
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.headers["content-type"]).toMatch(/^image\/png/);
+    expect(response.body).toBe("old-generation-png");
+    expect(readManagedFileByPath).toHaveBeenCalledWith(
+      "character-mentor",
+      "character-mentor-stand-v1",
+      "generation-closed.png"
     );
   });
 
@@ -181,6 +209,13 @@ describe("character visual catalog routes", () => {
       });
       expect(fileResponse.statusCode).toBe(200);
       expect(fileResponse.headers["content-type"]).toMatch(/^image\/png/);
+
+      const exactFileResponse = await initialized.app.inject({
+        method: "GET",
+        url: "/api/character-visuals/character-mentor/character-mentor-stand-v1/single.png"
+      });
+      expect(exactFileResponse.statusCode).toBe(200);
+      expect(exactFileResponse.headers["content-type"]).toMatch(/^image\/png/);
     } finally {
       await initialized?.app.close();
       await fs.rm(workspaceRoot, { recursive: true, force: true });

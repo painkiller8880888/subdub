@@ -816,6 +816,41 @@ export class CharacterVisualCatalogService {
     return { content, mimeType: file.mimeType };
   }
 
+  async readManagedFileByPath(
+    visualId: string,
+    variantId: string,
+    fileName: string
+  ): Promise<CharacterVisualManagedFile | undefined> {
+    // RenderManifest may intentionally point to an unreferenced previous
+    // generation when replacement cleanup leaves an orphan behind.
+    const libraryPath = `library/character-visuals/${visualId}/${variantId}/${fileName}`;
+    const managedPath = resolveInside(this.workspaceRoot, libraryPath);
+    await assertNoSymlinkComponents(this.workspaceRoot, libraryPath);
+
+    let fileStats;
+    try {
+      fileStats = await lstat(managedPath);
+    } catch (error) {
+      if (isMissingPath(error)) {
+        return undefined;
+      }
+      throw new CharacterVisualValidationError(
+        `character visual source file is missing: ${managedPath}`,
+        error
+      );
+    }
+    if (!fileStats.isFile() || fileStats.isSymbolicLink()) {
+      throw new CharacterVisualValidationError(
+        `character visual source file must be a regular file: ${managedPath}`
+      );
+    }
+
+    return {
+      content: await readFile(managedPath),
+      mimeType: "image/png"
+    };
+  }
+
   private requireVisual(visualId: string): CharacterVisualSet {
     const visual = this.get(visualId);
     if (visual === undefined) {
