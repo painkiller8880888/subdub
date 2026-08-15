@@ -147,4 +147,69 @@ describe("preview state helpers", () => {
     );
     expect(() => resolver("projects/other-project/media/clip.mp4")).toThrow();
   });
+
+  it("resolves managed character visual paths through the character visual API", () => {
+    const resolver = createProjectManifestAssetUrlResolver(
+      "manual-video-project"
+    );
+
+    expect(
+      resolver("library/character-visuals/character-mentor/normal/closed.png")
+    ).toBe("/api/character-visuals/character-mentor/normal/closed");
+    expect(
+      resolver(
+        "library/character-visuals/character-mentor/normal/generation-closed.png"
+      )
+    ).toBe("/api/character-visuals/character-mentor/normal/closed");
+    expect(
+      resolver("library/character-visuals/character-mentor/normal/single.png")
+    ).toBe("/api/character-visuals/character-mentor/normal/single");
+    expect(
+      resolver("library/character-visuals/character-mentor/normal/open.png")
+    ).toBe("/api/character-visuals/character-mentor/normal/open");
+  });
+
+  it("rejects malformed managed character visual paths without broadening namespaces", () => {
+    const resolver = createProjectManifestAssetUrlResolver(
+      "manual-video-project"
+    );
+
+    expect(() =>
+      resolver("library/character-visuals/character_mentor/normal/closed.png")
+    ).toThrow();
+    expect(() =>
+      resolver(
+        "library/character-visuals/character-mentor/normal_variant/closed.png"
+      )
+    ).toThrow();
+    expect(() =>
+      resolver(
+        "library/character-visuals/character-mentor/normal/not-a-slot.png"
+      )
+    ).toThrow();
+    expect(() =>
+      resolver("library/character-visuals/character-mentor/normal/closed.jpg")
+    ).toThrow();
+    expect(() =>
+      resolver(
+        "library/character-visuals/../character-mentor/normal/closed.png"
+      )
+    ).toThrow();
+    expect(() =>
+      resolver(
+        "library/character-visuals/character-mentor/normal/closed.png/extra"
+      )
+    ).toThrow();
+    expect(() =>
+      resolver("/library/character-visuals/visual/variant/closed.png")
+    ).toThrow();
+    expect(() =>
+      resolver(
+        "https://example.com/library/character-visuals/visual/variant/closed.png"
+      )
+    ).toThrow();
+    expect(resolver("library/other-assets/image.png")).toBe(
+      "/api/projects/manual-video-project/files/library/other-assets/image.png"
+    );
+  });
 });

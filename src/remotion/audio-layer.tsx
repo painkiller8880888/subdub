@@ -4,13 +4,15 @@ import { Audio, Sequence } from "remotion";
 
 import type {
   RenderAudioTrack,
+  RenderLine,
   RenderManifest,
   RenderSoundEffect
 } from "../schema/index";
 import {
   audioTrackSequenceProps,
   audioTrackVolumeAtFrame,
-  soundEffectSequenceProps
+  soundEffectSequenceProps,
+  speechSequenceProps
 } from "./audio";
 import {
   defaultManifestAssetUrlResolver,
@@ -61,6 +63,26 @@ function SoundEffectSequence({
   );
 }
 
+function SpeechSequence({
+  line,
+  assetUrlResolver
+}: {
+  line: RenderLine;
+  assetUrlResolver: ManifestAssetUrlResolver;
+}): ReactNode {
+  const sequence = speechSequenceProps(line, assetUrlResolver);
+  return (
+    <Sequence
+      from={sequence.from}
+      durationInFrames={sequence.durationInFrames}
+      layout="none"
+      name={`speech:${line.id}`}
+    >
+      <Audio src={sequence.src} />
+    </Sequence>
+  );
+}
+
 export function ManifestAudioLayer({
   manifest,
   assetUrlResolver = defaultManifestAssetUrlResolver
@@ -70,6 +92,13 @@ export function ManifestAudioLayer({
 }): ReactNode {
   return (
     <>
+      {manifest.lines.map((line) => (
+        <SpeechSequence
+          key={line.id}
+          line={line}
+          assetUrlResolver={assetUrlResolver}
+        />
+      ))}
       {manifest.audioTracks.map((track) => (
         <AudioTrackSequence
           key={track.id}
