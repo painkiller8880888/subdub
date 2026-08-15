@@ -1,4 +1,5 @@
 import type {
+  ManifestCompileDiagnostic,
   ManifestPreviewBlocker,
   ManifestPreviewData,
   ManifestPreviewState
@@ -31,6 +32,51 @@ export type PreviewPlayerProps = {
     readonly manifest: RenderManifest;
     readonly assetUrlResolver: ManifestAssetUrlResolver;
   };
+};
+
+export type PreviewCompileDiagnosticViewModel = {
+  readonly diagnostic: ManifestCompileDiagnostic;
+  readonly title: string;
+  readonly target: string;
+};
+
+const compileDiagnosticTitles: Readonly<Record<string, string>> = {
+  OUTLINE_NOT_APPROVED: "構成案が未承認です。",
+  OUTLINE_SOURCE_HASH_MISMATCH:
+    "元資料が更新されています。構成案を確認してください。",
+  SCRIPT_OUTLINE_HASH_MISMATCH:
+    "構成案と台本の対応が古くなっています。台本を確認してください。",
+  SCRIPT_EMPTY: "台本にセリフがありません。",
+  SCRIPT_SECTION_EMPTY: "セリフがないセクションがあります。",
+  AUDIO_INDEX_ENTRY_MISSING: "セリフに必要な音声が未生成です。",
+  AUDIO_INDEX_ENTRY_EXTRA: "削除済みまたは不明なセリフの音声が残っています。",
+  AUDIO_ASSET_MISSING: "音声ファイルの素材情報が不足しています。",
+  AUDIO_ASSET_CHECKSUM_MISMATCH: "音声ファイルが更新されています。",
+  AUDIO_ASSET_KIND_MISMATCH: "音声素材の種類が正しくありません。",
+  AUDIO_DURATION_MISMATCH: "音声の長さ情報が一致しません。",
+  ASSET_METADATA_MISSING: "参照素材のメタデータが不足しています。",
+  ASSET_KIND_MISMATCH: "参照素材の種類が正しくありません。",
+  ASSET_CHECKSUM_MISMATCH: "参照素材が更新されています。",
+  ASSET_DURATION_MISSING: "動画素材の長さ情報が不足しています。",
+  ASSET_DURATION_INVALID: "動画素材の長さ情報が不正です。",
+  ASSET_RANGE_INVALID: "素材の表示範囲が不正です。",
+  ASSET_PAGE_COUNT_MISSING: "帳票素材のページ数情報が不足しています。",
+  CHARACTER_VISUAL_BINDING_MISSING: "キャラクター素材のbindingが未設定です。",
+  CHARACTER_VARIANT_UNSELECTED: "キャラクター素材のvariantが未選択です。",
+  CHARACTER_VARIANT_MISSING:
+    "選択されたキャラクターvariantがカタログにありません。",
+  CHARACTER_VARIANT_CHARACTER_MISMATCH:
+    "選択されたキャラクターvariantが別のビジュアルに属しています。",
+  CHARACTER_VISUAL_INACTIVE: "参照先のキャラクタービジュアルが無効です。",
+  CHARACTER_VARIANT_INACTIVE: "参照先のキャラクターvariantが無効です。",
+  CHARACTER_VARIANT_FILE_SLOT_MISSING:
+    "キャラクターvariantに必要な画像slotが不足しています。",
+  CHARACTER_VARIANT_FILE_MISSING:
+    "キャラクターvariantの画像ファイルが不足しています。",
+  CHARACTER_VARIANT_FILE_KIND_MISMATCH:
+    "キャラクターvariantの画像ファイル形式が正しくありません。",
+  CHARACTER_VARIANT_FILE_CHECKSUM_MISMATCH:
+    "キャラクターvariantの画像ファイルが更新されています。"
 };
 
 const stateLabels: Readonly<Record<ManifestPreviewState, string>> = {
@@ -101,6 +147,40 @@ const blockerOrder: readonly string[] = [
   "ASSET_UNREADABLE",
   "ASSET_CHECKSUM_MISMATCH"
 ];
+
+function compileDiagnosticTarget(
+  diagnostic: ManifestCompileDiagnostic
+): string {
+  const targets = [
+    diagnostic.lineId === undefined ? null : `セリフ ${diagnostic.lineId}`,
+    diagnostic.assignmentId === undefined
+      ? null
+      : `割り当て ${diagnostic.assignmentId}`,
+    diagnostic.sectionId === undefined ? null : `対象 ${diagnostic.sectionId}`,
+    diagnostic.variantId === undefined
+      ? null
+      : `variant ${diagnostic.variantId}`,
+    diagnostic.assetPath === undefined ? null : `素材 ${diagnostic.assetPath}`
+  ].filter((target): target is string => target !== null);
+  if (targets.length > 0) {
+    return targets.join(" / ");
+  }
+  return diagnostic.path.length > 0
+    ? diagnostic.path.join(".")
+    : "プロジェクト全体";
+}
+
+export function createPreviewCompileDiagnosticViewModel(
+  diagnostics: readonly ManifestCompileDiagnostic[]
+): readonly PreviewCompileDiagnosticViewModel[] {
+  return diagnostics.map((diagnostic) => ({
+    diagnostic,
+    title:
+      compileDiagnosticTitles[diagnostic.code] ??
+      "プレビュー作成に必要な項目を確認してください。",
+    target: compileDiagnosticTarget(diagnostic)
+  }));
+}
 
 function blockerSortIndex(code: string): number {
   const index = blockerOrder.indexOf(code);

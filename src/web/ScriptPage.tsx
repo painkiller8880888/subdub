@@ -1120,6 +1120,11 @@ export function ScriptPage() {
           <Link to={outlinePath(projectId)}>構成案へ戻る</Link>
         </p>
         <WorkflowIndicator projectId={projectId} currentStep="production" />
+        <div className="production-character-assets-action">
+          <Link className="button" to={charactersPath(projectId)}>
+            キャラクター素材を設定
+          </Link>
+        </div>
         <header className="page-header page-header-stacked">
           <p className="eyebrow">制作 台本・ビジュアル・音声</p>
           <h1>{project.metadata.title}</h1>
@@ -1129,9 +1134,6 @@ export function ScriptPage() {
           <div className="page-header-actions">
             <Link className="button" to={outlinePath(projectId)}>
               構成案を確認
-            </Link>
-            <Link className="button" to={charactersPath(projectId)}>
-              キャラクター素材を設定
             </Link>
           </div>
         </header>
@@ -1214,19 +1216,19 @@ export function ScriptPage() {
         </Link>
       </p>
       <WorkflowIndicator projectId={projectId} currentStep="production" />
+      <div className="production-character-assets-action">
+        <Link
+          className="button"
+          to={charactersPath(projectId)}
+          onClick={(event) =>
+            void navigateAway(event, charactersPath(projectId))
+          }
+        >
+          キャラクター素材を設定
+        </Link>
+      </div>
       <header className="page-header page-header-stacked">
-        <div className="page-header-actions">
-          <p className="eyebrow">制作 台本・ビジュアル・音声</p>
-          <Link
-            className="button"
-            to={charactersPath(projectId)}
-            onClick={(event) =>
-              void navigateAway(event, charactersPath(projectId))
-            }
-          >
-            キャラクター素材を設定
-          </Link>
-        </div>
+        <p className="eyebrow">制作 台本・ビジュアル・音声</p>
         <h1>{project.metadata.title}</h1>
         <p>
           台本を編集し、話者ごとのビジュアルセットからセリフ単位で表示 variant

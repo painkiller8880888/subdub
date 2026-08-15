@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Player } from "@remotion/player";
 import { Link, Navigate, useParams } from "react-router";
 import { ZodError } from "zod";
@@ -7,15 +7,20 @@ import { RenderManifestComposition } from "../remotion/composition";
 import {
   ApiClientError,
   ApiClientProtocolError,
+  compileProjectManifest,
   fetchProjectManifest
 } from "./lib/api-client";
 import {
+  createPreviewCompileDiagnosticViewModel,
   createPreviewPlayerProps,
   createPreviewViewModel
 } from "./preview-state";
 import { WorkflowIndicator } from "./WorkflowIndicator";
 
-function getErrorMessage(error: unknown): string {
+function getErrorMessage(
+  error: unknown,
+  fallback = "プレビュー情報を取得できませんでした。"
+): string {
   if (error instanceof ApiClientError) {
     return `${error.message}（エラーコード: ${error.code}）`;
   }
@@ -25,16 +30,34 @@ function getErrorMessage(error: unknown): string {
   if (error instanceof ZodError) {
     return "プレビュー応答の形式を確認できませんでした。";
   }
-  return "プレビュー情報を取得できませんでした。";
+  return fallback;
+}
+
+function errorDetails(error: unknown): readonly string[] {
+  if (!(error instanceof ApiClientError)) {
+    return [];
+  }
+  return error.details.map(
+    (detail) => `${detail.path.join(".") || "project"}: ${detail.message}`
+  );
 }
 
 export function PreviewPage() {
   const { projectId } = useParams<{ projectId: string }>();
+  const queryClient = useQueryClient();
   const manifestQuery = useQuery({
     queryKey: ["projects", projectId, "manifest"],
     queryFn: () => fetchProjectManifest(projectId ?? ""),
     enabled: projectId !== undefined,
     retry: false
+  });
+  const compileMutation = useMutation({
+    mutationFn: () => compileProjectManifest(projectId ?? ""),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({
+        queryKey: ["projects", projectId, "manifest"]
+      });
+    }
   });
 
   if (projectId === undefined) {
@@ -84,6 +107,12 @@ export function PreviewPage() {
   const data = manifestQuery.data;
   const viewModel = createPreviewViewModel(data, projectId);
   const playerProps = createPreviewPlayerProps(data, projectId);
+  const compileDiagnostics =
+    compileMutation.data?.status === "failed"
+      ? createPreviewCompileDiagnosticViewModel(
+          compileMutation.data.diagnostics
+        )
+      : [];
 
   return (
     <main className="page-shell preview-page">
@@ -112,6 +141,18 @@ export function PreviewPage() {
           <button
             className="button button-primary"
             type="button"
+            disabled={compileMutation.isPending}
+            onClick={() => compileMutation.mutate()}
+          >
+            {compileMutation.isPending
+              ? "プレビューを作成中…"
+              : data.manifest === null
+                ? "プレビューを作成"
+                : "プレビューを更新"}
+          </button>
+          <button
+            className="button"
+            type="button"
             disabled={!viewModel.canPlay}
             aria-describedby="preview-play-disabled-reason"
           >
@@ -124,6 +165,54 @@ export function PreviewPage() {
           </p>
         </div>
       </section>
+
+      {compileMutation.isError ? (
+        <section className="message-panel message-panel-error" role="alert">
+          <h2>プレビューを作成できませんでした</h2>
+          <p>
+            {getErrorMessage(
+              compileMutation.error,
+              "プレビュー作成に必要な情報を確認できませんでした。"
+            )}
+          </p>
+          {errorDetails(compileMutation.error).length > 0 ? (
+            <ul>
+              {errorDetails(compileMutation.error).map((detail) => (
+                <li key={detail}>{detail}</li>
+              ))}
+            </ul>
+          ) : null}
+        </section>
+      ) : null}
+
+      {compileDiagnostics.length > 0 ? (
+        <section
+          aria-labelledby="preview-compile-diagnostics-title"
+          className="preview-blockers preview-compile-diagnostics"
+          role="alert"
+        >
+          <h2 id="preview-compile-diagnostics-title">
+            プレビュー作成に不足している項目
+          </h2>
+          <p>次の項目を解消してから、もう一度プレビューを作成してください。</p>
+          <ul>
+            {compileDiagnostics.map(({ diagnostic, target, title }) => (
+              <li
+                key={`${diagnostic.code}-${diagnostic.path.join(".")}-${target}`}
+              >
+                <div>
+                  <strong>{title}</strong>
+                  <span className="preview-diagnostic-target">{target}</span>
+                  <span className="preview-blocker-code">
+                    {diagnostic.code}
+                  </span>
+                  <small>{diagnostic.message}</small>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
 
       {viewModel.previousSuccess ? (
         <section className="message-panel preview-previous-panel">
