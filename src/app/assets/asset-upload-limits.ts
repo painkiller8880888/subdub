@@ -1,5 +1,7 @@
 import type { AssetKind } from "../../schema/asset.js";
 
+type LegacyAssetKind = Exclude<AssetKind, "bgm">;
+
 export type AssetUploadLimits = {
   /** Maximum number of file parts in a single upload request. */
   readonly maxFileCount: number;
@@ -15,8 +17,14 @@ export type AssetUploadLimits = {
   readonly maxFileNameLength: number;
   /** Global file size cap enforced while streaming; the largest allowed kind is video. */
   readonly maxGlobalFileBytes: number;
-  /** Per-kind file size caps enforced at commit time. */
-  readonly perKindMaxBytes: Record<AssetKind, number>;
+  /**
+   * Per-kind file size caps enforced at commit time. BGM is optional here so
+   * pre-ED-02 custom limit objects remain compatible; omission uses the BGM
+   * default below.
+   */
+  readonly perKindMaxBytes: Record<LegacyAssetKind, number> & {
+    readonly bgm?: number;
+  };
 };
 
 // Initial values. Rationale is documented in the P3-01 PR body.
