@@ -1107,7 +1107,7 @@ function EditPlanEditor({
   }
 
   function moveKeyboardDropTarget(direction: "previous" | "next"): void {
-    if (activeDropTarget === null) {
+    if (activeDropTarget === null || keyboardDraggingElementId === null) {
       return;
     }
     const currentIndex = cutinDropTargets.findIndex((target) =>
@@ -1116,13 +1116,27 @@ function EditPlanEditor({
     if (currentIndex < 0) {
       return;
     }
-    const nextIndex =
-      direction === "next"
-        ? Math.min(currentIndex + 1, cutinDropTargets.length - 1)
-        : Math.max(currentIndex - 1, 0);
-    const nextTarget = cutinDropTargets[nextIndex];
-    if (nextTarget !== undefined) {
-      setActiveDropTarget(nextTarget);
+    const step = direction === "next" ? 1 : -1;
+    let nextIndex = currentIndex + step;
+    while (nextIndex >= 0 && nextIndex < cutinDropTargets.length) {
+      const nextTarget = cutinDropTargets[nextIndex];
+      if (nextTarget === undefined) {
+        return;
+      }
+      const nextDraft = moveEditVideoElement(
+        draftRef.current,
+        keyboardDraggingElementId,
+        nextTarget,
+        sectionIds
+      );
+      if (JSON.stringify(nextDraft) !== JSON.stringify(draftRef.current)) {
+        setActiveDropTarget(nextTarget);
+        return;
+      }
+      // A slot immediately after the source card can describe the same
+      // result after the source is removed. Skip that no-op slot so one
+      // ArrowDown/ArrowRight always advances the cutin when possible.
+      nextIndex += step;
     }
   }
 

@@ -318,6 +318,13 @@ describe("edit page read model", () => {
         name: "まとめ",
         background: { kind: "solid", colorToken: "background" },
         lines: []
+      },
+      {
+        id: "section-tail",
+        outlineSectionId: "outline-tail",
+        name: "補足",
+        background: { kind: "solid", colorToken: "background" },
+        lines: []
       }
     ] satisfies ScriptSection[];
     const cutin = (id: string, sectionId: string, order: number) => ({
@@ -334,7 +341,9 @@ describe("edit page read model", () => {
       videoElements: [
         cutin("cutin-a", "section-main", 0),
         cutin("cutin-b", "section-main", 1),
-        cutin("cutin-c", "section-outro", 0)
+        cutin("cutin-c", "section-outro", 0),
+        cutin("cutin-d", "section-tail", 5),
+        cutin("cutin-e", "section-tail", 10)
       ],
       sectionBgms: []
     };
@@ -348,7 +357,10 @@ describe("edit page read model", () => {
       { sectionId: "section-main", index: 1 },
       { sectionId: "section-main", index: 2 },
       { sectionId: "section-outro", index: 0 },
-      { sectionId: "section-outro", index: 1 }
+      { sectionId: "section-outro", index: 1 },
+      { sectionId: "section-tail", index: 0 },
+      { sectionId: "section-tail", index: 1 },
+      { sectionId: "section-tail", index: 2 }
     ]);
 
     const reordered = moveEditVideoElement(
@@ -371,6 +383,14 @@ describe("edit page read model", () => {
       [
         "cutin-c",
         { kind: "before_section", sectionId: "section-outro", order: 0 }
+      ],
+      [
+        "cutin-d",
+        { kind: "before_section", sectionId: "section-tail", order: 5 }
+      ],
+      [
+        "cutin-e",
+        { kind: "before_section", sectionId: "section-tail", order: 10 }
       ]
     ]);
 
@@ -385,7 +405,9 @@ describe("edit page read model", () => {
     ).toEqual([
       { kind: "before_section", sectionId: "section-outro", order: 1 },
       { kind: "before_section", sectionId: "section-main", order: 0 },
-      { kind: "before_section", sectionId: "section-outro", order: 0 }
+      { kind: "before_section", sectionId: "section-outro", order: 0 },
+      { kind: "before_section", sectionId: "section-tail", order: 5 },
+      { kind: "before_section", sectionId: "section-tail", order: 10 }
     ]);
 
     expect(

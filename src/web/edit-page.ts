@@ -222,7 +222,7 @@ export function createEditCutinDropTargets(
 }
 
 /**
- * Move a cutin to a valid section boundary and normalize the order in both
+ * Move a cutin to a valid section boundary and normalize the order in the
  * affected boundaries. A rejected target is a no-op so the UI cannot create a
  * client-side state that the server would reject.
  */
@@ -304,8 +304,16 @@ export function moveEditVideoElement(
   insertionIndex = Math.max(0, Math.min(insertionIndex, targetCutins.length));
   targetCutins.splice(insertionIndex, 0, source);
 
+  const affectedSectionIds = new Set([
+    source.placement.sectionId,
+    target.sectionId
+  ]);
   const placementByElementId = new Map<string, EditVideoElement["placement"]>();
-  for (const [sectionId, cutins] of cutinsBySectionId.entries()) {
+  for (const sectionId of affectedSectionIds) {
+    const cutins = cutinsBySectionId.get(sectionId);
+    if (cutins === undefined) {
+      continue;
+    }
     for (const [order, cutin] of cutins.entries()) {
       if (cutin.placement.kind !== "before_section") {
         continue;
