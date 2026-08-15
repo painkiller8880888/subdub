@@ -63,7 +63,7 @@ ED-00 は docs-only の仕様改訂であり、この Issue の作業ではコ�
 - intro / outro / cutin は MP4 の `video` Asset、BGM は MP3 の `bgm` Asset に限定する。
 - project data には Asset 本体の `version` / `checksum` を `assetVersion` / `assetChecksum` として、`assetId`、`projectMediaPath` とともに snapshot 固定する。OS path や任意ファイルを保存しない。
 - snapshot 作成後の Asset の差し替え・利用停止は既存 project の出力エラーにしない。出力時は project 内 `projectMediaPath` の存在、`assetChecksum`、MP4 / MP3 の実ファイル形式だけを検証し、live な Asset `status` や Asset Service の SQLite を必須入力にしない。
-- 動画と BGM は `0 <= volume <= 1` を持つ。generic `VideoDisplay.muted` の `true → 0`、`false → 1` 変換は ED-01 の `1.1.0 → 1.2.0` schema migration が担当する。ED-01 は既存 `RenderManifest 2.2.0` の `muted` legacy schema と project schema の分離、および 0 / 1 の compatibility adapter まで担当し、ED-07 は変換後の `volume` の UI / API / compiler / Remotion 側対応に限定する。
+- 動画と BGM は `0 <= volume <= 1` を持つ。generic `VideoDisplay.muted` の `true → 0`、`false → 1` 変換は ED-01 の `1.1.0 → 1.2.0` schema migration が担当する。ED-01 は既存 `RenderManifest 2.2.0` の `muted` legacy schema と project schema の分離、および 0 / 1 の compatibility adapter まで担当する。ED-08 を ED-07 より先に完了させて `RenderManifest 2.3.0` の任意 volume 経路を用意し、その後の ED-07 が変換後の `volume` の UI / API / compiler / Remotion 側対応を公開する。
 
 ## 2. 今回確定した判断
 
@@ -1149,15 +1149,53 @@ type LegacyRenderInsert = {
 `RenderManifest 2.2.0` は既存キャッシュと既存 Remotion / render 経路の入力契約として凍結する。`src/schema/render-manifest.ts` 相当の runtime schema は project の generic `VideoDisplay` schema を直接 import せず、`muted: boolean` を保持する専用の legacy schema を使う。ED-01で project schema を `volume` へ変更する前にこの境界を分離し、2.2.0 の manifestVersion の意味を変更しない。
 
 ```ts
-type LegacyRenderVideoDisplayV22 = Omit<VideoDisplay, "volume"> & {
+type LegacyRenderStaticAnnotationV22 = {
+  id: string;
+  kind: "label" | "box" | "arrow";
+  text: string | null;
+  x: number;
+  y: number;
+  width: number | null;
+  height: number | null;
+  colorToken: "accent" | "caution" | "warning";
+};
+
+type LegacyRenderCommonDisplayV22 = {
+  fit: "contain" | "cover";
+  crop: { x: number; y: number; width: number; height: number };
+  scale: number;
+  position: { x: number; y: number };
+  prioritizeVisual: boolean;
+  annotations: LegacyRenderStaticAnnotationV22[];
+};
+
+type LegacyRenderVideoDisplayV22 = LegacyRenderCommonDisplayV22 & {
+  kind: "video";
+  startMs: number;
+  endMs: number;
+  playbackRate: number;
   muted: boolean;
 };
 
-type LegacyRenderVisualV22 = Omit<RenderVisual, "display"> & {
+type LegacyRenderImageDisplayV22 = LegacyRenderCommonDisplayV22 & {
+  kind: "photo";
+};
+
+type LegacyRenderDocumentDisplayV22 = LegacyRenderCommonDisplayV22 & {
+  kind: "document_scan";
+  page: number;
+};
+
+type LegacyRenderVisualV22 = {
+  id: string;
+  from: number;
+  durationInFrames: number;
+  kind: "video" | "photo" | "document_scan";
+  src: string;
   display:
     | LegacyRenderVideoDisplayV22
-    | ImageDisplay
-    | DocumentDisplay;
+    | LegacyRenderImageDisplayV22
+    | LegacyRenderDocumentDisplayV22;
 };
 ```
 
@@ -1167,16 +1205,28 @@ type LegacyRenderVisualV22 = Omit<RenderVisual, "display"> & {
 function toLegacyRenderVideoDisplayV22(
   display: VideoDisplay,
 ): LegacyRenderVideoDisplayV22 {
-  const { volume, ...rest } = display;
-  if (volume === 0) return { ...rest, muted: true };
-  if (volume === 1) return { ...rest, muted: false };
-  throw new ValidationError(
-    "RenderManifest 2.2.0 cannot represent a non-binary video volume",
-  );
+  if (display.volume !== 0 && display.volume !== 1) {
+    throw new ValidationError(
+      "RenderManifest 2.2.0 cannot represent a non-binary video volume",
+    );
+  }
+  return {
+    kind: display.kind,
+    fit: display.fit,
+    crop: display.crop,
+    scale: display.scale,
+    position: display.position,
+    prioritizeVisual: display.prioritizeVisual,
+    annotations: display.annotations,
+    startMs: display.startMs,
+    endMs: display.endMs,
+    playbackRate: display.playbackRate,
+    muted: display.volume === 0,
+  };
 }
 ```
 
-ED-01 migration 直後の generic `volume` は 0 / 1 だけなので、この変換では情報を失わない。ED-07で UI / API が任意の 0〜1 を保存できるようになった後も、2.2.0 経路で値を丸めたり `muted` へ暗黙変換したりしない。0 / 1 以外の値は、ED-08 の `RenderManifest 2.3.0` 経路が必要な明示的 validation error とする。ED-08 では legacy schema / adapter を廃止し、2.3.0 の `RenderVisual.display` へ `volume` を直接保存する。
+ED-01 migration 直後の generic `volume` は 0 / 1 だけなので、この変換では情報を失わない。ED-08 完了前の2.2.0経路では値を丸めたり `muted` へ暗黙変換したりしない。ED-08 を ED-07 より先に完了させ、2.3.0 の `RenderVisual.display` へ任意の `volume` を直接保存できるようにしてから、ED-07 の UI / API が中間値を公開する。これにより ED-07 完了後に保存値だけがレンダリング不能になる状態を作らない。
 
 ### 8.1.1 次期 `RenderManifest 2.3.0` model
 
@@ -1184,7 +1234,7 @@ CV-05 で導入した explicit variant 解決を引き継ぐ次期モデルは `
 
 production の compile endpoint は `POST /api/projects/{projectId}/manifest/compile` とする。endpoint の compile service は project と audio index を読み、`CharacterVisualCatalogService.verifyFiles()` が返す SQLite の validated snapshot から character file metadata を組み立て、checksum を保持したまま `RenderManifestStore.compileAndStore()` へ渡す。編集 Asset は `project.json` の `assetId` / `assetVersion` / `assetChecksum` / `projectMediaPath` snapshot と project 内ファイルから解決し、Asset Service の SQLite や live な Asset `status` を必須入力にしない。静的 legacy catalog をこの経路の入力にせず、snapshot checksum と実ファイルの不一致は validation error とする。
 
-ED-01からED-08の間に既存 `2.2.0` を生成する場合、generic assignment の `VideoDisplay.volume` は 8.1.0 の legacy adapter を通して `RenderManifest 2.2.0` の `muted` へ変換する。`RenderManifest 2.2.0` の Zod schema と Remotion は `muted` のまま維持し、project の `volume` object を直接受け取らない。ED-08完了後の `2.3.0` だけが任意の `volume` を manifest / Remotion へ渡す。
+ED-08 実装前に既存 `2.2.0` を生成する場合、generic assignment の `VideoDisplay.volume` は 8.1.0 の legacy adapter を通して `RenderManifest 2.2.0` の `muted` へ変換する。`RenderManifest 2.2.0` の Zod schema と Remotion は `muted` のまま維持し、project の `volume` object を直接受け取らない。ED-08 は ED-07 の UI がなくても `VideoProject 1.2.0` の fixture volume を受け取れるように実装し、完了後の `2.3.0` が任意の `volume` を manifest / Remotion へ渡す。
 
 ```ts
 type RenderManifest = {
@@ -1688,7 +1738,7 @@ POST   /api/projects/{projectId}/thumbnail/render
 
 以下の `RenderManifest.characters[]`、`RenderManifest.lines[].characterVariantId`、`RenderManifest.characterVariants[]` は、8.1.1 の次期 `RenderManifest 2.3.0` model の出力である。旧 `RenderManifest 1.0.0` / `2.2.0` の互換モデルへ新しい意味を追加する仕様ではない。
 
-ただし ED-01 から ED-08 までの暫定 compile 経路では、既存 `RenderManifest 2.2.0` の generic video 契約を維持するため、assignment の `display` をそのまま manifest の `display` へ渡さない。project 側の `VideoDisplay.volume` は 8.1.0 の adapter で 0 / 1 のみ `muted` へ変換し、0 / 1 以外は 2.3.0 が必要な validation error とする。ED-08以後は 2.3.0 の `volume` schema へ直接解決する。
+ED-08 完了前の compile 経路では、既存 `RenderManifest 2.2.0` の generic video 契約を維持するため、assignment の `display` をそのまま manifest の `display` へ渡さない。project 側の `VideoDisplay.volume` は 8.1.0 の adapter で 0 / 1 のみ `muted` へ変換し、0 / 1 以外は 2.3.0 が必要な validation error とする。ED-08 完了後は 2.3.0 の `volume` schema へ直接解決し、ED-07 はその経路が存在する状態で任意 volume の UI / API を公開する。
 
 入力:
 
@@ -2188,6 +2238,8 @@ ED-00 はこの文書の仕様確定だけを行い、以下の後続 Issue へ�
 | ED-04 | workflow 表示の「制作」→「台本」、`/projects/{projectId}/edit` の画面骨格、section card の読み取り専用表示。 |
 | ED-05 | video element card、MP4 / BGM picker、追加・差し替え・削除・解除、volume UI、保存 validation。 |
 | ED-06 | section card を並べ替えず、video element card だけを同一境界内で drag & drop する処理。 |
-| ED-07 | ED-01 で変換済みの generic `VisualAssignment` の `VideoDisplay.volume` を UI、API、compiler、Remotion 側の project 表現で扱い、任意の 0〜1 を保存できるようにする。`muted → volume` の schema / migration 変換と 2.2.0 legacy adapter は担当しない。2.2.0 経路では 0 / 1 以外を暗黙変換しない。 |
-| ED-08 | `RenderManifest 2.3.0` の generic video display を `volume` へ移行し、2.2.0 legacy adapter を置き換える。実動画 `RenderVideoInsert`、timeline shift、最終 section BGM range の compiler も担当する。 |
+| ED-07 | **ED-08 完了後に実装する。** ED-01 で変換済みの generic `VisualAssignment` の `VideoDisplay.volume` を UI、API、compiler、Remotion 側の project 表現で扱い、任意の 0〜1 を保存できるようにする。`muted → volume` の schema / migration 変換と 2.2.0 legacy adapter は担当しない。通常の preview / MP4 が 2.3.0 の任意 volume 経路を使えることを前提とする。 |
+| ED-08 | **ED-07 より先に実装する。** `VideoProject 1.2.0` の generic `VideoDisplay.volume` を UI が未提供でも compiler input として受け取り、`RenderManifest 2.3.0` の generic video display を `volume` へ移行する。2.2.0 legacy adapter を置き換え、実動画 `RenderVideoInsert`、timeline shift、最終 section BGM range の compiler も担当する。 |
 | ED-09 | Remotion、preview、MP4、編集画面の E2E、実素材形式・音量・BGM 停止の検証。 |
+
+実装順序は `ED-01〜ED-06 → ED-08 → ED-07 → ED-09` とする。ED-08 の受け入れ条件には、UIから任意 volume を保存しなくても、fixture または手動作成した `VideoProject 1.2.0` の `volume: 0.25` を `RenderManifest 2.3.0` へ解決できることを含める。ED-07 完了時点で UI / API が保存できる値が通常の preview / MP4 でレンダリング不能になる中間状態を作らない。

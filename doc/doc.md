@@ -55,7 +55,7 @@ Issue #107（ED-00）では、MVP 完了後のワークフローを `企画 → 
 
 ED-00 は本書と `implementation-spec.md` だけを更新し、コード、schema、migration、API、UI、compiler、Remotion は変更しない。ED-01〜ED-09 の実装境界は 17.17 に定義する。
 
-この文書で定義する `VideoProject 1.2.0` / `RenderManifest 2.3.0` は後続 Issue の採用仕様であり、ED-00 の文書変更だけで現行コードの version が変わることを意味しない。ED-01 / ED-08 の実装完了までは既存の `1.1.0` / `2.2.0` との互換境界を維持する。
+この文書で定義する `VideoProject 1.2.0` / `RenderManifest 2.3.0` は後続 Issue の採用仕様であり、ED-00 の文書変更だけで現行コードの version が変わることを意味しない。ED-01 / ED-08 の実装完了までは既存の `1.1.0` / `2.2.0` との互換境界を維持する。後続 Issue の実装順序は、任意の generic video volume を UI / API から保存可能にする前にレンダリング経路を完成させるため、`ED-01〜ED-06 → ED-08 → ED-07 → ED-09` とする。ED-08 前に ED-07 を単独で有効化しない。
 
 ## 2. プロジェクト概要
 
@@ -374,7 +374,7 @@ RenderManifest（次期 `2.3.0`）
 
 `RenderManifest` は生成キャッシュであり、制作データの正本にはしない。正本 JSON、参照素材、出力設定のいずれかが変わった場合は再生成する。
 
-既存 `RenderManifest 2.2.0` の generic video は `muted` を持つ意味を維持する。`VideoProject 1.2.0` の `volume` をこの経路へ渡す場合は、ED-01で導入する adapter を通し、assignment の display をそのまま legacy manifest へ渡さない。ED-08で `RenderManifest 2.3.0` に移行した後だけ、generic video の `volume` を manifest と Remotion の正本表現にする。
+既存 `RenderManifest 2.2.0` の generic video は `muted` を持つ意味を維持する。`VideoProject 1.2.0` の `volume` をこの経路へ渡す場合は、ED-01で導入する adapter を通し、assignment の display をそのまま legacy manifest へ渡さない。ED-08で `RenderManifest 2.3.0` に移行した後は、generic video の任意 `volume` を現行 manifest と Remotion の正本経路へ流せる。ED-07 はその既存経路へ UI / API の保存導線を追加する後続 Issueであり、ED-08 前の2.2.0経路では 0 / 1 以外を保存可能なUIを公開しない。
 
 次期のキャラクター素材解決では、次の情報を `RenderManifest 2.3.0` へ固定する。登録機能とレンダリング解決は分離し、コンパイラが検証済み snapshot から派生データを生成する。実動画挿入と BGM の最終セクション範囲も同じ派生マニフェストへ解決する。
 
@@ -1594,9 +1594,11 @@ Issue #107（ED-00）は仕様書だけを更新する。以下は後続 Issue �
 | ED-04 | workflow の「制作」表示を「台本」へ変更し、`/projects/{projectId}/edit` の画面骨格と section card を追加。 |
 | ED-05 | video element card、MP4 picker、BGM picker、追加・差し替え・削除・解除、volume UI と保存 validation。 |
 | ED-06 | section card を固定したまま、video element card だけを同一境界内で drag & drop する処理。 |
-| ED-07 | ED-01 で変換済みの generic `VisualAssignment` の `VideoDisplay.volume` を UI、API、compiler、Remotion 側の project 表現で扱い、任意の 0〜1 を保存できるようにする。schema / migration の `muted → volume` 変換と 2.2.0 legacy adapter は担当しない。2.2.0 経路では 0 / 1 以外を暗黙変換しない。 |
-| ED-08 | `RenderManifest 2.3.0` の generic video display を `volume` へ移行し、2.2.0 legacy adapter を置き換える。実動画 `RenderVideoInsert`、cutin / intro / outro の shift、section BGM の最終範囲解決も担当する。 |
+| ED-07 | **ED-08 完了後に実装する。** ED-01 で変換済みの generic `VisualAssignment` の `VideoDisplay.volume` を UI、API、compiler、Remotion 側の project 表現で扱い、任意の 0〜1 を保存できるようにする。schema / migration の `muted → volume` 変換と 2.2.0 legacy adapter は担当しない。通常の preview / MP4 は ED-08 の 2.3.0 経路で任意 volume をレンダリングできる状態を前提とする。 |
+| ED-08 | **ED-07 より先に実装する。** `VideoProject 1.2.0` の generic `VideoDisplay.volume` を UI が未提供でも compiler input として受け取り、`RenderManifest 2.3.0` の generic video display へ移行する。2.2.0 legacy adapter を置き換え、実動画 `RenderVideoInsert`、cutin / intro / outro の shift、section BGM の最終範囲解決も担当する。 |
 | ED-09 | Remotion、プレビュー、MP4、編集画面を含む E2E と実素材検証。 |
+
+実装順序は `ED-01〜ED-06 → ED-08 → ED-07 → ED-09` とする。ED-08 の受け入れ条件には、UIから任意 volume を保存しなくても、fixture または手動作成した `VideoProject 1.2.0` の `volume: 0.25` を `RenderManifest 2.3.0` へ解決できることを含める。これにより ED-07 完了時点で UI / API が保存できる値が通常の preview / MP4 でレンダリング不能になる中間状態を作らない。
 
 ED-01〜ED-09 では、今回確定した配置規則、登録済み Asset 限定、project snapshot、volume、固定 loop、動画要素中の BGM 停止を拡張して自由編集機能へ広げない。
 
