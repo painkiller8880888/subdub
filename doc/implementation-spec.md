@@ -104,14 +104,14 @@ CV-04 はこの3文書の更新だけを行い、schema、schema version bump、
 
 キャラクター素材に関するデータは、次の 4 層を混同しない。
 
-| データ | 正本または性質 | P2-01 時点の扱い |
+| データ | 正本または性質 | 現在の扱い |
 |---|---|---|
-| `projects/{projectId}/project.json` | 人間が編集する動画制作データの正本。構成案の承認と、台本・ビジュアル・音声のレビュー状態もここに保持する | `VideoProject 1.0.0` を維持する |
-| `CharacterVisualSet` | ワークスペース共通の登録済みキャラクタービジュアルと variant/file メタデータの正本 | P2-01 の 2 キャラクター、6 variant、10 PNG を CV-01 で SQLite へ idempotent に seed / migration する |
-| `CharacterVisualBinding` | `project.json` に保存する、プロジェクト内の VOICEVOX 話者と visual / idle variant の選択 | CV-05 で schema version bump 後に追加済み。SQLite に project binding は持たせない |
-| `ScriptLine.characterVariantId` | `project.json` に保存する、line ごとの人間が選択した physical variant 参照 | CV-05 で追加済み。新規 line は未選択から開始する |
-| `characterVariantCatalog` | `CharacterVisualSet` から生成する型、検証入力、または純粋な catalog snapshot | P2-01 では静的データだったが、移行後は実在項目を静的ソースへ二重管理しない |
-| `RenderManifest` | 特定レンダリングへ使う解決済み派生データ | 現行 `1.0.0` は論理表情を持つ。物理 variant の解決情報は後続設計 |
+| `projects/{projectId}/project.json` | 人間が編集する動画制作データの正本。構成案の承認と、台本・ビジュアル・音声のレビュー状態もここに保持する | 現行保存形式は `VideoProject 1.1.0`。`schemaVersion: "1.0.0"` は legacy input boundary として厳密に検証し、明示的 migration で `1.1.0` へ変換する |
+| `CharacterVisualSet` | ワークスペース共通の登録済みキャラクタービジュアルと variant/file メタデータの正本 | workspace SQLite の現行カタログ。P2-01 の初期 2 キャラクター、6 variant、10 PNG は idempotent seed / migration の入力として扱い、静的カタログを現行の正本にしない |
+| `CharacterVisualBinding` | `project.json` に保存する、プロジェクト内の VOICEVOX 話者と visual / idle variant の選択 | 現行 `VideoProject 1.1.0` の project-specific な保存データ。CV-05 で実装済みであり、SQLite に project binding は持たせない |
+| `ScriptLine.characterVariantId` | `project.json` に保存する、line ごとの人間が選択した physical variant 参照 | 現行 `VideoProject 1.1.0` に保存する explicit reference。CV-05 で実装済みで、新規 line は未選択から開始する |
+| `characterVariantCatalog` | `CharacterVisualSet` から生成する型、検証入力、または純粋な catalog snapshot | DB から取得した検証済み snapshot または純粋な view model。実在項目を静的ソースへ二重管理しない |
+| `RenderManifest` | 特定レンダリングへ使う解決済み派生データ | 現行 `RenderManifest 2.2.0`。`characters`、`characterVariants`、line ごとの `characterVariantId` など、explicit reference から解決した物理 variant 情報を保持する |
 
 `CharacterVisualSet` と配下の物理 variant は別エンティティとして扱う。visual 全体は一部の表情・ポーズ variant が未登録でも登録できるが、`single-image` は `single`、`mouth-pair` は `closed` と `open` が揃った場合だけ完成 variant とする。最初の完成 variant のキャンバスサイズを visual 単位の基準とし、同じ visual へ異なるサイズの画像を追加しない。
 
@@ -1526,7 +1526,7 @@ POST   /api/projects/{projectId}/thumbnail/render
 
 - API キーは `OPENROUTER_API_KEY` からバックエンドだけが読む。
 - 現行の既定モデルは `google/gemma-4-31b-it` とする。
-- WebUI の構成案、台本生成、台本レビュー、ビジュアル検索意図、レイアウトレビュー、OpenCode は別の `AiTaskKind` として実装済みだが、用途別評価を行うまでは同じ共通モデルを使用する。
+- 構成案生成、台本生成、台本レビュー、ビジュアル検索意図、レイアウトレビュー、OpenCode の各用途は、用途識別のための `AiTaskKind` として定義済みである。これは各機能が利用可能または実装済みであることを意味しない。特に AI による台本初稿生成は現在対象外・将来拡張であり、本仕様では実装済みとして扱わない。用途別評価を行うまでは同じ共通モデルを使用する。
 - OpenCode のエージェントは役割別に分けても、初期設定ではすべて `google/gemma-4-31b-it` を参照する。
 - 実行ログには `taskKind`、解決されたモデル ID、モデル選択元 `run_override | task_override | default` を記録する。
 - モデル一覧は認証済み利用可能モデルを取得し、text 出力と structured output 対応で絞り込む。
