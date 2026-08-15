@@ -1,15 +1,26 @@
+# Legacy Notice — MVP development completed
+
+本書は MVP を段階的に実装するために使用した開発計画であり、MVP の対象実装は完了している。本書は現在の製品仕様、実装仕様、今後の開発順序を定義する正本ではない。
+
+現在の正本:
+
+- [`doc/doc.md`](../doc.md)
+- [`doc/implementation-spec.md`](../implementation-spec.md)
+
+本書の Phase、P0〜P6、PR 候補、Codex 指示例は、過去の施工計画を確認する場合だけ参照する。現在の正本と矛盾する場合は、本書の内容を採用しない。
+
 # Remotion 社内マニュアル動画制作システム
 # ChatGPT計画・レビュー／Codex実装向け 開発計画
 
 文書版: 1.1
 作成日: 2026-08-02  
 更新日: 2026-08-15
-基礎資料: [`implementation-spec.md`](./implementation-spec.md)<br>
+基礎資料: [`implementation-spec.md`](../implementation-spec.md)<br>
 対象: アプリ開発の初心者が、Web版ChatGPTと相談しながらCodexへ実装を依頼し、段階的にMVPを完成させるための計画
 
 ## 0. Issue #87 による計画の更新
 
-この計画の旧 P2/P3/P5 文言より、Issue #97（CV-04）と [`implementation-spec.md`](./implementation-spec.md) の更新内容を優先する。台本・キャラクタービジュアル・音声は、`/projects/{projectId}/script` を中心とした一体型の制作範囲として扱う。現場素材用の generic Asset Search / `VisualAssignment` は backend とデータを維持するが、標準 `/script` の旧右ペインではなく、分離した補助導線で扱う。
+この計画の旧 P2/P3/P5 文言より、Issue #97（CV-04）と [`implementation-spec.md`](../implementation-spec.md) の更新内容を優先する。台本・キャラクタービジュアル・音声は、`/projects/{projectId}/script` を中心とした一体型の制作範囲として扱う。現場素材用の generic Asset Search / `VisualAssignment` は backend とデータを維持するが、標準 `/script` の旧右ペインではなく、分離した補助導線で扱う。
 
 - `outline` の承認済みかつ最新であることは、台本の初期化と現在の制作コンテキストの前提として残す。この文書の対象範囲では、構成案の承認が唯一の明示的な工程境界である。
 - 台本承認とビジュアル承認は制作フローから削除する。script/visual の `approved`、`draft`、`needs_review` は互換性、レビュー結果、stale、再生成要否の表示に残せるが、候補表示、素材割り当て、音声操作、プレビュー、`RenderManifest`、レンダリングの前提には使わない。
@@ -976,6 +987,6 @@ Phase 0からPhase 6まで完了した後、最終的なMVP確認用fixtureを�
 
 最初の依頼はP0-01だけにする。P0-01でリポジトリの起動方法、テスト方法、ディレクトリ境界が固定されてから、P0-02のZodスキーマへ進む。
 
-最初の依頼時には、[`implementation-spec.md`](./implementation-spec.md) とこの計画書を Codex が常に参照できる場所へ置く。Codex には、実装前に対象節を読み、Issue #87 の制作モデルと出力 validation に反する旧承認ゲートを再導入しないこと、実装後に参照した節番号を報告するよう求める。
+最初の依頼時には、[`implementation-spec.md`](../implementation-spec.md) とこの計画書を Codex が常に参照できる場所へ置く。Codex には、実装前に対象節を読み、Issue #87 の制作モデルと出力 validation に反する旧承認ゲートを再導入しないこと、実装後に参照した節番号を報告するよう求める。
 
 P0-01を完了するまでは、プロジェクト画面、OpenRouter、VOICEVOX、Remotionの本格実装を始めない。
