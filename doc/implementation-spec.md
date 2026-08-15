@@ -1079,14 +1079,13 @@ type RenderInsert = {
 
 `RenderManifest 1.0.0` の `lines[].expression` は `ScriptLine["expression"]`、つまり `neutral` / `smile` / `explain` / `caution` の論理表情である。これは物理ファイルパスや `variantId` を意味しない。現行 `1.0.0` は明示的な character variant 解決フィールドを持たず、その意味を CV-04 で変更しない。
 
-### 8.1.1 CV-05 target `RenderManifest` model（現行 `1.0.0` とは別）
+### 8.1.1 CV-05 target `RenderManifest 2.2.0` model（現行 `1.0.0` とは別）
 
-次は CV-05 で実装する概念モデルであり、現行 `RenderManifest 1.0.0` の型定義ではない。CV-04 では `manifestVersion` の値を決めない。CV-05 はこの target model をシリアライズする前に、既存 `1.0.0` と衝突しない明示的な manifest version / compatibility 方針を定め、target を `1.0.0` として保存してはならない。
+CV-05 target は既存 `RenderManifest 1.0.0` と意味を分離し、実装では `manifestVersion: "2.2.0"` として保存する。`characterMappingVersion` は既存キャッシュ・run-log との互換メタデータとして残すが、expression や mapping table から physical variant を解決する入力ではない。
 
 ```ts
 type RenderManifestCv05Target = {
-  // CV-05 が明示的な値を決める。"1.0.0" として保存しない。
-  manifestVersion: string;
+  manifestVersion: "2.2.0";
   sourceProjectHash: string;
   sourceAssetChecksums: { path: string; sha256: string }[];
   fps: number;
@@ -1109,6 +1108,7 @@ type RenderLineCv05Target = RenderLine & {
 
 type RenderCharacter = {
   characterId: string;
+  visualId: string;
   displayName: string;
   themeColorToken: string;
   lipSyncPeriodFrames: number;
@@ -1118,13 +1118,13 @@ type RenderCharacter = {
 type RenderCharacterVariant =
   | {
       variantId: string;
-      characterId: string;
+      visualId: string;
       renderType: "single-image";
       files: { single: { path: string; sha256: string } };
     }
   | {
       variantId: string;
-      characterId: string;
+      visualId: string;
       renderType: "mouth-pair";
       files: {
         closed: { path: string; sha256: string };
@@ -1149,7 +1149,7 @@ RenderManifest.lines[].characterVariantId
 RenderManifest.characterVariants[]
 ```
 
-compiler は explicit reference を snapshot と照合し、解決元 visual、variant の active 状態、speaker 所属、renderType、相対ファイルパス、checksum、`mouth-pair` の `closed` / `open` を manifest に固定する。expression、tag、label、旧固定 mapping から physical variant を自動選択・代替しない。missing、inactive、cross-visual、variant / mouth slot 欠落、checksum 不一致は validation error とする。Remotion は SQLite、CharacterVisual Service、ファイル探索を直接参照せず、解決済み manifest だけを入力とする。
+compiler は explicit reference を snapshot と照合し、解決元 `visualId`、variant の active 状態、speaker の project character、renderType、相対ファイルパス、checksum、`mouth-pair` の `closed` / `open` を manifest に固定する。`RenderCharacterVariant` は physical visual の `(visualId, variantId)` を識別し、同じ physical variant を複数の project character が共有できる。expression、tag、label、旧固定 mapping から physical variant を自動選択・代替しない。missing、inactive、cross-visual、variant / mouth slot 欠落、checksum 不一致は validation error とする。Remotion は SQLite、CharacterVisual Service、ファイル探索を直接参照せず、解決済み manifest だけを入力とする。
 
 実際の project schema、snapshot version、variant version、target `manifestVersion` の互換性は CV-05 で既存 schema と整合させる。CV-04 は manifest version の値を決めない。project schema `1.0.0` の意味も暗黙に変更せず、explicit schema version bump と migration を必須とする。
 
@@ -1971,7 +1971,7 @@ VOICEVOX の数値 style ID は実装前に人間が決定する値ではなく�
 - `CharacterVisualBinding` と `ScriptLine.characterVariantId` の既存 schema 命名への適合
 - `schemaVersion` の bump 値と `1.0.0` からの migration の具体的手順
 - snapshot の版または更新時点と variant version の表現
-- `RenderManifest` の manifestVersion 互換性と、既存 `characterMappingVersion` 等の互換フィールドの扱い
+- `RenderManifest 2.2.0` の `visualId` 分離、共有 physical variant、`characterMappingVersion` の compatibility-only 扱いは CV-05 で確定済み
 - 登録 API の multipart 形式、status の enum/遷移、file version の詳細
 
 論理表情から physical variant への既定 mapping、tag / label による推測、missing / inactive / cross-visual の自動代替は未決事項ではなく、採用しない仕様として確定している。

@@ -14,7 +14,7 @@ const COMPILER_INPUT_HASH =
   "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff";
 
 export const renderManifestFixture = {
-  manifestVersion: "2.1.0",
+  manifestVersion: "2.2.0",
   sourceProjectHash: SOURCE_HASH,
   compilerInputHash: COMPILER_INPUT_HASH,
   characterCatalogVersion: "1.0.0",
@@ -22,6 +22,7 @@ export const renderManifestFixture = {
   characters: [
     {
       characterId: "character-mentor",
+      visualId: "character-mentor",
       displayName: "四国めたん",
       themeColorToken: "character.metan",
       lipSyncPeriodFrames: 3,
@@ -29,6 +30,7 @@ export const renderManifestFixture = {
     },
     {
       characterId: "character-learner",
+      visualId: "character-learner",
       displayName: "ずんだもん",
       themeColorToken: "character.zundamon",
       lipSyncPeriodFrames: 3,
@@ -38,7 +40,7 @@ export const renderManifestFixture = {
   characterVariants: [
     {
       variantId: "character-learner-stand-v1",
-      characterId: "character-learner",
+      visualId: "character-learner",
       renderType: "single-image",
       files: {
         single: {
@@ -49,7 +51,7 @@ export const renderManifestFixture = {
     },
     {
       variantId: "character-learner-speak-normal-v1",
-      characterId: "character-learner",
+      visualId: "character-learner",
       renderType: "mouth-pair",
       files: {
         closed: {
@@ -64,7 +66,7 @@ export const renderManifestFixture = {
     },
     {
       variantId: "character-learner-speak-pointing-v1",
-      characterId: "character-learner",
+      visualId: "character-learner",
       renderType: "mouth-pair",
       files: {
         closed: {
@@ -79,7 +81,7 @@ export const renderManifestFixture = {
     },
     {
       variantId: "character-mentor-speak-normal-v1",
-      characterId: "character-mentor",
+      visualId: "character-mentor",
       renderType: "mouth-pair",
       files: {
         closed: {
@@ -94,7 +96,7 @@ export const renderManifestFixture = {
     },
     {
       variantId: "character-mentor-speak-pointing-v1",
-      characterId: "character-mentor",
+      visualId: "character-mentor",
       renderType: "mouth-pair",
       files: {
         closed: {
@@ -109,7 +111,7 @@ export const renderManifestFixture = {
     },
     {
       variantId: "character-mentor-stand-v1",
-      characterId: "character-mentor",
+      visualId: "character-mentor",
       renderType: "single-image",
       files: {
         single: {

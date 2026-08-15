@@ -4,7 +4,7 @@ const EMPTY_HASH =
   "0000000000000000000000000000000000000000000000000000000000000000";
 
 export const defaultRenderManifest: RenderManifest = {
-  manifestVersion: "2.1.0",
+  manifestVersion: "2.2.0",
   sourceProjectHash: EMPTY_HASH,
   compilerInputHash: EMPTY_HASH,
   characterCatalogVersion: "default",

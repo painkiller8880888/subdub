@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import type {
   CharacterVariant,
@@ -32,10 +32,66 @@ export function CharacterVisualPickerModal({
   readonly onClose: () => void;
 }) {
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
 
   useEffect(() => {
     setSelectedTags([]);
   }, [visual?.visualId]);
+
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    if (dialog === null) {
+      return;
+    }
+    const dialogElement = dialog;
+
+    const previouslyFocused =
+      document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null;
+    const getFocusableElements = (): HTMLElement[] =>
+      Array.from(
+        dialogElement.querySelectorAll<HTMLElement>(
+          'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+        )
+      ).filter((element) => !element.hasAttribute("disabled"));
+    getFocusableElements()[0]?.focus();
+
+    function handleKeyDown(event: KeyboardEvent): void {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        onCloseRef.current();
+        return;
+      }
+      if (event.key !== "Tab") {
+        return;
+      }
+
+      const focusableElements = getFocusableElements();
+      if (focusableElements.length === 0) {
+        event.preventDefault();
+        dialogElement.focus();
+        return;
+      }
+      const first = focusableElements[0];
+      const last = focusableElements[focusableElements.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last?.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first?.focus();
+      }
+    }
+
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("keydown", handleKeyDown);
+      previouslyFocused?.focus();
+    };
+  }, []);
 
   if (visual === undefined) {
     return null;
@@ -53,7 +109,9 @@ export function CharacterVisualPickerModal({
       aria-label={`${characterName}のビジュアルを選択`}
       aria-modal="true"
       className="character-visual-picker-backdrop"
+      ref={dialogRef}
       role="dialog"
+      tabIndex={-1}
     >
       <section className="character-visual-picker-modal">
         <header className="character-visual-picker-header">

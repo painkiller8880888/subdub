@@ -36,7 +36,7 @@ import {
   type VoicevoxAudioIndexEntry
 } from "../voicevox/audio-index.js";
 
-export const RENDER_MANIFEST_VERSION = "2.1.0" as const;
+export const RENDER_MANIFEST_VERSION = "2.2.0" as const;
 
 export const renderManifestAssetMetadataSchema = z
   .object({
@@ -140,9 +140,14 @@ export type RenderManifestCompilerInput = {
   readonly materials?: readonly unknown[];
   readonly characterVariantCatalog?: unknown;
   readonly catalog?: unknown;
+  /** Legacy input aliases retained for callers and logs; never used to resolve a variant. */
   readonly characterVariantMapping?: unknown;
   readonly mapping?: unknown;
   readonly characterCatalogVersion?: unknown;
+  /**
+   * Legacy compatibility metadata. It is retained for cache and run-log
+   * callers, but explicit project references now determine every variant.
+   */
   readonly characterMappingVersion?: unknown;
 };
 
@@ -185,7 +190,7 @@ type NormalizedCatalogFile = {
 
 type NormalizedCatalogVariant = {
   readonly variantId: string;
-  readonly characterId: string;
+  readonly visualId: string;
   readonly status: "active" | "inactive";
   readonly visualStatus: "active" | "inactive";
   readonly renderType: CharacterVariantRenderType;
@@ -194,6 +199,11 @@ type NormalizedCatalogVariant = {
 };
 
 type AssetLookup = ReadonlyMap<string, RenderManifestAssetMetadata>;
+
+type CatalogIndex = {
+  readonly byKey: ReadonlyMap<string, NormalizedCatalogVariant>;
+  readonly byId: ReadonlyMap<string, readonly NormalizedCatalogVariant[]>;
+};
 
 type LineEntry = {
   readonly sectionIndex: number;
@@ -309,6 +319,10 @@ function compareStrings(left: string, right: string): number {
   return left < right ? -1 : left > right ? 1 : 0;
 }
 
+function catalogVariantKey(visualId: string, variantId: string): string {
+  return `${visualId}\u0000${variantId}`;
+}
+
 function recordInputAssets(input: RenderManifestCompilerInput): unknown {
   return input.assetMetadata ?? input.assets ?? input.materials ?? [];
 }
@@ -339,7 +353,7 @@ function normalizeCatalog(
     ? snapshotResult.data.flatMap((visual) =>
         visual.variants.map((variant) => ({
           variantId: variant.variantId,
-          characterId: visual.visualId,
+          visualId: visual.visualId,
           renderType: variant.renderType,
           status: variant.status,
           visualStatus: visual.status,
@@ -352,7 +366,7 @@ function normalizeCatalog(
     : rawCatalog;
 
   const variants: NormalizedCatalogVariant[] = [];
-  const variantIds = new Set<string>();
+  const variantKeys = new Set<string>();
 
   for (const [index, rawVariant] of catalogEntries.entries()) {
     if (!isPlainRecord(rawVariant)) {
@@ -366,7 +380,7 @@ function normalizeCatalog(
     }
 
     const variantId = rawVariant.variantId;
-    const characterId = rawVariant.characterId;
+    const visualId = rawVariant.visualId ?? rawVariant.characterId;
     const renderType = rawVariant.renderType;
     const status = rawVariant.status ?? "active";
     const visualStatus = rawVariant.visualStatus ?? "active";
@@ -382,30 +396,27 @@ function normalizeCatalog(
       );
       continue;
     }
-    if (variantIds.has(variantId)) {
+    if (typeof visualId !== "string" || !idSchema.safeParse(visualId).success) {
       addDiagnostic(
         diagnostics,
         RENDER_MANIFEST_ERROR_CODE.catalogSchema,
-        ["characterVariantCatalog", index, "variantId"],
-        "variantId must be unique",
-        { variantId }
-      );
-    }
-    variantIds.add(variantId);
-
-    if (
-      typeof characterId !== "string" ||
-      !idSchema.safeParse(characterId).success
-    ) {
-      addDiagnostic(
-        diagnostics,
-        RENDER_MANIFEST_ERROR_CODE.catalogSchema,
-        ["characterVariantCatalog", index, "characterId"],
-        "characterId must be a lower-kebab-case identifier",
+        ["characterVariantCatalog", index, "visualId"],
+        "visualId must be a lower-kebab-case identifier",
         { variantId }
       );
       continue;
     }
+    const variantKey = catalogVariantKey(visualId, variantId);
+    if (variantKeys.has(variantKey)) {
+      addDiagnostic(
+        diagnostics,
+        RENDER_MANIFEST_ERROR_CODE.catalogSchema,
+        ["characterVariantCatalog", index, "variantId"],
+        "variantId must be unique within a visual",
+        { variantId }
+      );
+    }
+    variantKeys.add(variantKey);
 
     if (status !== "active" && status !== "inactive") {
       addDiagnostic(
@@ -432,7 +443,7 @@ function normalizeCatalog(
         RENDER_MANIFEST_ERROR_CODE.catalogSchema,
         ["characterVariantCatalog", index, "renderType"],
         "renderType must be single-image or mouth-pair",
-        { variantId, sectionId: characterId }
+        { variantId, sectionId: visualId }
       );
       continue;
     }
@@ -534,7 +545,7 @@ function normalizeCatalog(
 
     variants.push({
       variantId,
-      characterId,
+      visualId,
       status: status === "inactive" ? "inactive" : "active",
       visualStatus: visualStatus === "inactive" ? "inactive" : "active",
       renderType,
@@ -707,22 +718,34 @@ function expectedCharacterKinds(kind: string): boolean {
 }
 
 function variantForId(
-  variants: ReadonlyMap<string, NormalizedCatalogVariant>,
+  catalog: CatalogIndex,
   variantId: string,
   visualId: string,
   diagnostics: RenderManifestDiagnostic[],
   context: DiagnosticContext
 ): NormalizedCatalogVariant | undefined {
-  const variant = variants.get(variantId);
+  let variant = catalog.byKey.get(catalogVariantKey(visualId, variantId));
   if (variant === undefined) {
-    addDiagnostic(
-      diagnostics,
-      RENDER_MANIFEST_ERROR_CODE.variantMissing,
-      ["characterVariantCatalog", variantId],
-      "explicit character variant is not present in characterVariantCatalog",
-      { ...context, variantId }
-    );
-    return undefined;
+    const variantsWithId = catalog.byId.get(variantId);
+    if (variantsWithId !== undefined && variantsWithId.length > 0) {
+      addDiagnostic(
+        diagnostics,
+        RENDER_MANIFEST_ERROR_CODE.variantCharacterMismatch,
+        ["characterVariantCatalog", variantId, "visualId"],
+        "explicit character variant belongs to a different visual",
+        { ...context, variantId }
+      );
+      variant = variantsWithId[0];
+    } else {
+      addDiagnostic(
+        diagnostics,
+        RENDER_MANIFEST_ERROR_CODE.variantMissing,
+        ["characterVariantCatalog", variantId],
+        "explicit character variant is not present in characterVariantCatalog",
+        { ...context, variantId }
+      );
+      return undefined;
+    }
   }
   if (variant.visualStatus !== "active") {
     addDiagnostic(
@@ -739,15 +762,6 @@ function variantForId(
       RENDER_MANIFEST_ERROR_CODE.characterVariantInactive,
       ["characterVariantCatalog", variant.inputIndex, "status"],
       "the referenced character variant is inactive",
-      { ...context, variantId }
-    );
-  }
-  if (variant.characterId !== visualId) {
-    addDiagnostic(
-      diagnostics,
-      RENDER_MANIFEST_ERROR_CODE.variantCharacterMismatch,
-      ["characterVariantCatalog", variant.inputIndex, "characterId"],
-      "explicit character variant belongs to a different visual",
       { ...context, variantId }
     );
   }
@@ -915,6 +929,7 @@ function orderedManifest(manifest: RenderManifest): RenderManifest {
     characterMappingVersion: manifest.characterMappingVersion,
     characters: manifest.characters.map((character): RenderCharacter => ({
       characterId: character.characterId,
+      visualId: character.visualId,
       displayName: character.displayName,
       themeColorToken: character.themeColorToken,
       lipSyncPeriodFrames: character.lipSyncPeriodFrames,
@@ -925,10 +940,7 @@ function orderedManifest(manifest: RenderManifest): RenderManifest {
         variant.renderType === "single-image"
           ? {
               variantId: variant.variantId,
-              characterId: variant.characterId,
-              ...(variant.visualId === undefined
-                ? {}
-                : { visualId: variant.visualId }),
+              visualId: variant.visualId,
               renderType: variant.renderType,
               files: {
                 single: {
@@ -939,10 +951,7 @@ function orderedManifest(manifest: RenderManifest): RenderManifest {
             }
           : {
               variantId: variant.variantId,
-              characterId: variant.characterId,
-              ...(variant.visualId === undefined
-                ? {}
-                : { visualId: variant.visualId }),
+              visualId: variant.visualId,
               renderType: variant.renderType,
               files: {
                 closed: {
@@ -1101,9 +1110,19 @@ export function compileRenderManifest(
   const assets = normalizeAssets(recordInputAssets(input), diagnostics);
   const assetLookup = getAssetLookup(assets);
   const catalog = normalizeCatalog(recordInputCatalog(input), diagnostics);
-  const catalogById = new Map(
-    catalog.map((variant) => [variant.variantId, variant])
+  const catalogByKey = new Map(
+    catalog.map((variant) => [
+      catalogVariantKey(variant.visualId, variant.variantId),
+      variant
+    ])
   );
+  const catalogById = new Map<string, NormalizedCatalogVariant[]>();
+  for (const variant of catalog) {
+    const variantsWithId = catalogById.get(variant.variantId) ?? [];
+    variantsWithId.push(variant);
+    catalogById.set(variant.variantId, variantsWithId);
+  }
+  const catalogIndex: CatalogIndex = { byKey: catalogByKey, byId: catalogById };
   const characterCatalogVersion = validateVersion(
     input.characterCatalogVersion,
     CHARACTER_VARIANT_CATALOG_VERSION,
@@ -1393,7 +1412,10 @@ export function compileRenderManifest(
 
   const idleVariantIds = new Map<string, string>();
   const lineVariantIds = new Map<string, string>();
-  const referencedVariantIds = new Set<string>();
+  const referencedVariants = new Map<
+    string,
+    { readonly visualId: string; readonly variantId: string }
+  >();
   const projectCharactersById = new Map(
     project.characters.map((character) => [character.id, character])
   );
@@ -1421,9 +1443,12 @@ export function compileRenderManifest(
     }
 
     idleVariantIds.set(character.id, binding.idleVariantId);
-    referencedVariantIds.add(binding.idleVariantId);
-    variantForId(
-      catalogById,
+    referencedVariants.set(
+      catalogVariantKey(binding.visualId, binding.idleVariantId),
+      { visualId: binding.visualId, variantId: binding.idleVariantId }
+    );
+    const resolvedIdleVariant = variantForId(
+      catalogIndex,
       binding.idleVariantId,
       binding.visualId,
       diagnostics,
@@ -1432,6 +1457,18 @@ export function compileRenderManifest(
         variantId: binding.idleVariantId
       }
     );
+    if (resolvedIdleVariant !== undefined) {
+      referencedVariants.set(
+        catalogVariantKey(
+          resolvedIdleVariant.visualId,
+          resolvedIdleVariant.variantId
+        ),
+        {
+          visualId: resolvedIdleVariant.visualId,
+          variantId: resolvedIdleVariant.variantId
+        }
+      );
+    }
   }
   for (const entry of lineEntries) {
     const variantId = entry.line.characterVariantId;
@@ -1473,31 +1510,46 @@ export function compileRenderManifest(
       continue;
     }
     lineVariantIds.set(entry.line.id, variantId);
-    referencedVariantIds.add(variantId);
-    variantForId(catalogById, variantId, visualId, diagnostics, {
-      lineId: entry.line.id,
-      sectionId: entry.sectionId,
+    referencedVariants.set(catalogVariantKey(visualId, variantId), {
+      visualId,
       variantId
     });
-  }
-
-  const variantOwnerById = new Map<string, string>();
-  for (const character of project.characters) {
-    const idleVariantId = character.characterVisual.idleVariantId;
-    if (idleVariantId !== null) {
-      variantOwnerById.set(idleVariantId, character.id);
-    }
-  }
-  for (const entry of lineEntries) {
-    const variantId = entry.line.characterVariantId;
-    if (variantId !== undefined && variantId !== null) {
-      variantOwnerById.set(variantId, entry.line.speakerId);
+    const resolvedLineVariant = variantForId(
+      catalogIndex,
+      variantId,
+      visualId,
+      diagnostics,
+      {
+        lineId: entry.line.id,
+        sectionId: entry.sectionId,
+        variantId
+      }
+    );
+    if (resolvedLineVariant !== undefined) {
+      referencedVariants.set(
+        catalogVariantKey(
+          resolvedLineVariant.visualId,
+          resolvedLineVariant.variantId
+        ),
+        {
+          visualId: resolvedLineVariant.visualId,
+          variantId: resolvedLineVariant.variantId
+        }
+      );
     }
   }
 
   const resolvedCharacterVariants = new Map<string, RenderCharacterVariant>();
-  for (const variantId of [...referencedVariantIds].sort()) {
-    const catalogVariant = catalogById.get(variantId);
+  for (const reference of [...referencedVariants.values()].sort((left, right) =>
+    compareStrings(
+      catalogVariantKey(left.visualId, left.variantId),
+      catalogVariantKey(right.visualId, right.variantId)
+    )
+  )) {
+    const { visualId, variantId } = reference;
+    const catalogVariant = catalogIndex.byKey.get(
+      catalogVariantKey(visualId, variantId)
+    );
     if (catalogVariant === undefined) {
       continue;
     }
@@ -1557,27 +1609,29 @@ export function compileRenderManifest(
     if (catalogVariant.renderType === "single-image") {
       const single = resolvedFiles.single;
       if (single !== undefined) {
-        resolvedCharacterVariants.set(variantId, {
-          variantId,
-          characterId:
-            variantOwnerById.get(variantId) ?? catalogVariant.characterId,
-          visualId: catalogVariant.characterId,
-          renderType: "single-image",
-          files: { single }
-        });
+        resolvedCharacterVariants.set(
+          catalogVariantKey(catalogVariant.visualId, variantId),
+          {
+            variantId,
+            visualId: catalogVariant.visualId,
+            renderType: "single-image",
+            files: { single }
+          }
+        );
       }
     } else {
       const closed = resolvedFiles.closed;
       const open = resolvedFiles.open;
       if (closed !== undefined && open !== undefined) {
-        resolvedCharacterVariants.set(variantId, {
-          variantId,
-          characterId:
-            variantOwnerById.get(variantId) ?? catalogVariant.characterId,
-          visualId: catalogVariant.characterId,
-          renderType: "mouth-pair",
-          files: { closed, open }
-        });
+        resolvedCharacterVariants.set(
+          catalogVariantKey(catalogVariant.visualId, variantId),
+          {
+            variantId,
+            visualId: catalogVariant.visualId,
+            renderType: "mouth-pair",
+            files: { closed, open }
+          }
+        );
       }
     }
   }
@@ -1752,13 +1806,13 @@ export function compileRenderManifest(
     .sort((left, right) => compareStrings(left.path, right.path));
   const catalogForHash = catalog.map((variant) => ({
     variantId: variant.variantId,
-    characterId: variant.characterId,
+    visualId: variant.visualId,
     renderType: variant.renderType,
     files: [...variant.files.values()]
       .sort((left, right) => compareStrings(left.key, right.key))
       .map((file) => ({ key: file.key, destinationPath: file.destinationPath }))
   }));
-  const mappingForHash = {
+  const characterSelectionForHash = {
     characters: project.characters.map((character) => ({
       characterId: character.id,
       visualId: character.characterVisual.visualId,
@@ -1776,7 +1830,7 @@ export function compileRenderManifest(
     characterCatalogVersion,
     characterMappingVersion,
     characterCatalog: catalogForHash,
-    characterMapping: mappingForHash
+    characterSelection: characterSelectionForHash
   });
 
   const renderLines: RenderLine[] = lineEntries.map((entry) => {
@@ -2002,12 +2056,14 @@ export function compileRenderManifest(
     (renderInserts[renderInserts.length - 1]?.from ?? 0) + endingFrames;
 
   const characters: RenderCharacter[] = project.characters.map((character) => {
+    const visualId = character.characterVisual.visualId;
     const idleVariantId = idleVariantIds.get(character.id);
-    if (idleVariantId === undefined) {
+    if (visualId === null || idleVariantId === undefined) {
       throw new Error(`idle variant is missing: ${character.id}`);
     }
     return {
       characterId: character.id,
+      visualId,
       displayName: character.name,
       themeColorToken: character.themeColorToken,
       lipSyncPeriodFrames: character.lipSyncPeriodFrames,
@@ -2015,7 +2071,11 @@ export function compileRenderManifest(
     };
   });
   const characterVariants = [...resolvedCharacterVariants.values()].sort(
-    (left, right) => compareStrings(left.variantId, right.variantId)
+    (left, right) =>
+      compareStrings(
+        catalogVariantKey(left.visualId, left.variantId),
+        catalogVariantKey(right.visualId, right.variantId)
+      )
   );
   const manifest = {
     manifestVersion: RENDER_MANIFEST_VERSION,

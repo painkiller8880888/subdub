@@ -441,6 +441,7 @@ describe("outline editing and approval APIs", () => {
                   spokenText: "script",
                   subtitleText: "script",
                   expression: "neutral",
+                  characterVariantId: null,
                   pauseBeforeMs: 0,
                   pauseAfterMs: 0,
                   voiceOverrides: {},

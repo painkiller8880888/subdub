@@ -4,7 +4,10 @@ import {
   CURRENT_VIDEO_PROJECT_SCHEMA_VERSION,
   migrateVideoProject
 } from "../../src/app/projects/video-project-migration.js";
-import { videoProjectSchema } from "../../src/schema/index.js";
+import {
+  legacyVideoProjectSchema,
+  videoProjectSchema
+} from "../../src/schema/index.js";
 import { videoProjectFixture } from "../fixtures/video-project.js";
 
 function clone<T>(value: T): T {
@@ -63,5 +66,16 @@ describe("video project schema migration", () => {
 
     expect(migrated).toBe(current);
     expect((migrated as typeof current).schemaVersion).toBe("1.1.0");
+  });
+
+  it("rejects 1.1.0-only fields before migrating a 1.0.0 project", () => {
+    const mixed = clone(videoProjectFixture) as Record<string, unknown>;
+    mixed.schemaVersion = "1.0.0";
+
+    expect(legacyVideoProjectSchema.safeParse(mixed).success).toBe(false);
+    expect(migrateVideoProject(mixed)).toBe(mixed);
+    expect(
+      videoProjectSchema.safeParse(migrateVideoProject(mixed)).success
+    ).toBe(false);
   });
 });

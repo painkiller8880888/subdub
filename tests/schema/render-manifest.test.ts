@@ -66,6 +66,26 @@ describe("renderManifestSchema", () => {
     const unknownCharacterKey = clone(renderManifestFixture);
     Object.assign(unknownCharacterKey.characters[0], { unexpected: true });
     expectInvalid(unknownCharacterKey, ["characters", 0]);
+
+    const missingVisualId = clone(renderManifestFixture);
+    Reflect.deleteProperty(missingVisualId.characterVariants[0], "visualId");
+    expectInvalid(missingVisualId, ["characterVariants", 0, "visualId"]);
+  });
+
+  it("allows multiple project characters to share one physical visual variant", () => {
+    const shared = clone(renderManifestFixture);
+    shared.characters[1].visualId = "character-mentor";
+    shared.characters[1].idleVariantId = "character-mentor-stand-v1";
+    shared.characterVariants = shared.characterVariants.filter(
+      (variant) => variant.visualId === "character-mentor"
+    );
+    for (const line of shared.lines) {
+      if (line.speakerId === "character-learner") {
+        line.characterVariantId = "character-mentor-speak-normal-v1";
+      }
+    }
+
+    expect(renderManifestSchema.safeParse(shared).success).toBe(true);
   });
 
   it("accepts long non-blank subtitle text from the source project", () => {
@@ -85,7 +105,7 @@ describe("renderManifestSchema", () => {
       string,
       unknown
     >;
-    legacy.manifestVersion = "2.0.0";
+    legacy.manifestVersion = "2.1.0";
     expectInvalid(legacy, ["manifestVersion"]);
   });
 

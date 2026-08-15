@@ -68,6 +68,23 @@ describe("videoProjectSchema", () => {
     expectInvalid(deepUnknown);
   });
 
+  it("requires an explicit null or variant id on every 1.1.0 script line", () => {
+    const missingVariantSelection = clone(videoProjectFixture);
+    Reflect.deleteProperty(
+      missingVariantSelection.script.sections[0].lines[0],
+      "characterVariantId"
+    );
+
+    expectInvalid(missingVariantSelection, [
+      "script",
+      "sections",
+      0,
+      "lines",
+      0,
+      "characterVariantId"
+    ]);
+  });
+
   it("rejects unknown task model override keys", () => {
     const invalid = clone(videoProjectFixture);
     Object.assign(invalid.aiSettings.taskModelOverrides, {

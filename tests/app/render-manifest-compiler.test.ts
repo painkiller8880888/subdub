@@ -35,7 +35,7 @@ describe("compileRenderManifest", () => {
     expect(diagnosticCodes(result)).toContain("CHARACTER_CATALOG_INVALID");
   });
 
-  it("resolves the explicit character mapping and compiles all timeline inputs", () => {
+  it("resolves explicit character selections and compiles all timeline inputs", () => {
     const result = compileRenderManifest(validInput());
 
     expect(result.success).toBe(true);
@@ -43,7 +43,7 @@ describe("compileRenderManifest", () => {
       return;
     }
 
-    expect(result.manifest.manifestVersion).toBe("2.1.0");
+    expect(result.manifest.manifestVersion).toBe("2.2.0");
     expect(result.manifest.characterCatalogVersion).toBe(
       CHARACTER_VARIANT_CATALOG_VERSION
     );
@@ -53,6 +53,7 @@ describe("compileRenderManifest", () => {
     expect(result.manifest.characters).toEqual([
       {
         characterId: "character-mentor",
+        visualId: "character-mentor",
         displayName: "四国めたん",
         themeColorToken: "character.metan",
         lipSyncPeriodFrames: 3,
@@ -60,6 +61,7 @@ describe("compileRenderManifest", () => {
       },
       {
         characterId: "character-learner",
+        visualId: "character-learner",
         displayName: "ずんだもん",
         themeColorToken: "character.zundamon",
         lipSyncPeriodFrames: 3,
@@ -216,6 +218,46 @@ describe("compileRenderManifest", () => {
         .map(({ path }) => path)
         .sort((left, right) => left.localeCompare(right))
     );
+  });
+
+  it("shares a physical visual variant without assigning ownership to one speaker", () => {
+    const input = validInput();
+    const project = structuredClone(input.project) as VideoProject;
+    project.characters[1]!.characterVisual = {
+      visualId: "character-mentor",
+      idleVariantId: "character-mentor-stand-v1"
+    };
+    for (const section of project.script.sections) {
+      for (const line of section.lines) {
+        if (line.speakerId === "character-learner") {
+          line.characterVariantId = "character-mentor-speak-normal-v1";
+        }
+      }
+    }
+
+    const result = compileRenderManifest({ ...input, project });
+
+    expect(result.success).toBe(true);
+    if (!result.success) {
+      return;
+    }
+    expect(result.manifest.characters[1]).toMatchObject({
+      characterId: "character-learner",
+      visualId: "character-mentor"
+    });
+    expect(
+      result.manifest.characterVariants.filter(
+        (variant) => variant.variantId === "character-mentor-speak-normal-v1"
+      )
+    ).toHaveLength(1);
+    expect(
+      result.manifest.lines
+        .filter((line) => line.speakerId === "character-learner")
+        .every(
+          (line) =>
+            line.characterVariantId === "character-mentor-speak-normal-v1"
+        )
+    ).toBe(true);
   });
 
   it("is deterministic for hashes, deep equality, and serialization", () => {
@@ -555,7 +597,7 @@ describe("compileRenderManifest", () => {
     }
   });
 
-  it("reports character ownership, slot, kind, checksum, and duration errors with context", () => {
+  it("reports visual ownership, slot, kind, checksum, and duration errors with context", () => {
     const catalog = characterVariantCatalog.map((variant) =>
       variant.variantId === "character-mentor-speak-pointing-v1"
         ? { ...variant, characterId: "character-learner" }

@@ -1,4 +1,5 @@
 import type { CharacterVisualBinding } from "../../schema/video-project.js";
+import { legacyVideoProjectSchema } from "../../schema/video-project.js";
 
 export const CURRENT_VIDEO_PROJECT_SCHEMA_VERSION = "1.1.0" as const;
 export const LEGACY_VIDEO_PROJECT_SCHEMA_VERSION = "1.0.0" as const;
@@ -52,6 +53,14 @@ function cloneJson(value: unknown): unknown {
 }
 
 function migrateLegacyProject(project: Record<string, unknown>): unknown {
+  // Validate the actual 1.0.0 shape before changing the version. In
+  // particular, strict legacy objects reject characterVisual and
+  // characterVariantId instead of allowing 1.1.0-only data to bypass the
+  // legacy schema boundary.
+  if (!legacyVideoProjectSchema.safeParse(project).success) {
+    return project;
+  }
+
   const migrated = cloneJson(project);
   if (!isRecord(migrated)) {
     return migrated;

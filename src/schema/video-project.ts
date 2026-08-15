@@ -170,7 +170,7 @@ export const scriptLineSchema = strictObject({
     message: "subtitleText must not be blank"
   }),
   expression: expressionSchema,
-  characterVariantId: idSchema.nullable().optional(),
+  characterVariantId: idSchema.nullable(),
   pauseBeforeMs: finiteNumberSchema.int().nonnegative(),
   pauseAfterMs: finiteNumberSchema.int().nonnegative(),
   voiceOverrides: voiceOverridesSchema,
@@ -296,6 +296,30 @@ const videoProjectBaseSchema = strictObject({
   audio: audioPlanSchema,
   inserts: insertPlanSchema,
   thumbnail: thumbnailPlanSchema
+});
+
+/**
+ * The 1.0.0 input boundary is intentionally kept strict so that a project
+ * carrying 1.1.0-only fields cannot be relabeled and accepted as a migrated
+ * project before the legacy shape has been validated.
+ */
+const legacyCharacterSchema = characterSchema.omit({
+  characterVisual: true
+});
+const legacyScriptLineSchema = scriptLineSchema.omit({
+  characterVariantId: true
+});
+const legacyScriptSectionSchema = scriptSectionSchema.extend({
+  lines: z.array(legacyScriptLineSchema)
+});
+const legacyScriptSchema = scriptSchema.extend({
+  sections: z.array(legacyScriptSectionSchema)
+});
+
+export const legacyVideoProjectSchema = videoProjectBaseSchema.extend({
+  schemaVersion: z.literal("1.0.0"),
+  characters: z.array(legacyCharacterSchema).length(2),
+  script: legacyScriptSchema
 });
 
 type IssuePath = Array<string | number>;

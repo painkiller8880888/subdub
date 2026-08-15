@@ -46,6 +46,7 @@ function addFirstLine(script: Script): Script {
                 spokenText: "追加されたセリフ",
                 subtitleText: "追加された字幕",
                 expression: "neutral",
+                characterVariantId: null,
                 pauseBeforeMs: 0,
                 pauseAfterMs: 250,
                 voiceOverrides: {},
