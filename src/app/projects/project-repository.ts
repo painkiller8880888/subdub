@@ -18,7 +18,6 @@ import {
 } from "../run-log-store.js";
 import { invalidateForUpstreamChange } from "./project-invalidation.js";
 import {
-  migrateVideoProject,
   migrateVideoProjectWithDiagnostics,
   type LegacyBgmMigrationLogEntry
 } from "./video-project-migration.js";
@@ -467,7 +466,9 @@ export class ProjectRepository {
 
   async read(projectId: unknown): Promise<VideoProject> {
     const safeProjectId = this.validateProjectId(projectId);
-    return this.readUnlocked(safeProjectId);
+    return this.withSaveLock(safeProjectId, () =>
+      this.readUnlocked(safeProjectId)
+    );
   }
 
   async withProjectLock<T>(
@@ -594,16 +595,18 @@ export class ProjectRepository {
         }
 
         projects.push(
-          await this.readProjectWithExpectedId(projectId, {
-            projectDirectoryPath,
-            projectFilePath,
-            sourceDirectoryPath: path.join(projectDirectoryPath, "source"),
-            sourceFilePath: path.join(
+          await this.withSaveLock(projectId, () =>
+            this.readProjectWithExpectedId(projectId, {
               projectDirectoryPath,
-              "source",
-              "source.md"
-            )
-          })
+              projectFilePath,
+              sourceDirectoryPath: path.join(projectDirectoryPath, "source"),
+              sourceFilePath: path.join(
+                projectDirectoryPath,
+                "source",
+                "source.md"
+              )
+            })
+          )
         );
       } catch (error) {
         if (error instanceof ProjectRepositoryError) {
@@ -620,9 +623,7 @@ export class ProjectRepository {
   }
 
   async create(candidate: unknown): Promise<VideoProject> {
-    const candidateResult = videoProjectSchema.safeParse(
-      migrateVideoProject(candidate)
-    );
+    const candidateResult = videoProjectSchema.safeParse(candidate);
     if (!candidateResult.success) {
       throw candidateValidationFailedError(
         validationIssues(candidateResult.error)
@@ -1029,9 +1030,7 @@ export class ProjectRepository {
       paths
     );
 
-    const candidateResult = videoProjectSchema.safeParse(
-      migrateVideoProject(candidate)
-    );
+    const candidateResult = videoProjectSchema.safeParse(candidate);
     if (!candidateResult.success) {
       throw candidateValidationFailedError(
         validationIssues(candidateResult.error)
@@ -1493,6 +1492,59 @@ export class ProjectRepository {
     }
   }
 
+  private async assertMigrationLogPathsSafe(
+    paths: ResolvedProjectPaths,
+    logsDirectoryPath: string,
+    logFilePath: string
+  ): Promise<void> {
+    const managementRootPath = await this.resolveExistingPath(
+      this.workspaceRoot
+    );
+    if (managementRootPath === null) {
+      throw invalidProjectPathError();
+    }
+
+    const resolvedProjectDirectoryPath = await this.resolveExistingPath(
+      paths.projectDirectoryPath
+    );
+    if (resolvedProjectDirectoryPath === null) {
+      throw projectNotFoundError();
+    }
+    this.assertInsideManagementRoot(
+      managementRootPath,
+      resolvedProjectDirectoryPath
+    );
+
+    const resolvedLogsDirectoryPath = await this.resolveExistingPath(
+      logsDirectoryPath
+    );
+    if (resolvedLogsDirectoryPath !== null) {
+      this.assertInsideManagementRoot(
+        managementRootPath,
+        resolvedLogsDirectoryPath
+      );
+      if (
+        !isPathInside(
+          resolvedProjectDirectoryPath,
+          resolvedLogsDirectoryPath
+        )
+      ) {
+        throw invalidProjectPathError();
+      }
+    }
+
+    const resolvedLogFilePath = await this.resolveExistingPath(logFilePath);
+    if (resolvedLogFilePath !== null) {
+      this.assertInsideManagementRoot(managementRootPath, resolvedLogFilePath);
+      if (
+        resolvedLogsDirectoryPath === null ||
+        !isPathInside(resolvedLogsDirectoryPath, resolvedLogFilePath)
+      ) {
+        throw invalidProjectPathError();
+      }
+    }
+  }
+
   private async persistMigrationLog(
     paths: ResolvedProjectPaths,
     entries: readonly LegacyBgmMigrationLogEntry[]
@@ -1503,9 +1555,25 @@ export class ProjectRepository {
 
     const logsDirectoryPath = path.join(paths.projectDirectoryPath, "logs");
     const logFilePath = path.join(logsDirectoryPath, "migration-log.jsonl");
+    await this.assertMigrationLogPathsSafe(
+      paths,
+      logsDirectoryPath,
+      logFilePath
+    );
     let existingContents = "";
     try {
       await this.fileSystem.mkdir(logsDirectoryPath, { recursive: true });
+    } catch (error) {
+      if (!isMissingPathError(error)) {
+        throw migrationLogWriteFailedError();
+      }
+    }
+    await this.assertMigrationLogPathsSafe(
+      paths,
+      logsDirectoryPath,
+      logFilePath
+    );
+    try {
       existingContents = await this.fileSystem.readFile(logFilePath);
     } catch (error) {
       if (!isMissingPathError(error)) {
