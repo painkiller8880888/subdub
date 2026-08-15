@@ -63,7 +63,7 @@ ED-00 は docs-only の仕様改訂であり、この Issue の作業ではコ�
 - intro / outro / cutin は MP4 の `video` Asset、BGM は MP3 の `bgm` Asset に限定する。
 - project data には Asset 本体の `version` / `checksum` を `assetVersion` / `assetChecksum` として、`assetId`、`projectMediaPath` とともに snapshot 固定する。OS path や任意ファイルを保存しない。
 - snapshot 作成後の Asset の差し替え・利用停止は既存 project の出力エラーにしない。出力時は project 内 `projectMediaPath` の存在、`assetChecksum`、MP4 / MP3 の実ファイル形式だけを検証し、live な Asset `status` や Asset Service の SQLite を必須入力にしない。
-- 動画と BGM は `0 <= volume <= 1` を持つ。generic `VideoDisplay.muted` の `true → 0`、`false → 1` 変換は ED-01 の `1.1.0 → 1.2.0` schema migration が担当し、ED-07 は変換後の `volume` の UI / API / compiler / Remotion 対応だけを担当する。
+- 動画と BGM は `0 <= volume <= 1` を持つ。generic `VideoDisplay.muted` の `true → 0`、`false → 1` 変換は ED-01 の `1.1.0 → 1.2.0` schema migration が担当する。ED-01 は既存 `RenderManifest 2.2.0` の `muted` legacy schema と project schema の分離、および 0 / 1 の compatibility adapter まで担当し、ED-07 は変換後の `volume` の UI / API / compiler / Remotion 側対応に限定する。
 
 ## 2. 今回確定した判断
 
@@ -896,7 +896,7 @@ type BackgroundDefinition =
 
 - `endMs` は `startMs` より大きく、素材の duration 以下とする。
 - `playbackRate` は `0` より大きい値とする。
-- `volume` は `0` 以上 `1` 以下とする。旧 generic `muted` は ED-01 migration 時に `true → 0`、`false → 1` として変換し、`1.2.0` では保存しない。ED-07 はこの変換後の `volume` を UI、API、compiler、Remotion で扱う。
+- `volume` は `0` 以上 `1` 以下とする。旧 generic `muted` は ED-01 migration 時に `true → 0`、`false → 1` として変換し、`1.2.0` では保存しない。ED-07 はこの変換後の `volume` を UI、API、compiler、Remotion 側の project 表現で扱う。既存 `RenderManifest 2.2.0` の legacy adapter は 0 / 1 だけを受け付け、その他の値を `muted` へ丸めない。
 - 帳票の `page` は 1 始まりとし、素材の `pageCount` 以下とする。
 
 ### 7.9 音声、編集、サムネイル
@@ -1057,7 +1057,7 @@ type LegacyEyeCatchPlaceholder = {
 
 ### 8.1 `RenderManifest`（次期 `2.3.0`）
 
-ED-08 では `RenderManifest 2.3.0` を採用する。次の `1.0.0` 型と既存 `2.2.0` キャッシュは、MVP / ED-00 前の互換性確認のために履歴として保持するものであり、新規実装の正本ではない。次期モデルは 8.1.1 に示す。
+ED-08 では `RenderManifest 2.3.0` を採用する。次の `1.0.0` 型と既存 `2.2.0` キャッシュは、MVP / ED-00 前の互換性確認のために履歴として保持するものであり、新規実装の正本ではない。特に既存 `2.2.0` の generic video display は `muted: boolean` の意味を凍結し、`VideoProject 1.2.0` の `volume` schema と共有しない。次期モデルは 8.1.1 に示す。
 
 ```ts
 type LegacyRenderManifestV1 = {
@@ -1144,11 +1144,47 @@ type LegacyRenderInsert = {
 
 旧 `RenderManifest 1.0.0` の `lines[].expression` は `ScriptLine["expression"]`、つまり `neutral` / `smile` / `explain` / `caution` の論理表情である。これは物理ファイルパスや `variantId` を意味しない。互換 `2.2.0` ではこれに加えて明示的な character variant 解決フィールドを保持した。ED-08 の `2.3.0` では、その責務に実動画 insert と編集 BGM の最終範囲を加える。
 
+### 8.1.0 既存 `RenderManifest 2.2.0` の legacy compatibility boundary
+
+`RenderManifest 2.2.0` は既存キャッシュと既存 Remotion / render 経路の入力契約として凍結する。`src/schema/render-manifest.ts` 相当の runtime schema は project の generic `VideoDisplay` schema を直接 import せず、`muted: boolean` を保持する専用の legacy schema を使う。ED-01で project schema を `volume` へ変更する前にこの境界を分離し、2.2.0 の manifestVersion の意味を変更しない。
+
+```ts
+type LegacyRenderVideoDisplayV22 = Omit<VideoDisplay, "volume"> & {
+  muted: boolean;
+};
+
+type LegacyRenderVisualV22 = Omit<RenderVisual, "display"> & {
+  display:
+    | LegacyRenderVideoDisplayV22
+    | ImageDisplay
+    | DocumentDisplay;
+};
+```
+
+2.2.0 へ出力する暫定 adapter は compiler の assignment display の直接 pass-through を置き換える。
+
+```ts
+function toLegacyRenderVideoDisplayV22(
+  display: VideoDisplay,
+): LegacyRenderVideoDisplayV22 {
+  const { volume, ...rest } = display;
+  if (volume === 0) return { ...rest, muted: true };
+  if (volume === 1) return { ...rest, muted: false };
+  throw new ValidationError(
+    "RenderManifest 2.2.0 cannot represent a non-binary video volume",
+  );
+}
+```
+
+ED-01 migration 直後の generic `volume` は 0 / 1 だけなので、この変換では情報を失わない。ED-07で UI / API が任意の 0〜1 を保存できるようになった後も、2.2.0 経路で値を丸めたり `muted` へ暗黙変換したりしない。0 / 1 以外の値は、ED-08 の `RenderManifest 2.3.0` 経路が必要な明示的 validation error とする。ED-08 では legacy schema / adapter を廃止し、2.3.0 の `RenderVisual.display` へ `volume` を直接保存する。
+
 ### 8.1.1 次期 `RenderManifest 2.3.0` model
 
 CV-05 で導入した explicit variant 解決を引き継ぐ次期モデルは `RenderManifest 1.0.0` / `2.2.0` と意味を分離し、`manifestVersion: "2.3.0"` として保存する。`characterMappingVersion` は既存キャッシュ・run-log との互換メタデータとして残すが、expression や mapping table から physical variant を解決する入力ではない。
 
 production の compile endpoint は `POST /api/projects/{projectId}/manifest/compile` とする。endpoint の compile service は project と audio index を読み、`CharacterVisualCatalogService.verifyFiles()` が返す SQLite の validated snapshot から character file metadata を組み立て、checksum を保持したまま `RenderManifestStore.compileAndStore()` へ渡す。編集 Asset は `project.json` の `assetId` / `assetVersion` / `assetChecksum` / `projectMediaPath` snapshot と project 内ファイルから解決し、Asset Service の SQLite や live な Asset `status` を必須入力にしない。静的 legacy catalog をこの経路の入力にせず、snapshot checksum と実ファイルの不一致は validation error とする。
+
+ED-01からED-08の間に既存 `2.2.0` を生成する場合、generic assignment の `VideoDisplay.volume` は 8.1.0 の legacy adapter を通して `RenderManifest 2.2.0` の `muted` へ変換する。`RenderManifest 2.2.0` の Zod schema と Remotion は `muted` のまま維持し、project の `volume` object を直接受け取らない。ED-08完了後の `2.3.0` だけが任意の `volume` を manifest / Remotion へ渡す。
 
 ```ts
 type RenderManifest = {
@@ -1652,6 +1688,8 @@ POST   /api/projects/{projectId}/thumbnail/render
 
 以下の `RenderManifest.characters[]`、`RenderManifest.lines[].characterVariantId`、`RenderManifest.characterVariants[]` は、8.1.1 の次期 `RenderManifest 2.3.0` model の出力である。旧 `RenderManifest 1.0.0` / `2.2.0` の互換モデルへ新しい意味を追加する仕様ではない。
 
+ただし ED-01 から ED-08 までの暫定 compile 経路では、既存 `RenderManifest 2.2.0` の generic video 契約を維持するため、assignment の `display` をそのまま manifest の `display` へ渡さない。project 側の `VideoDisplay.volume` は 8.1.0 の adapter で 0 / 1 のみ `muted` へ変換し、0 / 1 以外は 2.3.0 が必要な validation error とする。ED-08以後は 2.3.0 の `volume` schema へ直接解決する。
+
 入力:
 
 - 検証済み `VideoProject`
@@ -2144,12 +2182,12 @@ ED-00 はこの文書の仕様確定だけを行い、以下の後続 Issue へ�
 
 | Issue | 実装責務 |
 |---|---|
-| ED-01 | `VideoProject 1.2.0`、`EditPlan`、schema / Zod、`1.1.0 → 1.2.0` migration。旧 placeholder は空状態へ移し、generic `VideoDisplay.muted` を `volume` へ変換し、旧 BGM path は架空 Asset にせず `logs/migration-log.jsonl` へ sectionId・path・volume を記録する。 |
+| ED-01 | `VideoProject 1.2.0`、`EditPlan`、schema / Zod、`1.1.0 → 1.2.0` migration。旧 placeholder は空状態へ移し、generic `VideoDisplay.muted` を `volume` へ変換する。`RenderManifest 2.2.0` の `muted` legacy schema を project schema から分離し、`volume` の 0 / 1 を既存 2.2.0 compiler / render 経路へ渡す adapter まで実装する。旧 BGM path は架空 Asset にせず `logs/migration-log.jsonl` へ sectionId・path・volume を記録する。 |
 | ED-02 | `Asset.kind = "bgm"`、MP4 / MP3 の拡張子・MIME・実ファイル形式 validation。 |
 | ED-03 | 編集 Asset の候補取得、安全な project 取り込み、`assetId` / `assetVersion` / `assetChecksum` / `projectMediaPath` snapshot API。選択・差し替え時だけ Asset を active とし、出力時は project 内 snapshot を検証する。 |
 | ED-04 | workflow 表示の「制作」→「台本」、`/projects/{projectId}/edit` の画面骨格、section card の読み取り専用表示。 |
 | ED-05 | video element card、MP4 / BGM picker、追加・差し替え・削除・解除、volume UI、保存 validation。 |
 | ED-06 | section card を並べ替えず、video element card だけを同一境界内で drag & drop する処理。 |
-| ED-07 | ED-01 で変換済みの generic `VisualAssignment` の `VideoDisplay.volume` を UI、API、compiler、Remotion で扱う。`muted → volume` の schema / migration 変換は担当しない。 |
-| ED-08 | `RenderManifest 2.3.0`、実動画 `RenderVideoInsert`、timeline shift、最終 section BGM range の compiler。 |
+| ED-07 | ED-01 で変換済みの generic `VisualAssignment` の `VideoDisplay.volume` を UI、API、compiler、Remotion 側の project 表現で扱い、任意の 0〜1 を保存できるようにする。`muted → volume` の schema / migration 変換と 2.2.0 legacy adapter は担当しない。2.2.0 経路では 0 / 1 以外を暗黙変換しない。 |
+| ED-08 | `RenderManifest 2.3.0` の generic video display を `volume` へ移行し、2.2.0 legacy adapter を置き換える。実動画 `RenderVideoInsert`、timeline shift、最終 section BGM range の compiler も担当する。 |
 | ED-09 | Remotion、preview、MP4、編集画面の E2E、実素材形式・音量・BGM 停止の検証。 |
