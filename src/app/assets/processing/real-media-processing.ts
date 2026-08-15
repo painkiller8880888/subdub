@@ -15,6 +15,7 @@ export function createRealMediaProcessingPort(): AssetMediaProcessingPort {
       switch (input.kind) {
         case "video":
           return processVideoMedia(input.mediaPath, input.maxThumbnailEdgePx);
+        case "bgm":
         case "sound_effect":
           return processAudioMedia(input.mediaPath);
         case "photo":
