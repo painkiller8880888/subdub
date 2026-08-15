@@ -24,6 +24,60 @@ function clone(value: unknown): unknown {
   return JSON.parse(JSON.stringify(value));
 }
 
+function legacyVideoProjectV11(): Record<string, unknown> {
+  const legacy = clone(videoProjectFixture) as Record<string, unknown>;
+  const edit = legacy.edit as {
+    sectionBgms: Array<{
+      id: string;
+      sectionId: string;
+      projectMediaPath: string;
+      volume: number;
+    }>;
+  };
+  const audio = legacy.audio as { soundEffects: unknown[] };
+  legacy.schemaVersion = "1.1.0";
+  legacy.audio = {
+    sectionBgms: edit.sectionBgms.map((bgm) => ({
+      id: bgm.id,
+      sectionId: bgm.sectionId,
+      path: bgm.projectMediaPath,
+      volume: bgm.volume,
+      loop: true,
+      fadeInMs: 0,
+      fadeOutMs: 0
+    })),
+    soundEffects: audio.soundEffects
+  };
+  legacy.inserts = {
+    opening: {
+      id: "insert-opening",
+      kind: "placeholder",
+      slot: "opening",
+      durationMs: 2000
+    },
+    ending: {
+      id: "insert-ending",
+      kind: "placeholder",
+      slot: "ending",
+      durationMs: 2000
+    },
+    eyeCatches: []
+  };
+  delete legacy.edit;
+
+  const visuals = legacy.visuals as {
+    assignments: Array<{ display: Record<string, unknown> }>;
+  };
+  for (const assignment of visuals.assignments) {
+    if (assignment.display.kind !== "video") {
+      continue;
+    }
+    assignment.display.muted = assignment.display.volume === 0;
+    delete assignment.display.volume;
+  }
+  return legacy;
+}
+
 function asRepositoryError(error: unknown): ProjectRepositoryError {
   if (error instanceof ProjectRepositoryError) {
     return error;
@@ -77,6 +131,14 @@ describe("ProjectRepository", () => {
   });
 
   async function writeProject(project: VideoProject): Promise<void> {
+    await fs.writeFile(
+      projectFile,
+      `${JSON.stringify(project, null, 2)}\n`,
+      "utf8"
+    );
+  }
+
+  async function writeRawProject(project: unknown): Promise<void> {
     await fs.writeFile(
       projectFile,
       `${JSON.stringify(project, null, 2)}\n`,
@@ -228,6 +290,67 @@ describe("ProjectRepository", () => {
     expect(["並行保存A", "並行保存B"]).toContain(finalProject.metadata.title);
   });
 
+  it("holds the project lock across legacy migration replacement", async () => {
+    const legacy = legacyVideoProjectV11();
+    legacy.revision = 7;
+    await writeRawProject(legacy);
+
+    let resolveMigrationRenameStarted: () => void = () => undefined;
+    const migrationRenameStarted = new Promise<void>((resolve) => {
+      resolveMigrationRenameStarted = resolve;
+    });
+    let releaseMigrationRename: () => void = () => undefined;
+    const migrationRenameRelease = new Promise<void>((resolve) => {
+      releaseMigrationRename = resolve;
+    });
+    let migrationRenamePaused = false;
+    const repository = new ProjectRepository({
+      workspaceRoot,
+      fileSystem: {
+        rename: async (source, destination) => {
+          if (
+            !migrationRenamePaused &&
+            destination === projectFile &&
+            path.basename(source).startsWith("project.json.")
+          ) {
+            migrationRenamePaused = true;
+            resolveMigrationRenameStarted();
+            await migrationRenameRelease;
+          }
+          await fs.rename(source, destination);
+        }
+      }
+    });
+
+    const readPromise = repository.read(projectId);
+    await migrationRenameStarted;
+
+    const candidate = clone(videoProjectFixture);
+    candidate.metadata.title = "migration と同時の保存";
+    let saveCompleted = false;
+    const savePromise = repository
+      .save(projectId, candidate, 7)
+      .then((saved) => {
+        saveCompleted = true;
+        return saved;
+      });
+
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    expect(saveCompleted).toBe(false);
+
+    releaseMigrationRename();
+    const [migrated, saved] = await Promise.all([readPromise, savePromise]);
+    expect(migrated.revision).toBe(7);
+    expect(saved.revision).toBe(8);
+    expect(saved.metadata.title).toBe("migration と同時の保存");
+
+    const finalProject = JSON.parse(
+      await fs.readFile(projectFile, "utf8")
+    ) as VideoProject;
+    expect(finalProject.revision).toBe(8);
+    expect(finalProject.metadata.title).toBe("migration と同時の保存");
+  });
+
   it("rejects an invalid candidate without changing the current bytes", async () => {
     const repository = new ProjectRepository(workspaceRoot);
     const before = await readProjectBytes();
@@ -329,6 +452,112 @@ describe("ProjectRepository", () => {
     expect(await listTemporaryFiles()).toEqual([]);
     expectSafeExternalError(readError);
     expectSafeExternalError(saveError);
+  });
+
+  it("persists migration diagnostics before replacing a legacy project", async () => {
+    const legacy = legacyVideoProjectV11();
+    legacy.revision = 7;
+    await writeRawProject(legacy);
+    const before = await readProjectBytes();
+    const repository = new ProjectRepository(workspaceRoot);
+
+    const migrated = await repository.read(projectId);
+    expect(migrated.schemaVersion).toBe("1.2.0");
+    expect(migrated.revision).toBe(7);
+    expect(migrated.edit).toEqual({ videoElements: [], sectionBgms: [] });
+    expect(migrated.audio).not.toHaveProperty("sectionBgms");
+
+    const migrationLogPath = path.join(
+      projectDirectory,
+      "logs",
+      "migration-log.jsonl"
+    );
+    const migrationLog = await fs.readFile(migrationLogPath, "utf8");
+    const entries = migrationLog
+      .trimEnd()
+      .split("\n")
+      .map((line) => JSON.parse(line) as Record<string, unknown>);
+    expect(entries).toHaveLength(2);
+    expect(entries[0]).toMatchObject({
+      fromSchemaVersion: "1.1.0",
+      toSchemaVersion: "1.2.0",
+      kind: "unresolved_legacy_bgm",
+      sectionId: "section-intro",
+      legacyPath: "media/bgm-intro.mp3",
+      legacyVolume: 0.25
+    });
+
+    const migratedBytes = await readProjectBytes();
+    expect(migratedBytes).not.toEqual(before);
+    expect(JSON.parse(migratedBytes.toString("utf8")).schemaVersion).toBe(
+      "1.2.0"
+    );
+
+    await repository.read(projectId);
+    expect(await fs.readFile(migrationLogPath, "utf8")).toBe(migrationLog);
+  });
+
+  it("keeps the legacy project untouched when migration diagnostics cannot be written", async () => {
+    await writeRawProject(legacyVideoProjectV11());
+    const before = await readProjectBytes();
+    const repository = new ProjectRepository({
+      workspaceRoot,
+      fileSystem: {
+        writeFile: async (filePath, contents) => {
+          if (path.basename(filePath).startsWith("migration-log.jsonl.")) {
+            throw new Error("injected migration log write failure");
+          }
+          await fs.writeFile(filePath, contents, {
+            encoding: "utf8",
+            flag: "wx"
+          });
+        }
+      }
+    });
+
+    const error = await expectRepositoryError(
+      () => repository.read(projectId),
+      "PROJECT_MIGRATION_LOG_WRITE_FAILED",
+      500
+    );
+
+    expect(await readProjectBytes()).toEqual(before);
+    expect(await listTemporaryFiles()).toEqual([]);
+    expectSafeExternalError(error);
+  });
+
+  it("rejects legacy candidates in save without implicitly migrating them", async () => {
+    const repository = new ProjectRepository(workspaceRoot);
+    const legacy = legacyVideoProjectV11();
+    const before = await readProjectBytes();
+
+    const error = await expectRepositoryError(
+      () => repository.save(projectId, legacy, 0),
+      "PROJECT_CANDIDATE_VALIDATION_FAILED",
+      422
+    );
+
+    expect(await readProjectBytes()).toEqual(before);
+    await expect(
+      fs.access(path.join(projectDirectory, "logs", "migration-log.jsonl"))
+    ).rejects.toBeDefined();
+    expectSafeExternalError(error);
+  });
+
+  it("rejects legacy candidates in create instead of implicitly migrating them", async () => {
+    await fs.rm(projectDirectory, { recursive: true, force: true });
+    const repository = new ProjectRepository(workspaceRoot);
+    const legacy = legacyVideoProjectV11();
+    legacy.revision = 0;
+
+    const error = await expectRepositoryError(
+      () => repository.create(legacy),
+      "PROJECT_CANDIDATE_VALIDATION_FAILED",
+      422
+    );
+
+    expect(await fs.readdir(path.join(workspaceRoot, "projects"))).toEqual([]);
+    expectSafeExternalError(error);
   });
 
   it("reports write failures without calling rename or changing the original", async () => {
@@ -634,6 +863,52 @@ describe("ProjectRepository", () => {
       );
 
       expect(await fs.readFile(outsideProjectFile)).toEqual(outsideBefore);
+      expectSafeExternalError(error);
+    } finally {
+      await fs.rm(outsideDirectory, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects a migration logs symlink that resolves outside the workspace", async () => {
+    const outsideDirectory = await fs.mkdtemp(
+      path.join(tmpdir(), "subdub-migration-logs-outside-")
+    );
+    const logsDirectoryPath = path.join(projectDirectory, "logs");
+    const outsideMigrationLogPath = path.join(
+      outsideDirectory,
+      "migration-log.jsonl"
+    );
+
+    try {
+      try {
+        await fs.symlink(
+          outsideDirectory,
+          logsDirectoryPath,
+          process.platform === "win32" ? "junction" : "dir"
+        );
+      } catch (error) {
+        const code =
+          typeof error === "object" && error !== null && "code" in error
+            ? error.code
+            : undefined;
+        if (code === "EPERM" || code === "EACCES" || code === "ENOTSUP") {
+          return;
+        }
+        throw error;
+      }
+
+      const legacy = legacyVideoProjectV11();
+      await writeRawProject(legacy);
+      const before = await readProjectBytes();
+      const repository = new ProjectRepository(workspaceRoot);
+      const error = await expectRepositoryError(
+        () => repository.read(projectId),
+        "PROJECT_PATH_INVALID",
+        400
+      );
+
+      expect(await readProjectBytes()).toEqual(before);
+      await expect(fs.access(outsideMigrationLogPath)).rejects.toBeDefined();
       expectSafeExternalError(error);
     } finally {
       await fs.rm(outsideDirectory, { recursive: true, force: true });

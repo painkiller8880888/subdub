@@ -100,8 +100,11 @@ async function appendBgmMetadata(
     "projects",
     project.metadata.id
   );
-  for (const bgm of project.audio.sectionBgms) {
-    const filePath = path.resolve(projectRoot, ...bgm.path.split("/"));
+  for (const bgm of project.edit.sectionBgms) {
+    const filePath = path.resolve(
+      projectRoot,
+      ...bgm.projectMediaPath.split("/")
+    );
     if (!isPathInside(projectRoot, filePath)) {
       continue;
     }
@@ -111,7 +114,7 @@ async function appendBgmMetadata(
         processAudioMedia(filePath)
       ]);
       addAssetMetadata(metadata, {
-        path: bgm.path,
+        path: bgm.projectMediaPath,
         kind: "bgm",
         sha256: createHash("sha256").update(contents).digest("hex"),
         durationMs: processed.metadata.durationMs

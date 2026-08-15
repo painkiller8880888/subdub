@@ -494,7 +494,7 @@ function visualDisplay(
       startMs: 0,
       endMs: 2_000,
       playbackRate: 1,
-      muted: true
+      volume: 0
     };
   }
   if (kind === "document_scan") {
@@ -1545,7 +1545,7 @@ describe("MVP final verification E2E", () => {
         );
 
         const bgmProjectMediaPath = "media/fixture-section-bgm.wav";
-        // BGM is part of VideoProject.audio, but the current asset API only
+        // BGM is part of VideoProject.edit, but the current asset API only
         // exposes the sound_effect kind and requires a usage tag. Copy the
         // checked-in BGM fixture at the existing project-media boundary rather
         // than misclassifying it as a sound effect or adding a new API.
@@ -1566,7 +1566,7 @@ describe("MVP final verification E2E", () => {
         if (mainSectionId === undefined || effectLineId === undefined) {
           throw new Error("The fixture main/outro section is missing.");
         }
-        // The current API has no project-level audio/inserts/thumbnail mutation
+        // The current API has no project-level audio/edit/thumbnail mutation
         // route, so this fixture-only configuration uses the existing validated
         // repository boundary instead of inventing an E2E-only endpoint.
         project = await projectRepository.save(
@@ -1574,17 +1574,6 @@ describe("MVP final verification E2E", () => {
           {
             ...currentProject,
             audio: {
-              sectionBgms: [
-                {
-                  id: "bgm-fixture-main",
-                  sectionId: mainSectionId,
-                  path: bgmProjectMediaPath,
-                  volume: 0.1,
-                  loop: true,
-                  fadeInMs: 100,
-                  fadeOutMs: 100
-                }
-              ],
               soundEffects: [
                 {
                   id: "effect-fixture-confirm",
@@ -1598,15 +1587,17 @@ describe("MVP final verification E2E", () => {
                 }
               ]
             },
-            inserts: {
-              ...currentProject.inserts,
-              eyeCatches: [
+            edit: {
+              ...currentProject.edit,
+              sectionBgms: [
                 {
-                  id: "insert-fixture-eye-catch",
-                  kind: "placeholder",
-                  slot: "eye_catch",
-                  beforeSectionId: mainSectionId,
-                  durationMs: 2_000
+                  id: "bgm-fixture-main",
+                  sectionId: mainSectionId,
+                  assetId: "asset-bgm-fixture-main",
+                  assetVersion: 1,
+                  assetChecksum: bgmChecksum,
+                  projectMediaPath: bgmProjectMediaPath,
+                  volume: 0.1
                 }
               ]
             },
@@ -1623,11 +1614,11 @@ describe("MVP final verification E2E", () => {
           },
           currentProject.revision
         );
-        expect(project.audio.sectionBgms).toHaveLength(1);
-        expect(project.audio.sectionBgms[0]).toMatchObject({
+        expect(project.edit.sectionBgms).toHaveLength(1);
+        expect(project.edit.sectionBgms[0]).toMatchObject({
           sectionId: mainSectionId,
-          path: bgmProjectMediaPath,
-          loop: true
+          projectMediaPath: bgmProjectMediaPath,
+          volume: 0.1
         });
         expect(project.audio.soundEffects).toHaveLength(1);
         expect(project.audio.soundEffects[0]).toMatchObject({
@@ -1770,7 +1761,7 @@ describe("MVP final verification E2E", () => {
             insert.slot === "ending" ||
             insert.slot === "eye_catch"
         );
-        expect(requiredPlaceholderInserts).toHaveLength(3);
+        expect(requiredPlaceholderInserts).toHaveLength(2);
         expect(
           requiredPlaceholderInserts.every(
             (insert) => insert.durationInFrames === 60
@@ -2186,8 +2177,8 @@ describe("MVP final verification E2E", () => {
         expect(reloadedProject.script.status).toBe("approved");
         expect(reloadedProject.script.origin).toBe("manual");
         expect(reloadedProject.visuals.status).toBe("approved");
-        expect(reloadedProject.audio.sectionBgms).toEqual(
-          project.audio.sectionBgms
+        expect(reloadedProject.edit.sectionBgms).toEqual(
+          project.edit.sectionBgms
         );
         expect(reloadedProject.thumbnail).toEqual(project.thumbnail);
 

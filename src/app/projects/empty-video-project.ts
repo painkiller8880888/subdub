@@ -78,7 +78,7 @@ export function createEmptyVideoProject(
   const manualVersion = options.manualVersion ?? "";
 
   const project: VideoProject = {
-    schemaVersion: "1.1.0",
+    schemaVersion: "1.2.0",
     revision: 0,
     metadata: {
       id: options.projectId,
@@ -153,23 +153,11 @@ export function createEmptyVideoProject(
       assignments: []
     },
     audio: {
-      sectionBgms: [],
       soundEffects: []
     },
-    inserts: {
-      opening: {
-        id: "insert-opening",
-        kind: "placeholder",
-        durationMs: 2000,
-        slot: "opening"
-      },
-      ending: {
-        id: "insert-ending",
-        kind: "placeholder",
-        durationMs: 2000,
-        slot: "ending"
-      },
-      eyeCatches: []
+    edit: {
+      videoElements: [],
+      sectionBgms: []
     },
     thumbnail: {
       backgroundImage: null,

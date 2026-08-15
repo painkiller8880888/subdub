@@ -185,13 +185,13 @@ describe("applyEditedScript", () => {
     expect(result.project.visuals.status).toBe("approved");
   });
 
-  it("preserves audio, inserts, thumbnail, and revision metadata", () => {
+  it("preserves audio, edit plan, thumbnail, and revision metadata", () => {
     const project = projectFixture();
     const candidate = editFirstLine(project.script, { spokenText: "変更後" });
     const result = applyEditedScript(project, candidate);
 
     expect(result.project.audio).toEqual(project.audio);
-    expect(result.project.inserts).toEqual(project.inserts);
+    expect(result.project.edit).toEqual(project.edit);
     expect(result.project.thumbnail).toEqual(project.thumbnail);
     expect(result.project.revision).toBe(project.revision);
     expect(result.project.metadata).toEqual(project.metadata);

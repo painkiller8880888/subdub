@@ -668,7 +668,7 @@ export class VisualAssignmentService {
         startMs: 0,
         endMs: asset.durationMs,
         playbackRate: 1,
-        muted: true
+        volume: 0
       };
     }
 

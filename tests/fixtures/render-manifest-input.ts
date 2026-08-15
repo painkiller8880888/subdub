@@ -9,7 +9,6 @@ import type { VideoProject } from "../../src/schema/index.js";
 import { videoProjectFixture } from "./video-project.js";
 
 const AUDIO_CHECKSUM = "e".repeat(64);
-const BGM_CHECKSUM = "f".repeat(64);
 const BACKGROUND_CHECKSUM = "a".repeat(64);
 
 function linesOf(project: VideoProject) {
@@ -73,10 +72,10 @@ export function createRenderManifestAssetMetadata(
         ]
       : []
   );
-  const bgms = project.audio.sectionBgms.map((bgm) => ({
-    path: bgm.path,
+  const bgms = project.edit.sectionBgms.map((bgm) => ({
+    path: bgm.projectMediaPath,
     kind: "bgm",
-    sha256: BGM_CHECKSUM,
+    sha256: bgm.assetChecksum,
     durationMs: 60_000
   }));
   const effects = project.audio.soundEffects.map((effect) => ({

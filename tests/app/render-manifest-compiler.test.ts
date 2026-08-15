@@ -205,8 +205,7 @@ describe("compileRenderManifest", () => {
       ])
     ).toEqual([
       ["opening", 0, 60],
-      ["eye_catch", 139, 60],
-      ["ending", 313, 60]
+      ["ending", 253, 60]
     ]);
     expect(
       result.manifest.lines.map(({ from, durationInFrames }) => [
@@ -216,14 +215,19 @@ describe("compileRenderManifest", () => {
     ).toEqual([
       [60, 38],
       [98, 41],
-      [199, 38],
-      [237, 38],
-      [275, 38]
+      [139, 38],
+      [177, 38],
+      [215, 38]
     ]);
-    expect(result.manifest.durationInFrames).toBe(373);
+    expect(result.manifest.durationInFrames).toBe(313);
+    expect(result.manifest.visuals[0]?.display).toMatchObject({
+      kind: "video",
+      muted: true
+    });
+    expect(result.manifest.visuals[0]?.display).not.toHaveProperty("volume");
     expect(result.manifest.soundEffects[0]).toMatchObject({
       lineId: "main-learner-1",
-      from: 240,
+      from: 180,
       durationInFrames: 12
     });
     const mainLearnerLine = result.manifest.lines.find(
@@ -258,8 +262,8 @@ describe("compileRenderManifest", () => {
         ]
       )
     ).toEqual([
-      ["section-intro", 60, 79, 0.25, true, 0, 9],
-      ["section-main", 199, 76, 0.2, true, 9, 9]
+      ["section-intro", 60, 79, 0.25, true, 0, 0],
+      ["section-main", 139, 76, 0.2, true, 0, 0]
     ]);
     const placeholderRanges = result.manifest.inserts.map((insert) => ({
       from: insert.from,
@@ -302,6 +306,52 @@ describe("compileRenderManifest", () => {
         .map(({ path }) => path)
         .sort((left, right) => left.localeCompare(right))
     );
+  });
+
+  it("rejects project video volumes that the legacy manifest cannot represent", () => {
+    const input = validInput();
+    const project = structuredClone(input.project) as VideoProject;
+    const display = project.visuals.assignments[0]?.display;
+    if (display?.kind !== "video") {
+      throw new Error("fixture must contain a video display");
+    }
+    display.volume = 0.5;
+
+    const result = compileRenderManifest({ ...input, project });
+
+    expect(result.success).toBe(false);
+    expect(diagnosticCodes(result)).toContain(
+      "LEGACY_MANIFEST_VIDEO_VOLUME_UNREPRESENTABLE"
+    );
+    if (result.success) {
+      return;
+    }
+    expect(result.diagnostics).toContainEqual(
+      expect.objectContaining({
+        path: ["visuals", "assignments", 0, "display", "volume"]
+      })
+    );
+  });
+
+  it("adapts project video volume 1 to muted false in the legacy manifest", () => {
+    const input = validInput();
+    const project = structuredClone(input.project) as VideoProject;
+    const display = project.visuals.assignments[0]?.display;
+    if (display?.kind !== "video") {
+      throw new Error("fixture must contain a video display");
+    }
+    display.volume = 1;
+
+    const result = compileRenderManifest({ ...input, project });
+
+    expect(result.success).toBe(true);
+    if (!result.success) {
+      return;
+    }
+    expect(result.manifest.visuals[0]?.display).toMatchObject({
+      kind: "video",
+      muted: false
+    });
   });
 
   it("shares a physical visual variant without assigning ownership to one speaker", () => {

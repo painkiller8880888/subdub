@@ -17,7 +17,10 @@ import {
   type RunLogStorePort
 } from "../run-log-store.js";
 import { invalidateForUpstreamChange } from "./project-invalidation.js";
-import { migrateVideoProject } from "./video-project-migration.js";
+import {
+  migrateVideoProjectWithDiagnostics,
+  type LegacyBgmMigrationLogEntry
+} from "./video-project-migration.js";
 
 export type ProjectRepositoryErrorCode =
   | "PROJECT_ID_INVALID"
@@ -35,6 +38,7 @@ export type ProjectRepositoryErrorCode =
   | "PROJECT_ALREADY_EXISTS"
   | "PROJECT_WRITE_FAILED"
   | "PROJECT_RENAME_FAILED"
+  | "PROJECT_MIGRATION_LOG_WRITE_FAILED"
   | "PROJECT_SOURCE_NOT_FOUND"
   | "PROJECT_SOURCE_READ_FAILED"
   | "PROJECT_SOURCE_HASH_MISMATCH"
@@ -171,6 +175,10 @@ function getFileSystemErrorCode(error: unknown): string | undefined {
 
 function isMissingPathError(error: unknown): boolean {
   return getFileSystemErrorCode(error) === "ENOENT";
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function isPathInside(rootPath: string, candidatePath: string): boolean {
@@ -327,6 +335,14 @@ function renameFailedError(): ProjectRepositoryError {
   );
 }
 
+function migrationLogWriteFailedError(): ProjectRepositoryError {
+  return new ProjectRepositoryError(
+    "PROJECT_MIGRATION_LOG_WRITE_FAILED",
+    500,
+    "The project migration diagnostics could not be written."
+  );
+}
+
 function sourceNotFoundError(): ProjectRepositoryError {
   return new ProjectRepositoryError(
     "PROJECT_SOURCE_NOT_FOUND",
@@ -450,7 +466,9 @@ export class ProjectRepository {
 
   async read(projectId: unknown): Promise<VideoProject> {
     const safeProjectId = this.validateProjectId(projectId);
-    return this.readUnlocked(safeProjectId);
+    return this.withSaveLock(safeProjectId, () =>
+      this.readUnlocked(safeProjectId)
+    );
   }
 
   async withProjectLock<T>(
@@ -577,16 +595,18 @@ export class ProjectRepository {
         }
 
         projects.push(
-          await this.readProjectWithExpectedId(projectId, {
-            projectDirectoryPath,
-            projectFilePath,
-            sourceDirectoryPath: path.join(projectDirectoryPath, "source"),
-            sourceFilePath: path.join(
+          await this.withSaveLock(projectId, () =>
+            this.readProjectWithExpectedId(projectId, {
               projectDirectoryPath,
-              "source",
-              "source.md"
-            )
-          })
+              projectFilePath,
+              sourceDirectoryPath: path.join(projectDirectoryPath, "source"),
+              sourceFilePath: path.join(
+                projectDirectoryPath,
+                "source",
+                "source.md"
+              )
+            })
+          )
         );
       } catch (error) {
         if (error instanceof ProjectRepositoryError) {
@@ -603,9 +623,7 @@ export class ProjectRepository {
   }
 
   async create(candidate: unknown): Promise<VideoProject> {
-    const candidateResult = videoProjectSchema.safeParse(
-      migrateVideoProject(candidate)
-    );
+    const candidateResult = videoProjectSchema.safeParse(candidate);
     if (!candidateResult.success) {
       throw candidateValidationFailedError(
         validationIssues(candidateResult.error)
@@ -1012,9 +1030,7 @@ export class ProjectRepository {
       paths
     );
 
-    const candidateResult = videoProjectSchema.safeParse(
-      migrateVideoProject(candidate)
-    );
+    const candidateResult = videoProjectSchema.safeParse(candidate);
     if (!candidateResult.success) {
       throw candidateValidationFailedError(
         validationIssues(candidateResult.error)
@@ -1476,8 +1492,164 @@ export class ProjectRepository {
     }
   }
 
+  private async assertMigrationLogPathsSafe(
+    paths: ResolvedProjectPaths,
+    logsDirectoryPath: string,
+    logFilePath: string
+  ): Promise<void> {
+    const managementRootPath = await this.resolveExistingPath(
+      this.workspaceRoot
+    );
+    if (managementRootPath === null) {
+      throw invalidProjectPathError();
+    }
+
+    const resolvedProjectDirectoryPath = await this.resolveExistingPath(
+      paths.projectDirectoryPath
+    );
+    if (resolvedProjectDirectoryPath === null) {
+      throw projectNotFoundError();
+    }
+    this.assertInsideManagementRoot(
+      managementRootPath,
+      resolvedProjectDirectoryPath
+    );
+
+    const resolvedLogsDirectoryPath = await this.resolveExistingPath(
+      logsDirectoryPath
+    );
+    if (resolvedLogsDirectoryPath !== null) {
+      this.assertInsideManagementRoot(
+        managementRootPath,
+        resolvedLogsDirectoryPath
+      );
+      if (
+        !isPathInside(
+          resolvedProjectDirectoryPath,
+          resolvedLogsDirectoryPath
+        )
+      ) {
+        throw invalidProjectPathError();
+      }
+    }
+
+    const resolvedLogFilePath = await this.resolveExistingPath(logFilePath);
+    if (resolvedLogFilePath !== null) {
+      this.assertInsideManagementRoot(managementRootPath, resolvedLogFilePath);
+      if (
+        resolvedLogsDirectoryPath === null ||
+        !isPathInside(resolvedLogsDirectoryPath, resolvedLogFilePath)
+      ) {
+        throw invalidProjectPathError();
+      }
+    }
+  }
+
+  private async persistMigrationLog(
+    paths: ResolvedProjectPaths,
+    entries: readonly LegacyBgmMigrationLogEntry[]
+  ): Promise<void> {
+    if (entries.length === 0) {
+      return;
+    }
+
+    const logsDirectoryPath = path.join(paths.projectDirectoryPath, "logs");
+    const logFilePath = path.join(logsDirectoryPath, "migration-log.jsonl");
+    await this.assertMigrationLogPathsSafe(
+      paths,
+      logsDirectoryPath,
+      logFilePath
+    );
+    let existingContents = "";
+    try {
+      await this.fileSystem.mkdir(logsDirectoryPath, { recursive: true });
+    } catch (error) {
+      if (!isMissingPathError(error)) {
+        throw migrationLogWriteFailedError();
+      }
+    }
+    await this.assertMigrationLogPathsSafe(
+      paths,
+      logsDirectoryPath,
+      logFilePath
+    );
+    try {
+      existingContents = await this.fileSystem.readFile(logFilePath);
+    } catch (error) {
+      if (!isMissingPathError(error)) {
+        throw migrationLogWriteFailedError();
+      }
+    }
+
+    const existingLines = existingContents
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0);
+    const existingKeys = new Set<string>();
+    for (const line of existingLines) {
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(line);
+      } catch {
+        throw migrationLogWriteFailedError();
+      }
+      if (!isRecord(parsed)) {
+        throw migrationLogWriteFailedError();
+      }
+      const key = [
+        parsed.migrationId,
+        parsed.kind,
+        parsed.sectionId,
+        parsed.legacyPath,
+        parsed.legacyVolume
+      ].join("\u0000");
+      existingKeys.add(key);
+    }
+
+    const newEntries = entries.filter((entry) => {
+      const key = [
+        entry.migrationId,
+        entry.kind,
+        entry.sectionId,
+        entry.legacyPath,
+        entry.legacyVolume
+      ].join("\u0000");
+      if (existingKeys.has(key)) {
+        return false;
+      }
+      existingKeys.add(key);
+      return true;
+    });
+    if (newEntries.length === 0) {
+      return;
+    }
+
+    const serialized = `${[
+      ...existingLines,
+      ...newEntries.map((entry) => JSON.stringify(entry))
+    ].join("\n")}\n`;
+    const temporaryFilePath = path.join(
+      logsDirectoryPath,
+      `migration-log.jsonl.${randomUUID()}.tmp`
+    );
+    try {
+      await this.fileSystem.writeFile(temporaryFilePath, serialized);
+    } catch {
+      await this.removeTemporaryFile(temporaryFilePath);
+      throw migrationLogWriteFailedError();
+    }
+
+    try {
+      await this.fileSystem.rename(temporaryFilePath, logFilePath);
+    } catch {
+      await this.removeTemporaryFile(temporaryFilePath);
+      throw migrationLogWriteFailedError();
+    }
+  }
+
   private async readResolvedProject(
-    paths: ResolvedProjectPaths
+    paths: ResolvedProjectPaths,
+    expectedProjectId?: string
   ): Promise<VideoProject> {
     let contents: string;
     try {
@@ -1496,11 +1668,22 @@ export class ProjectRepository {
       throw parseFailedError();
     }
 
-    const projectResult = videoProjectSchema.safeParse(
-      migrateVideoProject(parsedJson)
-    );
+    const migration = migrateVideoProjectWithDiagnostics(parsedJson);
+    const projectResult = videoProjectSchema.safeParse(migration.project);
     if (!projectResult.success) {
       throw currentValidationFailedError(validationIssues(projectResult.error));
+    }
+
+    if (
+      expectedProjectId !== undefined &&
+      projectResult.data.metadata.id !== expectedProjectId
+    ) {
+      throw currentProjectIdMismatchError();
+    }
+
+    if (migration.migrated) {
+      await this.persistMigrationLog(paths, migration.logEntries);
+      await this.writeProjectCandidate(paths, projectResult.data);
     }
 
     return projectResult.data;
@@ -1510,7 +1693,7 @@ export class ProjectRepository {
     projectId: string,
     paths: ResolvedProjectPaths
   ): Promise<VideoProject> {
-    const project = await this.readResolvedProject(paths);
+    const project = await this.readResolvedProject(paths, projectId);
     if (project.metadata.id !== projectId) {
       throw currentProjectIdMismatchError();
     }
