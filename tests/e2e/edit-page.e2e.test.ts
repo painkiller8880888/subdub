@@ -94,8 +94,8 @@ function cutin(
 
 const initialEdit: EditPlan = {
   videoElements: [
-    cutin("cutin-a", "section-second", 0),
-    cutin("cutin-b", "section-second", 1)
+    cutin("cutin-a", "section-second", 5),
+    cutin("cutin-b", "section-second", 10)
   ],
   sectionBgms: []
 };
