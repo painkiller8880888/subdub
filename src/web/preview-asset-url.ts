@@ -1,32 +1,14 @@
-import { characterVisualFileParamsSchema } from "../schema/api.js";
+import { characterVisualManagedFileParamsSchema } from "../schema/api.js";
 import { idSchema, relativePosixPathSchema } from "../schema/index.js";
 import type { ManifestAssetUrlResolver } from "../remotion/asset-url";
 
 const characterVisualLibraryPrefix = "library/character-visuals/";
-const characterVisualFileKeys = ["single", "closed", "open"] as const;
-
-type CharacterVisualFileKey = (typeof characterVisualFileKeys)[number];
 
 function encodePathSegments(value: string): string {
   return value
     .split("/")
     .map((segment) => encodeURIComponent(segment))
     .join("/");
-}
-
-function parseCharacterVisualFileKey(fileName: string): CharacterVisualFileKey {
-  if (!fileName.endsWith(".png")) {
-    throw new Error("キャラクタービジュアルの画像パスが不正です。");
-  }
-
-  const fileStem = fileName.slice(0, -".png".length);
-  const fileKey = characterVisualFileKeys.find(
-    (candidate) => fileStem === candidate || fileStem.endsWith(`-${candidate}`)
-  );
-  if (fileKey === undefined) {
-    throw new Error("キャラクタービジュアルの画像slotが不正です。");
-  }
-  return fileKey;
 }
 
 function resolveCharacterVisualAssetUrl(manifestPath: string): string | null {
@@ -42,11 +24,10 @@ function resolveCharacterVisualAssetUrl(manifestPath: string): string | null {
   const visualId = segments[2];
   const variantId = segments[3];
   const fileName = segments[4];
-  const fileKey = parseCharacterVisualFileKey(fileName);
-  const parsedParams = characterVisualFileParamsSchema.safeParse({
+  const parsedParams = characterVisualManagedFileParamsSchema.safeParse({
     visualId,
     variantId,
-    fileKey
+    fileName
   });
   if (!parsedParams.success) {
     throw new Error("キャラクタービジュアルの識別子が不正です。");
@@ -54,9 +35,9 @@ function resolveCharacterVisualAssetUrl(manifestPath: string): string | null {
 
   return `/api/character-visuals/${encodeURIComponent(
     parsedParams.data.visualId
-  )}/${encodeURIComponent(parsedParams.data.variantId)}/${encodeURIComponent(
-    parsedParams.data.fileKey
-  )}`;
+  )}/${encodeURIComponent(
+    parsedParams.data.variantId
+  )}/${encodeURIComponent(parsedParams.data.fileName)}`;
 }
 
 export function createProjectManifestAssetUrlResolver(

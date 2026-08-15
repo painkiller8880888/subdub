@@ -155,18 +155,20 @@ describe("preview state helpers", () => {
 
     expect(
       resolver("library/character-visuals/character-mentor/normal/closed.png")
-    ).toBe("/api/character-visuals/character-mentor/normal/closed");
+    ).toBe("/api/character-visuals/character-mentor/normal/closed.png");
     expect(
       resolver(
         "library/character-visuals/character-mentor/normal/generation-closed.png"
       )
-    ).toBe("/api/character-visuals/character-mentor/normal/closed");
+    ).toBe(
+      "/api/character-visuals/character-mentor/normal/generation-closed.png"
+    );
     expect(
       resolver("library/character-visuals/character-mentor/normal/single.png")
-    ).toBe("/api/character-visuals/character-mentor/normal/single");
+    ).toBe("/api/character-visuals/character-mentor/normal/single.png");
     expect(
       resolver("library/character-visuals/character-mentor/normal/open.png")
-    ).toBe("/api/character-visuals/character-mentor/normal/open");
+    ).toBe("/api/character-visuals/character-mentor/normal/open.png");
   });
 
   it("rejects malformed managed character visual paths without broadening namespaces", () => {

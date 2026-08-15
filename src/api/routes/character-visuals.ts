@@ -19,6 +19,7 @@ import {
   characterVisualCatalogResponseSchema,
   characterVisualCreateRequestSchema,
   characterVisualFileParamsSchema,
+  characterVisualManagedFileParamsSchema,
   characterVisualParamsSchema,
   characterVisualResponseSchema,
   characterVisualUpdateRequestSchema,
@@ -40,6 +41,7 @@ export type CharacterVisualCatalogServicePort = Pick<
   | "stageUpload"
   | "discardStaged"
   | "readManagedFile"
+  | "readManagedFileByPath"
 > &
   Partial<Pick<CharacterVisualCatalogService, "verifyFiles">>;
 
@@ -367,26 +369,47 @@ export function registerCharacterVisualRoutes(
     Params: {
       visualId: string;
       variantId: string;
-      fileKey: string;
+      fileRef: string;
     };
   }>(
-    "/api/character-visuals/:visualId/:variantId/:fileKey",
+    "/api/character-visuals/:visualId/:variantId/:fileRef",
     async (request, reply) => {
-      const params = characterVisualFileParamsSchema.parse(request.params);
-      const visual = requireVisual(
-        characterVisualCatalogService,
-        params.visualId
-      );
-      const variant = visual.variants.find(
-        (candidate) => candidate.variantId === params.variantId
-      );
-      if (variant === undefined) {
-        throw new CharacterVariantNotFoundError();
+      const legacyParams = characterVisualFileParamsSchema.safeParse({
+        visualId: request.params.visualId,
+        variantId: request.params.variantId,
+        fileKey: request.params.fileRef
+      });
+      if (legacyParams.success) {
+        const visual = requireVisual(
+          characterVisualCatalogService,
+          legacyParams.data.visualId
+        );
+        const variant = visual.variants.find(
+          (candidate) => candidate.variantId === legacyParams.data.variantId
+        );
+        if (variant === undefined) {
+          throw new CharacterVariantNotFoundError();
+        }
+        const file = await characterVisualCatalogService.readManagedFile(
+          legacyParams.data.visualId,
+          legacyParams.data.variantId,
+          legacyParams.data.fileKey
+        );
+        if (file === undefined) {
+          throw new CharacterVisualNotFoundError();
+        }
+        return reply.type(file.mimeType).send(file.content);
       }
-      const file = await characterVisualCatalogService.readManagedFile(
+
+      const params = characterVisualManagedFileParamsSchema.parse({
+        visualId: request.params.visualId,
+        variantId: request.params.variantId,
+        fileName: request.params.fileRef
+      });
+      const file = await characterVisualCatalogService.readManagedFileByPath(
         params.visualId,
         params.variantId,
-        params.fileKey
+        params.fileName
       );
       if (file === undefined) {
         throw new CharacterVisualNotFoundError();

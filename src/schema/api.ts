@@ -182,6 +182,17 @@ export const characterVisualFileParamsSchema = strictObject({
   fileKey: idSchema
 });
 
+export const characterVisualManagedFileParamsSchema = strictObject({
+  visualId: idSchema,
+  variantId: idSchema,
+  fileName: z
+    .string()
+    .regex(
+      /^(?:[a-z0-9]+(?:-[a-z0-9]+)*-)?(?:single|closed|open)\.png$/u,
+      "must be a managed character visual PNG filename"
+    )
+});
+
 export const voicevoxStatusDataSchema = strictObject({
   available: z.literal(true),
   speakers: z.array(voicevoxResolvedSpeakerSchema).length(2)
