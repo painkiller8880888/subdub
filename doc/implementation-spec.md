@@ -990,7 +990,9 @@ type EyeCatchPlaceholder = {
 
 ## 8. 派生データ
 
-### 8.1 `RenderManifest`
+### 8.1 `RenderManifest`（現行 `1.0.0`）
+
+以下は現行 `RenderManifest 1.0.0` の型である。CV-04 ではこの型へ `characters`、`characterVariants`、`RenderLine.characterVariantId` などを追加しない。既存の `1.0.0` の意味と fixture・既存 renderer の入力契約を維持する。
 
 ```ts
 type RenderManifest = {
@@ -1001,8 +1003,6 @@ type RenderManifest = {
   width: number;
   height: number;
   durationInFrames: number;
-  characters: RenderCharacter[];
-  characterVariants: RenderCharacterVariant[];
   lines: RenderLine[];
   visuals: RenderVisual[];
   backgrounds: RenderBackground[];
@@ -1026,33 +1026,7 @@ type RenderLine = {
   subtitleText: string;
   speakerId: string;
   expression: ScriptLine["expression"];
-  characterVariantId: string;
 };
-
-type RenderCharacter = {
-  characterId: string;
-  displayName: string;
-  themeColorToken: string;
-  lipSyncPeriodFrames: number;
-  idleVariantId: string;
-};
-
-type RenderCharacterVariant =
-  | {
-      variantId: string;
-      characterId: string;
-      renderType: "single-image";
-      files: { single: { path: string; sha256: string } };
-    }
-  | {
-      variantId: string;
-      characterId: string;
-      renderType: "mouth-pair";
-      files: {
-        closed: { path: string; sha256: string };
-        open: { path: string; sha256: string };
-      };
-    };
 
 type RenderVisual = {
   id: string;
@@ -1103,9 +1077,65 @@ type RenderInsert = {
 };
 ```
 
-`RenderManifest.lines[].expression` は `ScriptLine["expression"]`、つまり `neutral` / `smile` / `explain` / `caution` の論理表情である。これは物理ファイルパスや `variantId` を意味しない。通常レンダリングで physical variant を決める正本は `RenderManifest.characters[].idleVariantId` と `RenderManifest.lines[].characterVariantId` であり、`RenderManifest.characterVariants[]` は検証済み snapshot から解決された renderType、ファイルパス、checksum を保持する。
+`RenderManifest 1.0.0` の `lines[].expression` は `ScriptLine["expression"]`、つまり `neutral` / `smile` / `explain` / `caution` の論理表情である。これは物理ファイルパスや `variantId` を意味しない。現行 `1.0.0` は明示的な character variant 解決フィールドを持たず、その意味を CV-04 で変更しない。
 
-P5-02 / P5-04 では、次を入力として受け取る。
+### 8.1.1 CV-05 target `RenderManifest` model（現行 `1.0.0` とは別）
+
+次は CV-05 で実装する概念モデルであり、現行 `RenderManifest 1.0.0` の型定義ではない。CV-04 では `manifestVersion` の値を決めない。CV-05 はこの target model をシリアライズする前に、既存 `1.0.0` と衝突しない明示的な manifest version / compatibility 方針を定め、target を `1.0.0` として保存してはならない。
+
+```ts
+type RenderManifestCv05Target = {
+  // CV-05 が明示的な値を決める。"1.0.0" として保存しない。
+  manifestVersion: string;
+  sourceProjectHash: string;
+  sourceAssetChecksums: { path: string; sha256: string }[];
+  fps: number;
+  width: number;
+  height: number;
+  durationInFrames: number;
+  characters: RenderCharacter[];
+  characterVariants: RenderCharacterVariant[];
+  lines: RenderLineCv05Target[];
+  visuals: RenderVisual[];
+  backgrounds: RenderBackground[];
+  audioTracks: RenderAudioTrack[];
+  soundEffects: RenderSoundEffect[];
+  inserts: RenderInsert[];
+};
+
+type RenderLineCv05Target = RenderLine & {
+  characterVariantId: string;
+};
+
+type RenderCharacter = {
+  characterId: string;
+  displayName: string;
+  themeColorToken: string;
+  lipSyncPeriodFrames: number;
+  idleVariantId: string;
+};
+
+type RenderCharacterVariant =
+  | {
+      variantId: string;
+      characterId: string;
+      renderType: "single-image";
+      files: { single: { path: string; sha256: string } };
+    }
+  | {
+      variantId: string;
+      characterId: string;
+      renderType: "mouth-pair";
+      files: {
+        closed: { path: string; sha256: string };
+        open: { path: string; sha256: string };
+      };
+    };
+```
+
+#### CV-05 target resolution（現行 `RenderManifest 1.0.0` には適用しない）
+
+CV-05 target resolutionでは、次を入力として受け取る。
 
 ```text
 project.characters[].characterVisual.visualId
@@ -1121,7 +1151,7 @@ RenderManifest.characterVariants[]
 
 compiler は explicit reference を snapshot と照合し、解決元 visual、variant の active 状態、speaker 所属、renderType、相対ファイルパス、checksum、`mouth-pair` の `closed` / `open` を manifest に固定する。expression、tag、label、旧固定 mapping から physical variant を自動選択・代替しない。missing、inactive、cross-visual、variant / mouth slot 欠落、checksum 不一致は validation error とする。Remotion は SQLite、CharacterVisual Service、ファイル探索を直接参照せず、解決済み manifest だけを入力とする。
 
-実際の project schema、snapshot version、variant version、manifestVersion の互換性は CV-05 で既存 schema と整合させる。ただし、project schema `1.0.0` の意味を暗黙に変更せず、explicit schema version bump と migration を必須とする。
+実際の project schema、snapshot version、variant version、target `manifestVersion` の互換性は CV-05 で既存 schema と整合させる。CV-04 は manifest version の値を決めない。project schema `1.0.0` の意味も暗黙に変更せず、explicit schema version bump と migration を必須とする。
 
 - フレーム範囲は半開区間 `[from, from + durationInFrames)` とする。
 - ミリ秒からフレームへの変換は `Math.ceil((ms / 1000) * fps)` とする。
@@ -1258,7 +1288,7 @@ character_visual_sets
       └─ created_at / updated_at
 ```
 
-`tags[]` は variant とタグの関連として保持し、既存素材のタグ辞書と共有できる。`renderType` と必須 slot の検証はアプリケーション層で行う。visual 全体は一部 variant が未登録でも有効にできるが、永続化する variant は必須 slot が揃った完成状態に限る。`single-image` の作成は `single` 1 件、`mouth-pair` の作成は `closed` と `open` 各 1 件を同一リクエストで検証・登録し、必須 slot 欠落の variant 行や file を残さない。登録後の差し替えは complete file set 単位で許可するが、必須 slot の削除は許可しない。最初の完成 variant で `canvas_width` / `canvas_height` を設定し、以後の file 登録時に同じ visual の値と比較する。異なるサイズは保存せず、既存レコードとファイルを壊さない。
+`tags[]` は CharacterVisual variant とそのタグの関連として保持する。これは現場素材 `Asset` のタグ辞書・tag ID・関連付けとは別ドメインであり、同じ workspace SQLite に置く場合でも ID namespace、関連テーブル、API / schema 上の意味を共有・混同しない。CharacterVisual variant のタグは picker 内の sort 補助だけに使い、generic Asset のタグは現場素材用 Asset Search の検索語彙として使う。`renderType` と必須 slot の検証はアプリケーション層で行う。visual 全体は一部 variant が未登録でも有効にできるが、永続化する variant は必須 slot が揃った完成状態に限る。`single-image` の作成は `single` 1 件、`mouth-pair` の作成は `closed` と `open` 各 1 件を同一リクエストで検証・登録し、必須 slot 欠落の variant 行や file を残さない。登録後の差し替えは complete file set 単位で許可するが、必須 slot の削除は許可しない。最初の完成 variant で `canvas_width` / `canvas_height` を設定し、以後の file 登録時に同じ visual の値と比較する。異なるサイズは保存せず、既存レコードとファイルを壊さない。
 
 `status` の具体的な enum・遷移と、slot key の将来拡張は CV-01 で確定する。ただし、未登録 variant の存在だけで `CharacterVisualSet` を error にしないこと、登録時点で `mentor` / `learner` や project ID を持たせないことは確定する。
 
@@ -1519,6 +1549,8 @@ POST   /api/projects/{projectId}/thumbnail/render
 
 ## 13. タイムラインコンパイラ
 
+以下の `RenderManifest.characters[]`、`RenderManifest.lines[].characterVariantId`、`RenderManifest.characterVariants[]` は、8.1.1 の CV-05 target model に対する出力である。現行 `RenderManifest 1.0.0` の型へ追加する仕様ではない。
+
 入力:
 
 - 検証済み `VideoProject`
@@ -1712,7 +1744,7 @@ CV-04 後の標準 `/script` 画面には、現在の編集対象、制作 ビ�
 - 最新 `RenderManifest` を validation 済みの入力から生成できること（script/visual の `approved` status は不要）
 - 全素材と音声の存在、チェックサム
 - 現行 `RenderManifest 1.0.0` の `RenderLine.expression` は論理表情であり、物理ファイルパスとして解釈しない。
-- `RenderManifest.characters[].idleVariantId`、`RenderManifest.lines[].characterVariantId`、`RenderManifest.characterVariants[]` が project の explicit reference と validated snapshot から解決されていることを確認する。expression、tag、label、旧固定 mapping からの自動代替は許可しない。
+- CV-05 target `RenderManifest`（現行 `1.0.0` とは別）の `characters[].idleVariantId`、`lines[].characterVariantId`、`characterVariants[]` が project の explicit reference と validated snapshot から解決されていることを確認する。expression、tag、label、旧固定 mapping からの自動代替は許可しない。
 - 解決済み `variantId`、character ID、renderType、ファイルパス、checksum、mouth slot が manifest に固定されていることを確認する。
 - 正の duration
 - フレーム範囲の境界
@@ -1794,7 +1826,7 @@ SQLite にはキー入力単位ではなく、保存、構成案の承認、レ�
 - 効果音の発話開始相対オフセット、複数設定、3 音以上の同時再生警告
 - 任意項目がすべて未設定のサムネイル生成
 - `VideoProject` から `RenderManifest` 生成
-- explicit character binding / line variant と validated catalog snapshot から `RenderManifest.characters[].idleVariantId`、`lines[].characterVariantId`、`characterVariants[]` を解決すること
+- explicit character binding / line variant と validated catalog snapshot から、CV-05 target `RenderManifest`（現行 `1.0.0` とは別）の `characters[].idleVariantId`、`lines[].characterVariantId`、`characterVariants[]` を解決すること
 - レンダリングジョブの状態遷移
 
 外部 API は fixture またはローカル stub を使用し、通常のテスト実行で課金や実サービス依存を発生させない。

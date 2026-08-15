@@ -417,11 +417,11 @@ SQLiteへ用語テーブルを追加し、一覧、検索、登録、編集、�
 
 #### P2-05 台本中心の制作状態と依存アーティファクトのstale検知
 
-台本承認を追加しない。構成案が承認済みかつ最新であること、台本の構造、話者、発話、`outlineHash`を検証する。台本が`draft`または`needs_review`でも、保存済みで対象セリフが有効なら、generic 現場素材の Asset Search / assignment backend と音声生成・調整を利用できる。generic 素材の UI は CV-04 後の標準 `/script` 右ペインを前提にせず、別画面または補助導線で扱う。キャラクタービジュアルの binding / physical variant 選択は、CV-04 で確定した `project.json` の explicit reference と CV-05 の card/modal UI で扱う。セリフ追加・削除・順序変更や発話変更では、依存するビジュアル範囲、音声、`RenderManifest`を stale または `needs_review` として表示する。
+台本承認を追加しない。構成案が承認済みかつ最新であること、台本の構造、話者、発話、`outlineHash`を検証する。台本が`draft`または`needs_review`でも、保存済みで対象セリフが有効なら、同じ制作画面からビジュアル候補、素材割り当て、音声生成・調整を利用できる。セリフ追加・削除・順序変更や発話変更では、依存するビジュアル範囲、音声、`RenderManifest`を stale または `needs_review` として表示する。
 
 検証では、不正な台本だけが該当する保存・候補・音声操作で拒否されること、台本未承認でもビジュアル候補と音声操作が可能なこと、revision 競合と自動保存が維持されること、変更後に音声・素材・Manifest の stale/missing が検出されることを確認する。
 
-完了条件は、台本を明示承認せずに各セリフカードからキャラクタービジュアルと音声を設定でき、generic 素材機能は分離した補助導線で利用でき、出力時 validation が不足データだけを機械的に拒否することである。
+完了条件は、台本を明示承認せずにビジュアルと音声を同じ制作画面で設定でき、出力時 validation が不足データだけを機械的に拒否することである。
 
 ### 8.3 Phase 2のCodex指示例
 
@@ -522,6 +522,7 @@ CV-04 ではドキュメントだけを変更する。TypeScript / React / Fasti
 
 - human explicit selection が通常経路であり、`expression`、tag、label、旧固定 mapping から physical variant を自動選択・代替しない。
 - SQLite は `CharacterVisualSet` の visual / variant / file metadata の正本、`project.json` は project binding と line variant の正本である。
+- CharacterVisual variant の tags と generic Asset の tags は別ドメインであり、同じ SQLite に置いても ID namespace と関連付けを混同しない。前者は picker の sort 補助、後者は Asset Search 用である。
 - `/script` は 1 ペインのセリフカード中心、picker は modal、タグは filter ではなく sort 補助、`/characters` は binding + SQLite snapshot の確認画面である。
 - compiler / Remotion は explicit reference と validated snapshot を使い、SQLite を直接検索せず、missing / inactive / cross-visual を validation error とする。
 - `schemaVersion: "1.0.0"` の意味を暗黙に変更せず、migration では tag / label 検索による推測をしない。
@@ -728,6 +729,8 @@ Phase 5では、validation 可能な `VideoProject` の台本、音声、ビジ�
 
 #### P5-02 RenderManifestコンパイラ
 
+P5-02 の character variant 解決は CV-05 target `RenderManifest` に対する後続実装であり、現行 `RenderManifest 1.0.0` の意味を変更する作業ではない。manifest version の値と互換性は CV-05 で決定する。
+
 検証済み `VideoProject`、audio index、素材メタデータ、`project.json` の `CharacterVisualBinding` / line `characterVariantId`、バックエンドが解決した `CharacterVisualCatalogSnapshot` を読み、`RenderManifest` を生成する。コンパイラは SQLite や `library/character-visuals/` を直接検索しない。構成案の承認・最新性、台本の構造、音声の current/missing/stale、generic ビジュアル assignment の範囲・参照・checksum、character binding / explicit variant の所属・status・slot、Manifest の整合性を validation する。台本・ビジュアルが `draft` または `needs_review` でも、内容と参照が有効ならコンパイルできる。`RenderLine.expression` は論理表情であり、physical variant は `project.characters[].characterVisual.idleVariantId` と `project.script.sections[].lines[].characterVariantId` から決定する。expression、tag、label、旧固定 mapping から自動選択・代替しない。解決済みの character ID、variant ID、renderType、ファイルパス、checksum、`mouth-pair` の `closed` / `open` を manifest へ固定する。具体的な保存フィールドと manifestVersion 互換性は CV-05 で既存 schema と整合させる。
 
 binding / explicit reference の欠落、variant 欠落、missing / inactive / cross-visual、mouth slot 欠落、ファイルまたは checksum の不一致時は自動代替せず、複数のエラーを line ID、character ID、assignment ID へ関連付けて返す。Remotion や WebUI の描画処理から `CharacterVisualSet`、catalog snapshot、SQLite を直接検索しない。
@@ -741,6 +744,8 @@ binding / explicit reference の欠落、variant 欠落、missing / inactive / c
 完了条件は、fixture manifestだけで代表フレームを描画できることである。
 
 #### P5-04 キャラクター・字幕・定周期口パク
+
+P5-04 が扱う character fields は CV-05 target `RenderManifest` のものとし、現行 `RenderManifest 1.0.0` に追加済みとは扱わない。
 
 CV-05 で保存した `CharacterVisualBinding` と line の `characterVariantId` に従い、バックエンドから渡された validated `CharacterVisualCatalogSnapshot` を使って `RenderManifest` の `idleVariantId`、line `characterVariantId`、`characterVariants[]` を解決する。`RenderLine.expression` は論理表情として保持するだけで、physical variant の決定には使わない。解決済み `mouth-pair` variant の `closed` / `open` だけを `lipSyncPeriodFrames` で定周期切り替えする。`single-image` に存在しない口差分、missing / inactive / cross-visual 参照の代替を自動補完しない。Remotion は `CharacterVisualSet`、カタログ、SQLite を直接参照せず、manifest の解決済み情報だけを使用する。話者は色だけでなく名前と配置でも区別する。
 

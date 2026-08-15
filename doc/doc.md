@@ -492,7 +492,7 @@ AI に素材そのもの、完成スライド、図解を生成させない。AI
    };
    ```
 3. セリフカードの「ビジュアルを変更」はモーダルを開く。モーダルにはその line の speaker に binding された `CharacterVisualSet` の active variant だけを表示し、workspace 内の別 visual の variant を混在させない。
-4. variant には少なくとも preview、label、renderType、tags、選択中状態を表示する。`mouth-pair` は `closed` / `open` の両方を確認できるようにし、`single-image` に存在しない口差分を生成・推測しない。
+4. variant には少なくとも preview、label、renderType、tags、選択中状態を表示する。ここでの tags は CharacterVisual variant 専用のタグドメインであり、現場素材 `Asset` のタグ辞書・tag ID・関連付けとは共有・混同しない。`mouth-pair` は `closed` / `open` の両方を確認できるようにし、`single-image` に存在しない口差分を生成・推測しない。
 5. 新規 line は `characterVariantId: null` から開始する。人間が選択した variant の ID だけを保存し、line の speaker に binding された `CharacterVisualSet` 配下であることを保存時・出力前に検証する。missing、inactive、cross-visual の場合は代替せず validation error とする。
 6. `expression`、variant の tag、label から physical variant を自動選択しない。タグを指定した場合も、タグ一致数が多い active variant を上位へ移動するだけで、不一致 variant を一覧から削除しない。タグ未指定では active variant をすべて表示し、同点では catalog snapshot の決定論的な元順序を維持する。
 7. 選択済み variant は別の「選択セリフの表示設定」カードではなく、各セリフカード自体に preview、label、renderType、未選択状態、ビジュアル変更ボタンとして表示する。
@@ -640,6 +640,8 @@ const msToFrames = (ms: number, fps: number): number =>
 - WebUI のプレビューと MP4 レンダリングには、同じタイムラインコンパイラと同じ `RenderManifest` を使用する。
 
 ### 6.8 キャラクター演出
+
+以下の `RenderManifest.characters[]`、`RenderManifest.lines[].characterVariantId`、`RenderManifest.characterVariants[]` は CV-05 target model の概念であり、現行 `RenderManifest 1.0.0` へ CV-04 で追加するフィールドではない。manifest version の値と互換性は CV-05 で決定する。
 
 - 2 人のキャラクターを使用する。
 - 各キャラクターは画面下部の左右へ配置する。
