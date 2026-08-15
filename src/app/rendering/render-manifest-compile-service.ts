@@ -33,6 +33,7 @@ type CharacterVisualCatalogVerifier = Pick<
 >;
 type AudioIndexReader = Pick<VoicevoxAudioStore, "readIndex">;
 type ManifestStoreWriter = Pick<RenderManifestStore, "compileAndStore">;
+type AssetMetadataByPath = Map<string, RenderManifestAssetMetadata>;
 
 export type RenderManifestInputBuilderOptions = {
   readonly workspaceRoot: string;
@@ -52,8 +53,17 @@ function isPathInside(rootPath: string, candidatePath: string): boolean {
   );
 }
 
+function addAssetMetadata(
+  metadata: AssetMetadataByPath,
+  asset: RenderManifestAssetMetadata
+): void {
+  if (!metadata.has(asset.path)) {
+    metadata.set(asset.path, asset);
+  }
+}
+
 function appendAssetMetadata(
-  metadata: RenderManifestAssetMetadata[],
+  metadata: AssetMetadataByPath,
   assetRepository: AssetDetailReader,
   assetId: string,
   path: string,
@@ -67,7 +77,7 @@ function appendAssetMetadata(
   if (detail === undefined || detail.checksum === null) {
     return;
   }
-  metadata.push({
+  addAssetMetadata(metadata, {
     path,
     kind,
     sha256: detail.checksum,
@@ -81,7 +91,7 @@ function appendAssetMetadata(
 }
 
 async function appendBgmMetadata(
-  metadata: RenderManifestAssetMetadata[],
+  metadata: AssetMetadataByPath,
   workspaceRoot: string,
   project: VideoProject
 ): Promise<void> {
@@ -100,7 +110,7 @@ async function appendBgmMetadata(
         readFile(filePath),
         processAudioMedia(filePath)
       ]);
-      metadata.push({
+      addAssetMetadata(metadata, {
         path: bgm.path,
         kind: "bgm",
         sha256: createHash("sha256").update(contents).digest("hex"),
@@ -113,7 +123,7 @@ async function appendBgmMetadata(
 }
 
 async function appendImageBackgroundMetadata(
-  metadata: RenderManifestAssetMetadata[],
+  metadata: AssetMetadataByPath,
   workspaceRoot: string,
   project: VideoProject
 ): Promise<void> {
@@ -135,7 +145,7 @@ async function appendImageBackgroundMetadata(
     }
     try {
       const contents = await readFile(filePath);
-      metadata.push({
+      addAssetMetadata(metadata, {
         path: section.background.src,
         kind: "image",
         sha256: createHash("sha256").update(contents).digest("hex")
@@ -153,10 +163,10 @@ async function assetMetadataForProject(
   snapshot: CharacterVisualCatalogSnapshot,
   assetRepository: AssetDetailReader
 ): Promise<readonly RenderManifestAssetMetadata[]> {
-  const metadata: RenderManifestAssetMetadata[] = [];
+  const metadata: AssetMetadataByPath = new Map();
 
   for (const entry of Object.values(audioIndex)) {
-    metadata.push({
+    addAssetMetadata(metadata, {
       path: entry.audioPath,
       kind: "audio",
       sha256: entry.audioSha256,
@@ -191,7 +201,7 @@ async function assetMetadataForProject(
   for (const visual of snapshot) {
     for (const variant of visual.variants) {
       for (const file of variant.files) {
-        metadata.push({
+        addAssetMetadata(metadata, {
           path: file.libraryPath,
           kind: "character",
           sha256: file.checksum
@@ -201,7 +211,7 @@ async function assetMetadataForProject(
   }
 
   await appendBgmMetadata(metadata, workspaceRoot, project);
-  return metadata;
+  return [...metadata.values()];
 }
 
 export class RenderManifestInputBuilder {

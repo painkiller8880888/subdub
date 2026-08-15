@@ -8,7 +8,10 @@ import { describe, expect, it, vi } from "vitest";
 import { legacyCharacterVariantCatalog } from "../../src/app/character-visuals/character-visual-seed.js";
 import { computeOutlineHash } from "../../src/app/projects/script-domain.js";
 import { RenderManifestInputBuilder } from "../../src/app/rendering/render-manifest-compile-service.js";
-import { compileRenderManifest } from "../../src/app/rendering/render-manifest-compiler.js";
+import {
+  compileRenderManifest,
+  type RenderManifestAssetMetadata
+} from "../../src/app/rendering/render-manifest-compiler.js";
 import { characterVisualCatalogSnapshotSchema } from "../../src/schema/character-visual.js";
 import { pngBytes } from "../fixtures/asset-fixtures.js";
 import { createRenderManifestAudioIndex } from "../fixtures/render-manifest-input.js";
@@ -128,6 +131,16 @@ describe("RenderManifestInputBuilder", () => {
       project.visuals.assignments = [];
       project.audio.sectionBgms = [];
       project.audio.soundEffects = [];
+      const mainSection = project.script.sections[1];
+      const introSection = project.script.sections[0];
+      if (
+        mainSection === undefined ||
+        introSection === undefined ||
+        mainSection.background.kind !== "image"
+      ) {
+        throw new Error("The fixture image background is missing.");
+      }
+      introSection.background = mainSection.background;
 
       const backgroundPath = path.join(
         workspaceRoot,
@@ -163,6 +176,13 @@ describe("RenderManifestInputBuilder", () => {
           }
         ])
       );
+      const assetMetadata = (input.assetMetadata ??
+        []) as readonly RenderManifestAssetMetadata[];
+      expect(
+        assetMetadata.filter(
+          (asset) => asset.path === "backgrounds/application-system.png"
+        )
+      ).toHaveLength(1);
 
       const result = compileRenderManifest(input);
       expect(result.success).toBe(true);
@@ -177,6 +197,11 @@ describe("RenderManifestInputBuilder", () => {
           }
         ])
       );
+      expect(
+        result.manifest.sourceAssetChecksums.filter(
+          (asset) => asset.path === "backgrounds/application-system.png"
+        )
+      ).toHaveLength(1);
     } finally {
       await fs.rm(workspaceRoot, { recursive: true, force: true });
     }
