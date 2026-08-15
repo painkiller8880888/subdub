@@ -55,9 +55,11 @@ function resolveCharacterImagePath(input: RenderRendererInput): string | null {
   }
 
   const variant = input.manifest.characterVariants.find(
-    (candidate) => candidate.variantId === character.idleVariantId
+    (candidate) =>
+      candidate.variantId === character.idleVariantId &&
+      candidate.visualId === character.visualId
   );
-  if (variant === undefined || variant.characterId !== character.characterId) {
+  if (variant === undefined) {
     throw new RenderJobError(
       RENDER_JOB_ERROR_CODE.thumbnailRenderFailed,
       500,

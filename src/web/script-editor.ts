@@ -89,6 +89,7 @@ export function createDefaultScriptLine(
     spokenText: text,
     subtitleText: text,
     expression: "neutral",
+    characterVariantId: null,
     pauseBeforeMs: 0,
     pauseAfterMs: 250,
     voiceOverrides: {},

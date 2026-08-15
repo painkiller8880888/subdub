@@ -189,9 +189,12 @@ async function copyReferencedAsset(
 ): Promise<void> {
   const safePath = normalizeRenderAssetPath(projectId, relativePath);
   const isSharedAsset = safePath.startsWith("shared-assets/");
+  const isLibraryAsset = safePath.startsWith("library/");
   const sourceRoot = isSharedAsset
     ? path.join(workspaceRoot, "public", "shared-assets")
-    : path.join(workspaceRoot, "projects", projectId);
+    : isLibraryAsset
+      ? workspaceRoot
+      : path.join(workspaceRoot, "projects", projectId);
   const sourceRelativePath = isSharedAsset
     ? safePath.slice("shared-assets/".length)
     : safePath;

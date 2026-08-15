@@ -641,7 +641,9 @@ const msToFrames = (ms: number, fps: number): number =>
 
 ### 6.8 キャラクター演出
 
-以下の `RenderManifest.characters[]`、`RenderManifest.lines[].characterVariantId`、`RenderManifest.characterVariants[]` は CV-05 target model の概念であり、現行 `RenderManifest 1.0.0` へ CV-04 で追加するフィールドではない。manifest version の値と互換性は CV-05 で決定する。
+以下の `RenderManifest.characters[]`、`RenderManifest.lines[].characterVariantId`、`RenderManifest.characterVariants[]` は CV-05 target model であり、現行 `RenderManifest 1.0.0` へ CV-04 で追加するフィールドではない。CV-05 では `manifestVersion: "2.2.0"` として保存し、`RenderCharacterVariant` は physical visual の `(visualId, variantId)` を識別する。同じ physical variant を複数の project character が共有しても、特定話者の所有権で上書きしない。既存 `characterMappingVersion` は cache / run-log 互換のメタデータとして残すが、variant 選択には使用しない。
+
+production compile は `POST /api/projects/{projectId}/manifest/compile` を標準経路とする。backend は SQLite の `CharacterVisualCatalogSnapshot` を `verifyFiles()` で検証し、file checksum を含む validated snapshot と asset metadata を compiler へ渡してから `RenderManifestStore` に保存する。compiler や Remotion が SQLite を直接検索したり、静的 legacy catalog を通常経路として渡したりしない。
 
 - 2 人のキャラクターを使用する。
 - 各キャラクターは画面下部の左右へ配置する。

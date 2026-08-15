@@ -15,6 +15,7 @@ import { createRenderManifestInput } from "../fixtures/render-manifest-input.js"
 import { videoProjectFixture } from "../fixtures/video-project.js";
 import type { VideoProject } from "../../src/schema/index.js";
 import type { VoicevoxAudioIndex } from "../../src/app/voicevox/audio-index.js";
+import { characterVisualCatalogSnapshotSchema } from "../../src/schema/character-visual.js";
 
 const validInput = createRenderManifestInput;
 
@@ -25,7 +26,90 @@ function diagnosticCodes(result: ReturnType<typeof compileRenderManifest>) {
   return result.diagnostics.map((diagnostic) => diagnostic.code);
 }
 
+function snapshotCatalogInput(input: ReturnType<typeof validInput>): {
+  readonly catalog: unknown;
+  readonly assetMetadata: readonly RenderManifestAssetMetadata[];
+} {
+  const characterFiles = characterVariantCatalog.flatMap((variant) =>
+    variant.files.map((file) => ({ variant, file }))
+  );
+  const assetsByPath = new Map<string, RenderManifestAssetMetadata>(
+    (input.assetMetadata as readonly RenderManifestAssetMetadata[]).map(
+      (asset) => [asset.path, asset]
+    )
+  );
+  const libraryPathByLegacyPath = new Map<string, string>(
+    characterFiles.map(({ variant, file }) => [
+      file.destinationPath,
+      `library/character-visuals/${variant.characterId}/${variant.variantId}/${file.key}.png`
+    ])
+  );
+  const catalog = characterVisualCatalogSnapshotSchema.parse(
+    [
+      ...new Set(characterVariantCatalog.map((variant) => variant.characterId))
+    ].map((visualId) => ({
+      visualId,
+      name: visualId,
+      description: "",
+      status: "active",
+      baseWidth: 600,
+      baseHeight: 1000,
+      variants: characterVariantCatalog
+        .filter((variant) => variant.characterId === visualId)
+        .map((variant) => ({
+          variantId: variant.variantId,
+          label: variant.label,
+          renderType: variant.renderType,
+          status: "active",
+          tags: [...variant.tags],
+          files: variant.files.map((file) => ({
+            key: file.key,
+            libraryPath: libraryPathByLegacyPath.get(file.destinationPath),
+            mimeType: "image/png",
+            checksum: assetsByPath.get(file.destinationPath)?.sha256,
+            sizeBytes: 0,
+            width: 600,
+            height: 1000
+          }))
+        })),
+      createdAt: "2026-08-15T00:00:00.000Z",
+      updatedAt: "2026-08-15T00:00:00.000Z"
+    }))
+  );
+  const assetMetadata = (
+    input.assetMetadata as readonly RenderManifestAssetMetadata[]
+  ).map((asset) => {
+    const libraryPath = libraryPathByLegacyPath.get(asset.path);
+    return libraryPath === undefined ? asset : { ...asset, path: libraryPath };
+  });
+  return { catalog, assetMetadata };
+}
+
 describe("compileRenderManifest", () => {
+  it("validates the checksum carried by a SQLite catalog snapshot", () => {
+    const input = validInput();
+    const snapshot = snapshotCatalogInput(input);
+    const brokenCatalog = structuredClone(snapshot.catalog) as Array<{
+      variants: Array<{ files: Array<{ checksum: string }> }>;
+    }>;
+    const firstFile = brokenCatalog[0]?.variants[0]?.files[0];
+    if (firstFile === undefined) {
+      throw new Error("The snapshot fixture has no character file.");
+    }
+    firstFile.checksum = "d".repeat(64);
+
+    const result = compileRenderManifest({
+      ...input,
+      characterVariantCatalog: brokenCatalog,
+      assetMetadata: snapshot.assetMetadata
+    });
+
+    expect(result.success).toBe(false);
+    expect(diagnosticCodes(result)).toContain(
+      "CHARACTER_VARIANT_FILE_CHECKSUM_MISMATCH"
+    );
+  });
+
   it("rejects compilation when the runtime catalog snapshot is not injected", () => {
     const input = { ...validInput() };
     Reflect.deleteProperty(input, "characterVariantCatalog");
@@ -35,7 +119,7 @@ describe("compileRenderManifest", () => {
     expect(diagnosticCodes(result)).toContain("CHARACTER_CATALOG_INVALID");
   });
 
-  it("resolves the explicit character mapping and compiles all timeline inputs", () => {
+  it("resolves explicit character selections and compiles all timeline inputs", () => {
     const result = compileRenderManifest(validInput());
 
     expect(result.success).toBe(true);
@@ -43,7 +127,7 @@ describe("compileRenderManifest", () => {
       return;
     }
 
-    expect(result.manifest.manifestVersion).toBe("2.1.0");
+    expect(result.manifest.manifestVersion).toBe("2.2.0");
     expect(result.manifest.characterCatalogVersion).toBe(
       CHARACTER_VARIANT_CATALOG_VERSION
     );
@@ -53,6 +137,7 @@ describe("compileRenderManifest", () => {
     expect(result.manifest.characters).toEqual([
       {
         characterId: "character-mentor",
+        visualId: "character-mentor",
         displayName: "四国めたん",
         themeColorToken: "character.metan",
         lipSyncPeriodFrames: 3,
@@ -60,6 +145,7 @@ describe("compileRenderManifest", () => {
       },
       {
         characterId: "character-learner",
+        visualId: "character-learner",
         displayName: "ずんだもん",
         themeColorToken: "character.zundamon",
         lipSyncPeriodFrames: 3,
@@ -216,6 +302,46 @@ describe("compileRenderManifest", () => {
         .map(({ path }) => path)
         .sort((left, right) => left.localeCompare(right))
     );
+  });
+
+  it("shares a physical visual variant without assigning ownership to one speaker", () => {
+    const input = validInput();
+    const project = structuredClone(input.project) as VideoProject;
+    project.characters[1]!.characterVisual = {
+      visualId: "character-mentor",
+      idleVariantId: "character-mentor-stand-v1"
+    };
+    for (const section of project.script.sections) {
+      for (const line of section.lines) {
+        if (line.speakerId === "character-learner") {
+          line.characterVariantId = "character-mentor-speak-normal-v1";
+        }
+      }
+    }
+
+    const result = compileRenderManifest({ ...input, project });
+
+    expect(result.success).toBe(true);
+    if (!result.success) {
+      return;
+    }
+    expect(result.manifest.characters[1]).toMatchObject({
+      characterId: "character-learner",
+      visualId: "character-mentor"
+    });
+    expect(
+      result.manifest.characterVariants.filter(
+        (variant) => variant.variantId === "character-mentor-speak-normal-v1"
+      )
+    ).toHaveLength(1);
+    expect(
+      result.manifest.lines
+        .filter((line) => line.speakerId === "character-learner")
+        .every(
+          (line) =>
+            line.characterVariantId === "character-mentor-speak-normal-v1"
+        )
+    ).toBe(true);
   });
 
   it("is deterministic for hashes, deep equality, and serialization", () => {
@@ -506,22 +632,29 @@ describe("compileRenderManifest", () => {
     }
   });
 
-  it("does not infer or substitute a missing mapping or variant", () => {
-    const mapping = structuredClone(characterVariantMapping) as Record<
-      string,
-      Record<string, string>
-    >;
-    delete mapping["character-mentor"].smile;
-    const missingMapping = compileRenderManifest(
-      validInput(undefined, { characterVariantMapping: mapping })
+  it("requires explicit project selections and does not use the legacy mapping", () => {
+    const projectWithoutLineSelection = structuredClone(
+      videoProjectFixture
+    ) as VideoProject;
+    const outroLine = projectWithoutLineSelection.script.sections
+      .flatMap((section) => section.lines)
+      .find((line) => line.id === "outro-mentor-1");
+    if (outroLine === undefined) {
+      throw new Error("fixture line is missing");
+    }
+    outroLine.characterVariantId = null;
+    const missingSelection = compileRenderManifest(
+      validInput(projectWithoutLineSelection, {
+        characterVariantMapping
+      })
     );
-    expect(missingMapping.success).toBe(false);
-    expect(diagnosticCodes(missingMapping)).toContain(
-      "CHARACTER_MAPPING_MISSING"
+    expect(missingSelection.success).toBe(false);
+    expect(diagnosticCodes(missingSelection)).toContain(
+      "CHARACTER_VARIANT_UNSELECTED"
     );
-    if (!missingMapping.success) {
+    if (!missingSelection.success) {
       expect(
-        missingMapping.diagnostics.find(
+        missingSelection.diagnostics.find(
           (diagnostic) => diagnostic.lineId === "outro-mentor-1"
         )?.variantId
       ).toBeUndefined();
@@ -548,7 +681,7 @@ describe("compileRenderManifest", () => {
     }
   });
 
-  it("reports character ownership, slot, kind, checksum, and duration errors with context", () => {
+  it("reports visual ownership, slot, kind, checksum, and duration errors with context", () => {
     const catalog = characterVariantCatalog.map((variant) =>
       variant.variantId === "character-mentor-speak-pointing-v1"
         ? { ...variant, characterId: "character-learner" }
@@ -613,5 +746,31 @@ describe("compileRenderManifest", () => {
         diagnostic.assetPath?.endsWith("open.png")
       )
     ).toBe(true);
+  });
+
+  it("rejects inactive catalog visuals and variants", () => {
+    const inactiveVariantCatalog = characterVariantCatalog.map((variant) =>
+      variant.variantId === "character-mentor-speak-normal-v1"
+        ? { ...variant, status: "inactive" as const }
+        : variant
+    );
+    const inactiveVariant = compileRenderManifest(
+      validInput(undefined, { characterVariantCatalog: inactiveVariantCatalog })
+    );
+    expect(diagnosticCodes(inactiveVariant)).toContain(
+      "CHARACTER_VARIANT_INACTIVE"
+    );
+
+    const inactiveVisualCatalog = characterVariantCatalog.map((variant) =>
+      variant.variantId === "character-mentor-speak-pointing-v1"
+        ? { ...variant, visualStatus: "inactive" as const }
+        : variant
+    );
+    const inactiveVisual = compileRenderManifest(
+      validInput(undefined, { characterVariantCatalog: inactiveVisualCatalog })
+    );
+    expect(diagnosticCodes(inactiveVisual)).toContain(
+      "CHARACTER_VISUAL_INACTIVE"
+    );
   });
 });

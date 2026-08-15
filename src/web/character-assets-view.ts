@@ -1,6 +1,5 @@
 import {
   characterVisualSnapshotToVariantCatalog,
-  characterVariantsForCharacter,
   type CharacterVariantCatalog,
   type CharacterVariantRenderType
 } from "../assets/character-asset-manifest.js";
@@ -33,24 +32,28 @@ export function toCharacterAssetViewModel(
   character: Character,
   catalog: CharacterVariantCatalog
 ): CharacterAssetViewModel {
+  const visualId = character.characterVisual.visualId;
   return {
     id: character.id,
     name: character.name,
     role: character.role,
     speakerName: character.voicevox.speakerName,
     styleName: character.voicevox.styleName,
-    availableVariants: characterVariantsForCharacter(character.id, catalog).map(
-      (variant) => ({
-        variantId: variant.variantId,
-        label: variant.label,
-        renderType: variant.renderType,
-        tags: variant.tags,
-        files: variant.files.map((file) => ({
-          key: file.key,
-          path: file.destinationPath
-        }))
-      })
-    )
+    availableVariants:
+      visualId === null
+        ? []
+        : catalog
+            .filter((variant) => variant.characterId === visualId)
+            .map((variant) => ({
+              variantId: variant.variantId,
+              label: variant.label,
+              renderType: variant.renderType,
+              tags: variant.tags,
+              files: variant.files.map((file) => ({
+                key: file.key,
+                path: file.destinationPath
+              }))
+            }))
   };
 }
 

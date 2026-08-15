@@ -19,6 +19,7 @@ import {
   outlineSaveRequestSchema,
   modelsResponseSchema,
   projectBriefSaveRequestSchema,
+  projectCharactersSaveRequestSchema,
   projectCreateRequestSchema,
   projectCreateResponseSchema,
   projectDetailResponseSchema,
@@ -68,6 +69,7 @@ import {
   type OutlineReviewRequest,
   type OutlineSaveRequest,
   type ProjectBriefSaveRequest,
+  type ProjectCharactersSaveRequest,
   type ProjectCreateRequest,
   type ModelsResponse,
   type ProjectSourceContent,
@@ -540,6 +542,25 @@ export async function saveProjectBrief(
   const validatedInput = projectBriefSaveRequestSchema.parse(input);
   const response = await fetchApi(
     `/api/projects/${encodeURIComponent(projectId)}/brief`,
+    projectMutationResponseSchema,
+    {
+      method: "PUT",
+      headers: {
+        "content-type": "application/json"
+      },
+      body: JSON.stringify(validatedInput)
+    }
+  );
+  return response.data;
+}
+
+export async function saveProjectCharacterVisualBindings(
+  projectId: string,
+  input: ProjectCharactersSaveRequest
+): Promise<VideoProject> {
+  const validatedInput = projectCharactersSaveRequestSchema.parse(input);
+  const response = await fetchApi(
+    `/api/projects/${encodeURIComponent(projectId)}/characters`,
     projectMutationResponseSchema,
     {
       method: "PUT",

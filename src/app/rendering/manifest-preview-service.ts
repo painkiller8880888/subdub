@@ -420,6 +420,31 @@ export class ManifestPreviewService {
     projectId: string,
     manifestPath: string
   ): Promise<string> {
+    if (manifestPath.startsWith("library/")) {
+      const parsedPath = relativePosixPathSchema.safeParse(manifestPath);
+      if (!parsedPath.success || manifestPath.includes("%")) {
+        throw new ProjectFileServiceError("PROJECT_FILE_PATH_INVALID", 400);
+      }
+      const libraryRoot = path.resolve(this.workspaceRoot, "library");
+      const resolvedLibraryRoot = await fs.realpath(libraryRoot);
+      const candidatePath = path.resolve(
+        libraryRoot,
+        ...manifestPath.slice("library/".length).split("/")
+      );
+      if (!isPathInside(libraryRoot, candidatePath)) {
+        throw new ProjectFileServiceError("PROJECT_FILE_PATH_INVALID", 400);
+      }
+      const resolvedCandidate = await fs.realpath(candidatePath);
+      if (!isPathInside(resolvedLibraryRoot, resolvedCandidate)) {
+        throw new ProjectFileServiceError("PROJECT_FILE_PATH_INVALID", 400);
+      }
+      const stats = await fs.stat(resolvedCandidate);
+      if (!stats.isFile()) {
+        throw new ProjectFileServiceError("PROJECT_FILE_NOT_FOUND", 404);
+      }
+      return resolvedCandidate;
+    }
+
     if (manifestPath.startsWith("shared-assets/")) {
       const parsedPath = relativePosixPathSchema.safeParse(manifestPath);
       if (!parsedPath.success || manifestPath.includes("%")) {

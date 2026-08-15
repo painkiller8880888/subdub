@@ -44,6 +44,10 @@ function makeCharacter(
       postPhonemeLength: 0
     },
     lipSyncPeriodFrames: 4,
+    characterVisual: {
+      visualId: null,
+      idleVariantId: null
+    },
     visualAssets: {
       neutral: {
         closed: `${assetPrefix}/neutral-closed.png`,
@@ -74,7 +78,7 @@ export function createEmptyVideoProject(
   const manualVersion = options.manualVersion ?? "";
 
   const project: VideoProject = {
-    schemaVersion: "1.0.0",
+    schemaVersion: "1.1.0",
     revision: 0,
     metadata: {
       id: options.projectId,

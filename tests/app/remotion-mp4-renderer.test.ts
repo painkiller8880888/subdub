@@ -78,4 +78,37 @@ describe("Remotion MP4 public staging", () => {
       fs.readFile(path.join(publicRoot, "audio", "voice", "line-1.wav"), "utf8")
     ).resolves.toBe("voice-data");
   });
+
+  it("stages SQLite-managed character visual files from the workspace library", async () => {
+    temporaryRoot = await fs.mkdtemp(
+      path.join(os.tmpdir(), "subdub-remotion-library-staging-")
+    );
+    const libraryPath =
+      "library/character-visuals/visual-custom/variant-custom/single.png";
+    const sourcePath = path.join(temporaryRoot, ...libraryPath.split("/"));
+    await fs.mkdir(path.dirname(sourcePath), { recursive: true });
+    await fs.writeFile(sourcePath, "character-data");
+
+    const manifestInput = structuredClone(
+      renderManifestFixture
+    ) as RenderManifest;
+    manifestInput.sourceAssetChecksums = [
+      { path: libraryPath, sha256: "a".repeat(64) }
+    ];
+    const manifest = renderManifestSchema.parse(manifestInput);
+    const stagingRoot = await fs.mkdtemp(
+      path.join(temporaryRoot, ".subdub-render-")
+    );
+
+    const publicRoot = await stagePublicDirectory(
+      temporaryRoot,
+      projectId,
+      manifest,
+      stagingRoot
+    );
+
+    await expect(
+      fs.readFile(path.join(publicRoot, ...libraryPath.split("/")), "utf8")
+    ).resolves.toBe("character-data");
+  });
 });

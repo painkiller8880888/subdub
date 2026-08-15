@@ -6,6 +6,10 @@ export const CHARACTER_CANVAS_SIZE = {
 } as const;
 
 export const CHARACTER_VARIANT_CATALOG_VERSION = "1.0.0" as const;
+/**
+ * Compatibility metadata for existing manifest consumers. CV-05 does not use
+ * this mapping table to resolve project line selections.
+ */
 export const CHARACTER_VARIANT_MAPPING_VERSION = "1.0.0" as const;
 
 export type CharacterVariantRenderType = "single-image" | "mouth-pair";

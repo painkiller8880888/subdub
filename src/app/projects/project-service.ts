@@ -6,6 +6,7 @@ import {
   outlineReviewRequestSchema,
   outlineSaveRequestSchema,
   projectBriefSaveRequestSchema,
+  projectCharactersSaveRequestSchema,
   projectCreateRequestSchema,
   projectSourceSaveRequestSchema,
   scriptApproveRequestSchema,
@@ -238,6 +239,55 @@ export class ProjectService {
     return this.repository.saveBrief(
       projectId,
       request.brief,
+      request.expectedRevision
+    );
+  }
+
+  async saveCharacterVisualBindings(
+    projectId: unknown,
+    input: unknown
+  ): Promise<VideoProject> {
+    const request = projectCharactersSaveRequestSchema.parse(input);
+    const currentProject = await this.repository.read(projectId);
+    const submittedById = new Map(
+      request.characters.map((character) => [character.characterId, character])
+    );
+    const issues = [];
+    for (const [index, character] of currentProject.characters.entries()) {
+      if (!submittedById.has(character.id)) {
+        issues.push({
+          path: ["characters", index, "characterId"],
+          message: "characterId must reference a project character"
+        });
+      }
+    }
+    for (const [index, character] of request.characters.entries()) {
+      if (!currentProject.characters.some((candidate) => candidate.id === character.characterId)) {
+        issues.push({
+          path: ["characters", index, "characterId"],
+          message: "characterId must reference a project character"
+        });
+      }
+    }
+    if (issues.length > 0) {
+      throw new ProjectRepositoryError(
+        "PROJECT_CANDIDATE_VALIDATION_FAILED",
+        422,
+        "The character visual binding candidate is invalid.",
+        issues
+      );
+    }
+
+    const candidate: VideoProject = {
+      ...currentProject,
+      characters: currentProject.characters.map((character) => ({
+        ...character,
+        characterVisual: submittedById.get(character.id)!.characterVisual
+      }))
+    };
+    return this.repository.save(
+      projectId,
+      candidate,
       request.expectedRevision
     );
   }

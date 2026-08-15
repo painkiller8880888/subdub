@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { promises as fs } from "node:fs";
 import { tmpdir } from "node:os";
 import * as path from "node:path";
@@ -285,5 +286,30 @@ describe("ManifestPreviewService", () => {
     expect(result.blockers.map((blocker) => blocker.code)).toContain(
       "ASSET_CHECKSUM_MISMATCH"
     );
+  });
+
+  it("resolves SQLite-managed character files from the workspace library", async () => {
+    const root = await createRoot();
+    const project = createProject();
+    const libraryPath =
+      "library/character-visuals/visual-custom/variant-custom/single.png";
+    const filePath = path.join(root, ...libraryPath.split("/"));
+    await fs.mkdir(path.dirname(filePath), { recursive: true });
+    await fs.writeFile(filePath, "character-data", "utf8");
+
+    const manifest = createManifest(project);
+    manifest.sourceAssetChecksums = [
+      {
+        path: libraryPath,
+        sha256: createHash("sha256").update("character-data").digest("hex")
+      }
+    ];
+    const service = await createService(root, project, { manifest });
+
+    await expect(service.get(projectId)).resolves.toMatchObject({
+      state: "current",
+      canPlay: true,
+      blockers: []
+    });
   });
 });

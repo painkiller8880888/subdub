@@ -42,6 +42,10 @@ import {
   type ManifestPreviewServicePort
 } from "./routes/manifest-preview.js";
 import {
+  registerManifestCompileRoutes,
+  type ManifestCompileServicePort
+} from "./routes/manifest-compile.js";
+import {
   registerProjectFileRoutes,
   type ProjectFileServicePort
 } from "./routes/project-files.js";
@@ -77,6 +81,7 @@ export type AppOptions = {
   voiceGenerationService?: VoicevoxGenerationServicePort;
   voiceAdjustmentService?: VoicevoxAdjustmentServicePort;
   manifestPreviewService?: ManifestPreviewServicePort;
+  manifestCompileService?: ManifestCompileServicePort;
   projectFileService?: ProjectFileServicePort;
   renderJobService?: RenderJobServicePort;
   aiRunSearchService?: AiRunSearchServicePort;
@@ -153,6 +158,10 @@ export function buildApp(options: AppOptions = {}): FastifyInstance {
 
   if (options.manifestPreviewService !== undefined) {
     registerManifestPreviewRoutes(app, options.manifestPreviewService);
+  }
+
+  if (options.manifestCompileService !== undefined) {
+    registerManifestCompileRoutes(app, options.manifestCompileService);
   }
 
   if (options.projectFileService !== undefined) {

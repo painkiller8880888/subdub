@@ -7,6 +7,7 @@ import {
   outlineReviewRequestSchema,
   outlineSaveRequestSchema,
   projectBriefSaveRequestSchema,
+  projectCharactersSaveRequestSchema,
   projectCreateRequestSchema,
   projectCreateResponseSchema,
   projectDetailResponseSchema,
@@ -79,6 +80,20 @@ export function registerProjectRoutes(
     async (request) => {
       const input = projectBriefSaveRequestSchema.parse(request.body);
       const project = await projectService.saveBrief(
+        request.params.projectId,
+        input
+      );
+      return projectMutationResponseSchema.parse(
+        createApiSuccessResponse(project, project.revision)
+      );
+    }
+  );
+
+  app.put<{ Params: { projectId: string } }>(
+    "/api/projects/:projectId/characters",
+    async (request) => {
+      const input = projectCharactersSaveRequestSchema.parse(request.body);
+      const project = await projectService.saveCharacterVisualBindings(
         request.params.projectId,
         input
       );

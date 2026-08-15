@@ -52,6 +52,7 @@ const renderMouthPairFilesSchema = strictObject({
 
 export const renderCharacterSchema = strictObject({
   characterId: idSchema,
+  visualId: idSchema,
   displayName: z.string(),
   themeColorToken: z.enum(["character.metan", "character.zundamon"]),
   lipSyncPeriodFrames: positiveIntegerSchema,
@@ -60,14 +61,14 @@ export const renderCharacterSchema = strictObject({
 
 export const renderSingleImageCharacterVariantSchema = strictObject({
   variantId: idSchema,
-  characterId: idSchema,
+  visualId: idSchema,
   renderType: z.literal("single-image"),
   files: renderSingleImageFilesSchema
 });
 
 export const renderMouthPairCharacterVariantSchema = strictObject({
   variantId: idSchema,
-  characterId: idSchema,
+  visualId: idSchema,
   renderType: z.literal("mouth-pair"),
   files: renderMouthPairFilesSchema
 });
@@ -151,10 +152,12 @@ export const renderInsertSchema = strictObject({
 });
 
 const renderManifestBaseSchema = strictObject({
-  manifestVersion: z.literal("2.1.0"),
+  manifestVersion: z.literal("2.2.0"),
   sourceProjectHash: sha256Schema,
   compilerInputHash: sha256Schema,
   characterCatalogVersion: z.string().min(1),
+  // Kept for existing cache and run-log consumers. In 2.2.0 this is
+  // compatibility metadata only; it does not drive physical variant choice.
   characterMappingVersion: z.string().min(1),
   characters: z.array(renderCharacterSchema),
   characterVariants: z.array(renderCharacterVariantSchema),
@@ -199,6 +202,10 @@ function addIssue(
   message: string
 ): void {
   ctx.addIssue({ code: "custom", path, message });
+}
+
+function renderVariantKey(visualId: string, variantId: string): string {
+  return `${visualId}\u0000${variantId}`;
 }
 
 function validateTimelineOrder(
@@ -273,11 +280,11 @@ export const renderManifestSchema = renderManifestBaseSchema.superRefine(
     );
     addDuplicateIssues(
       manifest.characterVariants.map((variant, index) => ({
-        value: variant.variantId,
+        value: renderVariantKey(variant.visualId, variant.variantId),
         path: ["characterVariants", index, "variantId"]
       })),
       ctx,
-      "render character variant id"
+      "render character variant visualId/variantId"
     );
 
     addDuplicateIssues(
@@ -372,42 +379,44 @@ export const renderManifestSchema = renderManifestBaseSchema.superRefine(
       string,
       (typeof manifest.characters)[number]
     >();
-    const variantById = new Map<
+    const variantByKey = new Map<
       string,
       (typeof manifest.characterVariants)[number]
     >();
 
-    for (const [index, character] of manifest.characters.entries()) {
+    for (const character of manifest.characters) {
       if (!characterById.has(character.characterId)) {
         characterById.set(character.characterId, character);
       }
-      const idleVariant = manifest.characterVariants.find(
-        (variant) => variant.variantId === character.idleVariantId
+    }
+
+    for (const [index, variant] of manifest.characterVariants.entries()) {
+      const key = renderVariantKey(variant.visualId, variant.variantId);
+      if (!variantByKey.has(key)) {
+        variantByKey.set(key, variant);
+      }
+      if (
+        !manifest.characters.some(
+          (character) => character.visualId === variant.visualId
+        )
+      ) {
+        addIssue(
+          ctx,
+          ["characterVariants", index, "visualId"],
+          "character variant visualId must reference a render character visual"
+        );
+      }
+    }
+
+    for (const [index, character] of manifest.characters.entries()) {
+      const idleVariant = variantByKey.get(
+        renderVariantKey(character.visualId, character.idleVariantId)
       );
       if (idleVariant === undefined) {
         addIssue(
           ctx,
           ["characters", index, "idleVariantId"],
-          "idleVariantId must reference a character variant"
-        );
-      } else if (idleVariant.characterId !== character.characterId) {
-        addIssue(
-          ctx,
-          ["characters", index, "idleVariantId"],
-          "idleVariantId must reference a variant for the same character"
-        );
-      }
-    }
-
-    for (const [index, variant] of manifest.characterVariants.entries()) {
-      if (!variantById.has(variant.variantId)) {
-        variantById.set(variant.variantId, variant);
-      }
-      if (!characterById.has(variant.characterId)) {
-        addIssue(
-          ctx,
-          ["characterVariants", index, "characterId"],
-          "character variant characterId must reference a render character"
+          "idleVariantId must reference a variant in the character visual"
         );
       }
     }
@@ -437,18 +446,17 @@ export const renderManifestSchema = renderManifestBaseSchema.superRefine(
           "speakerId must reference a render character"
         );
       }
-      const variant = variantById.get(line.characterVariantId);
+      const variant =
+        speaker === undefined
+          ? undefined
+          : variantByKey.get(
+              renderVariantKey(speaker.visualId, line.characterVariantId)
+            );
       if (variant === undefined) {
         addIssue(
           ctx,
           ["lines", index, "characterVariantId"],
-          "characterVariantId must reference a character variant"
-        );
-      } else if (variant.characterId !== line.speakerId) {
-        addIssue(
-          ctx,
-          ["lines", index, "characterVariantId"],
-          "characterVariantId must reference a variant for the line speaker"
+          "characterVariantId must reference a variant in the speaker visual"
         );
       }
     }

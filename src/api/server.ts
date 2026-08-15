@@ -37,6 +37,7 @@ import { VoicevoxAdjustmentService } from "../app/voicevox/adjustment-service.js
 import { VoicevoxClient } from "../voicevox/client.js";
 import { VoicevoxAudioStore } from "../app/voicevox/audio-store.js";
 import { RenderManifestStore } from "../app/rendering/render-manifest-store.js";
+import { RenderManifestCompileService } from "../app/rendering/render-manifest-compile-service.js";
 import { ManifestPreviewService } from "../app/rendering/manifest-preview-service.js";
 import {
   RenderJobService,
@@ -250,16 +251,35 @@ export async function initializeServer(
     const resolvedProjectFileService =
       appOptions.projectFileService ?? new ProjectFileService({ workspaceRoot });
     const renderManifestStore = new RenderManifestStore({ workspaceRoot });
+    const audioStore = new VoicevoxAudioStore({ workspaceRoot });
     const resolvedManifestPreviewService =
       appOptions.manifestPreviewService ??
       new ManifestPreviewService({
         workspaceRoot,
         projectRepository: resolvedProjectRepository,
         manifestStore: renderManifestStore,
-        audioStore: new VoicevoxAudioStore({ workspaceRoot }),
+        audioStore,
         voiceGenerationService: resolvedVoiceGenerationService,
         projectFileService: resolvedProjectFileService
       });
+    const verifyCharacterVisualFiles =
+      resolvedCharacterVisualCatalogService.verifyFiles;
+    const resolvedManifestCompileService =
+      appOptions.manifestCompileService ??
+      (verifyCharacterVisualFiles === undefined
+        ? undefined
+        : new RenderManifestCompileService({
+            workspaceRoot,
+            projectRepository: resolvedProjectRepository,
+            assetRepository: resolvedAssetRepository,
+            characterVisualCatalogService: {
+              verifyFiles: verifyCharacterVisualFiles.bind(
+                resolvedCharacterVisualCatalogService
+              )
+            },
+            audioStore,
+            manifestStore: renderManifestStore
+          }));
     const resolvedRenderJobService: RenderJobLifecyclePort =
       suppliedRenderJobService ??
       new RenderJobService({
@@ -280,6 +300,7 @@ export async function initializeServer(
       voiceGenerationService: resolvedVoiceGenerationService,
       voiceAdjustmentService: resolvedVoiceAdjustmentService,
       manifestPreviewService: resolvedManifestPreviewService,
+      manifestCompileService: resolvedManifestCompileService,
       projectFileService: resolvedProjectFileService,
       renderJobService: resolvedRenderJobService,
       aiRunSearchService: resolvedAiRunSearchService,

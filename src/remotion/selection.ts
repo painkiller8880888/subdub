@@ -73,10 +73,13 @@ export function selectActiveLineForSpeaker(
 
 export function findCharacterVariant(
   manifest: RenderManifest,
-  variantId: string
+  variantId: string,
+  visualId?: string
 ): RenderCharacterVariant | undefined {
   return manifest.characterVariants.find(
-    (variant) => variant.variantId === variantId
+    (variant) =>
+      variant.variantId === variantId &&
+      (visualId === undefined || variant.visualId === visualId)
   );
 }
 
@@ -91,7 +94,7 @@ export function selectCharacterVariantForFrame(
     frame
   );
   const variantId = activeLine?.characterVariantId ?? character.idleVariantId;
-  return findCharacterVariant(manifest, variantId);
+  return findCharacterVariant(manifest, variantId, character.visualId);
 }
 
 export type CharacterImageSlot = "single" | "closed" | "open";

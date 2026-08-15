@@ -17,6 +17,7 @@ import {
   type RunLogStorePort
 } from "../run-log-store.js";
 import { invalidateForUpstreamChange } from "./project-invalidation.js";
+import { migrateVideoProject } from "./video-project-migration.js";
 
 export type ProjectRepositoryErrorCode =
   | "PROJECT_ID_INVALID"
@@ -602,7 +603,9 @@ export class ProjectRepository {
   }
 
   async create(candidate: unknown): Promise<VideoProject> {
-    const candidateResult = videoProjectSchema.safeParse(candidate);
+    const candidateResult = videoProjectSchema.safeParse(
+      migrateVideoProject(candidate)
+    );
     if (!candidateResult.success) {
       throw candidateValidationFailedError(
         validationIssues(candidateResult.error)
@@ -1009,7 +1012,9 @@ export class ProjectRepository {
       paths
     );
 
-    const candidateResult = videoProjectSchema.safeParse(candidate);
+    const candidateResult = videoProjectSchema.safeParse(
+      migrateVideoProject(candidate)
+    );
     if (!candidateResult.success) {
       throw candidateValidationFailedError(
         validationIssues(candidateResult.error)
@@ -1491,7 +1496,9 @@ export class ProjectRepository {
       throw parseFailedError();
     }
 
-    const projectResult = videoProjectSchema.safeParse(parsedJson);
+    const projectResult = videoProjectSchema.safeParse(
+      migrateVideoProject(parsedJson)
+    );
     if (!projectResult.success) {
       throw currentValidationFailedError(validationIssues(projectResult.error));
     }

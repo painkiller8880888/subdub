@@ -89,6 +89,11 @@ export const mouthPairSchema = strictObject({
   open: relativePosixPathSchema
 });
 
+export const characterVisualBindingSchema = strictObject({
+  visualId: idSchema.nullable(),
+  idleVariantId: idSchema.nullable()
+});
+
 export const characterSchema = strictObject({
   id: idSchema,
   name: z.string(),
@@ -103,6 +108,7 @@ export const characterSchema = strictObject({
   themeColorToken: z.enum(["character.metan", "character.zundamon"]),
   voice: voiceSchema,
   lipSyncPeriodFrames: positiveIntegerSchema,
+  characterVisual: characterVisualBindingSchema,
   visualAssets: strictObject({
     neutral: mouthPairSchema,
     smile: mouthPairSchema,
@@ -164,6 +170,7 @@ export const scriptLineSchema = strictObject({
     message: "subtitleText must not be blank"
   }),
   expression: expressionSchema,
+  characterVariantId: idSchema.nullable(),
   pauseBeforeMs: finiteNumberSchema.int().nonnegative(),
   pauseAfterMs: finiteNumberSchema.int().nonnegative(),
   voiceOverrides: voiceOverridesSchema,
@@ -276,7 +283,7 @@ export const thumbnailPlanSchema = strictObject({
 });
 
 const videoProjectBaseSchema = strictObject({
-  schemaVersion: z.literal("1.0.0"),
+  schemaVersion: z.literal("1.1.0"),
   revision: finiteNumberSchema.int().nonnegative(),
   metadata: projectMetadataSchema,
   source: projectSourceSchema,
@@ -289,6 +296,30 @@ const videoProjectBaseSchema = strictObject({
   audio: audioPlanSchema,
   inserts: insertPlanSchema,
   thumbnail: thumbnailPlanSchema
+});
+
+/**
+ * The 1.0.0 input boundary is intentionally kept strict so that a project
+ * carrying 1.1.0-only fields cannot be relabeled and accepted as a migrated
+ * project before the legacy shape has been validated.
+ */
+const legacyCharacterSchema = characterSchema.omit({
+  characterVisual: true
+});
+const legacyScriptLineSchema = scriptLineSchema.omit({
+  characterVariantId: true
+});
+const legacyScriptSectionSchema = scriptSectionSchema.extend({
+  lines: z.array(legacyScriptLineSchema)
+});
+const legacyScriptSchema = scriptSchema.extend({
+  sections: z.array(legacyScriptSectionSchema)
+});
+
+export const legacyVideoProjectSchema = videoProjectBaseSchema.extend({
+  schemaVersion: z.literal("1.0.0"),
+  characters: z.array(legacyCharacterSchema).length(2),
+  script: legacyScriptSchema
 });
 
 type IssuePath = Array<string | number>;
@@ -385,6 +416,17 @@ export const videoProjectSchema = videoProjectBaseSchema.superRefine(
           ctx,
           ["characters", index, "themeColorToken"],
           "theme color token does not match the character id"
+        );
+      }
+
+      if (
+        character.characterVisual.visualId === null &&
+        character.characterVisual.idleVariantId !== null
+      ) {
+        addReferenceIssue(
+          ctx,
+          ["characters", index, "characterVisual", "idleVariantId"],
+          "idleVariantId requires a visualId"
         );
       }
     }
@@ -675,6 +717,9 @@ export type ProjectSource = z.infer<typeof projectSourceSchema>;
 export type ProjectBrief = z.infer<typeof projectBriefSchema>;
 export type AiSettings = z.infer<typeof aiSettingsSchema>;
 export type Character = z.infer<typeof characterSchema>;
+export type CharacterVisualBinding = z.infer<
+  typeof characterVisualBindingSchema
+>;
 export type MouthPair = z.infer<typeof mouthPairSchema>;
 export type SourceRef = z.infer<typeof sourceRefSchema>;
 export type OpenQuestion = z.infer<typeof openQuestionSchema>;

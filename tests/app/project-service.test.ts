@@ -48,7 +48,7 @@ describe("ProjectService", () => {
     expect(project.metadata.title).toBe("作成テスト");
     expect(project.metadata.createdAt).toBe("2026-08-04T01:02:03.000Z");
     expect(project.metadata.updatedAt).toBe("2026-08-04T01:02:03.000Z");
-    expect(project.schemaVersion).toBe("1.0.0");
+    expect(project.schemaVersion).toBe("1.1.0");
     expect(project.characters).toEqual([
       expect.objectContaining({
         id: "character-mentor",
@@ -137,6 +137,49 @@ describe("ProjectService", () => {
     await expect(service.create({ title: "   " })).rejects.toMatchObject({
       name: "ZodError"
     });
+  });
+
+  it("saves project-specific visual bindings with revision protection", async () => {
+    const workspaceRoot = await fs.mkdtemp(
+      path.join(tmpdir(), "subdub-project-service-")
+    );
+    workspaceRoots.push(workspaceRoot);
+
+    const repository = new ProjectRepository(workspaceRoot);
+    const project = createEmptyVideoProject({
+      projectId: "character-binding-project",
+      createdAt: "2026-08-04T00:00:00.000Z"
+    });
+    await repository.create(project);
+    const service = new ProjectService({ repository });
+
+    const saved = await service.saveCharacterVisualBindings(
+      project.metadata.id,
+      {
+        expectedRevision: 0,
+        characters: project.characters.map((character, index) => ({
+          characterId: character.id,
+          characterVisual: {
+            visualId: `visual-project-${index + 1}`,
+            idleVariantId: `visual-project-${index + 1}-idle`
+          }
+        }))
+      }
+    );
+
+    expect(saved.revision).toBe(1);
+    expect(
+      saved.characters.map((character) => character.characterVisual)
+    ).toEqual([
+      {
+        visualId: "visual-project-1",
+        idleVariantId: "visual-project-1-idle"
+      },
+      {
+        visualId: "visual-project-2",
+        idleVariantId: "visual-project-2-idle"
+      }
+    ]);
   });
 
   it("applies fixed defaults when optional metadata is omitted", async () => {

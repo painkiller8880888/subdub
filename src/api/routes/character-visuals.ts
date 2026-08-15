@@ -40,7 +40,8 @@ export type CharacterVisualCatalogServicePort = Pick<
   | "stageUpload"
   | "discardStaged"
   | "readManagedFile"
->;
+> &
+  Partial<Pick<CharacterVisualCatalogService, "verifyFiles">>;
 
 const metadataFieldNames = new Set(["label", "renderType", "tags"]);
 const fileFieldNames = new Set(["single", "closed", "open"]);
