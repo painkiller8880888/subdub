@@ -15,6 +15,7 @@ import { createRenderManifestInput } from "../fixtures/render-manifest-input.js"
 import { videoProjectFixture } from "../fixtures/video-project.js";
 import type { VideoProject } from "../../src/schema/index.js";
 import type { VoicevoxAudioIndex } from "../../src/app/voicevox/audio-index.js";
+import { characterVisualCatalogSnapshotSchema } from "../../src/schema/character-visual.js";
 
 const validInput = createRenderManifestInput;
 
@@ -25,7 +26,90 @@ function diagnosticCodes(result: ReturnType<typeof compileRenderManifest>) {
   return result.diagnostics.map((diagnostic) => diagnostic.code);
 }
 
+function snapshotCatalogInput(input: ReturnType<typeof validInput>): {
+  readonly catalog: unknown;
+  readonly assetMetadata: readonly RenderManifestAssetMetadata[];
+} {
+  const characterFiles = characterVariantCatalog.flatMap((variant) =>
+    variant.files.map((file) => ({ variant, file }))
+  );
+  const assetsByPath = new Map<string, RenderManifestAssetMetadata>(
+    (input.assetMetadata as readonly RenderManifestAssetMetadata[]).map(
+      (asset) => [asset.path, asset]
+    )
+  );
+  const libraryPathByLegacyPath = new Map<string, string>(
+    characterFiles.map(({ variant, file }) => [
+      file.destinationPath,
+      `library/character-visuals/${variant.characterId}/${variant.variantId}/${file.key}.png`
+    ])
+  );
+  const catalog = characterVisualCatalogSnapshotSchema.parse(
+    [
+      ...new Set(characterVariantCatalog.map((variant) => variant.characterId))
+    ].map((visualId) => ({
+      visualId,
+      name: visualId,
+      description: "",
+      status: "active",
+      baseWidth: 600,
+      baseHeight: 1000,
+      variants: characterVariantCatalog
+        .filter((variant) => variant.characterId === visualId)
+        .map((variant) => ({
+          variantId: variant.variantId,
+          label: variant.label,
+          renderType: variant.renderType,
+          status: "active",
+          tags: [...variant.tags],
+          files: variant.files.map((file) => ({
+            key: file.key,
+            libraryPath: libraryPathByLegacyPath.get(file.destinationPath),
+            mimeType: "image/png",
+            checksum: assetsByPath.get(file.destinationPath)?.sha256,
+            sizeBytes: 0,
+            width: 600,
+            height: 1000
+          }))
+        })),
+      createdAt: "2026-08-15T00:00:00.000Z",
+      updatedAt: "2026-08-15T00:00:00.000Z"
+    }))
+  );
+  const assetMetadata = (
+    input.assetMetadata as readonly RenderManifestAssetMetadata[]
+  ).map((asset) => {
+    const libraryPath = libraryPathByLegacyPath.get(asset.path);
+    return libraryPath === undefined ? asset : { ...asset, path: libraryPath };
+  });
+  return { catalog, assetMetadata };
+}
+
 describe("compileRenderManifest", () => {
+  it("validates the checksum carried by a SQLite catalog snapshot", () => {
+    const input = validInput();
+    const snapshot = snapshotCatalogInput(input);
+    const brokenCatalog = structuredClone(snapshot.catalog) as Array<{
+      variants: Array<{ files: Array<{ checksum: string }> }>;
+    }>;
+    const firstFile = brokenCatalog[0]?.variants[0]?.files[0];
+    if (firstFile === undefined) {
+      throw new Error("The snapshot fixture has no character file.");
+    }
+    firstFile.checksum = "d".repeat(64);
+
+    const result = compileRenderManifest({
+      ...input,
+      characterVariantCatalog: brokenCatalog,
+      assetMetadata: snapshot.assetMetadata
+    });
+
+    expect(result.success).toBe(false);
+    expect(diagnosticCodes(result)).toContain(
+      "CHARACTER_VARIANT_FILE_CHECKSUM_MISMATCH"
+    );
+  });
+
   it("rejects compilation when the runtime catalog snapshot is not injected", () => {
     const input = { ...validInput() };
     Reflect.deleteProperty(input, "characterVariantCatalog");

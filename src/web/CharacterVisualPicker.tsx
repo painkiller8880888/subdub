@@ -91,7 +91,7 @@ export function CharacterVisualPickerModal({
       document.removeEventListener("keydown", handleKeyDown);
       previouslyFocused?.focus();
     };
-  }, []);
+  }, [visual?.visualId]);
 
   if (visual === undefined) {
     return null;

@@ -97,6 +97,7 @@ export const RENDER_MANIFEST_ERROR_CODE = {
   variantFileSlotMissing: "CHARACTER_VARIANT_FILE_SLOT_MISSING",
   variantFileMissing: "CHARACTER_VARIANT_FILE_MISSING",
   variantFileKindMismatch: "CHARACTER_VARIANT_FILE_KIND_MISMATCH",
+  variantFileChecksumMismatch: "CHARACTER_VARIANT_FILE_CHECKSUM_MISMATCH",
   manifestSchema: "RENDER_MANIFEST_SCHEMA_INVALID"
 } as const;
 
@@ -186,6 +187,7 @@ type DiagnosticContext = {
 type NormalizedCatalogFile = {
   readonly key: string;
   readonly destinationPath: string;
+  readonly checksum?: string;
 };
 
 type NormalizedCatalogVariant = {
@@ -359,7 +361,8 @@ function normalizeCatalog(
           visualStatus: visual.status,
           files: variant.files.map((file) => ({
             key: file.key,
-            destinationPath: file.libraryPath
+            destinationPath: file.libraryPath,
+            checksum: file.checksum
           }))
         }))
       )
@@ -473,6 +476,7 @@ function normalizeCatalog(
       }
       const key = rawFile.key;
       const destinationPath = rawFile.destinationPath;
+      const rawChecksum = rawFile.checksum;
       if (typeof key !== "string" || key.length === 0) {
         addDiagnostic(
           diagnostics,
@@ -515,7 +519,29 @@ function normalizeCatalog(
         );
         continue;
       }
-      files.set(key, { key, destinationPath });
+      let checksum: string | undefined;
+      if (rawChecksum !== undefined) {
+        if (
+          typeof rawChecksum !== "string" ||
+          !sha256Schema.safeParse(rawChecksum).success
+        ) {
+          addDiagnostic(
+            diagnostics,
+            RENDER_MANIFEST_ERROR_CODE.catalogSchema,
+            ["characterVariantCatalog", index, "files", fileIndex, "checksum"],
+            "checksum must be a SHA-256 hex string",
+            { variantId, assetPath: destinationPath }
+          );
+          continue;
+        }
+        checksum = normalizeChecksum(rawChecksum);
+      }
+      files.set(
+        key,
+        checksum === undefined
+          ? { key, destinationPath }
+          : { key, destinationPath, checksum }
+      );
     }
 
     const expectedKeys =
@@ -666,7 +692,7 @@ function requireAsset(
       diagnostics,
       checksumCode,
       path,
-      "asset checksum does not match the project or audio index",
+      "asset checksum does not match the expected reference",
       { ...context, assetPath: pathValue }
     );
   }
@@ -1576,7 +1602,10 @@ export function compileRenderManifest(
         ["character", "image", "photo"],
         diagnostics,
         ["characterVariants", variantId, "files", key, "path"],
-        { variantId, assetPath: file.destinationPath }
+        { variantId, assetPath: file.destinationPath },
+        file.checksum,
+        false,
+        RENDER_MANIFEST_ERROR_CODE.variantFileChecksumMismatch
       );
       if (asset === undefined) {
         addDiagnostic(
@@ -1810,7 +1839,11 @@ export function compileRenderManifest(
     renderType: variant.renderType,
     files: [...variant.files.values()]
       .sort((left, right) => compareStrings(left.key, right.key))
-      .map((file) => ({ key: file.key, destinationPath: file.destinationPath }))
+      .map((file) => ({
+        key: file.key,
+        destinationPath: file.destinationPath,
+        ...(file.checksum === undefined ? {} : { checksum: file.checksum })
+      }))
   }));
   const characterSelectionForHash = {
     characters: project.characters.map((character) => ({

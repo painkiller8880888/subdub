@@ -1083,6 +1083,8 @@ type RenderInsert = {
 
 CV-05 target は既存 `RenderManifest 1.0.0` と意味を分離し、実装では `manifestVersion: "2.2.0"` として保存する。`characterMappingVersion` は既存キャッシュ・run-log との互換メタデータとして残すが、expression や mapping table から physical variant を解決する入力ではない。
 
+production の compile endpoint は `POST /api/projects/{projectId}/manifest/compile` とする。endpoint の compile service は project と audio index を読み、`CharacterVisualCatalogService.verifyFiles()` が返す SQLite の validated snapshot から character file metadata を組み立て、checksum を保持したまま `RenderManifestStore.compileAndStore()` へ渡す。静的 legacy catalog をこの経路の入力にせず、snapshot checksum と asset metadata の不一致は validation error とする。
+
 ```ts
 type RenderManifestCv05Target = {
   manifestVersion: "2.2.0";

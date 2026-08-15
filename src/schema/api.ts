@@ -417,6 +417,43 @@ export const manifestPreviewParamsSchema = strictObject({
   projectId: idSchema
 });
 
+export const manifestCompileDiagnosticSchema = strictObject({
+  code: z.string().min(1),
+  path: z.array(z.union([z.string(), z.number()])),
+  message: z.string().min(1),
+  lineId: idSchema.optional(),
+  assignmentId: idSchema.optional(),
+  sectionId: idSchema.optional(),
+  variantId: idSchema.optional(),
+  assetPath: relativePosixPathSchema.optional()
+});
+
+export const manifestCompileWarningSchema = strictObject({
+  code: z.string().min(1),
+  message: z.string().min(1),
+  from: nonNegativeIntegerSchema,
+  to: nonNegativeIntegerSchema,
+  soundEffectIds: z.array(idSchema),
+  lineIds: z.array(idSchema)
+});
+
+export const manifestCompileDataSchema = strictObject({
+  status: z.enum(["compiled", "reused", "failed"]),
+  reused: z.boolean(),
+  manifest: renderManifestSchema.nullable(),
+  diagnostics: z.array(manifestCompileDiagnosticSchema),
+  warnings: z.array(manifestCompileWarningSchema),
+  runId: idSchema
+});
+
+export const manifestCompileResponseSchema = strictObject({
+  data: manifestCompileDataSchema
+});
+
+export const manifestCompileParamsSchema = strictObject({
+  projectId: idSchema
+});
+
 export const renderProjectParamsSchema = strictObject({
   projectId: idSchema
 });
@@ -1071,6 +1108,19 @@ export type ManifestPreviewResponse = z.infer<
 >;
 export type ManifestPreviewParams = z.infer<
   typeof manifestPreviewParamsSchema
+>;
+export type ManifestCompileDiagnostic = z.infer<
+  typeof manifestCompileDiagnosticSchema
+>;
+export type ManifestCompileWarning = z.infer<
+  typeof manifestCompileWarningSchema
+>;
+export type ManifestCompileData = z.infer<typeof manifestCompileDataSchema>;
+export type ManifestCompileResponse = z.infer<
+  typeof manifestCompileResponseSchema
+>;
+export type ManifestCompileParams = z.infer<
+  typeof manifestCompileParamsSchema
 >;
 export type RenderProjectParams = z.infer<typeof renderProjectParamsSchema>;
 export type RenderRunParams = z.infer<typeof renderRunParamsSchema>;

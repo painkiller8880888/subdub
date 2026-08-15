@@ -20,7 +20,9 @@ import { describe, expect, it, vi } from "vitest";
 import { createServer, type ViteDevServer } from "vite";
 
 import { initializeServer } from "../../src/api/server.js";
-import { legacyCharacterVariantCatalog as characterVariantCatalog } from "../../src/app/character-visuals/character-visual-seed.js";
+import { AssetRepository } from "../../src/app/assets/asset-repository.js";
+import { CharacterVisualRepository } from "../../src/app/character-visuals/character-visual-repository.js";
+import { CharacterVisualCatalogService } from "../../src/app/character-visuals/character-visual-service.js";
 import { OutlineGenerationService } from "../../src/app/projects/outline-generation-service.js";
 import { ProjectRepository } from "../../src/app/projects/project-repository.js";
 import { computeOutlineHash } from "../../src/app/projects/script-domain.js";
@@ -30,19 +32,20 @@ import {
 } from "../../src/app/rendering/remotion-mp4-renderer.js";
 import {
   computeSourceProjectHash,
-  serializeRenderManifest,
-  type RenderManifestAssetMetadata
+  serializeRenderManifest
 } from "../../src/app/rendering/render-manifest-compiler.js";
+import { RenderManifestInputBuilder } from "../../src/app/rendering/render-manifest-compile-service.js";
 import { computeRenderInputHash } from "../../src/app/rendering/render-job-worker.js";
 import { RenderManifestStore } from "../../src/app/rendering/render-manifest-store.js";
 import { RunLogStore } from "../../src/app/run-log-store.js";
 import { VoicevoxAudioStore } from "../../src/app/voicevox/audio-store.js";
 import { VoicevoxClient } from "../../src/voicevox/client.js";
-import { characterVariantMapping } from "../../src/assets/character-asset-manifest.js";
 import { tags } from "../../src/db/schema.js";
 import {
   assetDetailResponseSchema,
   assetUploadResponseSchema,
+  characterVisualResponseSchema,
+  manifestCompileResponseSchema,
   manifestPreviewResponseSchema,
   projectCreateResponseSchema,
   projectDetailResponseSchema,
@@ -980,69 +983,6 @@ async function validateThumbnailOutput(outputPath: string): Promise<void> {
   expect((await fs.stat(outputPath)).size).toBeGreaterThan(0);
 }
 
-async function buildAssetMetadata(
-  workspaceRoot: string,
-  projectId: string,
-  project: VideoProject,
-  audioStore: VoicevoxAudioStore,
-  assetDetails: ReadonlyMap<string, AssetDetail>
-): Promise<readonly RenderManifestAssetMetadata[]> {
-  const metadata: RenderManifestAssetMetadata[] = [];
-  const audioIndex = await audioStore.readIndex(projectId);
-  for (const entry of Object.values(audioIndex)) {
-    metadata.push({
-      path: entry.audioPath,
-      kind: "audio",
-      sha256: entry.audioSha256,
-      durationMs: entry.durationMs
-    });
-  }
-
-  for (const assignment of project.visuals.assignments) {
-    const detail = assetDetails.get(assignment.assetId);
-    if (detail === undefined || detail.checksum === null) {
-      throw new Error(`Missing active detail for visual ${assignment.id}`);
-    }
-    metadata.push({
-      path: assignment.projectMediaPath,
-      kind: assignment.display.kind,
-      sha256: assignment.assetChecksum,
-      ...(detail.durationMs === null ? {} : { durationMs: detail.durationMs }),
-      ...(detail.pageCount === null ? {} : { pageCount: detail.pageCount })
-    });
-  }
-
-  for (const effect of project.audio.soundEffects) {
-    const detail = assetDetails.get(effect.soundEffectAssetId);
-    if (detail === undefined || detail.checksum === null) {
-      throw new Error(`Missing active detail for sound effect ${effect.id}`);
-    }
-    metadata.push({
-      path: effect.projectMediaPath,
-      kind: "sound_effect",
-      sha256: effect.assetChecksum,
-      durationMs: detail.durationMs
-    });
-  }
-
-  await fs.access(path.join(workspaceRoot, "public", "shared-assets"));
-  for (const variant of characterVariantCatalog) {
-    for (const file of variant.files) {
-      const filePath = path.join(
-        workspaceRoot,
-        "public",
-        ...file.destinationPath.split("/")
-      );
-      metadata.push({
-        path: file.destinationPath,
-        kind: "character",
-        sha256: await sha256File(filePath)
-      });
-    }
-  }
-  return metadata;
-}
-
 describe("MVP final verification E2E", () => {
   it(
     "recreates the Phase 0-6 MVP fixture through all 11 final-check operations",
@@ -1214,6 +1154,167 @@ describe("MVP final verification E2E", () => {
           project.script.sections.every((section) => section.lines.length === 0)
         ).toBe(true);
 
+        const customVisualCreateResponse = await server.app.inject({
+          method: "POST",
+          url: "/api/character-visuals",
+          headers: { "content-type": "application/json" },
+          payload: JSON.stringify({
+            name: "E2E registered visual",
+            description: "Created through the SQLite-backed API.",
+            status: "active"
+          })
+        });
+        expect(customVisualCreateResponse.statusCode).toBe(200);
+        const customVisual = characterVisualResponseSchema.parse(
+          customVisualCreateResponse.json()
+        ).data;
+        if (server === undefined) {
+          throw new Error("The E2E server was not initialized.");
+        }
+        const characterVisualServer = server;
+        const registerMouthPair = async (
+          label: string,
+          sourceVariantId: string
+        ) => {
+          const sourceRoot = path.join(
+            workspaceRoot,
+            "library",
+            "character-visuals",
+            "character-mentor",
+            sourceVariantId
+          );
+          const [closedSource, openSource] = await Promise.all([
+            fs.readFile(path.join(sourceRoot, "closed.png")),
+            fs.readFile(path.join(sourceRoot, "open.png"))
+          ]);
+          const [closedImage, openImage] = await Promise.all([
+            sharp(closedSource).png({ compressionLevel: 0 }).toBuffer(),
+            sharp(openSource).png({ compressionLevel: 0 }).toBuffer()
+          ]);
+          const multipart = buildMultipartBody([
+            { name: "label", value: label },
+            { name: "renderType", value: "mouth-pair" },
+            { name: "tags", value: "e2e" },
+            {
+              name: "closed",
+              filename: `${label.toLowerCase().replaceAll(" ", "-")}-closed.png`,
+              mimeType: "image/png",
+              data: closedImage
+            },
+            {
+              name: "open",
+              filename: `${label.toLowerCase().replaceAll(" ", "-")}-open.png`,
+              mimeType: "image/png",
+              data: openImage
+            }
+          ]);
+          const response = await characterVisualServer.app.inject({
+            method: "POST",
+            url: `/api/character-visuals/${customVisual.visualId}/variants`,
+            headers: { "content-type": multipart.contentType },
+            payload: multipart.body
+          });
+          expect(response.statusCode, response.body).toBe(200);
+          return characterVisualResponseSchema.parse(response.json()).data;
+        };
+        const registerSingleImage = async (
+          label: string,
+          sourceVariantId: string
+        ) => {
+          const sourcePath = path.join(
+            workspaceRoot,
+            "library",
+            "character-visuals",
+            "character-mentor",
+            sourceVariantId,
+            "single.png"
+          );
+          const image = await sharp(await fs.readFile(sourcePath))
+            .png({ compressionLevel: 0 })
+            .toBuffer();
+          const multipart = buildMultipartBody([
+            { name: "label", value: label },
+            { name: "renderType", value: "single-image" },
+            { name: "tags", value: "e2e" },
+            {
+              name: "single",
+              filename: `${label.toLowerCase().replaceAll(" ", "-")}.png`,
+              mimeType: "image/png",
+              data: image
+            }
+          ]);
+          const response = await characterVisualServer.app.inject({
+            method: "POST",
+            url: `/api/character-visuals/${customVisual.visualId}/variants`,
+            headers: { "content-type": multipart.contentType },
+            payload: multipart.body
+          });
+          expect(response.statusCode, response.body).toBe(200);
+          return characterVisualResponseSchema.parse(response.json()).data;
+        };
+        const pointingVisual = await registerMouthPair(
+          "E2E pointing mouth pair",
+          "character-mentor-speak-pointing-v1"
+        );
+        const normalVisual = await registerMouthPair(
+          "E2E normal mouth pair",
+          "character-mentor-speak-normal-v1"
+        );
+        const registeredVisual = await registerSingleImage(
+          "E2E idle image",
+          "character-mentor-stand-v1"
+        );
+        expect(registeredVisual.visualId).toBe(customVisual.visualId);
+        expect(pointingVisual.visualId).toBe(registeredVisual.visualId);
+        expect(normalVisual.visualId).toBe(registeredVisual.visualId);
+        const registeredPointingVariant = registeredVisual.variants.find(
+          (variant) => variant.label === "E2E pointing mouth pair"
+        );
+        const registeredNormalVariant = registeredVisual.variants.find(
+          (variant) => variant.label === "E2E normal mouth pair"
+        );
+        if (
+          registeredPointingVariant === undefined ||
+          registeredNormalVariant === undefined
+        ) {
+          throw new Error(
+            "The E2E visual registration did not create both variants."
+          );
+        }
+        const registeredIdleVariant = registeredVisual.variants.find(
+          (variant) => variant.label === "E2E idle image"
+        );
+        if (registeredIdleVariant === undefined) {
+          throw new Error(
+            "The E2E visual registration did not create the idle variant."
+          );
+        }
+        const registeredPointingClosedFile =
+          registeredPointingVariant.files.find((file) => file.key === "closed");
+        const registeredPointingOpenFile = registeredPointingVariant.files.find(
+          (file) => file.key === "open"
+        );
+        const registeredNormalClosedFile = registeredNormalVariant.files.find(
+          (file) => file.key === "closed"
+        );
+        const registeredNormalOpenFile = registeredNormalVariant.files.find(
+          (file) => file.key === "open"
+        );
+        const registeredIdleFile = registeredIdleVariant.files.find(
+          (file) => file.key === "single"
+        );
+        if (
+          registeredPointingClosedFile === undefined ||
+          registeredPointingOpenFile === undefined ||
+          registeredNormalClosedFile === undefined ||
+          registeredNormalOpenFile === undefined ||
+          registeredIdleFile === undefined
+        ) {
+          throw new Error(
+            "The E2E visual registration did not create both mouth-pair files."
+          );
+        }
+
         const characterBindingResponse = await server.app.inject({
           method: "PUT",
           url: `/api/projects/${projectId}/characters`,
@@ -1223,8 +1324,8 @@ describe("MVP final verification E2E", () => {
               {
                 characterId: "character-mentor",
                 characterVisual: {
-                  visualId: "character-mentor",
-                  idleVariantId: "character-mentor-stand-v1"
+                  visualId: registeredVisual.visualId,
+                  idleVariantId: registeredIdleVariant.variantId
                 }
               },
               {
@@ -1242,10 +1343,26 @@ describe("MVP final verification E2E", () => {
           characterBindingResponse.json()
         ).data;
 
-        const scriptDraft = createRepresentativeFrameScript(
+        const baseScriptDraft = createRepresentativeFrameScript(
           computeOutlineHash(project.outline),
           project.outline.sections.map((section) => section.id)
         );
+        const scriptDraft = {
+          ...baseScriptDraft,
+          sections: baseScriptDraft.sections.map((section) => ({
+            ...section,
+            lines: section.lines.map((line) => {
+              if (line.speakerId !== "character-mentor") {
+                return line;
+              }
+              const characterVariantId =
+                line.expression === "neutral" || line.expression === "smile"
+                  ? registeredNormalVariant.variantId
+                  : registeredPointingVariant.variantId;
+              return { ...line, characterVariantId };
+            })
+          }))
+        };
         const scriptResponse = await server.app.inject({
           method: "PUT",
           url: `/api/projects/${projectId}/script`,
@@ -1344,13 +1461,6 @@ describe("MVP final verification E2E", () => {
           tagIds: ["confirm"],
           data: soundEffectFixture
         });
-        const assetDetails = new Map<string, AssetDetail>([
-          [videoAsset.receipt.assetId, videoAsset.detail],
-          [photoAsset.receipt.assetId, photoAsset.detail],
-          [documentAsset.receipt.assetId, documentAsset.detail],
-          [soundEffectAsset.receipt.assetId, soundEffectAsset.detail]
-        ]);
-
         const introLines = project.script.sections[0]?.lines ?? [];
         const mainLines = project.script.sections[1]?.lines ?? [];
         const outroLines = project.script.sections[2]?.lines ?? [];
@@ -1561,33 +1671,16 @@ describe("MVP final verification E2E", () => {
             );
           }
         }
-        const assetMetadata: RenderManifestAssetMetadata[] = [
-          ...(await buildAssetMetadata(
-            workspaceRoot,
-            projectId,
-            project,
-            audioStore,
-            assetDetails
-          )),
-          {
-            path: bgmProjectMediaPath,
-            kind: "bgm",
-            sha256: bgmChecksum,
-            durationMs: 2_000
-          }
-        ];
-        const manifestStore = new RenderManifestStore({ workspaceRoot });
-        const compilerInput = {
-          project,
-          audioIndex,
-          assetMetadata,
-          characterVariantCatalog,
-          characterVariantMapping
-        };
-        const firstCompile = await manifestStore.compileAndStore(
-          projectId,
-          compilerInput
+        const firstCompileResponse = await server.app.inject({
+          method: "POST",
+          url: `/api/projects/${projectId}/manifest/compile`
+        });
+        expect(firstCompileResponse.statusCode, firstCompileResponse.body).toBe(
+          200
         );
+        const firstCompile = manifestCompileResponseSchema.parse(
+          firstCompileResponse.json()
+        ).data;
         expect(firstCompile.status).toBe("compiled");
         if (firstCompile.manifest === null) {
           throw new Error(
@@ -1595,6 +1688,53 @@ describe("MVP final verification E2E", () => {
           );
         }
         const manifest = renderManifestSchema.parse(firstCompile.manifest);
+        const mentorManifestCharacter = manifest.characters.find(
+          (character) => character.characterId === "character-mentor"
+        );
+        expect(mentorManifestCharacter).toMatchObject({
+          visualId: registeredVisual.visualId,
+          idleVariantId: registeredIdleVariant.variantId
+        });
+        const registeredManifestIdleVariant = manifest.characterVariants.find(
+          (variant) =>
+            variant.visualId === registeredVisual.visualId &&
+            variant.variantId === registeredIdleVariant.variantId
+        );
+        expect(registeredManifestIdleVariant).toMatchObject({
+          visualId: registeredVisual.visualId,
+          variantId: registeredIdleVariant.variantId,
+          renderType: "single-image",
+          files: { single: { sha256: registeredIdleFile.checksum } }
+        });
+        const registeredManifestPointingVariant =
+          manifest.characterVariants.find(
+            (variant) =>
+              variant.visualId === registeredVisual.visualId &&
+              variant.variantId === registeredPointingVariant.variantId
+          );
+        expect(registeredManifestPointingVariant).toMatchObject({
+          visualId: registeredVisual.visualId,
+          variantId: registeredPointingVariant.variantId,
+          renderType: "mouth-pair",
+          files: {
+            closed: { sha256: registeredPointingClosedFile.checksum },
+            open: { sha256: registeredPointingOpenFile.checksum }
+          }
+        });
+        const registeredManifestNormalVariant = manifest.characterVariants.find(
+          (variant) =>
+            variant.visualId === registeredVisual.visualId &&
+            variant.variantId === registeredNormalVariant.variantId
+        );
+        expect(registeredManifestNormalVariant).toMatchObject({
+          visualId: registeredVisual.visualId,
+          variantId: registeredNormalVariant.variantId,
+          renderType: "mouth-pair",
+          files: {
+            closed: { sha256: registeredNormalClosedFile.checksum },
+            open: { sha256: registeredNormalOpenFile.checksum }
+          }
+        });
         expect(manifest.width).toBe(1920);
         expect(manifest.height).toBe(1080);
         expect(manifest.fps).toBe(30);
@@ -1661,10 +1801,17 @@ describe("MVP final verification E2E", () => {
           effectProjectMediaPath
         ]);
 
-        const secondCompile = await manifestStore.compileAndStore(
-          projectId,
-          compilerInput
-        );
+        const secondCompileResponse = await server.app.inject({
+          method: "POST",
+          url: `/api/projects/${projectId}/manifest/compile`
+        });
+        expect(
+          secondCompileResponse.statusCode,
+          secondCompileResponse.body
+        ).toBe(200);
+        const secondCompile = manifestCompileResponseSchema.parse(
+          secondCompileResponse.json()
+        ).data;
         expect(secondCompile.status).toBe("reused");
         if (secondCompile.manifest === null) {
           throw new Error(
@@ -1678,6 +1825,17 @@ describe("MVP final verification E2E", () => {
           manifest.compilerInputHash
         );
 
+        const manifestStore = new RenderManifestStore({ workspaceRoot });
+        const compilerInput = await new RenderManifestInputBuilder({
+          workspaceRoot,
+          projectRepository,
+          assetRepository: new AssetRepository(server.database.database),
+          characterVisualCatalogService: new CharacterVisualCatalogService({
+            repository: new CharacterVisualRepository(server.database.database),
+            workspaceRoot
+          }),
+          audioStore
+        }).build(projectId);
         const runLogStore = new RunLogStore({ workspaceRoot });
         const manifestRunLog = await runLogStore.read(
           projectId,
