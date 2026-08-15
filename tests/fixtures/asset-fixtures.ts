@@ -89,6 +89,10 @@ export const mp4Bytes = ((): Buffer => {
   return buffer;
 })();
 
+export const mp3Bytes = Buffer.from([
+  0x49, 0x44, 0x33, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
+]);
+
 export type MultipartPart =
   | { name: string; value: string }
   | { name: string; filename: string; mimeType: string; data: Buffer };
