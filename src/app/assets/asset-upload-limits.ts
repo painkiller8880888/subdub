@@ -29,8 +29,9 @@ export type AssetUploadLimits = {
 // - maxFileNameLength 255: never trusted as a path, capped only as abuse defense.
 // - maxGlobalFileBytes 2 GiB: matches the largest per-kind cap (video) so the
 //   streaming parser and per-kind caps stay consistent.
-// - perKindMaxBytes: video 2 GiB (現場動画), photo 50 MiB (写真),
-//   document_scan 200 MiB (帳票スキャン), sound_effect 200 MiB (効果音 WAV).
+// - perKindMaxBytes: video 2 GiB (現場動画), bgm 200 MiB (BGM MP3),
+//   photo 50 MiB (写真), document_scan 200 MiB (帳票スキャン),
+//   sound_effect 200 MiB (効果音 WAV).
 export const DEFAULT_ASSET_UPLOAD_LIMITS: AssetUploadLimits = {
   maxFileCount: 1,
   maxPartCount: 64,
@@ -41,6 +42,7 @@ export const DEFAULT_ASSET_UPLOAD_LIMITS: AssetUploadLimits = {
   maxGlobalFileBytes: 2 * 1024 * 1024 * 1024,
   perKindMaxBytes: {
     video: 2 * 1024 * 1024 * 1024,
+    bgm: 200 * 1024 * 1024,
     photo: 50 * 1024 * 1024,
     document_scan: 200 * 1024 * 1024,
     sound_effect: 200 * 1024 * 1024
