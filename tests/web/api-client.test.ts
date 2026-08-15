@@ -9,6 +9,7 @@ import {
   approveProjectScript,
   assignProjectVisual,
   createProject,
+  compileProjectManifest,
   fetchModels,
   fetchProject,
   fetchProjects,
@@ -31,6 +32,7 @@ import {
   aiRunSearchResponseSchema,
   healthResponseSchema,
   projectListResponseSchema,
+  manifestCompileResponseSchema,
   terminologyPreviewResponseSchema,
   terminologyTermResponseSchema
 } from "../../src/schema/api.js";
@@ -655,6 +657,40 @@ describe("web API client", () => {
     });
     expect(
       terminologyPreviewResponseSchema.safeParse({ data: result }).success
+    ).toBe(true);
+  });
+
+  it("sends the manifest compile request and preserves diagnostics", async () => {
+    const result = {
+      status: "failed" as const,
+      reused: false,
+      manifest: null,
+      diagnostics: [
+        {
+          code: "CHARACTER_VARIANT_UNSELECTED",
+          path: ["script", "sections", 0, "lines", 0, "characterVariantId"],
+          message: "a physical character variant is required",
+          lineId: "line-one"
+        }
+      ],
+      warnings: [],
+      runId: "manifest-run-one"
+    };
+    const calls: Array<{ input: string; init: RequestInit | undefined }> = [];
+    globalThis.fetch = async (input, init) => {
+      calls.push({ input: String(input), init });
+      return jsonResponse({ data: result }, 200);
+    };
+
+    await expect(
+      compileProjectManifest("manual-video-project")
+    ).resolves.toEqual(result);
+    expect(calls[0]?.input).toBe(
+      "/api/projects/manual-video-project/manifest/compile"
+    );
+    expect(calls[0]?.init?.method).toBe("POST");
+    expect(
+      manifestCompileResponseSchema.safeParse({ data: result }).success
     ).toBe(true);
   });
 

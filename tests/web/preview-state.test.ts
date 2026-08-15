@@ -4,6 +4,7 @@ import { fetchProjectManifest } from "../../src/web/lib/api-client.js";
 import type { ManifestPreviewData } from "../../src/schema/api.js";
 import { renderManifestFixture } from "../fixtures/render-manifest.js";
 import {
+  createPreviewCompileDiagnosticViewModel,
   createPreviewPlayerProps,
   createPreviewViewModel
 } from "../../src/web/preview-state.js";
@@ -98,6 +99,35 @@ describe("preview state helpers", () => {
       "/projects/manual-video-project/script"
     );
     expect(viewModel.blockers[1]?.message).toContain("FUTURE_BLOCKER");
+  });
+
+  it("turns compile diagnostics into actionable missing-item labels", () => {
+    const diagnostics = createPreviewCompileDiagnosticViewModel([
+      {
+        code: "CHARACTER_VARIANT_UNSELECTED",
+        path: ["script", "sections", 0, "lines", 0, "characterVariantId"],
+        message: "a physical character variant is required",
+        lineId: "line-main-1"
+      },
+      {
+        code: "ASSET_METADATA_MISSING",
+        path: ["visuals", "assignments", 0, "projectMediaPath"],
+        message: "referenced asset metadata was not provided",
+        assignmentId: "assignment-main-1",
+        assetPath: "media/manual.mp4"
+      }
+    ]);
+
+    expect(diagnostics).toEqual([
+      expect.objectContaining({
+        title: "キャラクター素材のvariantが未選択です。",
+        target: "セリフ line-main-1"
+      }),
+      expect.objectContaining({
+        title: "参照素材のメタデータが不足しています。",
+        target: "割り当て assignment-main-1 / 素材 media/manual.mp4"
+      })
+    ]);
   });
 
   it("maps real fix targets and separates shared and project assets", () => {

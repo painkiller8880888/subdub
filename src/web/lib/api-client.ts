@@ -49,6 +49,7 @@ import {
   visualSuggestionCandidateRejectRequestSchema,
   visualSuggestionCandidateRejectParamsSchema,
   improvementDecisionResponseSchema,
+  manifestCompileResponseSchema,
   manifestPreviewResponseSchema,
   voiceAdjustmentMutationResponseSchema,
   voiceAdjustmentPreviewRequestSchema,
@@ -97,6 +98,7 @@ import {
   type VoiceGenerateRequest,
   type VoiceGenerationAccepted,
   type VoiceGenerationStatusData,
+  type ManifestCompileData,
   type ManifestPreviewData,
   type CharacterVisualCreateRequest,
   type CharacterVisualUpdateRequest,
@@ -502,6 +504,17 @@ export async function fetchProjectManifest(
   const response = await fetchApi(
     `/api/projects/${encodeURIComponent(projectId)}/manifest`,
     manifestPreviewResponseSchema
+  );
+  return response.data;
+}
+
+export async function compileProjectManifest(
+  projectId: string
+): Promise<ManifestCompileData> {
+  const response = await fetchApi(
+    `/api/projects/${encodeURIComponent(projectId)}/manifest/compile`,
+    manifestCompileResponseSchema,
+    { method: "POST" }
   );
   return response.data;
 }
