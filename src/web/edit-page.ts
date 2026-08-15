@@ -196,6 +196,139 @@ export function removeEditVideoElement(
   };
 }
 
+export type EditCutinDropTarget = {
+  readonly sectionId: string;
+  /** Insertion index in the cutins displayed before sectionId. */
+  readonly index: number;
+};
+
+/**
+ * Return the valid insertion slots for keyboard and pointer DnD.
+ * The first script section deliberately has no slot because a cutin cannot be
+ * placed before it.
+ */
+export function createEditCutinDropTargets(
+  sectionModels: readonly EditSectionReadModel[]
+): EditCutinDropTarget[] {
+  return sectionModels.flatMap((model) => {
+    if (model.order === 1) {
+      return [];
+    }
+    return Array.from({ length: model.cutins.length + 1 }, (_, index) => ({
+      sectionId: model.section.id,
+      index
+    }));
+  });
+}
+
+/**
+ * Move a cutin to a valid section boundary and normalize the order in both
+ * affected boundaries. A rejected target is a no-op so the UI cannot create a
+ * client-side state that the server would reject.
+ */
+export function moveEditVideoElement(
+  editPlan: EditPlan,
+  elementId: string,
+  target: EditCutinDropTarget,
+  sectionIds: readonly string[]
+): EditPlan {
+  const validSectionIds = new Set(sectionIds);
+  const firstSectionId = sectionIds[0];
+  if (
+    firstSectionId === undefined ||
+    target.sectionId === firstSectionId ||
+    !validSectionIds.has(target.sectionId) ||
+    !Number.isInteger(target.index) ||
+    target.index < 0
+  ) {
+    return cloneEditPlan(editPlan);
+  }
+
+  const source = editPlan.videoElements.find(
+    (element) => element.id === elementId
+  );
+  if (
+    source === undefined ||
+    source.role !== "cutin" ||
+    source.placement.kind !== "before_section"
+  ) {
+    return cloneEditPlan(editPlan);
+  }
+
+  const cutinsBySectionId = new Map<string, EditVideoElement[]>();
+  for (const element of editPlan.videoElements) {
+    if (
+      element.role !== "cutin" ||
+      element.placement.kind !== "before_section"
+    ) {
+      continue;
+    }
+    const cutins = cutinsBySectionId.get(element.placement.sectionId) ?? [];
+    cutins.push(element);
+    cutinsBySectionId.set(element.placement.sectionId, cutins);
+  }
+  for (const cutins of cutinsBySectionId.values()) {
+    cutins.sort((left, right) => {
+      if (
+        left.placement.kind !== "before_section" ||
+        right.placement.kind !== "before_section"
+      ) {
+        return 0;
+      }
+      return left.placement.order - right.placement.order;
+    });
+  }
+
+  const sourceCutins = cutinsBySectionId.get(source.placement.sectionId);
+  if (sourceCutins === undefined) {
+    return cloneEditPlan(editPlan);
+  }
+  const targetCutins =
+    cutinsBySectionId.get(target.sectionId) ?? ([] as EditVideoElement[]);
+  cutinsBySectionId.set(target.sectionId, targetCutins);
+  const sourceIndex = sourceCutins.findIndex(
+    (element) => element.id === source.id
+  );
+  if (sourceIndex < 0) {
+    return cloneEditPlan(editPlan);
+  }
+
+  // The target index is measured while the source card is still rendered.
+  // Adjust it after removing the source when both sides are the same boundary.
+  const boundedTargetIndex = Math.min(target.index, targetCutins.length);
+  let insertionIndex = boundedTargetIndex;
+  if (sourceCutins === targetCutins && sourceIndex < insertionIndex) {
+    insertionIndex -= 1;
+  }
+  sourceCutins.splice(sourceIndex, 1);
+  insertionIndex = Math.max(0, Math.min(insertionIndex, targetCutins.length));
+  targetCutins.splice(insertionIndex, 0, source);
+
+  const placementByElementId = new Map<string, EditVideoElement["placement"]>();
+  for (const [sectionId, cutins] of cutinsBySectionId.entries()) {
+    for (const [order, cutin] of cutins.entries()) {
+      if (cutin.placement.kind !== "before_section") {
+        continue;
+      }
+      placementByElementId.set(cutin.id, {
+        kind: "before_section",
+        sectionId,
+        order
+      });
+    }
+  }
+
+  return {
+    ...editPlan,
+    videoElements: editPlan.videoElements.map((element) => {
+      const placement = placementByElementId.get(element.id);
+      return placement === undefined
+        ? { ...element, placement: { ...element.placement } }
+        : { ...element, placement };
+    })
+  };
+}
+
 export function addSectionBgm(
   editPlan: EditPlan,
   sectionId: string,

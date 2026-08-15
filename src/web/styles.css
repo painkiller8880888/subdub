@@ -698,6 +698,44 @@ input:focus-visible {
   gap: 0.8rem;
 }
 
+.edit-video-element-card.is-dragging {
+  opacity: 0.55;
+}
+
+.edit-cutin-drop-target {
+  align-items: center;
+  background: #fff;
+  border: 2px dashed #aebdd6;
+  border-radius: 0.55rem;
+  color: #59647b;
+  display: flex;
+  justify-content: center;
+  min-height: 2.35rem;
+  padding: 0.35rem 0.7rem;
+  text-align: center;
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease,
+    color 120ms ease;
+}
+
+.edit-cutin-drop-target[aria-disabled="false"] {
+  cursor: copy;
+}
+
+.edit-cutin-drop-target.is-active,
+.edit-cutin-drop-target[aria-disabled="false"]:hover {
+  background: #e7f1ff;
+  border-color: #1e4f9a;
+  color: #1e4f9a;
+}
+
+.edit-cutin-drop-target-invalid {
+  border-style: dotted;
+  color: #7b8497;
+  cursor: not-allowed;
+}
+
 .edit-video-toolbar {
   align-items: center;
   display: flex;
@@ -722,6 +760,7 @@ input:focus-visible {
 }
 
 .edit-card-header,
+.edit-card-header-actions,
 .edit-section-header-actions {
   align-items: center;
   display: flex;
@@ -737,6 +776,37 @@ input:focus-visible {
 
 .edit-card-header h3 {
   margin: 0;
+}
+
+.edit-drag-handle {
+  background: #fff;
+  border: 1px solid #aebdd6;
+  border-radius: 0.45rem;
+  color: #1e4f9a;
+  cursor: grab;
+  font: inherit;
+  font-size: 0.85rem;
+  font-weight: 700;
+  padding: 0.35rem 0.55rem;
+}
+
+.edit-drag-handle:active {
+  cursor: grabbing;
+}
+
+.edit-fixed-placement {
+  color: #59647b;
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+
+.edit-dnd-status {
+  background: #eef5ff;
+  border: 1px solid #b8c7df;
+  border-radius: 0.55rem;
+  color: #33415c;
+  margin: 0 0 1rem;
+  padding: 0.65rem 0.8rem;
 }
 
 .edit-role-badge {
