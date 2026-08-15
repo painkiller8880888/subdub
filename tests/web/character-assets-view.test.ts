@@ -79,6 +79,14 @@ describe("character asset view model", () => {
       projectId: "character-view-project",
       createdAt: "2026-08-05T00:00:00.000Z"
     });
+    project.characters[0].characterVisual = {
+      visualId: "character-mentor",
+      idleVariantId: "character-mentor-stand-v1"
+    };
+    project.characters[1].characterVisual = {
+      visualId: "character-learner",
+      idleVariantId: "character-learner-stand-v1"
+    };
     const characters = toCharacterAssetViewModels(
       project,
       characterVariantCatalog
@@ -134,11 +142,32 @@ describe("character asset view model", () => {
     );
   });
 
+  it("does not infer a visual set from the project character id", () => {
+    const project = createEmptyVideoProject({
+      projectId: "unbound-character-view-project",
+      createdAt: "2026-08-05T00:00:00.000Z"
+    });
+
+    expect(
+      toCharacterAssetViewModels(project, characterVariantCatalog).map(
+        (character) => character.availableVariants
+      )
+    ).toEqual([[], []]);
+  });
+
   it("reflects a catalog variant addition in the character view", () => {
     const project = createEmptyVideoProject({
       projectId: "character-view-project",
       createdAt: "2026-08-05T00:00:00.000Z"
     });
+    project.characters[0].characterVisual = {
+      visualId: "character-mentor",
+      idleVariantId: "character-mentor-stand-v1"
+    };
+    project.characters[1].characterVisual = {
+      visualId: "character-learner",
+      idleVariantId: "character-learner-stand-v1"
+    };
     const extraVariant: CharacterVariant = {
       variantId: "character-learner-extra-v1",
       characterId: "character-learner",

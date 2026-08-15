@@ -12,7 +12,7 @@ const AUDIO_CHECKSUM =
   "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee";
 
 export const videoProjectFixture = {
-  schemaVersion: "1.0.0",
+  schemaVersion: "1.1.0",
   revision: 0,
   metadata: {
     id: "manual-video-project",
@@ -76,6 +76,10 @@ export const videoProjectFixture = {
         postPhonemeLength: 0.1
       },
       lipSyncPeriodFrames: 3,
+      characterVisual: {
+        visualId: "character-mentor",
+        idleVariantId: "character-mentor-stand-v1"
+      },
       visualAssets: {
         neutral: {
           closed: "characters/character-mentor/neutral/closed.png",
@@ -116,6 +120,10 @@ export const videoProjectFixture = {
         postPhonemeLength: 0.1
       },
       lipSyncPeriodFrames: 3,
+      characterVisual: {
+        visualId: "character-learner",
+        idleVariantId: "character-learner-stand-v1"
+      },
       visualAssets: {
         neutral: {
           closed: "characters/character-learner/neutral/closed.png",
@@ -225,6 +233,7 @@ export const videoProjectFixture = {
             spokenText: "今回は社内申請システムで申請を登録する手順を説明します。",
             subtitleText: "社内申請の登録手順を説明します。",
             expression: "explain",
+            characterVariantId: "character-mentor-speak-pointing-v1",
             pauseBeforeMs: 0,
             pauseAfterMs: 250,
             voiceOverrides: {},
@@ -236,6 +245,7 @@ export const videoProjectFixture = {
             spokenText: "まず、申請前に確認することから始めるのだ。",
             subtitleText: "まず、申請前の確認から始めます。",
             expression: "neutral",
+            characterVariantId: "character-learner-speak-normal-v1",
             pauseBeforeMs: 100,
             pauseAfterMs: 250,
             voiceOverrides: { speedScale: 1.05 },
@@ -259,6 +269,7 @@ export const videoProjectFixture = {
             spokenText: "申請メニューから新規申請を選びます。",
             subtitleText: "申請メニューから「新規申請」を選びます。",
             expression: "explain",
+            characterVariantId: "character-mentor-speak-pointing-v1",
             pauseBeforeMs: 0,
             pauseAfterMs: 250,
             voiceOverrides: {},
@@ -270,6 +281,7 @@ export const videoProjectFixture = {
             spokenText: "入力した内容を確認してから登録するのだ。",
             subtitleText: "内容を確認してから登録します。",
             expression: "caution",
+            characterVariantId: "character-learner-speak-pointing-v1",
             pauseBeforeMs: 0,
             pauseAfterMs: 250,
             voiceOverrides: {},
@@ -289,6 +301,7 @@ export const videoProjectFixture = {
             spokenText: "完了画面が表示されたら、登録は終了です。",
             subtitleText: "完了画面が表示されたら登録終了です。",
             expression: "smile",
+            characterVariantId: "character-mentor-speak-normal-v1",
             pauseBeforeMs: 0,
             pauseAfterMs: 250,
             voiceOverrides: {},

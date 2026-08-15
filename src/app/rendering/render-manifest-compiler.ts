@@ -2,11 +2,9 @@ import { createHash } from "node:crypto";
 import { z } from "zod";
 
 import {
-  characterVariantMapping as defaultCharacterVariantMapping,
   CHARACTER_VARIANT_CATALOG_VERSION,
   CHARACTER_VARIANT_MAPPING_VERSION,
   type CharacterVariantMapping,
-  type CharacterVariantMappingExpression,
   type CharacterVariantRenderType
 } from "../../assets/character-asset-manifest.js";
 import { computeOutlineHash } from "../projects/script-domain.js";
@@ -23,6 +21,7 @@ import {
   relativePosixPathSchema,
   renderManifestSchema,
   sha256Schema,
+  characterVisualCatalogSnapshotSchema,
   type RenderBackground,
   type RenderCharacter,
   type RenderCharacterVariant,
@@ -88,6 +87,11 @@ export const RENDER_MANIFEST_ERROR_CODE = {
   visualRangeInvalid: "VISUAL_RANGE_INVALID",
   fadeRangeInvalid: "AUDIO_FADE_RANGE_INVALID",
   mappingMissing: "CHARACTER_MAPPING_MISSING",
+  characterVisualBindingMissing: "CHARACTER_VISUAL_BINDING_MISSING",
+  characterVisualMissing: "CHARACTER_VISUAL_MISSING",
+  characterVisualInactive: "CHARACTER_VISUAL_INACTIVE",
+  characterVariantUnselected: "CHARACTER_VARIANT_UNSELECTED",
+  characterVariantInactive: "CHARACTER_VARIANT_INACTIVE",
   variantMissing: "CHARACTER_VARIANT_MISSING",
   variantCharacterMismatch: "CHARACTER_VARIANT_CHARACTER_MISMATCH",
   variantFileSlotMissing: "CHARACTER_VARIANT_FILE_SLOT_MISSING",
@@ -182,6 +186,8 @@ type NormalizedCatalogFile = {
 type NormalizedCatalogVariant = {
   readonly variantId: string;
   readonly characterId: string;
+  readonly status: "active" | "inactive";
+  readonly visualStatus: "active" | "inactive";
   readonly renderType: CharacterVariantRenderType;
   readonly files: ReadonlyMap<string, NormalizedCatalogFile>;
   readonly inputIndex: number;
@@ -202,6 +208,7 @@ type RenderProjectLine = {
   readonly spokenText: string;
   readonly subtitleText: string;
   readonly expression: "neutral" | "smile" | "explain" | "caution";
+  readonly characterVariantId?: string | null;
   readonly pauseBeforeMs: number;
   readonly pauseAfterMs: number;
 };
@@ -312,14 +319,6 @@ function recordInputCatalog(input: RenderManifestCompilerInput): unknown {
   return input.characterVariantCatalog ?? input.catalog ?? null;
 }
 
-function recordInputMapping(input: RenderManifestCompilerInput): unknown {
-  return (
-    input.characterVariantMapping ??
-    input.mapping ??
-    defaultCharacterVariantMapping
-  );
-}
-
 function normalizeCatalog(
   rawCatalog: unknown,
   diagnostics: RenderManifestDiagnostic[]
@@ -334,10 +333,28 @@ function normalizeCatalog(
     return [];
   }
 
+  const snapshotResult =
+    characterVisualCatalogSnapshotSchema.safeParse(rawCatalog);
+  const catalogEntries: readonly unknown[] = snapshotResult.success
+    ? snapshotResult.data.flatMap((visual) =>
+        visual.variants.map((variant) => ({
+          variantId: variant.variantId,
+          characterId: visual.visualId,
+          renderType: variant.renderType,
+          status: variant.status,
+          visualStatus: visual.status,
+          files: variant.files.map((file) => ({
+            key: file.key,
+            destinationPath: file.libraryPath
+          }))
+        }))
+      )
+    : rawCatalog;
+
   const variants: NormalizedCatalogVariant[] = [];
   const variantIds = new Set<string>();
 
-  for (const [index, rawVariant] of rawCatalog.entries()) {
+  for (const [index, rawVariant] of catalogEntries.entries()) {
     if (!isPlainRecord(rawVariant)) {
       addDiagnostic(
         diagnostics,
@@ -351,6 +368,8 @@ function normalizeCatalog(
     const variantId = rawVariant.variantId;
     const characterId = rawVariant.characterId;
     const renderType = rawVariant.renderType;
+    const status = rawVariant.status ?? "active";
+    const visualStatus = rawVariant.visualStatus ?? "active";
     if (
       typeof variantId !== "string" ||
       !idSchema.safeParse(variantId).success
@@ -386,6 +405,25 @@ function normalizeCatalog(
         { variantId }
       );
       continue;
+    }
+
+    if (status !== "active" && status !== "inactive") {
+      addDiagnostic(
+        diagnostics,
+        RENDER_MANIFEST_ERROR_CODE.catalogSchema,
+        ["characterVariantCatalog", index, "status"],
+        "status must be active or inactive",
+        { variantId }
+      );
+    }
+    if (visualStatus !== "active" && visualStatus !== "inactive") {
+      addDiagnostic(
+        diagnostics,
+        RENDER_MANIFEST_ERROR_CODE.catalogSchema,
+        ["characterVariantCatalog", index, "visualStatus"],
+        "visualStatus must be active or inactive",
+        { variantId }
+      );
     }
 
     if (renderType !== "single-image" && renderType !== "mouth-pair") {
@@ -497,6 +535,8 @@ function normalizeCatalog(
     variants.push({
       variantId,
       characterId,
+      status: status === "inactive" ? "inactive" : "active",
+      visualStatus: visualStatus === "inactive" ? "inactive" : "active",
       renderType,
       files,
       inputIndex: index
@@ -546,24 +586,6 @@ function normalizeAssets(
     assets.push(result.data);
   }
   return assets;
-}
-
-function resolveMappingValue(
-  rawMapping: unknown,
-  characterId: string,
-  expression: CharacterVariantMappingExpression
-): string | undefined {
-  if (!isPlainRecord(rawMapping)) {
-    return undefined;
-  }
-  const characterMapping = rawMapping[characterId];
-  if (!isPlainRecord(characterMapping)) {
-    return undefined;
-  }
-  const variantId = characterMapping[expression];
-  return typeof variantId === "string" && idSchema.safeParse(variantId).success
-    ? variantId
-    : undefined;
 }
 
 function validateVersion(
@@ -687,7 +709,7 @@ function expectedCharacterKinds(kind: string): boolean {
 function variantForId(
   variants: ReadonlyMap<string, NormalizedCatalogVariant>,
   variantId: string,
-  characterId: string,
+  visualId: string,
   diagnostics: RenderManifestDiagnostic[],
   context: DiagnosticContext
 ): NormalizedCatalogVariant | undefined {
@@ -697,17 +719,35 @@ function variantForId(
       diagnostics,
       RENDER_MANIFEST_ERROR_CODE.variantMissing,
       ["characterVariantCatalog", variantId],
-      "mapped character variant is not present in characterVariantCatalog",
+      "explicit character variant is not present in characterVariantCatalog",
       { ...context, variantId }
     );
     return undefined;
   }
-  if (variant.characterId !== characterId) {
+  if (variant.visualStatus !== "active") {
+    addDiagnostic(
+      diagnostics,
+      RENDER_MANIFEST_ERROR_CODE.characterVisualInactive,
+      ["characterVariantCatalog", variant.inputIndex, "visualStatus"],
+      "the referenced character visual is inactive",
+      { ...context, variantId }
+    );
+  }
+  if (variant.status !== "active") {
+    addDiagnostic(
+      diagnostics,
+      RENDER_MANIFEST_ERROR_CODE.characterVariantInactive,
+      ["characterVariantCatalog", variant.inputIndex, "status"],
+      "the referenced character variant is inactive",
+      { ...context, variantId }
+    );
+  }
+  if (variant.characterId !== visualId) {
     addDiagnostic(
       diagnostics,
       RENDER_MANIFEST_ERROR_CODE.variantCharacterMismatch,
       ["characterVariantCatalog", variant.inputIndex, "characterId"],
-      "mapped character variant belongs to a different character",
+      "explicit character variant belongs to a different visual",
       { ...context, variantId }
     );
   }
@@ -886,6 +926,9 @@ function orderedManifest(manifest: RenderManifest): RenderManifest {
           ? {
               variantId: variant.variantId,
               characterId: variant.characterId,
+              ...(variant.visualId === undefined
+                ? {}
+                : { visualId: variant.visualId }),
               renderType: variant.renderType,
               files: {
                 single: {
@@ -897,6 +940,9 @@ function orderedManifest(manifest: RenderManifest): RenderManifest {
           : {
               variantId: variant.variantId,
               characterId: variant.characterId,
+              ...(variant.visualId === undefined
+                ? {}
+                : { visualId: variant.visualId }),
               renderType: variant.renderType,
               files: {
                 closed: {
@@ -1345,56 +1391,108 @@ export function compileRenderManifest(
     }
   }
 
-  const mapping = recordInputMapping(input);
   const idleVariantIds = new Map<string, string>();
   const lineVariantIds = new Map<string, string>();
   const referencedVariantIds = new Set<string>();
+  const projectCharactersById = new Map(
+    project.characters.map((character) => [character.id, character])
+  );
   for (const character of project.characters) {
-    const idleVariantId = resolveMappingValue(mapping, character.id, "idle");
-    if (idleVariantId === undefined) {
+    const binding = character.characterVisual;
+    if (binding.visualId === null) {
       addDiagnostic(
         diagnostics,
-        RENDER_MANIFEST_ERROR_CODE.mappingMissing,
-        ["characterVariantMapping", character.id, "idle"],
-        "explicit idle mapping is required for every project character",
+        RENDER_MANIFEST_ERROR_CODE.characterVisualBindingMissing,
+        ["characters", character.id, "characterVisual", "visualId"],
+        "an explicit character visual binding is required for every project character",
         { sectionId: character.id }
       );
-    } else {
-      idleVariantIds.set(character.id, idleVariantId);
-      referencedVariantIds.add(idleVariantId);
-      variantForId(catalogById, idleVariantId, character.id, diagnostics, {
-        sectionId: character.id,
-        variantId: idleVariantId
-      });
+      continue;
     }
-  }
-  for (const entry of lineEntries) {
-    const variantId = resolveMappingValue(
-      mapping,
-      entry.line.speakerId,
-      entry.line.expression
-    );
-    if (variantId === undefined) {
+    if (binding.idleVariantId === null) {
       addDiagnostic(
         diagnostics,
-        RENDER_MANIFEST_ERROR_CODE.mappingMissing,
+        RENDER_MANIFEST_ERROR_CODE.characterVariantUnselected,
+        ["characters", character.id, "characterVisual", "idleVariantId"],
+        "an explicit idle variant selection is required for every project character",
+        { sectionId: character.id }
+      );
+      continue;
+    }
+
+    idleVariantIds.set(character.id, binding.idleVariantId);
+    referencedVariantIds.add(binding.idleVariantId);
+    variantForId(
+      catalogById,
+      binding.idleVariantId,
+      binding.visualId,
+      diagnostics,
+      {
+        sectionId: character.id,
+        variantId: binding.idleVariantId
+      }
+    );
+  }
+  for (const entry of lineEntries) {
+    const variantId = entry.line.characterVariantId;
+    if (variantId === undefined || variantId === null) {
+      addDiagnostic(
+        diagnostics,
+        RENDER_MANIFEST_ERROR_CODE.characterVariantUnselected,
         [
-          "characterVariantMapping",
-          entry.line.speakerId,
-          entry.line.expression
+          "script",
+          "sections",
+          entry.sectionIndex,
+          "lines",
+          entry.lineIndex,
+          "characterVariantId"
         ],
-        "explicit logical-expression mapping is required for every script line",
+        "a physical character variant must be explicitly selected for every script line",
         { lineId: entry.line.id, sectionId: entry.sectionId }
+      );
+      continue;
+    }
+
+    const speaker = projectCharactersById.get(entry.line.speakerId);
+    const visualId = speaker?.characterVisual.visualId;
+    if (visualId === undefined || visualId === null) {
+      addDiagnostic(
+        diagnostics,
+        RENDER_MANIFEST_ERROR_CODE.characterVisualBindingMissing,
+        [
+          "script",
+          "sections",
+          entry.sectionIndex,
+          "lines",
+          entry.lineIndex,
+          "speakerId"
+        ],
+        "the line speaker must have an explicit character visual binding",
+        { lineId: entry.line.id, sectionId: entry.sectionId, variantId }
       );
       continue;
     }
     lineVariantIds.set(entry.line.id, variantId);
     referencedVariantIds.add(variantId);
-    variantForId(catalogById, variantId, entry.line.speakerId, diagnostics, {
+    variantForId(catalogById, variantId, visualId, diagnostics, {
       lineId: entry.line.id,
       sectionId: entry.sectionId,
       variantId
     });
+  }
+
+  const variantOwnerById = new Map<string, string>();
+  for (const character of project.characters) {
+    const idleVariantId = character.characterVisual.idleVariantId;
+    if (idleVariantId !== null) {
+      variantOwnerById.set(idleVariantId, character.id);
+    }
+  }
+  for (const entry of lineEntries) {
+    const variantId = entry.line.characterVariantId;
+    if (variantId !== undefined && variantId !== null) {
+      variantOwnerById.set(variantId, entry.line.speakerId);
+    }
   }
 
   const resolvedCharacterVariants = new Map<string, RenderCharacterVariant>();
@@ -1461,7 +1559,9 @@ export function compileRenderManifest(
       if (single !== undefined) {
         resolvedCharacterVariants.set(variantId, {
           variantId,
-          characterId: catalogVariant.characterId,
+          characterId:
+            variantOwnerById.get(variantId) ?? catalogVariant.characterId,
+          visualId: catalogVariant.characterId,
           renderType: "single-image",
           files: { single }
         });
@@ -1472,7 +1572,9 @@ export function compileRenderManifest(
       if (closed !== undefined && open !== undefined) {
         resolvedCharacterVariants.set(variantId, {
           variantId,
-          characterId: catalogVariant.characterId,
+          characterId:
+            variantOwnerById.get(variantId) ?? catalogVariant.characterId,
+          visualId: catalogVariant.characterId,
           renderType: "mouth-pair",
           files: { closed, open }
         });
@@ -1656,14 +1758,17 @@ export function compileRenderManifest(
       .sort((left, right) => compareStrings(left.key, right.key))
       .map((file) => ({ key: file.key, destinationPath: file.destinationPath }))
   }));
-  const mappingForHash = project.characters.map((character) => ({
-    characterId: character.id,
-    idle: resolveMappingValue(mapping, character.id, "idle"),
-    neutral: resolveMappingValue(mapping, character.id, "neutral"),
-    smile: resolveMappingValue(mapping, character.id, "smile"),
-    explain: resolveMappingValue(mapping, character.id, "explain"),
-    caution: resolveMappingValue(mapping, character.id, "caution")
-  }));
+  const mappingForHash = {
+    characters: project.characters.map((character) => ({
+      characterId: character.id,
+      visualId: character.characterVisual.visualId,
+      idleVariantId: character.characterVisual.idleVariantId
+    })),
+    lines: lineEntries.map((entry) => ({
+      lineId: entry.line.id,
+      characterVariantId: entry.line.characterVariantId ?? null
+    }))
+  };
   const compilerInputHash = computeCompilerInputHash({
     project,
     audioIndex,

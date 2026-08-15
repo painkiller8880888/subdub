@@ -1214,6 +1214,34 @@ describe("MVP final verification E2E", () => {
           project.script.sections.every((section) => section.lines.length === 0)
         ).toBe(true);
 
+        const characterBindingResponse = await server.app.inject({
+          method: "PUT",
+          url: `/api/projects/${projectId}/characters`,
+          payload: {
+            expectedRevision: project.revision,
+            characters: [
+              {
+                characterId: "character-mentor",
+                characterVisual: {
+                  visualId: "character-mentor",
+                  idleVariantId: "character-mentor-stand-v1"
+                }
+              },
+              {
+                characterId: "character-learner",
+                characterVisual: {
+                  visualId: "character-learner",
+                  idleVariantId: "character-learner-stand-v1"
+                }
+              }
+            ]
+          }
+        });
+        expect(characterBindingResponse.statusCode).toBe(200);
+        project = projectMutationResponseSchema.parse(
+          characterBindingResponse.json()
+        ).data;
+
         const scriptDraft = createRepresentativeFrameScript(
           computeOutlineHash(project.outline),
           project.outline.sections.map((section) => section.id)

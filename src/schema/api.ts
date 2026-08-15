@@ -15,7 +15,8 @@ import {
   pronunciationSchema,
   scriptSchema,
   videoProjectSchema,
-  aiTaskKindSchema
+  aiTaskKindSchema,
+  characterVisualBindingSchema
 } from "./video-project.js";
 import { displaySchema } from "./common.js";
 import {
@@ -583,6 +584,28 @@ export const projectMutationResponseSchema = z
   })
   .strict();
 
+export const projectCharacterBindingInputSchema = strictObject({
+  characterId: idSchema,
+  characterVisual: characterVisualBindingSchema
+});
+
+export const projectCharactersSaveRequestSchema = strictObject({
+  characters: z.array(projectCharacterBindingInputSchema).length(2),
+  expectedRevision: nonNegativeIntegerSchema
+}).superRefine((request, ctx) => {
+  const seen = new Set<string>();
+  for (const [index, character] of request.characters.entries()) {
+    if (seen.has(character.characterId)) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["characters", index, "characterId"],
+        message: "characterId must be unique"
+      });
+    }
+    seen.add(character.characterId);
+  }
+});
+
 export const visualAssignmentInputSchema = strictObject({
   id: idSchema,
   startLineId: idSchema,
@@ -959,6 +982,9 @@ export type ProjectBriefSaveRequest = z.infer<
 >;
 export type ProjectMutationResponse = z.infer<
   typeof projectMutationResponseSchema
+>;
+export type ProjectCharactersSaveRequest = z.infer<
+  typeof projectCharactersSaveRequestSchema
 >;
 export type VisualAssignmentInput = z.infer<typeof visualAssignmentInputSchema>;
 export type VisualAssignmentCreateInput = z.infer<

@@ -9,6 +9,7 @@ import { initializeServer } from "../../src/api/server.js";
 import {
   apiErrorResponseSchema,
   projectBriefSaveRequestSchema,
+  projectCharactersSaveRequestSchema,
   projectCreateResponseSchema,
   projectDetailResponseSchema,
   projectMutationResponseSchema,
@@ -164,6 +165,44 @@ describe("project source and brief APIs", () => {
     expect(projectDetailResponseSchema.parse(detail.json()).data.brief).toEqual(
       brief
     );
+  });
+
+  it("saves explicit project visual bindings through the character endpoint", async () => {
+    const project = await createProject();
+    const request = {
+      expectedRevision: project.revision,
+      characters: project.characters.map((character, index) => ({
+        characterId: character.id,
+        characterVisual: {
+          visualId: `project-visual-${index + 1}`,
+          idleVariantId: `project-visual-${index + 1}-idle`
+        }
+      }))
+    };
+    expect(projectCharactersSaveRequestSchema.safeParse(request).success).toBe(
+      true
+    );
+
+    const response = await server.app.inject({
+      method: "PUT",
+      url: `/api/projects/${project.metadata.id}/characters`,
+      payload: request
+    });
+    const saved = projectMutationResponseSchema.parse(response.json()).data;
+
+    expect(response.statusCode).toBe(200);
+    expect(saved.revision).toBe(1);
+    expect(
+      saved.characters.map((character) => character.characterVisual)
+    ).toEqual(request.characters.map((character) => character.characterVisual));
+
+    const staleResponse = await server.app.inject({
+      method: "PUT",
+      url: `/api/projects/${project.metadata.id}/characters`,
+      payload: request
+    });
+    expect(staleResponse.statusCode).toBe(409);
+    expect(parseError(staleResponse).code).toBe("PROJECT_REVISION_CONFLICT");
   });
 
   it("rejects invalid duration, unknown keys, and invalid expectedRevision without changing files", async () => {

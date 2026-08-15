@@ -506,22 +506,29 @@ describe("compileRenderManifest", () => {
     }
   });
 
-  it("does not infer or substitute a missing mapping or variant", () => {
-    const mapping = structuredClone(characterVariantMapping) as Record<
-      string,
-      Record<string, string>
-    >;
-    delete mapping["character-mentor"].smile;
-    const missingMapping = compileRenderManifest(
-      validInput(undefined, { characterVariantMapping: mapping })
+  it("requires explicit project selections and does not use the legacy mapping", () => {
+    const projectWithoutLineSelection = structuredClone(
+      videoProjectFixture
+    ) as VideoProject;
+    const outroLine = projectWithoutLineSelection.script.sections
+      .flatMap((section) => section.lines)
+      .find((line) => line.id === "outro-mentor-1");
+    if (outroLine === undefined) {
+      throw new Error("fixture line is missing");
+    }
+    outroLine.characterVariantId = null;
+    const missingSelection = compileRenderManifest(
+      validInput(projectWithoutLineSelection, {
+        characterVariantMapping
+      })
     );
-    expect(missingMapping.success).toBe(false);
-    expect(diagnosticCodes(missingMapping)).toContain(
-      "CHARACTER_MAPPING_MISSING"
+    expect(missingSelection.success).toBe(false);
+    expect(diagnosticCodes(missingSelection)).toContain(
+      "CHARACTER_VARIANT_UNSELECTED"
     );
-    if (!missingMapping.success) {
+    if (!missingSelection.success) {
       expect(
-        missingMapping.diagnostics.find(
+        missingSelection.diagnostics.find(
           (diagnostic) => diagnostic.lineId === "outro-mentor-1"
         )?.variantId
       ).toBeUndefined();
@@ -613,5 +620,31 @@ describe("compileRenderManifest", () => {
         diagnostic.assetPath?.endsWith("open.png")
       )
     ).toBe(true);
+  });
+
+  it("rejects inactive catalog visuals and variants", () => {
+    const inactiveVariantCatalog = characterVariantCatalog.map((variant) =>
+      variant.variantId === "character-mentor-speak-normal-v1"
+        ? { ...variant, status: "inactive" as const }
+        : variant
+    );
+    const inactiveVariant = compileRenderManifest(
+      validInput(undefined, { characterVariantCatalog: inactiveVariantCatalog })
+    );
+    expect(diagnosticCodes(inactiveVariant)).toContain(
+      "CHARACTER_VARIANT_INACTIVE"
+    );
+
+    const inactiveVisualCatalog = characterVariantCatalog.map((variant) =>
+      variant.variantId === "character-mentor-speak-pointing-v1"
+        ? { ...variant, visualStatus: "inactive" as const }
+        : variant
+    );
+    const inactiveVisual = compileRenderManifest(
+      validInput(undefined, { characterVariantCatalog: inactiveVisualCatalog })
+    );
+    expect(diagnosticCodes(inactiveVisual)).toContain(
+      "CHARACTER_VISUAL_INACTIVE"
+    );
   });
 });

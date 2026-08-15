@@ -61,6 +61,7 @@ export const renderCharacterSchema = strictObject({
 export const renderSingleImageCharacterVariantSchema = strictObject({
   variantId: idSchema,
   characterId: idSchema,
+  visualId: idSchema.optional(),
   renderType: z.literal("single-image"),
   files: renderSingleImageFilesSchema
 });
@@ -68,6 +69,7 @@ export const renderSingleImageCharacterVariantSchema = strictObject({
 export const renderMouthPairCharacterVariantSchema = strictObject({
   variantId: idSchema,
   characterId: idSchema,
+  visualId: idSchema.optional(),
   renderType: z.literal("mouth-pair"),
   files: renderMouthPairFilesSchema
 });

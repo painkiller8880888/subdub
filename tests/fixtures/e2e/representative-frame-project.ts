@@ -120,12 +120,31 @@ function line(
   subtitleText: string,
   expression: ScriptLine["expression"]
 ): ScriptLine {
+  const variantIdByExpression = {
+    neutral:
+      speakerId === "character-mentor"
+        ? "character-mentor-speak-normal-v1"
+        : "character-learner-speak-normal-v1",
+    smile:
+      speakerId === "character-mentor"
+        ? "character-mentor-speak-normal-v1"
+        : "character-learner-speak-normal-v1",
+    explain:
+      speakerId === "character-mentor"
+        ? "character-mentor-speak-pointing-v1"
+        : "character-learner-speak-pointing-v1",
+    caution:
+      speakerId === "character-mentor"
+        ? "character-mentor-speak-pointing-v1"
+        : "character-learner-speak-pointing-v1"
+  } as const;
   return {
     id,
     speakerId,
     spokenText,
     subtitleText,
     expression,
+    characterVariantId: variantIdByExpression[expression],
     pauseBeforeMs: 0,
     pauseAfterMs: 100,
     voiceOverrides: {},
