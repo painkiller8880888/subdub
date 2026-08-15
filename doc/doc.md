@@ -2,7 +2,16 @@
 
 ## 1. この文書の位置づけ
 
-本書は、Remotion を中核とする動画自動制作システムを、職場の社内マニュアル動画作成用にカスタマイズした仕様書である。
+本書（`doc/doc.md`）は、Remotion を中核とする動画自動制作システムを、職場の社内マニュアル動画作成用にカスタマイズした要求・機能・ユーザー体験・製品仕様の正本である。
+
+現在の正本は次の 2 文書に固定する。
+
+- 本書（`doc/doc.md`）: 要求、目的、機能、ユーザー体験、制作フロー、利用者から見た挙動
+- [`implementation-spec.md`](./implementation-spec.md): データモデル、API、保存、validation、アーキテクチャ、実装詳細
+
+要求・目的・利用者から見た挙動は本書を優先し、実装の具体的詳細は `implementation-spec.md` を正本とする。実装詳細が要求と矛盾する場合は、実装仕様を更新して整合させる。`doc/legacy/` 配下は履歴資料であり、新規実装の仕様根拠または実装順序の根拠には使用しない。legacy 文書と現在の正本が矛盾する場合は、現在の正本を採用する。
+
+本書は MVP 完了後の現行仕様を記述する。本文中の MVP は完了済みの現行ベースラインまたは、その範囲に対する将来拡張を指し、未実装の施工計画を意味しない。
 
 ### 1.1 Issue #87 による制作工程の更新
 
@@ -19,17 +28,17 @@ Issue #89 以降、キャラクター素材を追加・更新する「キャラ�
 - IT 技術系の一般向け解説、ショート動画、多言語展開、外部公開を目的とした機能は対象外とする。
 - 本システムは個人利用とし、第三者へ配布可能な製品形態にはしない。
 - 動画および制作システムを社外へ公開する運用は想定しない。
-- WebUI は制作パイプラインに沿って段階的に実装し、Markdown 入力、構成案の生成または手入力、人力台本編集、素材ライブラリ検索、ビジュアル割り当てを順に追加する。ワークスペース共通のキャラクタービジュアル登録・更新は、制作画面から分離したライブラリ画面として追加する。
+- WebUI は制作パイプラインに沿った画面構成とし、Markdown 入力、構成案の生成または手入力、人力台本編集、素材ライブラリ検索、ビジュアル割り当てを扱う。ワークスペース共通のキャラクタービジュアル登録・更新は、制作画面から分離したライブラリ画面で扱う。
 
 ### 1.2 Issue #97 によるキャラクタービジュアル選択の更新
 
-Issue #97（CV-04）では、キャラクタービジュアルの選択を AI 候補・素材検索・右ペイン中心の導線から、人間が明示的に選択するセリフカード中心の導線へ変更する。`/projects/{projectId}/script` はセクションとセリフカードを中心とする 1 ペイン構成を標準とし、現在の右ペインにある「現在の編集対象」「制作 ビジュアル候補」「AI によるビジュアル候補 UI」「手順3-3 素材検索」「素材検索結果」「素材制作・表示設定カード」は後続実装で制作画面から除去する。
+Issue #97（CV-04）では、キャラクタービジュアルの選択を AI 候補・素材検索・右ペイン中心の導線から、人間が明示的に選択するセリフカード中心の導線へ変更した。この方針は CV-05（Issue #98）で実装済みである。`/projects/{projectId}/script` はセクションとセリフカードを中心とする 1 ペイン構成を標準とし、現在の右ペインにあった「現在の編集対象」「制作 ビジュアル候補」「AI によるビジュアル候補 UI」「手順3-3 素材検索」「素材検索結果」「素材制作・表示設定カード」は標準制作画面に置かない。
 
 これは UI の主要導線を変更する仕様であり、機能・データの廃止を意味しない。AI visual suggestion の backend、現場動画・写真・帳票用 Asset Search、generic `VisualAssignment`、およびそれらのデータは維持する。これらは人間の選択を補助する副次機能または別ドメインの機能として扱い、キャラクタービジュアル選択の標準経路にはしない。
 
 キャラクターごとの VOICEVOX 話者と `CharacterVisualSet` の binding、および各セリフの physical variant 参照は project-specific な制作データとして `project.json` に保存する。`CharacterVisualSet` と登録済み visual / variant / file metadata の正本は引き続き workspace SQLite とし、SQLite に project ID や `mentor` / `learner` の紐づけを追加しない。`visualId === characterId` という暗黙対応も採用しない。
 
-CV-04 はこの責務分離を3文書で確定する作業だけを行う。schema、migration、API、UI、compiler、Remotion の変更は後続 CV-05（実装 Issue #98）の対象とする。
+CV-04 はこの責務分離を3文書で確定し、CV-05（Issue #98）で schema、migration、API、UI、compiler、Remotion への実装を完了した。現在の仕様は、この実装済みの責務分離を前提とする。
 
 ## 2. プロジェクト概要
 
@@ -263,9 +272,9 @@ VideoProject
    └─ layout
 ```
 
-`VideoProject` は人間と WebUI が編集する制作データの正本であり、音声長、開始フレーム、終了フレームなど、素材と設定から再計算できる値は含めない。構成案の承認は初期化と制作コンテキストの前提として残すが、台本・ビジュアル・音声の status はレビューと stale を表す互換状態である。`characters[].visualAssets` は旧 `1.0.0` プロジェクトを読み込むための互換フィールドとして意図的に残すが、CV-05 で導入する `characterVisual` binding や物理素材の正本とは別物である。確認画面と素材検証はこの互換フィールドを物理素材の正本として使用しない。
+`VideoProject` は人間と WebUI が編集する制作データの正本であり、音声長、開始フレーム、終了フレームなど、素材と設定から再計算できる値は含めない。構成案の承認は初期化と制作コンテキストの前提として残すが、台本・ビジュアル・音声の status はレビューと stale を表す互換状態である。`characters[].visualAssets` は旧 `1.0.0` プロジェクトを読み込むための互換フィールドとして意図的に残すが、CV-05 で導入済みの `characterVisual` binding や物理素材の正本とは別物である。確認画面と素材検証はこの互換フィールドを物理素材の正本として使用しない。
 
-CV-05 の概念モデルでは、各 character が次の project-specific binding を持つ。実際のプロパティ名は既存 schema との整合を見て後続実装で確定してよいが、選択の正本を `project.json` に置く責務は変更しない。
+CV-05 で実装した概念モデルでは、各 character が次の project-specific binding を持つ。選択の正本を `project.json` に置く責務は変更しない。
 
 ```ts
 type CharacterVisualBinding = {
@@ -297,14 +306,20 @@ CharacterVisualSet
 
 最初に登録された完成 variant のキャンバスサイズを、その `CharacterVisualSet` の基準サイズとする。同じ visual へ異なるキャンバスサイズの画像を追加する場合は拒否する。初期 seed の 600 × 1000 px は既存素材の値であり、全 visual 共通の固定サイズではない。
 
-既存の 2 キャラクター、6 variant、10 PNG は DB へ idempotent に seed / migration する。移行後のメタデータ正本は SQLite だけとし、実在する登録項目を TypeScript ソースへ二重管理しない。TypeScript には `CharacterVisualSet` の型、検証用の純粋な catalog snapshot 型、解決済み入力型だけを残してよい。
+既存の 2 キャラクター、6 variant、10 PNG は DB へ idempotent に seed / migration 済みである。移行後のメタデータ正本は SQLite だけとし、実在する登録項目を TypeScript ソースへ二重管理しない。TypeScript には `CharacterVisualSet` の型、検証用の純粋な catalog snapshot 型、解決済み入力型だけを残してよい。
 
 新規登録ファイルは `library/character-visuals/{visualId}/{variantId}/` 以下へ保存し、`public/` へ直接保存しない。画像表示は Fastify の管理された配信経路を使用する。
 
 レンダリング前には、バックエンドが SQLite から現在の `CharacterVisualCatalogSnapshot` を取得して検証し、`project.json` に保存された visual binding と line の `characterVariantId` を照合したうえでタイムラインコンパイラへ渡す。コンパイラは明示参照と検証済み snapshot、音声などを入力として Remotion へ渡す派生データ `RenderManifest` を生成する。コンパイラと Remotion は SQLite を直接検索しない。expression、tag、label から物理 variant を自動解決・代替しない。
 
 ```text
-RenderManifest
+RenderManifest（現行 `2.2.0`）
+├─ manifestVersion
+├─ compilerInputHash
+├─ characterCatalogVersion
+├─ characterMappingVersion（互換メタデータ）
+├─ characters[]
+├─ characterVariants[]
 ├─ sourceProjectHash
 ├─ sourceAssetChecksums[]
 ├─ fps
@@ -321,7 +336,8 @@ RenderManifest
 │  ├─ audioPath
 │  ├─ subtitleText
 │  ├─ speaker
-│  └─ expression (現行 1.0.0 では論理表情)
+│  ├─ expression（論理表情）
+│  └─ characterVariantId（明示選択）
 ├─ visuals[]
 │  ├─ id
 │  ├─ from
@@ -338,7 +354,7 @@ RenderManifest
 
 `RenderManifest` は生成キャッシュであり、制作データの正本にはしない。正本 JSON、参照素材、出力設定のいずれかが変わった場合は再生成する。
 
-将来のキャラクター素材解決では、次の情報を `RenderManifest` へ固定する。これは登録機能とは分離した後続設計であり、現行 `RenderManifest 1.0.0` の型へ追加済みとは扱わない。
+現行のキャラクター素材解決では、次の情報を `RenderManifest 2.2.0` へ固定する。登録機能とレンダリング解決は分離し、コンパイラが検証済み snapshot から派生データを生成する。
 
 ```text
 project.characters[].characterVisual.visualId
@@ -356,7 +372,7 @@ RenderManifest.characterVariants[]
 Remotion
 ```
 
-解決済み snapshot の版または更新時点、variant 単位の版管理、manifest の互換性は後続実装で確定する。missing、inactive、cross-visual、ファイルスロット欠落時は validation error とし、自動代替しない。
+解決済み snapshot の版または更新時点、variant 単位の版管理、manifest の互換性は実装仕様に従って管理する。missing、inactive、cross-visual、ファイルスロット欠落時は validation error とし、自動代替しない。
 
 ### 5.2 セリフ
 
@@ -446,7 +462,7 @@ AI に素材そのもの、完成スライド、図解を生成させない。AI
 
 ### 6.3 台本
 
-初期段階では人間が初稿を作成し、AI は初稿生成ではなくレビュー補助に使用する。人間が作成した完成稿を正解例として蓄積し、15.2 の改善ループによって生成ルールとレビュー基準が十分に整ってから、AI による初稿生成を追加する。
+現行仕様では人間が初稿を作成し、AI は初稿生成ではなくレビュー補助に使用する。人間が作成した完成稿を正解例として蓄積し、15.2 の改善ループによって生成ルールとレビュー基準が十分に整った後に、AI による初稿生成を将来拡張として追加する。
 
 1. `approved` の構成案から、セクション構造だけを引き継いだ空の台本を作成する。
 2. 人間が WebUI でセリフを追加し、2 キャラクターの掛け合い形式で初稿を作る。
@@ -471,7 +487,7 @@ AI に素材そのもの、完成スライド、図解を生成させない。AI
 
 構造化したスライドや図解を AI または自前スキルで生成する方式は採用しない。キャラクタービジュアルは、プロジェクトの character binding とセリフカード上の explicit variant selection を標準経路とする。現場動画、写真、帳票スキャンは別ドメインの素材ライブラリへ登録し、必要な場合だけ人間が検索・確認して generic `VisualAssignment` として割り当てる。AI suggestion、Asset Search、表示設定はその補助機能として残すが、キャラクタービジュアル選択の主導線にはしない。
 
-以下の 6.4.1〜6.4.3 は、現場動画・写真・帳票スキャンを扱う generic Asset Search / `VisualAssignment` の機能・保存データ・API の仕様である。これらを維持することは、Issue #97 が除去対象とする `/projects/{projectId}/script` の旧右ペイン UI（候補、検索、検索結果、素材制作・表示設定カード）を標準画面に残す意味ではない。CV-05 以降に必要な UI を提供する場合も、キャラクタービジュアルの line picker とは分離した別画面または補助導線とする。
+以下の 6.4.1〜6.4.3 は、現場動画・写真・帳票スキャンを扱う generic Asset Search / `VisualAssignment` の機能・保存データ・API の仕様である。これらを維持することは、Issue #97 が除去対象とする `/projects/{projectId}/script` の旧右ペイン UI（候補、検索、検索結果、素材制作・表示設定カード）を標準画面に残す意味ではない。必要な UI は、キャラクタービジュアルの line picker とは分離した別画面または補助導線で扱う。
 
 #### 6.4.0 キャラクタービジュアル登録（ワークスペース共通）
 
@@ -589,7 +605,7 @@ audio/voice/expense-manual/02-014_line-0027_spk3_a1b2c3d4.wav
 5. 再生範囲はセクションの最初のセリフ開始から最後のセリフ終了までとし、台本や音声長が変化した場合は自動的に追従する。
 6. セクション境界では曲を重ねず、前曲をフェードアウトし、次曲をフェードインする。
 
-MVP では自動ダッキング、音量キーフレーム、1 セクション内の複数曲、曲同士のクロスフェードを行わない。
+現在対象外として、自動ダッキング、音量キーフレーム、1 セクション内の複数曲、曲同士のクロスフェードを行わない。
 
 ### 6.6 タイムライン
 
@@ -641,7 +657,7 @@ const msToFrames = (ms: number, fps: number): number =>
 
 ### 6.8 キャラクター演出
 
-以下の `RenderManifest.characters[]`、`RenderManifest.lines[].characterVariantId`、`RenderManifest.characterVariants[]` は CV-05 target model であり、現行 `RenderManifest 1.0.0` へ CV-04 で追加するフィールドではない。CV-05 では `manifestVersion: "2.2.0"` として保存し、`RenderCharacterVariant` は physical visual の `(visualId, variantId)` を識別する。同じ physical variant を複数の project character が共有しても、特定話者の所有権で上書きしない。既存 `characterMappingVersion` は cache / run-log 互換のメタデータとして残すが、variant 選択には使用しない。
+以下の `RenderManifest.characters[]`、`RenderManifest.lines[].characterVariantId`、`RenderManifest.characterVariants[]` は、CV-05（Issue #98）で実装済みの現行 `RenderManifest 2.2.0` のフィールドである。`RenderCharacterVariant` は physical visual の `(visualId, variantId)` を識別する。同じ physical variant を複数の project character が共有しても、特定話者の所有権で上書きしない。既存 `characterMappingVersion` は cache / run-log 互換のメタデータとして残すが、variant 選択には使用しない。
 
 production compile は `POST /api/projects/{projectId}/manifest/compile` を標準経路とする。backend は SQLite の `CharacterVisualCatalogSnapshot` を `verifyFiles()` で検証し、file checksum を含む validated snapshot と asset metadata を compiler へ渡してから `RenderManifestStore` に保存する。compiler や Remotion が SQLite を直接検索したり、静的 legacy catalog を通常経路として渡したりしない。
 
@@ -655,10 +671,10 @@ production compile は `POST /api/projects/{projectId}/manifest/compile` を標�
 - キャラクターの話者、論理表情、口パク、発話中演出は、project.json の明示 binding / line variant 参照、検証済み snapshot、タイムラインから決定する。キャラクタービジュアル登録では物理 variant を追加・更新できるが、プロジェクトでの採用は登録画面で自動決定しない。ユーザーが Remotion 用の物理ファイルパスを直接編集する機能も持たない。
 - ビジュアル素材を大きく表示する場面では、ビジュアル割り当ての「ビジュアルを優先」トグルによりキャラクターを縮小または非表示にできる。
 - 話者、論理表情、発話区間は `RenderManifest.lines[]` から取得し、物理素材のパスは解決済みのキャラクター素材情報から取得する。
-- MVP の将来口パクは、解決済み `mouth-pair` variant の発話区間内で相対フレームから計算し、設定された周期で `closed` と `open` を切り替える。無言区間と発話終了後は必ず `closed` とする。
+- 口パクは、解決済み `mouth-pair` variant の発話区間内で相対フレームから計算し、設定された周期で `closed` と `open` を切り替える。無言区間と発話終了後は必ず `closed` とする。
 - 上下動、拡大縮小、フェードなどは現在フレームから決定する純粋な計算とし、実時間に依存する状態を持たない。
 
-MVP の配置スキーマは固定とする。通常時は 2 人を画面下部の左右へ表示し、`visuals.assignments[].display.prioritizeVisual` が `true` の区間だけ、素材種別と表示領域に応じた既定規則で両者を縮小または非表示にする。ユーザーがキャラクターごとの座標、表情、アニメーションを直接編集する機能は持たせない。将来、複数の表示スキーマが必要になった場合は、座標値を各割り当てへ追加するのではなく、互換性を保った `layoutPreset` の切り替えとして拡張する。
+現行の配置スキーマは固定とする。通常時は 2 人を画面下部の左右へ表示し、`visuals.assignments[].display.prioritizeVisual` が `true` の区間だけ、素材種別と表示領域に応じた既定規則で両者を縮小または非表示にする。ユーザーがキャラクターごとの座標、表情、アニメーションを直接編集する機能は持たせない。将来、複数の表示スキーマが必要になった場合は、座標値を各割り当てへ追加するのではなく、互換性を保った `layoutPreset` の切り替えとして拡張する。
 
 ### 6.9 背景
 
@@ -682,7 +698,7 @@ MVP の配置スキーマは固定とする。通常時は 2 人を画面下部�
 - まとめ
 - エンディング
 
-MVP では先頭に 2 秒の opening、末尾に 2 秒の ending を必ず挿入する。必要に応じてセクション境界へ 2 秒の eye catch を追加する。いずれも無音の共通プレースホルダー画面とし、本番素材への置換は MVP 後に行う。一般向け動画の視聴維持を目的とした冒頭ダイジェストは必須としない。
+現行仕様では先頭に 2 秒の opening、末尾に 2 秒の ending を必ず挿入する。必要に応じてセクション境界へ 2 秒の eye catch を追加する。いずれも無音の共通プレースホルダー画面とし、本番素材への置換は将来拡張として扱う。一般向け動画の視聴維持を目的とした冒頭ダイジェストは必須としない。
 
 ### 6.11 レンダリング
 
@@ -775,7 +791,7 @@ JSON の通常編集は用途別フォームから行い、ファイルの直接
 - 完成映像を動画生成 AI で生成せず、映像生成単位の従量コストを発生させない。
 - VOICEVOX ENGINE はローカルで実行する。
 - OpenCode と OpenRouter を利用し、AI モデル呼び出し部分だけを外部サービスへ接続する。
-- AI 呼び出しを用途別に識別し、初期実装では共通モデルを使う。利用実績が蓄積した後、必要な用途だけモデルを分離してコストと品質を調整する。
+- AI 呼び出しを用途別に識別し、現行仕様では共通モデルを使う。利用実績が蓄積した後、必要な用途だけモデルを分離してコストと品質を調整する。
 - AI へプロジェクト全体を無条件に渡さず、各処理に必要な入力だけを渡す。
 - OpenRouter の API キーはリポジトリや JSON へ保存せず、環境変数または OpenCode の認証設定で管理する。
 
@@ -869,7 +885,7 @@ SQLite は素材メタデータの検索と、複数プロジェクトを横断�
 - 自動計算できる開始フレームや音声長は入力 JSON の正本にせず、生成キャッシュへ保存する。
 - 正本の `VideoProject` と派生データの `RenderManifest` は別の Zod スキーマと TypeScript 型で管理する。
 - `RenderManifest` には生成元となった正本 JSON のハッシュと参照素材のチェックサムを持たせ、いずれかが不一致の場合は再生成する。
-- CV-05 で project-specific binding と line の explicit variant reference を導入する際は、`schemaVersion: "1.0.0"` の意味を暗黙に変更せず、明示的な schema version bump と migration を行う。migration は tag / label 検索による推測をせず、既知の旧固定 mapping を決定論的な compatibility input として使える場合だけ利用し、解決不能な値は未設定として人間の確認を要求する。
+- CV-05 で導入済みの project-specific binding と line の explicit variant reference は、`schemaVersion: "1.0.0"` の意味を暗黙に変更せず、明示的な schema version bump と migration を経て保存する。migration は tag / label 検索による推測をせず、既知の旧固定 mapping を決定論的な compatibility input として使える場合だけ利用し、解決不能な値は未設定として人間の確認を要求する。
 
 **確定**
 
@@ -933,7 +949,7 @@ project-root/
 - Node.js のバージョン固定用の `.node-version`
 - `package.json` の `engines` で対応 Node.js を明示
 
-初期バージョン番号は `implementation-spec.md` 4.4 の表を採用する。導入直後に互換性を確認して `pnpm-lock.yaml` へ固定し、自動でメジャーアップデートしない。
+現行のバージョン番号は `implementation-spec.md` 4.4 の表を採用する。互換性を確認して `pnpm-lock.yaml` へ固定し、自動でメジャーアップデートしない。
 
 ### 17.4 WebUI
 
@@ -967,7 +983,7 @@ AI が生成する内容と人間が入力する指示を視覚的にもデー�
 
 これは Issue #97（CV-04）後の `/projects/{projectId}/script` 制作画面の基本仕様である。画面はセクションとセリフカードを中心とする 1 ペイン構成とし、キャラクタービジュアルの選択を人間の明示操作で完結させる。プレビュー、背景、VOICEVOX 音声生成・調整などの補助機能を残す場合も、右ペインを主導線にせず、各セリフカードとセクションの文脈へ統合する。
 
-後続実装では、現在の右ペインにある次の UI を `/projects/{projectId}/script` から除去する。
+現在の標準 `/projects/{projectId}/script` 画面には、現在の右ペインにあった次の UI を置かない。
 
 - 現在の編集対象
 - 制作 ビジュアル候補
@@ -976,7 +992,7 @@ AI が生成する内容と人間が入力する指示を視覚的にもデー�
 - 素材検索結果
 - 素材制作・表示設定カード
 
-これは AI visual suggestion、現場素材用 Asset Search、generic `VisualAssignment` の backend、service、schema、ログ、データを削除する指定ではない。必要な機能は別画面または後続の補助導線として維持し、キャラクタービジュアル選択の標準経路とは分離する。
+これは AI visual suggestion、現場素材用 Asset Search、generic `VisualAssignment` の backend、service、schema、ログ、データを削除する指定ではない。必要な機能は別画面または補助導線として維持し、キャラクタービジュアル選択の標準経路とは分離する。
 
 各セリフカードには少なくとも次を表示する。
 
@@ -997,7 +1013,7 @@ AI が生成する内容と人間が入力する指示を視覚的にもデー�
 
 人間がセリフカードを 1 件ずつ追加できる操作に加え、話者付きテキストをまとめて貼り付け、セリフカードへ機械的に分割する一括入力を用意する。一括入力は AI 生成ではなく、入力テキストの構造化処理として扱う。
 
-台本の編集内容は自動保存する。各セリフカードから `characterVariantId` の明示選択と VOICEVOX 音声生成・調整を直接操作できる。現場素材の検索・割り当て backend は維持するが、CV-04 の標準制作画面からは上記の右ペイン UI を除去する。入力エラー、character binding の未設定・参照切れ・inactive・cross-visual、line variant の未選択・参照切れ、generic 素材参照切れ、音声 stale などは validation として表示し、台本承認操作を要求しない。
+台本の編集内容は自動保存する。各セリフカードから `characterVariantId` の明示選択と VOICEVOX 音声生成・調整を直接操作できる。現場素材の検索・割り当て backend は維持するが、現在の標準制作画面には上記の右ペイン UI を置かない。入力エラー、character binding の未設定・参照切れ・inactive・cross-visual、line variant の未選択・参照切れ、generic 素材参照切れ、音声 stale などは validation として表示し、台本承認操作を要求しない。
 
 #### キャラクタービジュアル画面
 
@@ -1025,7 +1041,7 @@ WebUI は SQLite、キャラクターファイル、ローカルファイルシ�
 
 #### バックエンド API
 
-初期実装では少なくとも次の API を用意する。
+現行 API は少なくとも次の責務を持つ。
 
 ```text
 GET  /api/models
@@ -1067,7 +1083,7 @@ Uploads are streamed directly into workspace staging with a separate 32 MiB per-
 
 - `GET /api/models` は OpenRouter のモデル一覧を取得し、WebUI 用に必要な情報へ整形して返す。
 - WebUI は入出力単価がともに `0` のモデルを `free`、それ以外を `paid` としてモデル一覧を絞り込める。
-- 構成案生成 API は完了した JSON を一括で返す。初期実装ではストリーミングを行わない。
+- 構成案生成 API は完了した JSON を一括で返す。現行仕様ではストリーミングを行わない。
 - 受信した JSON は保存前に Zod で検証する。
 - API エラー、JSON Schema 違反、入力超過、未解決の要確認事項を区別して表示する。
 - OpenRouter API キーは環境変数 `OPENROUTER_API_KEY` からバックエンドだけが読み取り、レスポンス、ログ、ブラウザストレージへ出力しない。
@@ -1134,9 +1150,9 @@ WebUI は Vite + React SPA、画面ルーティングは React Router、サー�
 - モデル ID を生成ロジックへ直接書かない。プロジェクトに既定モデルを保存し、生成実行時に別モデルへ変更できるようにする。
 - 構成案生成、台本生成、台本レビュー、ビジュアル検索意図、レイアウトレビュー、OpenCode を用途 ID で区別する。
 - モデル解決順は、実行時の明示上書き、用途別上書き、プロジェクト共通既定値とする。
-- 初期状態では用途別上書きを空にし、すべての用途を `google/gemma-4-31b-it` へ解決する。用途別にプロンプト、structured output schema、評価指標は分離しておく。
+- 現行状態では用途別上書きを空にし、すべての用途を `google/gemma-4-31b-it` へ解決する。用途別にプロンプト、structured output schema、評価指標は分離しておく。
 - 選択したモデル ID は生成結果そのものではなく実行情報として記録し、構成案から `generationRunId` で参照する。
-- 初期実装では WebUI、OpenCode、レビュー、検索意図、レイアウトレビューの暫定既定モデルを Gemma 4 31B Instruct、OpenRouter モデル ID を `google/gemma-4-31b-it` とする。
+- 現行仕様では WebUI、OpenCode、レビュー、検索意図、レイアウトレビューの既定モデルを Gemma 4 31B Instruct、OpenRouter モデル ID を `google/gemma-4-31b-it` とする。
 - `google/gemma-4-31b-it:free` は既定にせず、人間が実行時に明示選択した場合だけ使用する。
 
 #### モデル一覧
@@ -1155,7 +1171,7 @@ WebUI は Vite + React SPA、画面ルーティングは React Router、サー�
 - `provider.require_parameters` を `true` とし、指定した JSON Schema を処理できないプロバイダーを除外する。
 - 受信結果を Zod で再検証し、検証に失敗した応答をプロジェクト JSON へ反映しない。
 - Markdown 内の文章は命令ではなく入力資料として区切り、プロンプトインジェクションによってシステム指示や企画条件を上書きさせない。
-- 初期実装では非ストリーミングで生成する。
+- 現行仕様では非ストリーミングで生成する。
 
 #### ZDR とプロバイダールーティング
 
@@ -1176,12 +1192,12 @@ WebUI は Vite + React SPA、画面ルーティングは React Router、サー�
 - 認証エラー、残高不足、モデル非対応、コンテキスト超過、JSON Schema 違反を区別して WebUI に表示する。
 - モデルやプロバイダーを暗黙に変更して成功扱いにしない。
 
-**暫定決定**
+**現行初期設定と評価方針**
 
 - プロジェクト作成時の初期値は `google/gemma-4-31b-it` とする。
-- 用途別上書きの初期値は空とし、OpenCode を含むすべての用途を同じモデルで開始する。
+- 用途別上書きの初期値は空とし、OpenCode を含むすべての用途を同じモデルで実行する。
 - 実行ログには用途 ID、解決後のモデル ID、共通既定・用途別上書き・実行時上書きのどれから選択したかを記録する。
-- MVP の品質、待ち時間、トークン使用量、人間による修正量を用途別に集計し、必要な用途だけモデル分離を再検討する。
+- 現行 MVP の品質、待ち時間、トークン使用量、人間による修正量を用途別に集計し、必要な用途だけモデル分離を再検討する。
 
 ### 17.8 キャラクター素材
 
@@ -1280,7 +1296,7 @@ library/character-visuals/{visualId}/{variantId}/...
 
 PR #24 など過去の実装では `VideoProject.schemaVersion` を `1.0.0` のまま維持し、既存 `project.json` の `Character.visualAssets` にある `neutral`、`smile`、`explain`、`caution` の固定 `MouthPair` を互換フィールドとして残した。この記述は過去プロジェクトを読み込むための履歴・互換条件であり、CV-04 の current design が `1.0.0` の意味を暗黙に変更することを示さない。
 
-このフィールドは CharacterVisualSet の正本ではない。既存の 4 キーへ同じ画像を重複割り当てたり、物理 variant を推測して保存したりしない。既存プロジェクトを読み込むための互換フィールドとして残すが、CV-05 では明示的な `schemaVersion` bump と migration により新しい binding / line reference の意味を導入する。`1.0.0` のまま新しい意味を保存することはしない。
+このフィールドは CharacterVisualSet の正本ではない。既存の 4 キーへ同じ画像を重複割り当てたり、物理 variant を推測して保存したりしない。既存プロジェクトを読み込むための互換フィールドとして残すが、CV-05 で明示的な `schemaVersion` bump と migration により新しい binding / line reference の意味を導入済みである。`1.0.0` のまま新しい意味を保存することはしない。
 
 #### 解決処理、version、再現性
 
@@ -1309,19 +1325,19 @@ compiler は各 explicit reference が存在すること、active であるこ�
 - 明示参照を含む新しい manifestVersion の互換性
 - `1.0.0` から新 schema への migration の具体的な手順
 
-解決不能、variant 欠落、mouth slot 欠落時は自動代替せずエラーにする。CV-04 の範囲は仕様書改訂であり、schema / migration / project binding / line picker / CharacterAssetsPage / compiler / Remotion の変更は CV-05 で実装する。旧固定 mapping が migration の compatibility input として使えるのは、既知対応を決定論的に確定できる場合だけであり、SQLite の tag や label の検索による推測は行わない。解決できないデータは未設定として人間の確認を要求する。
+解決不能、variant 欠落、mouth slot 欠落時は自動代替せずエラーにする。CV-04 で確定した仕様は CV-05 で schema / migration / project binding / line picker / CharacterAssetsPage / compiler / Remotion へ実装済みである。旧固定 mapping が migration の compatibility input として使えるのは、既知対応を決定論的に確定できる場合だけであり、SQLite の tag や label の検索による推測は行わない。解決できないデータは未設定として人間の確認を要求する。
 
-CV-00〜CV-03 は、キャラクタービジュアルの登録・管理をワークスペース共通資産として追加した履歴である。CV-04 で project-specific な明示選択の仕様を確定し、CV-05 で実装する。現場動画・写真・帳票素材ライブラリ、AI visual suggestion、generic `VisualAssignment` の backend は別ドメインとして維持する。
+CV-00〜CV-03 は、キャラクタービジュアルの登録・管理をワークスペース共通資産として追加した履歴である。CV-04 で project-specific な明示選択の仕様を確定し、CV-05 で実装済みである。現場動画・写真・帳票素材ライブラリ、AI visual suggestion、generic `VisualAssignment` の backend は別ドメインとして維持する。
 
 ### 17.9 口パク
 
 口パクの対象は、`closed` と `open` を持つ `mouth-pair` variant だけである。
 
 - `single-image` variant に存在しない `open` 画像を推測、複製、加工して使用しない。
-- `single-image` を発話中に表示する方法（静止表示など）は CV-05 の Remotion 実装で、explicit に選択された variant の renderType に従って決定する。存在しない口差分を生成・推測したり、別 variant を自動代替したりしない。
+- `single-image` を発話中に表示する方法（静止表示など）は CV-05 で実装した Remotion の処理により、explicit に選択された variant の renderType に従って決定する。存在しない口差分を生成・推測したり、別 variant を自動代替したりしない。
 - P5-04 では、解決済み `mouth-pair` の発話区間中に `closed` / `open` を定周期で切り替える。
 - セリフ開始時は閉じた状態から始め、終了時と無音区間は閉じた状態とする。
-- 音量解析に基づく口パクへの変更は MVP 後の判断事項である。
+- 音量解析に基づく口パクへの変更は将来の判断事項である。
 
 ### 17.10 表情
 
@@ -1355,7 +1371,7 @@ CV-00〜CV-03 は、キャラクタービジュアルの登録・管理をワー
 
 #### 素材メタデータ
 
-初期実装では、SQLite の素材レコードに少なくとも次を持たせる。
+現行の SQLite 素材レコードは少なくとも次を持つ。
 
 ```text
 assetId
@@ -1394,11 +1410,11 @@ AI の出力は次の形を基本とする。
 }
 ```
 
-タグは `分類軸:正規名` の形式で返させる。バックエンドはタグ辞書で正規化し、未知のタグを分離してから検索する。候補スコアの内訳はUIへ返し、人間が提案理由を検証できるようにする。ベクトル検索は初期実装に含めず、SQLite のタグ一致と全文検索から開始する。
+タグは `分類軸:正規名` の形式で返させる。バックエンドはタグ辞書で正規化し、未知のタグを分離してから検索する。候補スコアの内訳はUIへ返し、人間が提案理由を検証できるようにする。ベクトル検索は現在対象外とし、SQLite のタグ一致と全文検索を使用する。
 
 #### Remotion 表示コンポーネント
 
-初期実装では次の 3 コンポーネントだけを作る。
+現行仕様では次の 3 コンポーネントを使用する。
 
 - `VideoVisual`: 再生区間、切り抜き、拡大率、位置、再生速度、ミュート、注釈
 - `PhotoVisual`: 切り抜き、表示方法、拡大率、位置、注釈
@@ -1453,13 +1469,13 @@ AI の出力は次の形を基本とする。
 
 BGM と挿入プレースホルダー:
 
-- BGM は MVP からセクション単位で設定する。各セクションは 0 曲または 1 曲とする。
+- BGM は現在、セクション単位で設定する。各セクションは 0 曲または 1 曲とする。
 - 曲ごとに音量、ループ、フェードイン、フェードアウトを設定する。
 - セクション境界では曲を重ねず、前曲をフェードアウトしてから次曲を開始する。
-- 自動ダッキング、音量キーフレーム、1 セクション内の複数曲は MVP に含めない。
+- 自動ダッキング、音量キーフレーム、1 セクション内の複数曲は現在対象外とする。
 - opening と ending は常に 2 秒の無音プレースホルダーを挿入する。
 - eye catch はユーザーが指定したセクション境界へ 2 秒の無音プレースホルダーとして追加できる。
-- プレースホルダーは Remotion の共通画面を描画し、本番用素材の生成と置換は MVP 後に実装する。
+- プレースホルダーは Remotion の共通画面を描画し、本番用素材の生成と置換は将来拡張とする。
 
 素材動画:
 
@@ -1488,12 +1504,12 @@ BGM と挿入プレースホルダー:
 - 四国めたんとずんだもんの具体的な VOICEVOX style ID
 - キャラクターの最終透過 PNG とテーマ色の具体値
 - 効果音を使用する場面と運用範囲
-- MVP 後に使用する opening、ending、eye catch の本番素材と置換仕様
+- 将来使用する opening、ending、eye catch の本番素材と置換仕様
 - 素材登録時に OCR または音声文字起こしを実行し、検索対象へ含めるか
 
-## 18. 再現時の完成条件
+## 18. MVP 完了確認と再現条件
 
-本システムの初期版が完成したと判断する最小条件は、次の一連の処理が通ることである。
+MVP の対象実装が完了したことを確認する最小条件は、次の一連の処理が通ることである。これは完了確認と再現性の基準であり、現在の未実装作業一覧ではない。
 
 1. 現場動画、写真、帳票スキャンをメタデータとタグ付きで素材ライブラリへ登録し、サムネイル検索できる。
 2. AI が台本区間へ検索意図を付け、バックエンドが素材DBから実在する候補を返す。
