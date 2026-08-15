@@ -21,25 +21,48 @@
 
 `doc.md` と本書が矛盾する場合は、要求と目的については `doc.md` を優先し、実装の具体的詳細については本書を正本として更新し、両者を整合させる。
 
-### 1.1 Issue #87 による制作工程の更新
+### 1.1 Issue #87 による台本工程の更新
 
-Issue #87 以降、`/projects/{projectId}/script` を台本・ビジュアル・音声の一体型制作画面とし、3 つのデータを引き続き同じ `project.json` に保存する。制作中の承認操作を後工程の開始条件にはしない。
+Issue #87 以降、`/projects/{projectId}/script` を台本・ビジュアル・音声の一体型台本画面とし、3 つのデータを引き続き同じ `project.json` に保存する。台本工程中の承認操作を後工程の開始条件にはしない。
 
 - `outline.status === "approved"` かつ `outline.sourceHash === source.sha256` であることは、台本の初期化と現在の制作コンテキストの前提として維持する。この文書の対象範囲では、構成案の承認が唯一の明示的な工程境界である。
-- `script/approve` と `visuals/approve` は新しい通常制作フローから外す。既存データ、旧クライアント、レビュー履歴との互換性のため API や `approved` status を残す場合でも、制作画面、音声操作、候補利用、素材割り当て、`RenderManifest` 生成の前提に使用しない。
+- `script/approve` と `visuals/approve` は新しい通常台本フローから外す。既存データ、旧クライアント、レビュー履歴との互換性のため API や `approved` status を残す場合でも、台本画面、音声操作、候補利用、素材割り当て、`RenderManifest` 生成の前提に使用しない。
 - `Script.status` と `VisualPlan.status` の `draft`、`needs_review`、`approved` は、互換性、レビュー結果、stale、再生成要否の表示に使える。ただし `approved` は出力可能を意味せず、`draft` や `needs_review` だけを理由に編集や候補利用を拒否しない。
 - プレビュー、`RenderManifest` 生成、MP4 レンダリングのゲートは、保存済み正本に対する validation とする。Zod、台本構造、話者・発話、`outlineHash`、音声の current/stale/missing、ビジュアル参照・適用範囲・checksum、revision、Manifest の整合性を機械検証し、失敗時は該当する操作だけを無効化して理由を表示する。
 - revision 管理、自動保存、expected revision による競合拒否、安全な一時ファイル保存、生成物の stale 保持は変更しない。
 
 ### 1.2 Issue #97 / CV-04 による現在仕様の更新
 
-Issue #97 を本書の正本となる設計判断として扱い、キャラクタービジュアルの標準選択経路を人間の明示選択へ変更した。この方針は CV-05（Issue #98）で実装済みである。`/projects/{projectId}/script` はセクションとセリフカードを中心とする 1 ペイン構成とし、現在の右ペインにあった「現在の編集対象」「制作 ビジュアル候補」「AI によるビジュアル候補 UI」「手順3-3 素材検索」「素材検索結果」「素材制作・表示設定カード」は標準制作画面に置かない。
+Issue #97 を本書の正本となる設計判断として扱い、キャラクタービジュアルの標準選択経路を人間の明示選択へ変更した。この方針は CV-05（Issue #98）で実装済みである。`/projects/{projectId}/script` はセクションとセリフカードを中心とする 1 ペイン構成とし、現在の右ペインにあった「現在の編集対象」「制作 ビジュアル候補」「AI によるビジュアル候補 UI」「手順3-3 素材検索」「素材検索結果」「素材制作・表示設定カード」は標準台本画面に置かない。
 
 除去するのは制作画面の主要 UI であり、機能・データの削除ではない。AI visual suggestion の backend、visual suggestion API / service / schema / log、現場動画・写真・帳票用 Asset Search、generic `VisualAssignment` と Asset Service は維持する。これらはキャラクタービジュアルの標準選択経路とは別の補助機能・別ドメインとして扱う。
 
 `CharacterVisualSet` の登録済み visual / variant / file metadata の正本は workspace SQLite に置く。一方、プロジェクトで VOICEVOX 話者へどの visual を割り当て、どの idle variant を使うか、各 line でどの physical variant を選んだかは project-specific な `project.json` の正本に保存する。SQLite に project ID や `mentor` / `learner` の紐づけを追加せず、`visualId === characterId` も前提にしない。
 
 CV-04 はこの3文書の更新だけを行い、schema、schema version bump、migration、API、React UI、`ScriptPage`、`CharacterAssetsPage`、compiler、RenderManifest、Remotion の変更は CV-05（Issue #98）で実装済みである。
+
+### 1.3 Issue #107 / ED-00 による編集フェーズの追加
+
+ED-00 は docs-only の仕様改訂であり、この Issue の作業ではコード、Zod schema、migration、API、React UI、compiler、Remotion を変更しない。次期の実装対象は、`VideoProject 1.2.0` の `EditPlan` と `RenderManifest 2.3.0` を中心とする独立した編集フェーズである。
+
+ワークフローは次の順序とする。
+
+```text
+企画
+  → 構成案
+  → 台本（/projects/{projectId}/script）
+  → 編集（/projects/{projectId}/edit）
+  → 出力 validation
+  → RenderManifest
+  → プレビュー / MP4
+```
+
+現行 checkout のコードは ED-00 の文書変更だけでは version bump されない。ED-01 が明示的な migration を実装するまで、既存の `VideoProject 1.1.0` / `RenderManifest 2.2.0` を実装済み状態として扱い、以下の `1.2.0` / `2.3.0` は後続実装で採用する正本仕様として読む。
+
+- 編集素材は workspace SQLite に登録済みの Asset だけを使用する。
+- intro / outro / cutin は MP4 の `video` Asset、BGM は MP3 の `bgm` Asset に限定する。
+- project data には Asset の `assetId`、`assetVersion`、`assetChecksum`、`projectMediaPath` を snapshot として固定し、OS path や任意ファイルを保存しない。
+- 動画と BGM は `0 <= volume <= 1` を持つ。旧 `muted` は `true → 0`、`false → 1` として移行する。
 
 ## 2. 今回確定した判断
 
@@ -106,12 +129,12 @@ CV-04 はこの3文書の更新だけを行い、schema、schema version bump、
 
 | データ | 正本または性質 | 現在の扱い |
 |---|---|---|
-| `projects/{projectId}/project.json` | 人間が編集する動画制作データの正本。構成案の承認と、台本・ビジュアル・音声のレビュー状態もここに保持する | 現行保存形式は `VideoProject 1.1.0`。`schemaVersion: "1.0.0"` は legacy input boundary として厳密に検証し、明示的 migration で `1.1.0` へ変換する |
+| `projects/{projectId}/project.json` | 人間が編集する動画制作データの正本。構成案の承認と、台本・ビジュアル・音声のレビュー状態、編集フェーズの `EditPlan` もここに保持する | ED-01 の次期保存形式は `VideoProject 1.2.0`。`schemaVersion: "1.0.0"` は legacy input boundary、`1.1.0` は編集移行前の互換入力として厳密に検証し、明示的 migration で `1.2.0` へ変換する |
 | `CharacterVisualSet` | ワークスペース共通の登録済みキャラクタービジュアルと variant/file メタデータの正本 | workspace SQLite の現行カタログ。P2-01 の初期 2 キャラクター、6 variant、10 PNG は idempotent seed / migration の入力として扱い、静的カタログを現行の正本にしない |
-| `CharacterVisualBinding` | `project.json` に保存する、プロジェクト内の VOICEVOX 話者と visual / idle variant の選択 | 現行 `VideoProject 1.1.0` の project-specific な保存データ。CV-05 で実装済みであり、SQLite に project binding は持たせない |
-| `ScriptLine.characterVariantId` | `project.json` に保存する、line ごとの人間が選択した physical variant 参照 | 現行 `VideoProject 1.1.0` に保存する explicit reference。CV-05 で実装済みで、新規 line は未選択から開始する |
+| `CharacterVisualBinding` | `project.json` に保存する、プロジェクト内の VOICEVOX 話者と visual / idle variant の選択 | ED-01 の `VideoProject 1.2.0` へ引き継ぐ project-specific な保存データ。SQLite に project binding は持たせない |
+| `ScriptLine.characterVariantId` | `project.json` に保存する、line ごとの人間が選択した physical variant 参照 | ED-01 の `VideoProject 1.2.0` へ引き継ぐ explicit reference。新規 line は未選択から開始する |
 | `characterVariantCatalog` | `CharacterVisualSet` から生成する型、検証入力、または純粋な catalog snapshot | DB から取得した検証済み snapshot または純粋な view model。実在項目を静的ソースへ二重管理しない |
-| `RenderManifest` | 特定レンダリングへ使う解決済み派生データ | 現行 `RenderManifest 2.2.0`。`characters`、`characterVariants`、line ごとの `characterVariantId` など、explicit reference から解決した物理 variant 情報を保持する |
+| `RenderManifest` | 特定レンダリングへ使う解決済み派生データ | ED-08 の次期 `RenderManifest 2.3.0`。`characters`、`characterVariants`、line ごとの `characterVariantId`、実動画 insert、最終 section BGM など、explicit reference から解決した情報を保持する |
 
 `CharacterVisualSet` と配下の物理 variant は別エンティティとして扱う。visual 全体は一部の表情・ポーズ variant が未登録でも登録できるが、`single-image` は `single`、`mouth-pair` は `closed` と `open` が揃った場合だけ完成 variant とする。最初の完成 variant のキャンバスサイズを visual 単位の基準とし、同じ visual へ異なるサイズの画像を追加しない。
 
@@ -129,7 +152,7 @@ PNG は `CharacterVisualSet` の file slot から参照されるファイル実�
 2. プロジェクトの作成、一覧、読み込み
 3. Markdown と企画条件の編集、自動保存
 4. OpenRouter による構成案生成、編集、承認
-5. 2 キャラクター形式の台本編集と、ビジュアル・音声を含む一体型の制作画面
+5. 2 キャラクター形式の台本編集と、ビジュアル・音声を含む一体型の台本画面
 6. P2-01 の初期 2 キャラクター設定と、CV-01〜CV-03 で追加済みの `CharacterVisualSet` の動的カタログ、PNG 検証、登録・確認画面
 7. プロジェクトごとの VOICEVOX ↔ `CharacterVisualSet` binding、待機用 idle variant、セリフごとの explicit physical variant 選択
 8. セクション・セリフカード中心の 1 ペイン `/projects/{projectId}/script` と、speaker に binding された active variant だけを表示する modal picker
@@ -143,6 +166,8 @@ PNG は `CharacterVisualSet` の file slot から参照されるファイル実�
 16. Remotion による同一マニフェストのプレビューと MP4 出力
 17. サムネイルのプレビューと画像出力
 18. 機械検証、互換 status・レビュー結果・stale 状態、意味のある操作のログ（出力ゲートは validation）
+
+`EditPlan`、`bgm` Asset、`/projects/{projectId}/edit`、`RenderManifest 2.3.0` は ED-00 で次期仕様として確定した項目であり、ED-01〜ED-09 の実装完了前に現行コードがサポート済みであることを示さない。
 
 ### 3.2 現在対象外・将来拡張
 
@@ -427,13 +452,13 @@ project-root/
 
 ## 7. 正本データ `VideoProject`
 
-以下の型例では、現行の `schemaVersion: "1.1.0"` と、MVP 開発初期の `schemaVersion: "1.0.0"` 互換境界を実装引き継ぎのために同じ場所に示している。`characterVisual` と `characterVariantId` は、明示的な version bump と migration を通過した現行 schema で保存する。`schemaVersion: "1.0.0"` のデータへ新しい意味を暗黙に追加してはならない。
+以下の型例では、ED-01 で採用する `schemaVersion: "1.2.0"` と、編集移行前の `schemaVersion: "1.1.0"`、MVP 開発初期の `schemaVersion: "1.0.0"` 互換境界を実装引き継ぎのために同じ場所に示している。`characterVisual`、`characterVariantId`、`edit` は、明示的な version bump と migration を通過した `1.2.0` schema で保存する。`schemaVersion: "1.0.0"` または `"1.1.0"` のデータへ新しい意味を暗黙に追加してはならない。
 
 ### 7.1 ルート
 
 ```ts
 type VideoProject = {
-  schemaVersion: "1.1.0";
+  schemaVersion: "1.2.0";
   revision: number;
   metadata: ProjectMetadata;
   source: ProjectSource;
@@ -444,12 +469,22 @@ type VideoProject = {
   script: Script;
   visuals: VisualPlan;
   audio: AudioPlan;
-  inserts: InsertPlan;
+  edit: EditPlan;
   thumbnail: ThumbnailPlan;
 };
 ```
 
-すべてのオブジェクトは既知でないキーを拒否する strict object とする。スキーマを変更する場合は `schemaVersion` 単位で明示的なマイグレーション関数を追加する。MVP 開発初期の `1.0.0` は legacy input として検証し、CV-05 の migration 後は現行の `1.1.0` を使用する。
+すべてのオブジェクトは既知でないキーを拒否する strict object とする。スキーマを変更する場合は `schemaVersion` 単位で明示的なマイグレーション関数を追加する。MVP 開発初期の `1.0.0` と編集移行前の `1.1.0` は legacy input として検証し、ED-01 の migration 後は現行の `1.2.0` を使用する。
+
+ED-01 では `1.1.0` から `1.2.0` へ migration する。`1.1.0` の `audio.sectionBgms` と `inserts` は legacy input として読み取るが、現行 schema の `edit` へ暗黙に拡張しない。migration が完了した後の BGM と動画要素の正本は `edit` だけとする。
+
+### 7.1.1 `VideoProject 1.1.0 → 1.2.0` migration 方針
+
+- 旧 `opening`、`ending`、`eyeCatches` は実 MP4 Asset の参照を持たないため、架空 Asset や動画要素へ変換せず、`edit.videoElements` の空状態へ移行する。placeholder を現行正本へ持ち越さない。
+- 旧 `AudioPlan.sectionBgms` が登録済み Asset の `assetId`、version、checksum を安全に復元できる場合だけ `edit.sectionBgms` へ変換する。旧 path しかなく Asset を一意に復元できない場合は架空 Asset を自動生成せず、BGM 未設定・再登録または再選択が必要な状態として migration diagnostics を返す。
+- 旧 BGM の `loop`、`fadeInMs`、`fadeOutMs`、開始オフセット、トリムなど、現行 `EditPlan` にない自由設定は持ち越さない。BGM は対象セクション全区間の固定 loop とし、音量だけを引き継ぐ。範囲外の音量は validation error とする。
+- generic `VisualAssignment` の旧 `VideoDisplay.muted` は `true → volume: 0`、`false → volume: 1` として変換し、`muted` は `1.2.0` の保存値に残さない。
+- migration は一時ファイルへ出力してから atomic rename し、失敗時に既存 `project.json` を壊さない。未解決 BGM がある場合も、架空の Asset や推測による path を保存しない。
 
 ### 7.2 メタデータ
 
@@ -832,7 +867,7 @@ type VideoDisplay = CommonDisplay & {
   startMs: number;
   endMs: number;
   playbackRate: number;
-  muted: boolean;
+  volume: number;
 };
 
 type ImageDisplay = CommonDisplay & {
@@ -858,9 +893,10 @@ type BackgroundDefinition =
 
 - `endMs` は `startMs` より大きく、素材の duration 以下とする。
 - `playbackRate` は `0` より大きい値とする。
+- `volume` は `0` 以上 `1` 以下とする。旧 `muted` は migration 時に `true → 0`、`false → 1` として変換し、`1.2.0` では保存しない。
 - 帳票の `page` は 1 始まりとし、素材の `pageCount` 以下とする。
 
-### 7.9 音声、挿入素材、サムネイル
+### 7.9 音声、編集、サムネイル
 
 生成済み音声の duration、VOICEVOX query、フレーム値は派生データであり `project.json` へ保存しない。人間が確定した音声調整は `projects/{projectId}/voice-adjustments/{lineId}.json` へ分離し、Git 管理可能な正本データとして保存する。
 
@@ -916,14 +952,37 @@ type VoicevoxMora = {
 
 ```ts
 type AudioPlan = {
-  sectionBgms: SectionBgm[];
   soundEffects: SoundEffect[];
 };
 
-type InsertPlan = {
-  opening: PlaceholderInsert;
-  ending: PlaceholderInsert;
-  eyeCatches: EyeCatchPlaceholder[];
+type ProjectAssetSnapshot = {
+  assetId: string;
+  assetVersion: number;
+  assetChecksum: string;
+  projectMediaPath: string;
+};
+
+type EditVideoPlacement =
+  | { kind: "before_first_section" }
+  | { kind: "before_section"; sectionId: string; order: number }
+  | { kind: "after_last_section" };
+
+type EditVideoElement = ProjectAssetSnapshot & {
+  id: string;
+  role: "intro" | "outro" | "cutin";
+  placement: EditVideoPlacement;
+  volume: number;
+};
+
+type SectionBgmAssignment = ProjectAssetSnapshot & {
+  id: string;
+  sectionId: string;
+  volume: number;
+};
+
+type EditPlan = {
+  videoElements: EditVideoElement[];
+  sectionBgms: SectionBgmAssignment[];
 };
 
 type ThumbnailPlan = {
@@ -937,7 +996,8 @@ type ThumbnailPlan = {
   layout: "standard";
 };
 
-type SectionBgm = {
+/** `1.1.0` compatibility input only. It is not part of `EditPlan`. */
+type LegacySectionBgm = {
   id: string;
   sectionId: string;
   path: string;
@@ -958,14 +1018,15 @@ type SoundEffect = {
   volume: number;
 };
 
-type PlaceholderInsert = {
+/** `1.1.0` compatibility input only. Current projects do not persist placeholders. */
+type LegacyPlaceholderInsert = {
   id: string;
   kind: "placeholder";
   slot: "opening" | "ending";
   durationMs: 2000;
 };
 
-type EyeCatchPlaceholder = {
+type LegacyEyeCatchPlaceholder = {
   id: string;
   kind: "placeholder";
   slot: "eye_catch";
@@ -982,21 +1043,18 @@ type EyeCatchPlaceholder = {
 - 同時に 3 音以上の効果音が重なる場合は警告する。警告は保存を禁止しない。
 - セクション音声との合成試聴を提供し、ナレーションより効果音が大きく聞こえる場合は警告する。現行仕様では自動音量補正を行わず、保存を禁止しない。
 - 素材登録時のラウドネス解析と音量正規化は将来の評価事項とする。
-- BGM はセクションごとに 0 件または 1 件とし、同じ `sectionId` の重複を拒否する。BGM を設定しないセクションは無音とする。
-- BGM の再生範囲は、対象セクションの最初のセリフ開始から最後のセリフ終了までとする。素材が短い場合は `loop` に従い、長い場合はセクション終了位置で切る。
-- セクション境界では前セクションの BGM を `fadeOutMs` で終了させ、次セクションの BGM を `fadeInMs` で開始する。現行仕様では曲同士を重ねるクロスフェードを行わない。
-- 自動ダッキング、音量キーフレーム、1 セクション内の複数曲は現在対象外とする。
-- opening と ending は必須で、初期値と保存値をそれぞれ 2000 ms の無音プレースホルダーとする。
-- eye catch はセクション境界にだけ追加でき、`beforeSectionId` が示すセクションの直前へ 2000 ms の無音プレースホルダーを挿入する。最初のセクションの前と同じ境界へは追加できない。
-- プレースホルダーは Remotion の共通コンポーネントで識別用ラベルを描画し、外部動画ファイルを必要としない。本番用 OP、ED、アイキャッチへの置換は将来のスキーマ拡張とする。
-- プレースホルダー区間では本編用 BGM と効果音を再生しない。
+- `EditPlan.videoElements` の Asset は `kind: "video"` かつ `.mp4`、`video/mp4`、MP4 container を満たすこと。`role: "intro"` は `before_first_section` に最大 1 件、`role: "outro"` は `after_last_section` に最大 1 件、`role: "cutin"` は `before_section` にだけ置く。同じ境界の cutin は `order` の昇順で解決する。
+- `EditPlan.sectionBgms` は section ごとに 0 件または 1 件とし、同じ `sectionId` の重複を拒否する。Asset は `kind: "bgm"` かつ `.mp3`、`audio/mpeg`、MP3 を満たすこと。
+- BGM の再生範囲は、動画要素の shift 後に確定した対象セクションの全区間とする。素材の長さに関係なく固定 loop し、セクション終了で停止する。動画要素の区間では BGM を再生しない。
+- 動画要素と BGM の `volume` は `0` 以上 `1` 以下とする。`loop`、開始オフセット、トリム、`fadeInMs`、`fadeOutMs`、音量キーフレーム、自動ダッキング、曲同士のクロスフェードは `EditPlan` に持たせない。
+- 旧 `LegacySectionBgm` と `LegacyPlaceholderInsert` / `LegacyEyeCatchPlaceholder` は migration の入力境界だけで使用し、現行の project data や manifest へ placeholder を保存しない。
 - サムネイルは `title` と `departmentOrSystem` を必須の非空文字列とする。背景画像、補足、版数、キャラクター、代表ビジュアルは任意とし、未指定時は共通テンプレートの既定背景を使用する。
 
 ## 8. 派生データ
 
-### 8.1 `RenderManifest`（現行 `2.2.0`）
+### 8.1 `RenderManifest`（次期 `2.3.0`）
 
-現行実装は `RenderManifest 2.2.0` を使用する。次の `1.0.0` 型は MVP 開発初期に使われた旧モデルを、既存キャッシュ・fixture・renderer の互換性確認のために履歴として保持したものであり、新規実装の正本ではない。現行モデルは 8.1.1 に示す。
+ED-08 では `RenderManifest 2.3.0` を採用する。次の `1.0.0` 型と既存 `2.2.0` キャッシュは、MVP / ED-00 前の互換性確認のために履歴として保持するものであり、新規実装の正本ではない。次期モデルは 8.1.1 に示す。
 
 ```ts
 type LegacyRenderManifestV1 = {
@@ -1010,9 +1068,9 @@ type LegacyRenderManifestV1 = {
   lines: LegacyRenderLine[];
   visuals: RenderVisual[];
   backgrounds: RenderBackground[];
-  audioTracks: RenderAudioTrack[];
+  audioTracks: LegacyRenderAudioTrack[];
   soundEffects: RenderSoundEffect[];
-  inserts: RenderInsert[];
+  inserts: LegacyRenderInsert[];
 };
 ```
 
@@ -1048,7 +1106,7 @@ type RenderBackground = {
   background: BackgroundDefinition;
 };
 
-type RenderAudioTrack = {
+type LegacyRenderAudioTrack = {
   id: string;
   sectionId: string;
   from: number;
@@ -1070,7 +1128,7 @@ type RenderSoundEffect = {
   volume: number;
 };
 
-type RenderInsert = {
+type LegacyRenderInsert = {
   id: string;
   kind: "placeholder";
   slot: "opening" | "ending" | "eye_catch";
@@ -1081,17 +1139,17 @@ type RenderInsert = {
 };
 ```
 
-旧 `RenderManifest 1.0.0` の `lines[].expression` は `ScriptLine["expression"]`、つまり `neutral` / `smile` / `explain` / `caution` の論理表情である。これは物理ファイルパスや `variantId` を意味しない。現行 `2.2.0` では、これに加えて明示的な character variant 解決フィールドを保持する。
+旧 `RenderManifest 1.0.0` の `lines[].expression` は `ScriptLine["expression"]`、つまり `neutral` / `smile` / `explain` / `caution` の論理表情である。これは物理ファイルパスや `variantId` を意味しない。互換 `2.2.0` ではこれに加えて明示的な character variant 解決フィールドを保持した。ED-08 の `2.3.0` では、その責務に実動画 insert と編集 BGM の最終範囲を加える。
 
-### 8.1.1 現行 `RenderManifest 2.2.0` model
+### 8.1.1 次期 `RenderManifest 2.3.0` model
 
-CV-05 で導入した現行モデルは `RenderManifest 1.0.0` と意味を分離し、`manifestVersion: "2.2.0"` として保存する。`characterMappingVersion` は既存キャッシュ・run-log との互換メタデータとして残すが、expression や mapping table から physical variant を解決する入力ではない。
+CV-05 で導入した explicit variant 解決を引き継ぐ次期モデルは `RenderManifest 1.0.0` / `2.2.0` と意味を分離し、`manifestVersion: "2.3.0"` として保存する。`characterMappingVersion` は既存キャッシュ・run-log との互換メタデータとして残すが、expression や mapping table から physical variant を解決する入力ではない。
 
 production の compile endpoint は `POST /api/projects/{projectId}/manifest/compile` とする。endpoint の compile service は project と audio index を読み、`CharacterVisualCatalogService.verifyFiles()` が返す SQLite の validated snapshot から character file metadata を組み立て、checksum を保持したまま `RenderManifestStore.compileAndStore()` へ渡す。静的 legacy catalog をこの経路の入力にせず、snapshot checksum と asset metadata の不一致は validation error とする。
 
 ```ts
 type RenderManifest = {
-  manifestVersion: "2.2.0";
+  manifestVersion: "2.3.0";
   sourceProjectHash: string;
   compilerInputHash: string;
   characterCatalogVersion: string;
@@ -1108,7 +1166,7 @@ type RenderManifest = {
   backgrounds: RenderBackground[];
   audioTracks: RenderAudioTrack[];
   soundEffects: RenderSoundEffect[];
-  inserts: RenderInsert[];
+  inserts: RenderVideoInsert[];
 };
 
 type RenderLineCurrent = LegacyRenderLine & {
@@ -1140,9 +1198,28 @@ type RenderCharacterVariant =
         open: { path: string; sha256: string };
       };
     };
+
+type RenderAudioTrack = {
+  id: string;
+  sectionId: string;
+  from: number;
+  durationInFrames: number;
+  src: string;
+  volume: number;
+  loop: true;
+};
+
+type RenderVideoInsert = {
+  id: string;
+  role: "intro" | "outro" | "cutin";
+  from: number;
+  durationInFrames: number;
+  src: string;
+  volume: number;
+};
 ```
 
-#### 現行の explicit character variant resolution
+#### 次期の explicit character variant resolution
 
 現行の explicit character variant resolution では、次を入力として受け取る。
 
@@ -1160,13 +1237,13 @@ RenderManifest.characterVariants[]
 
 compiler は explicit reference を snapshot と照合し、解決元 `visualId`、variant の active 状態、speaker の project character、renderType、相対ファイルパス、checksum、`mouth-pair` の `closed` / `open` を manifest に固定する。`RenderCharacterVariant` は physical visual の `(visualId, variantId)` を識別し、同じ physical variant を複数の project character が共有できる。expression、tag、label、旧固定 mapping から physical variant を自動選択・代替しない。missing、inactive、cross-visual、variant / mouth slot 欠落、checksum 不一致は validation error とする。Remotion は SQLite、CharacterVisual Service、ファイル探索を直接参照せず、解決済み manifest だけを入力とする。
 
-実際の project schema、snapshot version、variant version、`manifestVersion` の互換性は CV-05 で既存 schema と整合させて実装済みである。CV-04 は仕様文書で manifest の責務を定め、CV-05 は manifest version `2.2.0` と project schema の明示的な version bump / migration を実装した。project schema `1.0.0` の意味も暗黙に変更しない。
+実際の project schema、snapshot version、variant version、`manifestVersion` の互換性は ED-01 / ED-08 で `VideoProject 1.2.0` と整合させる。ED-00 は仕様文書で `2.3.0` の責務を定め、project schema `1.0.0` / `1.1.0` の意味を暗黙に変更しない。
 
 - フレーム範囲は半開区間 `[from, from + durationInFrames)` とする。
 - ミリ秒からフレームへの変換は `Math.ceil((ms / 1000) * fps)` とする。
-- 30 fps の現行仕様では各 2000 ms プレースホルダーを正確に 60 フレームとして扱う。
-- タイムラインコンパイラは本編内のセリフ相対位置を計算した後、opening と eye catch の長さだけ後続要素をシフトし、最後に ending を追加する。
-- セクション BGM はプレースホルダー挿入後の最終的なセクションフレーム範囲へ解決する。
+- 30 fps の現行仕様では、動画要素の実尺をメディア技術情報からフレームへ変換する。
+- タイムラインコンパイラは本編内のセリフ相対位置を計算した後、cutin、intro、outro の順序で実動画を挿入し、後続要素をシフトする。
+- セクション BGM は動画要素挿入後の最終的なセクションフレーム範囲へ解決し、その区間を固定 loop する。動画要素の区間では BGM track を無効にする。
 - 効果音の `from` は対象 `RenderLine.speechFrom` に `offsetMs` をフレーム変換した値を加えて決定する。効果音素材の実尺から `durationInFrames` を計算する。
 - 配列はタイムライン順に安定ソートする。
 - 同一入力に対する出力順序と JSON シリアライズ順を固定する。
@@ -1324,7 +1401,7 @@ seed は「2 キャラクターしか登録できない」という制約を作�
 type Asset = {
   assetId: string;
   version: number;
-  kind: "video" | "photo" | "document_scan" | "sound_effect";
+  kind: "video" | "photo" | "document_scan" | "sound_effect" | "bgm";
   title: string;
   description: string;
   libraryMediaPath: string;
@@ -1344,7 +1421,16 @@ type Asset = {
 };
 ```
 
-タグは素材との多対多関連、タグの分類軸、正規名、別名、利用状態を別テーブルで管理する。全文検索対象はタイトル、説明、部門、対象システム、タグ正規名、タグ別名とする。`sound_effect` は `confirm`、`attention`、`warning` の用途タグを必須とする。動画、写真、帳票では `width` と `height` を必須とし、効果音では `durationMs` を必須とする。
+タグは素材との多対多関連、タグの分類軸、正規名、別名、利用状態を別テーブルで管理する。全文検索対象はタイトル、説明、部門、対象システム、タグ正規名、タグ別名とする。`sound_effect` は `confirm`、`attention`、`warning` の用途タグを必須とする。動画、写真、帳票では `width` と `height` を必須とし、動画、BGM、効果音では `durationMs` を必須とする。
+
+編集フェーズの形式 validation は次のとおりとする。
+
+| Asset kind | 拡張子 | MIME | 実ファイル形式 | 使用先 |
+|---|---|---|---|---|
+| `video` | `.mp4` | `video/mp4` | MP4 container | intro / outro / cutin |
+| `bgm` | `.mp3` | `audio/mpeg` | MP3 | section BGM |
+
+拡張子だけで許可せず、MIME と実ファイル形式を登録時に検証する。`bgm` は generic `VisualAssignment` の候補に含めず、編集画面の BGM picker だけへ返す。動画要素と BGM の project snapshot には `assetId`、`version`、`checksum`、`projectMediaPath` を固定し、Asset の後続更新で既存 project を変更しない。
 
 ### 10.4 登録
 
@@ -1411,10 +1497,13 @@ PUT    /api/projects/{projectId}/source
 PUT    /api/projects/{projectId}/brief
 PUT    /api/projects/{projectId}/characters
 PUT    /api/projects/{projectId}/audio
+PUT    /api/projects/{projectId}/edit
 GET    /api/projects/{projectId}/validation
 ```
 
 現行の project character mutation（CV-05 実装）は、VOICEVOX 話者と `CharacterVisualBinding` を `project.json` へ保存する責務を持つ。`CharacterVisualSet` の visual / variant / file metadata は `GET /api/character-visuals` 系の workspace catalog から取得し、project API が SQLite へ project binding を保存する設計にはしない。
+
+ED-03〜ED-05 の edit mutation は `EditPlan` を `expectedRevision` 付きで保存する。`PUT /api/projects/{projectId}/edit` は台本の section order を受け付けず、video element の role / placement / order、登録済み Asset の snapshot、section BGM 0/1、volume だけを更新する。Asset の取り込みと `project.json` 更新は、片方だけが成功した状態を残さない。
 
 ### 11.3 構成案と台本
 
@@ -1558,7 +1647,7 @@ POST   /api/projects/{projectId}/thumbnail/render
 
 ## 13. タイムラインコンパイラ
 
-以下の `RenderManifest.characters[]`、`RenderManifest.lines[].characterVariantId`、`RenderManifest.characterVariants[]` は、8.1.1 の現行 `RenderManifest 2.2.0` model の出力である。旧 `RenderManifest 1.0.0` の互換モデルへ新しい意味を追加する仕様ではない。
+以下の `RenderManifest.characters[]`、`RenderManifest.lines[].characterVariantId`、`RenderManifest.characterVariants[]` は、8.1.1 の次期 `RenderManifest 2.3.0` model の出力である。旧 `RenderManifest 1.0.0` / `2.2.0` の互換モデルへ新しい意味を追加する仕様ではない。
 
 入力:
 
@@ -1580,10 +1669,11 @@ POST   /api/projects/{projectId}/thumbnail/render
 7. セリフを累積して line range を作る。
 8. visual assignment の line ID 範囲を frame range へ解決する。
 9. section background を frame range へ解決する。
-10. 挿入素材、BGM、効果音を統合する。
-11. 全体の duration を計算する。
-12. ハッシュとチェックサムを付与し Zod で検証する。
-13. 一時ファイルから `cache/render-manifest.json` へ置換する。
+10. `EditPlan.videoElements` の cutin を section 境界へ挿入する。
+11. 先頭へ intro、末尾へ outro を挿入し、後続の section / line / visual / background の frame range を shift する。
+12. shift 後の section range へ `EditPlan.sectionBgms` を解決し、動画要素の区間では BGM を再生しない。効果音をセリフ基準の位置へ統合する。
+13. `RenderVideoInsert`、`RenderAudioTrack`、全体 duration、ハッシュ、チェックサムを確定し、Zod で検証する。
+14. 一時ファイルから `cache/render-manifest.json` へ置換する。
 
 失敗時は新しいマニフェストを保存せず、全エラーを line ID、assignment ID、パスと関連付けて返す。
 
@@ -1607,6 +1697,7 @@ POST   /api/projects/{projectId}/thumbnail/render
 /projects/{projectId}/brief
 /projects/{projectId}/outline
 /projects/{projectId}/script
+/projects/{projectId}/edit
 /projects/{projectId}/characters
 /projects/{projectId}/visuals
 /projects/{projectId}/voice
@@ -1620,32 +1711,35 @@ POST   /api/projects/{projectId}/thumbnail/render
 
 ルーティング表現は採用フレームワークに合わせて変更してよいが、画面責務は維持する。
 
-`/projects/{projectId}/script` はセクションとセリフカードを中心とする 1 ペインの制作画面である。各カードの「ビジュアルを変更」から modal picker を開き、speaker に project 上で binding された `CharacterVisualSet` の active variant だけを表示する。`project.json` の binding / line reference と、バックエンドが解決した `CharacterVisualCatalogSnapshot` を組み合わせ、選択結果をカード内へ統合する。画像読込失敗時は管理された配信 URL と対象 ID を表示し、DB に登録されていない物理素材を表示しない。台本、generic 素材 assignment、音声状態は同じ `project.json` の revision と自動保存で扱い、ワークスペース共通の visual metadata は `project.json` へ保存しない。
+`/projects/{projectId}/script` はセクションとセリフカードを中心とする 1 ペインの台本画面である。各カードの「ビジュアルを変更」から modal picker を開き、speaker に project 上で binding された `CharacterVisualSet` の active variant だけを表示する。`project.json` の binding / line reference と、バックエンドが解決した `CharacterVisualCatalogSnapshot` を組み合わせ、選択結果をカード内へ統合する。画像読込失敗時は管理された配信 URL と対象 ID を表示し、DB に登録されていない物理素材を表示しない。台本、generic 素材 assignment、音声状態は同じ `project.json` の revision と自動保存で扱い、ワークスペース共通の visual metadata は `project.json` へ保存しない。
+
+`/projects/{projectId}/edit` は独立した編集画面である。`script.sections` から導出した section card の順番と内容を読み取り専用で表示し、編集対象の video element card と BGM を追加で表示する。未編集状態では section card だけを表示する。
 
 `/character-visuals` はプロジェクトに依存しないワークスペース共通の登録・管理画面である。サイドバーから開き、一覧、作成、基本情報編集、完全な variant の作成、既存 file slot の差し替え、status 更新を行う。全表情・全ポーズの一括登録は要求しない。未登録 variant は未登録として表示し、variant 作成フォームでは `single-image` の `single`、`mouth-pair` の `closed` / `open` を揃えるまで登録操作を完了できない。必須 slot 欠落や形式不正はフォームの validation として表示するが、不完全な variant は DB や管理領域へ保存しない。既存の完成 variant は complete file set 単位で差し替えでき、必須 slot の削除は行わない。`mentor` / `learner` の役割付与、プロジェクトへの自動紐付け、`ScriptLine.expression` との mapping はこの画面の責務に含めない。
 `/projects/{projectId}/characters` は、`project.json` の VOICEVOX 話者と `CharacterVisualSet` の binding、および workspace SQLite の現在の snapshot を組み合わせた確認画面である。`visualId === characterId` を前提にせず、binding がない場合は「未設定」と表示する。catalog が inactive、missing、別 visual の参照を返した場合は自動代替せず validation error とする。
 
 WebUI は SQLite、`library/character-visuals/`、ローカルファイルシステムを直接操作しない。Character Visual API が返す metadata と管理された画像 URL だけを使用する。
 
-### 14.2 制作ステップ
+### 14.2 ワークフローステップ
 
 ```text
 企画
   → 構成案（承認・最新性確認）
-  → 制作（台本・ビジュアル・音声）
+  → 台本（台本・キャラクタービジュアル・音声）
+  → 編集（動画要素・セクション BGM）
   → 出力 validation
   → `RenderManifest` 生成
   → プレビュー／レンダリング
 ```
 
-制作画面は台本承認・ビジュアル承認なしで、台本、セリフカード上のキャラクタービジュアル、音声生成・調整を行える。generic 素材の候補表示・素材割り当ては backend と保存データを維持し、必要な UI は別画面または補助導線で扱う。プレビュー、`RenderManifest` 生成、レンダリングは、構成案の承認・最新性、入力内容、音声、素材参照、範囲、checksum などの validation に失敗した場合だけ無効化し、理由と修正先へのリンクを表示する。
+台本画面は台本承認・ビジュアル承認なしで、台本、セリフカード上のキャラクタービジュアル、音声生成・調整を行える。編集画面は台本の section 順を変更せず、登録済み Asset から video element と BGM を選択する。generic 素材の候補表示・素材割り当ては backend と保存データを維持し、必要な UI は別画面または補助導線で扱う。プレビュー、`RenderManifest` 生成、レンダリングは、構成案の承認・最新性、入力内容、編集要素、音声、素材参照、範囲、checksum、実ファイル形式などの validation に失敗した場合だけ無効化し、理由と修正先へのリンクを表示する。
 
 ### 14.3 台本画面
 
 以下は現在の `/script` 制作画面の基本責務である。CV-05 で実装済みの画面は、台本・ビジュアル・音声を別々の承認工程へ戻さない。`ScriptLine.expression` は論理表情として編集し、physical variant は explicit `characterVariantId` として人間が選択する。
 
 - 1 ペイン: セクションとセリフカードを主役にする。プレビュー、保存状態、validation は補助表示として統合してよい。
-- 各セクション見出し: BGM の選択、差し替え、解除、単体試聴、音量、ループ、フェード、セクション音声との合成試聴
+- 各セクション見出し: 台本の背景、セクション情報、音声状態の確認。BGM の編集は `/projects/{projectId}/edit` で行う
 - セリフカード: ID、話者、論理表情、字幕、読み上げ、字幕プレビュー、音声状態、選択中 variant の preview / label / renderType、未選択表示、ビジュアル変更ボタン、並べ替え、複製、削除
 - 「ビジュアルを変更」modal picker: speaker に binding された `CharacterVisualSet` の active variant だけを表示し、preview、label、renderType、tags、選択中状態を表示する。`mouth-pair` は `closed` / `open` を表示する。
 - picker のタグ: 未指定では全 active variant を表示し、指定時は一致数の多い順へ移動するだけ。不一致を除外せず、同点は catalog snapshot の元順序を維持する。
@@ -1655,10 +1749,20 @@ WebUI は SQLite、`library/character-visuals/`、ローカルファイルシス
 
 現在の標準 `/script` 画面には、現在の編集対象、制作 ビジュアル候補、AI ビジュアル候補 UI、手順3-3 素材検索、素材検索結果、素材制作・表示設定カードを置かない。AI visual suggestion、Asset Search、generic `VisualAssignment` は backend とデータを維持し、必要なら別画面または補助導線で再利用する。
 
-### 14.4 挿入プレースホルダーとサムネイル
+### 14.4 編集画面とサムネイル
 
-- opening と ending の 2 秒プレースホルダーをタイムラインの先頭と末尾へ常時表示する。
-- セクション境界メニューから eye catch の追加と削除を行う。追加後は 2 秒のプレースホルダーをプレビューへ即時反映する。
+`/projects/{projectId}/edit` では、台本の section card を固定したまま、登録済み Asset だけで編集する。
+
+- 未編集状態では `script.sections` から導出した section card だけを表示する。
+- `intro` は先頭セクション前に最大 1 件、`outro` は末尾セクション後に最大 1 件、`cutin` は section 境界に 0 件以上配置する。同じ境界の cutin は video element card の順序だけを drag & drop で変更できる。
+- section 自体の追加、削除、並べ替え、内部任意時刻への cutin 配置はこの画面の責務に含めない。
+- video element picker は active な `video` Asset のうち `.mp4`、`video/mp4`、MP4 container を満たすものだけを候補にする。BGM picker は active な `bgm` Asset のうち `.mp3`、`audio/mpeg`、MP3 を満たすものだけを候補にする。OS path と任意ファイルは受け付けない。
+- video element は追加、差し替え、削除、音量調整を行い、BGM はセクションごとに追加、差し替え、解除、単体試聴、音量調整を行う。
+- 動画と BGM の volume は 0〜1 とする。BGM は対象 section の全区間を固定 loop し、動画要素の区間では前後 section の BGM を再生しない。開始オフセット、トリム、フェード、音量キーフレーム、自動ダッキング、クロスフェードは提供しない。
+- 選択した Asset は `assetId`、version、checksum、projectMediaPath を `project.json` の `edit` snapshot へ保存し、素材ライブラリの後続変更から切り離す。
+
+編集画面の保存時と出力前に、role と配置可能な境界、同一境界内の順序、intro / outro の重複、BGM の section 重複、Asset status、MP4 / MP3 の実ファイル形式、checksum、volume を validation する。
+
 - サムネイル画面ではタイトルと部門名または対象システム名を必須入力とし、補足、版数、背景画像、代表ビジュアル、キャラクターは任意入力とする。
 - サムネイルは固定テンプレートの 1280 × 720 プレビューを常時表示し、キャラクターの表示・非表示と、四国めたん側・ずんだもん側の選択を可能にする。
 
@@ -1695,7 +1799,7 @@ WebUI は SQLite、`library/character-visuals/`、ローカルファイルシス
 | line の `characterVariantId` | 該当 line、Manifest |
 | CharacterVisualSet の status、variant files、checksum | binding / line variant validation、Manifest |
 | ビジュアル割り当て | Manifest |
-| 背景、挿入素材、BGM、効果音 | Manifest |
+| 背景、`EditPlan.videoElements`、`EditPlan.sectionBgms`、BGM / 動画の volume、効果音 | Manifest |
 | サムネイル構成 | サムネイル出力 |
 | 用語の読みまたは状態 | 該当セリフの音声 |
 
@@ -1722,9 +1826,10 @@ WebUI は SQLite、`library/character-visuals/`、ローカルファイルシス
 - `mouth-pair` の `closed` / `open` キャンバス一致
 - 未登録 variant が set 全体のエラーになっていないこと
 - セクションとセリフの順序
-- セクション BGM の重複、参照先、フェード長
+- `EditPlan` の video element の role / placement / order、intro / outro の最大 1 件制約、section BGM の 0/1 重複
+- 編集 Asset の `assetId`、version、checksum、projectMediaPath、active 状態、MP4 / MP3 の MIME・実ファイル形式
+- 動画要素と BGM の volume が 0〜1 であること。`muted`、loop、開始オフセット、トリム、fade を現行 `EditPlan` へ保存しないこと
 - 効果音の素材種別、参照先、チェックサム、カテゴリ、オフセット、音量
-- プレースホルダーの固定長と eye catch の境界参照
 - サムネイルの必須タイトルと部門・対象システム名
 
 ### 16.2 制作・出力前 validation
@@ -1732,6 +1837,7 @@ WebUI は SQLite、`library/character-visuals/`、ローカルファイルシス
 - 構成案の role 順序、未解決質問、承認状態、source hash の最新性
 - 台本の空セリフ、話者、`outlineHash`、section/line 参照
 - ビジュアルの割り当て範囲、素材状態、チェックサム、機密区分
+- 編集要素の境界、実尺、Asset snapshot、MP4 / MP3 validation、BGM の最終 section 範囲、動画要素中の BGM 停止
 - character binding の visual / idle variant、line の `characterVariantId` が存在し、active で、speaker に binding された同一 visual 配下であること。missing、inactive、cross-visual は自動代替しない。
 - 音声の current/stale/missing、生成エラー、音声 index の参照
 - 前工程の revision、assignment 範囲、Manifest の入力ハッシュ
@@ -1752,8 +1858,10 @@ WebUI は SQLite、`library/character-visuals/`、ローカルファイルシス
 
 - 最新 `RenderManifest` を validation 済みの入力から生成できること（script/visual の `approved` status は不要）
 - 全素材と音声の存在、チェックサム
-- 現行 `RenderManifest 2.2.0` の `RenderLine.expression` は論理表情であり、物理ファイルパスとして解釈しない。
-- 現行 `RenderManifest 2.2.0` の `characters[].idleVariantId`、`lines[].characterVariantId`、`characterVariants[]` が project の explicit reference と validated snapshot から解決されていることを確認する。expression、tag、label、旧固定 mapping からの自動代替は許可しない。
+- 次期 `RenderManifest 2.3.0` の `RenderLine.expression` は論理表情であり、物理ファイルパスとして解釈しない。
+- 次期 `RenderManifest 2.3.0` の `characters[].idleVariantId`、`lines[].characterVariantId`、`characterVariants[]` が project の explicit reference と validated snapshot から解決されていることを確認する。expression、tag、label、旧固定 mapping からの自動代替は許可しない。
+- 次期 `RenderManifest 2.3.0` の `inserts[]` が `EditPlan.videoElements` の実尺、src、role、volume を持ち、placeholder の `kind` や固定 2000 ms を持たないことを確認する。
+- 次期 `RenderManifest 2.3.0` の `audioTracks[]` が shift 後の section 範囲、BGM src、`volume`、固定 loop を持ち、fade fields を持たないことを確認する。
 - 解決済み `variantId`、character ID、renderType、ファイルパス、checksum、mouth slot が manifest に固定されていることを確認する。
 - 正の duration
 - フレーム範囲の境界
@@ -1826,16 +1934,16 @@ SQLite にはキー入力単位ではなく、保存、構成案の承認、レ�
 - Markdown と hash の一体保存
 - 素材コピーと project update の成功、ロールバック
 - SQLite migration と P2-01 の 2 visual / 6 variant / 10 PNG seed の idempotency
-- project schema version bump と migration が `1.0.0` の意味を暗黙変更せず、tag / label 推測を行わず、解決不能な参照を未設定として報告すること
+- project schema version bump と migration が `1.0.0` / `1.1.0` の意味を暗黙変更せず、`1.1.0 → 1.2.0` で旧 placeholder を空状態へ移し、解決不能な BGM path から架空 Asset を作らないこと
 - キャラクタービジュアルの staged file、atomic rename、checksum 検証、SQLite transaction、compensating cleanup、orphan 診断
 - OpenRouter 成功、schema 違反、429、認証失敗
 - VOICEVOX query と WAV のキャッシュ
 - 音声調整の保存、再読込、リセット、base hash 不一致時の適用拒否
-- セクション BGM、効果音、2 秒プレースホルダーを含むタイムライン計算
+- `EditPlan` の MP4 video element、MP3 BGM、volume、固定 loop、cutin / intro / outro の timeline 計算
 - 効果音の発話開始相対オフセット、複数設定、3 音以上の同時再生警告
 - 任意項目がすべて未設定のサムネイル生成
 - `VideoProject` から `RenderManifest` 生成
-- explicit character binding / line variant と validated catalog snapshot から、現行 `RenderManifest 2.2.0` の `characters[].idleVariantId`、`lines[].characterVariantId`、`characterVariants[]` を解決すること
+- explicit character binding / line variant と validated catalog snapshot から、次期 `RenderManifest 2.3.0` の `characters[].idleVariantId`、`lines[].characterVariantId`、`characterVariants[]`、`inserts[]`、`audioTracks[]` を解決すること
 - レンダリングジョブの状態遷移
 
 外部 API は fixture またはローカル stub を使用し、通常のテスト実行で課金や実サービス依存を発生させない。
@@ -1852,9 +1960,10 @@ SQLite にはキー入力単位ではなく、保存、構成案の承認、レ�
 6. 台本・ビジュアルの承認操作なしで制作を続け、stale/missing validation を確認する
 7. 固有名詞登録と読み上げ解決
 8. 動画、写真、帳票の 3 種類の素材登録と割り当て、および効果音素材の登録
-9. fixture WAV から validation を通したマニフェスト生成
-10. 代表フレームの画像比較
-11. 短い MP4 とサムネイルの生成
+9. 編集画面で登録済み MP4 の intro / cutin / outro と MP3 BGM を選び、section card を固定したまま video element card だけを並べ替える
+10. fixture WAV と編集 Asset snapshot から validation を通した `RenderManifest 2.3.0` 生成
+11. 代表フレームの画像比較
+12. 短い MP4 とサムネイルの生成
 
 ## 20. MVP 開発時の実装順序（履歴）
 
@@ -2002,7 +2111,7 @@ P2-01 は当時の静的カタログと検証を実装した履歴として残�
 | 複数レイアウト | キャラクター配置プリセットを増やすか | 実動画で標準配置の不足が発生してから |
 | AI 台本初稿 | AI に最初の台本を書かせるか | 正解例と評価基準が十分に蓄積してから |
 | SQLite 運用バックアップ | 定期バックアップ周期、復旧 UI、UTF-8 JSON Lines（拡張子 `.jsonl`）による標準エクスポート | 最低限の migration 前バックアップ運用後、利用実績と復旧要件を確認してから |
-| 本番 OP・ED・アイキャッチ | プレースホルダーを本番映像、音声、可変尺、置換操作へ拡張するか | 現行 MVP の利用実績を確認した後 |
+| 編集動画要素の追加拡張 | cutin の自由配置、トリム、可変速度、音声付き要素などを追加するか | ED-01〜ED-09 の利用実績と編集負荷を確認した後 |
 | 効果音ラウドネス正規化 | 素材登録時に音量解析と正規化を行うか | 効果音素材ごとの音量差が運用上の問題になってから |
 
 上表は現行仕様における将来拡張と、利用実績に基づく評価項目である。実装の優先順位や受け入れ条件は、今後の GitHub Issue で定義する。
@@ -2020,3 +2129,19 @@ P2-01 は当時の静的カタログと検証を実装した履歴として残�
 - 用語レコードを登録し、決定論的に読み上げ文へ適用できる。
 - `VideoProject` と `RenderManifest` の型が UI、API、コンパイラで共有される。
 - JSON Schema の外部公開物を生成しない。
+
+## 23. ED-01〜ED-09 の実装境界
+
+ED-00 はこの文書の仕様確定だけを行い、以下の後続 Issue へ実装責務を分割する。ここで定義した `EditPlan`、Asset snapshot、volume、固定 loop、配置規則を越える自由編集機能は追加しない。
+
+| Issue | 実装責務 |
+|---|---|
+| ED-01 | `VideoProject 1.2.0`、`EditPlan`、schema / Zod、`1.1.0 → 1.2.0` migration。旧 placeholder は空状態へ移し、解決不能な BGM path は架空 Asset にしない。 |
+| ED-02 | `Asset.kind = "bgm"`、MP4 / MP3 の拡張子・MIME・実ファイル形式 validation。 |
+| ED-03 | 編集 Asset の候補取得、安全な project 取り込み、assetId / version / checksum / projectMediaPath snapshot API。 |
+| ED-04 | workflow 表示の「制作」→「台本」、`/projects/{projectId}/edit` の画面骨格、section card の読み取り専用表示。 |
+| ED-05 | video element card、MP4 / BGM picker、追加・差し替え・削除・解除、volume UI、保存 validation。 |
+| ED-06 | section card を並べ替えず、video element card だけを同一境界内で drag & drop する処理。 |
+| ED-07 | generic `VisualAssignment` の `VideoDisplay.muted` から `volume` への互換移行。 |
+| ED-08 | `RenderManifest 2.3.0`、実動画 `RenderVideoInsert`、timeline shift、最終 section BGM range の compiler。 |
+| ED-09 | Remotion、preview、MP4、編集画面の E2E、実素材形式・音量・BGM 停止の検証。 |
