@@ -138,7 +138,7 @@ export type AssetRepositoryVisualSearchFilters = {
   readonly requiredTagIds: readonly string[];
   readonly optionalTagIds: readonly string[];
   readonly excludedTagIds: readonly string[];
-  readonly kinds: readonly Exclude<AssetKind, "sound_effect">[];
+  readonly kinds: readonly Exclude<AssetKind, "sound_effect" | "bgm">[];
   readonly q?: string;
   readonly limit: number;
 };
@@ -552,8 +552,8 @@ export class AssetRepository {
     filters: AssetRepositoryVisualSearchFilters
   ): AssetRepositoryVisualSearchResult {
     const visualKinds = (filters.kinds as readonly AssetKind[]).filter(
-      (kind): kind is Exclude<AssetKind, "sound_effect"> =>
-        kind !== "sound_effect"
+      (kind): kind is Exclude<AssetKind, "sound_effect" | "bgm"> =>
+        kind !== "sound_effect" && kind !== "bgm"
     );
     if (visualKinds.length === 0) {
       return { items: [], total: 0 };
