@@ -1,3 +1,4 @@
+import { type MouseEvent } from "react";
 import { Link, useLocation } from "react-router";
 import {
   WORKFLOW_STEPS,
@@ -9,11 +10,16 @@ import {
 type WorkflowIndicatorProps = {
   readonly projectId: string;
   readonly currentStep: WorkflowStepId;
+  readonly onNavigate?: (
+    event: MouseEvent<HTMLAnchorElement>,
+    destination: string
+  ) => void;
 };
 
 export function WorkflowIndicator({
   projectId,
-  currentStep
+  currentStep,
+  onNavigate
 }: WorkflowIndicatorProps) {
   const location = useLocation();
   const hashStep =
@@ -49,6 +55,7 @@ export function WorkflowIndicator({
       <ol className="workflow-steps">
         {WORKFLOW_STEPS.map((step, index) => {
           const status = workflowStepStatus(activeStep, step.id);
+          const destination = workflowStepPath(projectId, step.id);
           return (
             <li
               className={`workflow-step-item workflow-step-item-${status}`}
@@ -58,7 +65,8 @@ export function WorkflowIndicator({
                 aria-current={status === "current" ? "step" : undefined}
                 className={`workflow-step workflow-step-${status}`}
                 title={step.description}
-                to={workflowStepPath(projectId, step.id)}
+                to={destination}
+                onClick={(event) => onNavigate?.(event, destination)}
               >
                 <span aria-hidden="true" className="workflow-step-marker">
                   {status === "past" ? "✓" : index + 1}

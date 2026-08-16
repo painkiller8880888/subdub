@@ -1123,14 +1123,20 @@ export function ScriptPage() {
         <p className="back-link">
           <Link to={outlinePath(projectId)}>構成案へ戻る</Link>
         </p>
-        <WorkflowIndicator projectId={projectId} currentStep="production" />
+        <WorkflowIndicator
+          projectId={projectId}
+          currentStep="production"
+          onNavigate={(event, destination) =>
+            void navigateAway(event, destination)
+          }
+        />
         <div className="production-character-assets-action">
           <Link className="button" to={charactersPath(projectId)}>
             キャラクター素材を設定
           </Link>
         </div>
         <header className="page-header page-header-stacked">
-          <p className="eyebrow">制作 台本・ビジュアル・音声</p>
+          <p className="eyebrow">台本</p>
           <h1>{project.metadata.title}</h1>
           <p>
             構成案のセクション構造を引き継いで、台本中心の制作を開始します。
@@ -1219,7 +1225,13 @@ export function ScriptPage() {
           プロジェクト一覧へ戻る
         </Link>
       </p>
-      <WorkflowIndicator projectId={projectId} currentStep="production" />
+      <WorkflowIndicator
+        projectId={projectId}
+        currentStep="production"
+        onNavigate={(event, destination) =>
+          void navigateAway(event, destination)
+        }
+      />
       <div className="production-character-assets-action">
         <Link
           className="button"
@@ -1232,7 +1244,7 @@ export function ScriptPage() {
         </Link>
       </div>
       <header className="page-header page-header-stacked">
-        <p className="eyebrow">制作 台本・ビジュアル・音声</p>
+        <p className="eyebrow">台本</p>
         <h1>{project.metadata.title}</h1>
         <p>
           台本を編集し、話者ごとのビジュアルセットからセリフ単位で表示 variant
