@@ -4,6 +4,7 @@ import {
   idSchema,
   isoUtcDateTimeSchema,
   nonNegativeIntegerSchema,
+  positiveIntegerSchema,
   relativePosixPathSchema,
   sha256Schema,
   finiteNumberSchema,
@@ -32,6 +33,7 @@ import {
 } from "./terminology.js";
 import {
   assetDetailSchema,
+  assetFormatSchema,
   assetListResultSchema,
   assetKindSchema,
   assetStatusSchema,
@@ -629,14 +631,15 @@ export const projectBriefSaveRequestSchema = z
   .strict();
 
 /**
- * Edit mutations accept asset selections only.  The asset version, checksum,
- * and project path are resolved by the backend after the selected asset has
- * been validated and copied into the project.
+ * Edit mutations accept the selected asset ID and version. The checksum and
+ * project path are resolved by the backend after that exact version has been
+ * validated and copied into the project.
  */
 export const projectEditVideoElementInputSchema = strictObject({
   id: idSchema,
   role: z.enum(["intro", "outro", "cutin"]),
   assetId: idSchema,
+  assetVersion: positiveIntegerSchema,
   placement: editVideoPlacementSchema,
   volume: unitIntervalSchema
 });
@@ -645,6 +648,7 @@ export const projectEditSectionBgmInputSchema = strictObject({
   id: idSchema,
   sectionId: idSchema,
   assetId: idSchema,
+  assetVersion: positiveIntegerSchema,
   volume: unitIntervalSchema
 });
 
@@ -951,6 +955,7 @@ export const assetListQuerySchema = strictObject({
   q: z.string().optional(),
   query: z.string().optional(),
   kind: assetKindSchema.optional(),
+  format: assetFormatSchema.optional(),
   department: z.string().transform(normalizeAssetOptionalField).optional(),
   system: z.string().transform(normalizeAssetOptionalField).optional(),
   status: assetStatusSchema.optional(),
@@ -960,6 +965,7 @@ export const assetListQuerySchema = strictObject({
 }).transform((query) => ({
   q: normalizeAssetSearchQuery(query.q ?? query.query ?? ""),
   kind: query.kind,
+  format: query.format,
   department: query.department,
   system: query.system,
   status: query.status ?? "active",

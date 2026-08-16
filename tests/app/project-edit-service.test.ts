@@ -48,11 +48,12 @@ function createAssetFixture(
   overrides: Partial<AssetDetail> = {}
 ): AssetFixture {
   const extension = kind === "video" ? "mp4" : "mp3";
+  const version = overrides.version ?? 1;
   const { libraryMediaPath: overriddenLibraryPath, ...safeOverrides } =
     overrides;
   const parsedAsset = assetDetailSchema.parse({
     assetId,
-    version: 1,
+    version,
     kind,
     title: assetId,
     description: "",
@@ -60,7 +61,7 @@ function createAssetFixture(
     department: null,
     system: null,
     mimeType: kind === "video" ? "video/mp4" : "audio/mpeg",
-    libraryMediaPath: `media/${assetId}/v1.${extension}`,
+    libraryMediaPath: `media/${assetId}/v${version}.${extension}`,
     checksum: checksum(bytes),
     sizeBytes: bytes.length,
     width: kind === "video" ? 1920 : null,
@@ -97,6 +98,10 @@ type SetupContext = {
   readonly projectFile: string;
   readonly repository: ProjectRepository;
   readonly assets: Map<string, AssetDetail>;
+  readonly findAssetDetail: (
+    assetId: string,
+    version?: number
+  ) => AssetDetail | undefined;
   readonly service: ProjectEditService;
 };
 
@@ -143,9 +148,27 @@ describe("ProjectEditService", () => {
     const projectFile = path.join(projectRoot, "project.json");
     await fs.writeFile(projectFile, `${JSON.stringify(project, null, 2)}\n`);
 
-    const assets = new Map(
-      (options.assets ?? []).map(({ asset }) => [asset.assetId, asset])
-    );
+    const assetDetails = (options.assets ?? []).map(({ asset }) => asset);
+    const assets = new Map<string, AssetDetail>();
+    for (const asset of assetDetails) {
+      const current = assets.get(asset.assetId);
+      if (current === undefined || current.version < asset.version) {
+        assets.set(asset.assetId, asset);
+      }
+    }
+    const findAssetDetail = (assetId: string, version?: number) => {
+      const matches = assetDetails.filter((asset) => asset.assetId === assetId);
+      if (version === undefined) {
+        return matches.reduce<AssetDetail | undefined>(
+          (latest, asset) =>
+            latest === undefined || latest.version < asset.version
+              ? asset
+              : latest,
+          undefined
+        );
+      }
+      return matches.find((asset) => asset.version === version);
+    };
     for (const fixture of options.assets ?? []) {
       const pathResult = relativePosixPathSchema.safeParse(
         fixture.asset.libraryMediaPath
@@ -168,7 +191,7 @@ describe("ProjectEditService", () => {
     const service = new ProjectEditService({
       repository,
       assetRepository: {
-        findAssetDetail: (assetId) => assets.get(assetId)
+        findAssetDetail
       },
       workspaceRoot,
       libraryRoot,
@@ -182,25 +205,32 @@ describe("ProjectEditService", () => {
       projectFile,
       repository,
       assets,
+      findAssetDetail,
       service
     };
   }
 
-  function videoInput(assetId = "asset-video", id = "intro-video") {
+  function videoInput(
+    assetId = "asset-video",
+    id = "intro-video",
+    assetVersion = 1
+  ) {
     return {
       id,
       role: "intro" as const,
       assetId,
+      assetVersion,
       placement: { kind: "before_first_section" as const },
       volume: 0.4
     };
   }
 
-  function bgmInput(assetId = "asset-bgm", id = "main-bgm") {
+  function bgmInput(assetId = "asset-bgm", id = "main-bgm", assetVersion = 1) {
     return {
       id,
       sectionId: "section-main",
       assetId,
+      assetVersion,
       volume: 0.25
     };
   }
@@ -238,14 +268,15 @@ describe("ProjectEditService", () => {
   function actualFinalPath(
     projectRoot: string,
     kind: "video" | "bgm",
-    assetId: string
+    assetId: string,
+    version = 1
   ): string {
     return path.join(
       projectRoot,
       kind === "video" ? "media" : "audio",
       kind === "video" ? "edits" : "bgm",
       assetId,
-      `v1.${kind === "video" ? "mp4" : "mp3"}`
+      `v${version}.${kind === "video" ? "mp4" : "mp3"}`
     );
   }
 
@@ -318,6 +349,109 @@ describe("ProjectEditService", () => {
       result.data.edit
     );
     expect(await readProject(context.projectFile)).toEqual(result.data);
+  });
+
+  it("imports the explicitly selected Asset version for video and BGM", async () => {
+    const videoV1 = createAssetFixture(
+      "asset-versioned-video",
+      "video",
+      Buffer.from("video v1 bytes", "utf8"),
+      { version: 1 }
+    );
+    const videoV2 = createAssetFixture(
+      "asset-versioned-video",
+      "video",
+      Buffer.from("video v2 bytes", "utf8"),
+      { version: 2 }
+    );
+    const bgmV1 = createAssetFixture(
+      "asset-versioned-bgm",
+      "bgm",
+      Buffer.from("bgm v1 bytes", "utf8"),
+      { version: 1 }
+    );
+    const bgmV2 = createAssetFixture(
+      "asset-versioned-bgm",
+      "bgm",
+      Buffer.from("bgm v2 bytes", "utf8"),
+      { version: 2 }
+    );
+    const context = await setup({
+      assets: [videoV1, videoV2, bgmV1, bgmV2]
+    });
+
+    const first = await context.service.save(
+      PROJECT_ID,
+      request({
+        videoElements: [videoInput("asset-versioned-video", "intro-video", 1)],
+        sectionBgms: [bgmInput("asset-versioned-bgm", "main-bgm", 1)]
+      })
+    );
+    expect(first.data.edit.videoElements[0]).toMatchObject({
+      assetId: "asset-versioned-video",
+      assetVersion: 1,
+      assetChecksum: videoV1.asset.checksum,
+      projectMediaPath: "media/edits/asset-versioned-video/v1.mp4"
+    });
+    expect(first.data.edit.sectionBgms[0]).toMatchObject({
+      assetId: "asset-versioned-bgm",
+      assetVersion: 1,
+      assetChecksum: bgmV1.asset.checksum,
+      projectMediaPath: "audio/bgm/asset-versioned-bgm/v1.mp3"
+    });
+
+    const second = await context.service.save(
+      PROJECT_ID,
+      request(
+        {
+          videoElements: [
+            videoInput("asset-versioned-video", "intro-video", 2)
+          ],
+          sectionBgms: [bgmInput("asset-versioned-bgm", "main-bgm", 2)]
+        },
+        first.revision
+      )
+    );
+    expect(second.data.edit.videoElements[0]).toMatchObject({
+      assetVersion: 2,
+      assetChecksum: videoV2.asset.checksum,
+      projectMediaPath: "media/edits/asset-versioned-video/v2.mp4"
+    });
+    expect(second.data.edit.sectionBgms[0]).toMatchObject({
+      assetVersion: 2,
+      assetChecksum: bgmV2.asset.checksum,
+      projectMediaPath: "audio/bgm/asset-versioned-bgm/v2.mp3"
+    });
+    expect(
+      await fs.readFile(
+        actualFinalPath(
+          context.projectRoot,
+          "video",
+          "asset-versioned-video",
+          1
+        )
+      )
+    ).toEqual(videoV1.bytes);
+    expect(
+      await fs.readFile(
+        actualFinalPath(
+          context.projectRoot,
+          "video",
+          "asset-versioned-video",
+          2
+        )
+      )
+    ).toEqual(videoV2.bytes);
+    expect(
+      await fs.readFile(
+        actualFinalPath(context.projectRoot, "bgm", "asset-versioned-bgm", 1)
+      )
+    ).toEqual(bgmV1.bytes);
+    expect(
+      await fs.readFile(
+        actualFinalPath(context.projectRoot, "bgm", "asset-versioned-bgm", 2)
+      )
+    ).toEqual(bgmV2.bytes);
   });
 
   it.each([
@@ -533,7 +667,7 @@ describe("ProjectEditService", () => {
     const failingService = new ProjectEditService({
       repository: failingSaveRepository(context.repository),
       assetRepository: {
-        findAssetDetail: (assetId) => context.assets.get(assetId)
+        findAssetDetail: context.findAssetDetail
       },
       workspaceRoot: context.workspaceRoot,
       libraryRoot: context.libraryRoot,
@@ -617,7 +751,7 @@ describe("ProjectEditService", () => {
     const failingService = new ProjectEditService({
       repository: failingSaveRepository(context.repository),
       assetRepository: {
-        findAssetDetail: (assetId) => context.assets.get(assetId)
+        findAssetDetail: context.findAssetDetail
       },
       workspaceRoot: context.workspaceRoot,
       libraryRoot: context.libraryRoot,

@@ -990,6 +990,9 @@ export async function searchAssets(
   if (query.kind !== undefined) {
     searchParams.set("kind", query.kind);
   }
+  if (query.format !== undefined) {
+    searchParams.set("format", query.format);
+  }
   if (query.department !== undefined) {
     searchParams.set("department", query.department);
   }

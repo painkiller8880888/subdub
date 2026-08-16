@@ -27,6 +27,7 @@ import {
   AssetDatabaseError,
   AssetProcessingRaceError
 } from "./asset-errors.js";
+import { ASSET_FORMATS, type AssetFormat } from "./asset-formats.js";
 
 export type AssetInsert = {
   assetId: string;
@@ -115,6 +116,7 @@ export type AssetProcessingKey = {
 export type AssetRepositoryListFilters = {
   readonly q?: string;
   readonly kind?: AssetKind;
+  readonly format?: AssetFormat;
   readonly department?: string;
   readonly system?: string;
   readonly status: AssetStatus;
@@ -177,6 +179,7 @@ type AssetListRow = {
 type AssetRepositorySearchFilters = {
   readonly q?: string;
   readonly kinds?: readonly AssetKind[];
+  readonly format?: AssetFormat;
   readonly department?: string;
   readonly system?: string;
   readonly status: AssetStatus;
@@ -486,7 +489,10 @@ export class AssetRepository {
     });
   }
 
-  findAssetDetail(assetId: string): AssetDetail | undefined {
+  findAssetDetail(
+    assetId: string,
+    requestedVersion?: number
+  ): AssetDetail | undefined {
     return withDatabaseErrors(() => {
       const asset = this.database
         .select()
@@ -496,10 +502,17 @@ export class AssetRepository {
       if (asset === undefined) {
         return undefined;
       }
+      const versionCondition =
+        requestedVersion === undefined
+          ? eq(assetVersions.assetId, assetId)
+          : and(
+              eq(assetVersions.assetId, assetId),
+              eq(assetVersions.version, requestedVersion)
+            );
       const version = this.database
         .select()
         .from(assetVersions)
-        .where(eq(assetVersions.assetId, assetId))
+        .where(versionCondition)
         .orderBy(desc(assetVersions.version))
         .limit(1)
         .get();
@@ -537,6 +550,7 @@ export class AssetRepository {
     return this.listSearch({
       q: filters.q,
       kinds: filters.kind === undefined ? undefined : [filters.kind],
+      format: filters.format,
       department: filters.department,
       system: filters.system,
       status: filters.status,
@@ -621,12 +635,31 @@ export class AssetRepository {
         ? sql`INNER JOIN asset_search
             ON asset_search.asset_id = ${assets.assetId}`
         : sql``;
+      const latestVersionJoin = sql`
+        LEFT JOIN asset_versions AS latest_version
+          ON latest_version.asset_id = assets.asset_id
+         AND latest_version.version = (
+           SELECT MAX(version)
+           FROM asset_versions
+           WHERE asset_versions.asset_id = assets.asset_id
+         )
+      `;
       if (hasQuery) {
         conditions.push(
           useFts
             ? sql`asset_search MATCH ${buildFtsQuery(filters.q)}`
             : substringSearchCondition(filters.q)
         );
+      }
+      if (filters.format !== undefined) {
+        const format = ASSET_FORMATS[filters.format];
+        conditions.push(sql`latest_version.mime_type = ${format.mimeType}`);
+        conditions.push(sql`
+          lower(substr(
+            latest_version.library_media_path,
+            -${format.extension.length + 1}
+          )) = ${`.${format.extension}`}
+        `);
       }
 
       const optionalMatchScore =
@@ -655,6 +688,7 @@ export class AssetRepository {
         SELECT COUNT(*) AS total
         FROM assets
         ${searchJoin}
+        ${latestVersionJoin}
         WHERE ${where}
       `);
       const total = Number(totalRow?.total ?? 0);
@@ -718,13 +752,7 @@ export class AssetRepository {
           assets.updated_at AS updatedAt
         FROM assets
         ${searchJoin}
-        LEFT JOIN asset_versions AS latest_version
-          ON latest_version.asset_id = assets.asset_id
-         AND latest_version.version = (
-           SELECT MAX(version)
-           FROM asset_versions
-           WHERE asset_versions.asset_id = assets.asset_id
-         )
+        ${latestVersionJoin}
         WHERE ${where}
         ORDER BY ${orderBy}
         LIMIT ${filters.pageSize} OFFSET ${offset}

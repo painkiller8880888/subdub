@@ -19,6 +19,15 @@ export const assetKindSchema = z.enum([
   "sound_effect"
 ]);
 
+export const assetFormatSchema = z.enum([
+  "mp4",
+  "mp3",
+  "png",
+  "jpeg",
+  "pdf",
+  "wav"
+]);
+
 export const assetStatusSchema = z.enum([
   "processing",
   "active",
@@ -162,6 +171,7 @@ export function normalizeAssetSearchQuery(value: string): string | undefined {
 }
 
 export type AssetKind = z.infer<typeof assetKindSchema>;
+export type AssetFormat = z.infer<typeof assetFormatSchema>;
 export type AssetStatus = z.infer<typeof assetStatusSchema>;
 export type AssetTagStatus = z.infer<typeof assetTagStatusSchema>;
 export type AssetTagAxis = z.infer<typeof assetTagAxisSchema>;

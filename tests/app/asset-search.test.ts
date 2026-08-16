@@ -169,6 +169,27 @@ describe("asset repository search", () => {
     ).toEqual(["asset-search"]);
   });
 
+  it("resolves a requested Asset version without falling back to the latest", async () => {
+    const repository = await createRepository();
+    insertAsset("asset-versioned", { kind: "video" });
+    database!.database
+      .insert(assetVersions)
+      .values({
+        assetId: "asset-versioned",
+        version: 2,
+        libraryMediaPath: "media/asset-versioned/v2.mp4",
+        mimeType: "video/mp4",
+        createdAt: NOW,
+        updatedAt: NOW
+      })
+      .run();
+
+    expect(repository.findAssetDetail("asset-versioned")?.version).toBe(2);
+    expect(repository.findAssetDetail("asset-versioned", 1)?.version).toBe(1);
+    expect(repository.findAssetDetail("asset-versioned", 2)?.version).toBe(2);
+    expect(repository.findAssetDetail("asset-versioned", 3)).toBeUndefined();
+  });
+
   it("keeps the search document synchronized for metadata, tags, and aliases", async () => {
     const repository = await createRepository();
     insertTag("tag-work", "作業手順");

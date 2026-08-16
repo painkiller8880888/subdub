@@ -235,13 +235,18 @@ export class ProjectEditService {
       const current = currentProject.edit.videoElements.find(
         (element) => element.id === input.id
       );
-      if (current !== undefined && current.assetId === input.assetId) {
+      if (
+        current !== undefined &&
+        current.assetId === input.assetId &&
+        current.assetVersion === input.assetVersion
+      ) {
         videoElements.push({ ...current, ...input });
         continue;
       }
 
       const pending = await this.prepareImport(
         input.assetId,
+        input.assetVersion,
         "video",
         projectRoot,
         ["edit", "videoElements", index, "assetId"]
@@ -254,13 +259,18 @@ export class ProjectEditService {
       const current = currentProject.edit.sectionBgms.find(
         (bgm) => bgm.id === input.id
       );
-      if (current !== undefined && current.assetId === input.assetId) {
+      if (
+        current !== undefined &&
+        current.assetId === input.assetId &&
+        current.assetVersion === input.assetVersion
+      ) {
         sectionBgms.push({ ...current, ...input });
         continue;
       }
 
       const pending = await this.prepareImport(
         input.assetId,
+        input.assetVersion,
         "bgm",
         projectRoot,
         ["edit", "sectionBgms", index, "assetId"]
@@ -311,11 +321,12 @@ export class ProjectEditService {
 
   private async prepareImport(
     assetId: string,
+    assetVersion: number,
     expectedKind: ExpectedAssetKind,
     projectRoot: string,
     detailPath: readonly (string | number)[]
   ): Promise<PendingImport> {
-    const asset = this.assetRepository.findAssetDetail(assetId);
+    const asset = this.assetRepository.findAssetDetail(assetId, assetVersion);
     if (asset === undefined) {
       throw projectEditError(
         PROJECT_EDIT_ERROR_CODE.assetNotFound,
