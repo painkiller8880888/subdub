@@ -30,20 +30,6 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Inspect formatter output
-        shell: bash
-        run: |
-          pnpm exec prettier --write \
-            src/app/assets/asset-processing-service.ts \
-            tests/app/asset-bgm.test.ts \
-            tests/app/asset-formats.test.ts \
-            tests/db/bgm-migration.test.ts
-          git diff -- \
-            src/app/assets/asset-processing-service.ts \
-            tests/app/asset-bgm.test.ts \
-            tests/app/asset-formats.test.ts \
-            tests/db/bgm-migration.test.ts
-
       - name: Verify
         run: pnpm verify
 
