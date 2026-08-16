@@ -42,9 +42,7 @@ describe("asset format detection", () => {
       status: "matched",
       format: "mp3"
     });
-    expect(
-      detectAssetFormat(Buffer.from([0xff, 0xfb, 0x90, 0x64]))
-    ).toEqual({
+    expect(detectAssetFormat(Buffer.from([0xff, 0xfb, 0x90, 0x64]))).toEqual({
       status: "matched",
       format: "mp3"
     });
