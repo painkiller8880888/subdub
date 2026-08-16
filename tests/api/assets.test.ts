@@ -24,6 +24,7 @@ import {
 import {
   buildMultipartBody,
   jpegBytes,
+  mp3Bytes,
   mp4Bytes,
   pdfBytes,
   pngBytes,
@@ -958,6 +959,45 @@ describe("asset upload API", () => {
     });
     expect(thumbnailResponse.statusCode).toBe(200);
     expect(thumbnailResponse.headers["content-type"]).toMatch(/^image\/png/);
+  });
+
+  it("serves the requested asset version media for preview", async () => {
+    const assetId = "asset-bgm-preview";
+    insertSearchAsset(assetId, {
+      kind: "bgm",
+      libraryMediaPath: `media/${assetId}/v1.mp3`
+    });
+    server.database.database
+      .insert(assetVersions)
+      .values({
+        assetId,
+        version: 2,
+        libraryMediaPath: `media/${assetId}/v2.mp3`,
+        mimeType: "audio/mpeg",
+        checksum: "2".repeat(64),
+        sizeBytes: mp3Bytes.length,
+        width: null,
+        height: null,
+        durationMs: 222,
+        pageCount: null,
+        thumbnailPaths: null,
+        createdAt: "2026-08-08T00:00:00.000Z",
+        updatedAt: "2026-08-08T00:00:00.000Z"
+      })
+      .run();
+    const mediaRoot = path.join(workspaceRoot, "library", "media", assetId);
+    await fs.mkdir(mediaRoot, { recursive: true });
+    await fs.writeFile(path.join(mediaRoot, "v1.mp3"), mp3Bytes);
+    await fs.writeFile(path.join(mediaRoot, "v2.mp3"), Buffer.from([1, 2, 3]));
+
+    const response = await server.app.inject({
+      method: "GET",
+      url: `/api/assets/${assetId}/media?version=1`
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.headers["content-type"]).toMatch(/^audio\/mpeg/);
+    expect([...response.rawPayload]).toEqual([...mp3Bytes]);
   });
 
   it("returns 404 ASSET_NOT_FOUND for an unknown asset id", async () => {

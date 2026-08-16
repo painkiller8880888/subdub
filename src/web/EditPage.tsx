@@ -1,4 +1,5 @@
 import {
+  useInfiniteQuery,
   useMutation,
   useQueries,
   useQuery,
@@ -119,6 +120,10 @@ function placementLabel(
 
 function assetThumbnailUrl(assetId: string, assetVersion: number): string {
   return `/api/assets/${encodeURIComponent(assetId)}/thumbnails/0?version=${assetVersion}`;
+}
+
+function assetMediaUrl(assetId: string, assetVersion: number): string {
+  return `/api/assets/${encodeURIComponent(assetId)}/media?version=${assetVersion}`;
 }
 
 function assetTitle(asset: AssetDetail | undefined, assetId: string): string {
@@ -300,6 +305,15 @@ function SectionBgmSlot({
             <span>{assetDuration(asset)}</span>
             <span>セクション再生中はループ（固定）</span>
           </div>
+          <div className="edit-bgm-preview">
+            <span className="edit-detail-secondary">単体試聴</span>
+            <audio
+              aria-label={`${assetTitle(asset, bgm.assetId)}を試聴`}
+              controls
+              preload="metadata"
+              src={assetMediaUrl(bgm.assetId, bgm.assetVersion)}
+            />
+          </div>
           <div className="edit-volume-control">
             <label htmlFor={volumeId}>BGMの音量</label>
             <input
@@ -367,7 +381,10 @@ type AssetPickerQueryState = {
   readonly isPending: boolean;
   readonly isError: boolean;
   readonly error: unknown;
+  readonly hasNextPage: boolean;
+  readonly isFetchingNextPage: boolean;
   readonly onRetry: () => void;
+  readonly onLoadMore: () => void;
 };
 
 function pickerTitle(picker: PickerState): string {
@@ -436,44 +453,60 @@ function EditAssetPicker({
               再読み込み
             </button>
           </section>
-        ) : candidates.length === 0 ? (
-          <p className="edit-empty-state">
-            利用可能な再生素材がありません。active
-            かつ形式・メタデータが確認済みの素材を登録してください。
-          </p>
         ) : (
-          <ul className="edit-asset-picker-list">
-            {candidates.map((asset) => (
-              <li
-                className="edit-asset-picker-item"
-                key={`${asset.assetId}-${asset.version}`}
+          <>
+            {candidates.length === 0 ? (
+              <p className="edit-empty-state">
+                利用可能な再生素材がありません。active
+                かつ形式・メタデータが確認済みの素材を登録してください。
+              </p>
+            ) : (
+              <ul className="edit-asset-picker-list">
+                {candidates.map((asset) => (
+                  <li
+                    className="edit-asset-picker-item"
+                    key={`${asset.assetId}-${asset.version}`}
+                  >
+                    {asset.thumbnailPaths[0] !== undefined ? (
+                      <img
+                        alt={`${asset.title}のサムネイル`}
+                        className="edit-picker-thumbnail"
+                        src={assetThumbnailUrl(asset.assetId, asset.version)}
+                      />
+                    ) : (
+                      <div className="edit-picker-thumbnail edit-picker-thumbnail-empty">
+                        プレビューなし
+                      </div>
+                    )}
+                    <div className="edit-picker-asset-info">
+                      <h3>{asset.title}</h3>
+                      <p>{formatDurationMs(asset.durationMs)}</p>
+                      <span>{asset.mimeType}</span>
+                    </div>
+                    <button
+                      className="button button-small button-primary"
+                      type="button"
+                      onClick={() => onSelect(asset)}
+                    >
+                      この素材を選択
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+            {query.hasNextPage ? (
+              <button
+                className="button"
+                disabled={query.isFetchingNextPage}
+                type="button"
+                onClick={query.onLoadMore}
               >
-                {asset.thumbnailPaths[0] !== undefined ? (
-                  <img
-                    alt={`${asset.title}のサムネイル`}
-                    className="edit-picker-thumbnail"
-                    src={assetThumbnailUrl(asset.assetId, asset.version)}
-                  />
-                ) : (
-                  <div className="edit-picker-thumbnail edit-picker-thumbnail-empty">
-                    プレビューなし
-                  </div>
-                )}
-                <div className="edit-picker-asset-info">
-                  <h3>{asset.title}</h3>
-                  <p>{formatDurationMs(asset.durationMs)}</p>
-                  <span>{asset.mimeType}</span>
-                </div>
-                <button
-                  className="button button-small button-primary"
-                  type="button"
-                  onClick={() => onSelect(asset)}
-                >
-                  この素材を選択
-                </button>
-              </li>
-            ))}
-          </ul>
+                {query.isFetchingNextPage
+                  ? "次の素材を読み込んでいます…"
+                  : "次の素材を読み込む"}
+              </button>
+            ) : null}
+          </>
         )}
       </section>
     </div>
@@ -795,7 +828,13 @@ function EditPlanEditor({
     if (picker.kind === "video") {
       nextDraft =
         picker.action === "add"
-          ? addEditVideoElement(current, picker.role, picker.sectionId, asset)
+          ? addEditVideoElement(
+              current,
+              picker.role,
+              picker.sectionId,
+              asset,
+              project.script.sections[0]?.id
+            )
           : replaceEditVideoElement(current, picker.elementId, asset);
     } else {
       nextDraft =
@@ -1102,21 +1141,23 @@ function EditPlanEditor({
                       <span className="edit-section-order">
                         台本順 {model.order}
                       </span>
-                      <button
-                        className="button button-small"
-                        disabled={interactionDisabled}
-                        type="button"
-                        onClick={() =>
-                          setPicker({
-                            kind: "video",
-                            action: "add",
-                            role: "cutin",
-                            sectionId: model.section.id
-                          })
-                        }
-                      >
-                        カットインを追加
-                      </button>
+                      {model.order > 1 ? (
+                        <button
+                          className="button button-small"
+                          disabled={interactionDisabled}
+                          type="button"
+                          onClick={() =>
+                            setPicker({
+                              kind: "video",
+                              action: "add",
+                              role: "cutin",
+                              sectionId: model.section.id
+                            })
+                          }
+                        >
+                          カットインを追加
+                        </button>
+                      ) : null}
                     </div>
                   </header>
                   <SectionBgmSlot
@@ -1225,15 +1266,23 @@ export function EditPage() {
     enabled: projectId !== undefined,
     retry: false
   });
-  const videoAssetsQuery = useQuery({
+  const videoAssetsQuery = useInfiniteQuery({
     queryKey: ["assets", "edit", "video"],
-    queryFn: () => searchAssets(editAssetSearchInput("video")),
+    queryFn: ({ pageParam }) =>
+      searchAssets(editAssetSearchInput("video", pageParam)),
+    initialPageParam: 1,
+    getNextPageParam: (lastPage) =>
+      lastPage.hasNextPage ? lastPage.page + 1 : undefined,
     enabled: projectId !== undefined,
     retry: false
   });
-  const bgmAssetsQuery = useQuery({
+  const bgmAssetsQuery = useInfiniteQuery({
     queryKey: ["assets", "edit", "bgm"],
-    queryFn: () => searchAssets(editAssetSearchInput("bgm")),
+    queryFn: ({ pageParam }) =>
+      searchAssets(editAssetSearchInput("bgm", pageParam)),
+    initialPageParam: 1,
+    getNextPageParam: (lastPage) =>
+      lastPage.hasNextPage ? lastPage.page + 1 : undefined,
     enabled: projectId !== undefined,
     retry: false
   });
@@ -1306,12 +1355,17 @@ export function EditPage() {
   return (
     <EditPlanEditor
       bgmPickerQuery={{
-        items: bgmAssetsQuery.data?.items ?? [],
+        items: bgmAssetsQuery.data?.pages.flatMap((page) => page.items) ?? [],
         isPending: bgmAssetsQuery.isPending,
         isError: bgmAssetsQuery.isError,
         error: bgmAssetsQuery.error,
+        hasNextPage: bgmAssetsQuery.hasNextPage ?? false,
+        isFetchingNextPage: bgmAssetsQuery.isFetchingNextPage,
         onRetry: () => {
           void bgmAssetsQuery.refetch();
+        },
+        onLoadMore: () => {
+          void bgmAssetsQuery.fetchNextPage();
         }
       }}
       editResponse={editResponse}
@@ -1319,12 +1373,17 @@ export function EditPage() {
       project={project}
       projectId={projectId}
       videoPickerQuery={{
-        items: videoAssetsQuery.data?.items ?? [],
+        items: videoAssetsQuery.data?.pages.flatMap((page) => page.items) ?? [],
         isPending: videoAssetsQuery.isPending,
         isError: videoAssetsQuery.isError,
         error: videoAssetsQuery.error,
+        hasNextPage: videoAssetsQuery.hasNextPage ?? false,
+        isFetchingNextPage: videoAssetsQuery.isFetchingNextPage,
         onRetry: () => {
           void videoAssetsQuery.refetch();
+        },
+        onLoadMore: () => {
+          void videoAssetsQuery.fetchNextPage();
         }
       }}
     />

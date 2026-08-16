@@ -13,6 +13,7 @@ import {
   createProjectEditInput,
   createEditPlanReadModel,
   createEditSectionReadModels,
+  editAssetSearchInput,
   isSelectableEditAsset,
   reconcileSavedEditPlan,
   removeEditVideoElement,
@@ -229,6 +230,17 @@ describe("edit page read model", () => {
     });
   });
 
+  it("keeps picker pages explicit so later assets can be loaded", () => {
+    expect(editAssetSearchInput("video", 2)).toMatchObject({
+      kind: "video",
+      format: "mp4",
+      status: "active",
+      page: 2,
+      pageSize: 100
+    });
+    expect(editAssetSearchInput("bgm", 3).page).toBe(3);
+  });
+
   it("adds unique intro/outro, multiple boundary cutins, and one BGM per section", () => {
     const emptyPlan = { videoElements: [], sectionBgms: [] };
     const selectableVideo = videoAsset as SelectableEditAsset;
@@ -267,6 +279,31 @@ describe("edit page read model", () => {
     const withBgm = addSectionBgm(withCutins, "section-main", selectableBgm);
     expect(
       addSectionBgm(withBgm, "section-main", selectableBgm).sectionBgms
+    ).toHaveLength(1);
+  });
+
+  it("does not add a cutin before the first script section", () => {
+    const emptyPlan = { videoElements: [], sectionBgms: [] };
+    const selectableVideo = videoAsset as SelectableEditAsset;
+
+    expect(
+      addEditVideoElement(
+        emptyPlan,
+        "cutin",
+        "section-intro",
+        selectableVideo,
+        sections[0]?.id
+      )
+    ).toEqual(emptyPlan);
+
+    expect(
+      addEditVideoElement(
+        emptyPlan,
+        "cutin",
+        "section-main",
+        selectableVideo,
+        sections[0]?.id
+      ).videoElements
     ).toHaveLength(1);
   });
 

@@ -867,6 +867,16 @@ input:focus-visible {
   color: #59647b;
 }
 
+.edit-bgm-preview {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.edit-bgm-preview audio {
+  max-width: 100%;
+  width: 28rem;
+}
+
 .edit-picker-overlay {
   align-items: center;
   background: rgb(15 27 49 / 0.48);

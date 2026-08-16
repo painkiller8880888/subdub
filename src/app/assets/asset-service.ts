@@ -143,6 +143,11 @@ export class AssetService {
     return this.fileStore.resolvePath(thumbnailPath);
   }
 
+  getMediaPath(assetId: string, requestedVersion?: number): string {
+    const detail = this.findDetail(assetId, requestedVersion);
+    return this.fileStore.resolvePath(detail.libraryMediaPath);
+  }
+
   list(input: unknown): AssetListResult {
     const query = assetListQuerySchema.parse(input);
     return this.repository.list(query);

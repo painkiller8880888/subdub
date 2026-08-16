@@ -23,20 +23,20 @@ export function editAssetReferenceKey(
   return `${assetId}@v${assetVersion}`;
 }
 
-export function editAssetSearchInput(kind: EditPickerAssetKind) {
+export function editAssetSearchInput(kind: EditPickerAssetKind, page = 1) {
   return kind === "video"
     ? {
         kind: "video" as const,
         format: "mp4" as const,
         status: "active" as const,
-        page: 1,
+        page,
         pageSize: 100
       }
     : {
         kind: "bgm" as const,
         format: "mp3" as const,
         status: "active" as const,
-        page: 1,
+        page,
         pageSize: 100
       };
 }
@@ -120,7 +120,8 @@ export function addEditVideoElement(
   editPlan: EditPlan,
   role: EditVideoElement["role"],
   sectionId: string | undefined,
-  asset: SelectableEditAsset
+  asset: SelectableEditAsset,
+  firstSectionId?: string
 ): EditPlan {
   if (
     (role === "intro" || role === "outro") &&
@@ -128,7 +129,10 @@ export function addEditVideoElement(
   ) {
     return editPlan;
   }
-  if (role === "cutin" && sectionId === undefined) {
+  if (
+    role === "cutin" &&
+    (sectionId === undefined || sectionId === firstSectionId)
+  ) {
     return editPlan;
   }
 

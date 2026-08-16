@@ -34,7 +34,7 @@ export type AssetServicePort = Pick<
   AssetService,
   "stageUpload" | "commitUpload" | "discardStaged" | "findDetail" | "list"
 > &
-  Partial<Pick<AssetService, "getThumbnailPath">>;
+  Partial<Pick<AssetService, "getMediaPath" | "getThumbnailPath">>;
 
 const allowedFieldNames = new Set([
   "kind",
@@ -203,6 +203,25 @@ export function registerAssetRoutes(
       )
     );
   });
+
+  if (assetService.getMediaPath !== undefined) {
+    app.get<{
+      Params: { assetId: string };
+      Querystring: { version?: string };
+    }>("/api/assets/:assetId/media", async (request, reply) => {
+      const params = assetIdParamsSchema.parse(request.params);
+      const query = assetVersionQuerySchema.parse(request.query);
+      const detail = assetService.findDetail(params.assetId, query.version);
+      const mediaPath = assetService.getMediaPath?.(
+        params.assetId,
+        query.version
+      );
+      if (mediaPath === undefined) {
+        throw new Error("Asset media service is unavailable.");
+      }
+      return reply.type(detail.mimeType).send(createReadStream(mediaPath));
+    });
+  }
 
   if (assetService.getThumbnailPath !== undefined) {
     app.get<{
