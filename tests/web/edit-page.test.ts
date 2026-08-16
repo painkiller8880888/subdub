@@ -4,11 +4,23 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter, Route, Routes } from "react-router";
 import { describe, expect, it } from "vitest";
 
+import type { AssetListItem } from "../../src/schema/asset.js";
 import type { ScriptSection } from "../../src/schema/video-project.js";
 import { EditPage } from "../../src/web/EditPage";
 import {
+  addEditVideoElement,
+  addSectionBgm,
+  createProjectEditInput,
   createEditPlanReadModel,
-  createEditSectionReadModels
+  createEditSectionReadModels,
+  editAssetSearchInput,
+  isSelectableEditAsset,
+  reconcileSavedEditPlan,
+  removeEditVideoElement,
+  removeSectionBgm,
+  replaceEditVideoElement,
+  replaceSectionBgm,
+  type SelectableEditAsset
 } from "../../src/web/edit-page.js";
 
 const sections = [
@@ -27,6 +39,49 @@ const sections = [
     lines: []
   }
 ] satisfies ScriptSection[];
+
+const videoAsset = {
+  assetId: "video-asset",
+  version: 1,
+  kind: "video",
+  title: "イントロ素材",
+  description: "",
+  confidentiality: "internal",
+  department: null,
+  system: null,
+  mimeType: "video/mp4",
+  checksum: "a".repeat(64),
+  sizeBytes: 100,
+  width: 1920,
+  height: 1080,
+  durationMs: 2000,
+  pageCount: null,
+  thumbnailPaths: ["media/video-asset/thumbnail-0.png"],
+  tags: [],
+  tagIds: [],
+  status: "active",
+  errorCode: null,
+  errorMessage: null,
+  createdAt: "2026-01-01T00:00:00.000Z",
+  updatedAt: "2026-01-01T00:00:00.000Z"
+} satisfies AssetListItem;
+
+const replacementVideoAsset = {
+  ...videoAsset,
+  assetId: "video-replacement",
+  title: "差し替え素材",
+  checksum: "b".repeat(64)
+} satisfies AssetListItem;
+
+const bgmAsset = {
+  ...videoAsset,
+  assetId: "bgm-asset",
+  kind: "bgm",
+  title: "操作説明 BGM",
+  mimeType: "audio/mpeg",
+  checksum: "c".repeat(64),
+  thumbnailPaths: []
+} satisfies AssetListItem;
 
 describe("edit page read model", () => {
   it("renders the loading state through the edit route", () => {
@@ -132,5 +187,197 @@ describe("edit page read model", () => {
       "cutin"
     ]);
     expect(sectionModels[1]?.bgm?.assetId).toBe("bgm");
+  });
+
+  it("filters picker assets and strips server-owned snapshots from save input", () => {
+    expect(isSelectableEditAsset(videoAsset, "video")).toBe(true);
+    expect(
+      isSelectableEditAsset({ ...videoAsset, status: "inactive" }, "video")
+    ).toBe(false);
+    expect(
+      isSelectableEditAsset({ ...videoAsset, durationMs: null }, "video")
+    ).toBe(false);
+    expect(isSelectableEditAsset(bgmAsset, "bgm")).toBe(true);
+
+    const editPlan = {
+      videoElements: [
+        {
+          id: "intro",
+          role: "intro" as const,
+          assetId: videoAsset.assetId,
+          assetVersion: videoAsset.version!,
+          assetChecksum: videoAsset.checksum!,
+          projectMediaPath: "media/intro.mp4",
+          placement: { kind: "before_first_section" as const },
+          volume: 0
+        }
+      ],
+      sectionBgms: []
+    };
+
+    expect(createProjectEditInput(editPlan)).toEqual({
+      videoElements: [
+        {
+          id: "intro",
+          role: "intro",
+          assetId: videoAsset.assetId,
+          assetVersion: videoAsset.version,
+          placement: { kind: "before_first_section" },
+          volume: 0
+        }
+      ],
+      sectionBgms: []
+    });
+  });
+
+  it("keeps picker pages explicit so later assets can be loaded", () => {
+    expect(editAssetSearchInput("video", 2)).toMatchObject({
+      kind: "video",
+      format: "mp4",
+      status: "active",
+      page: 2,
+      pageSize: 100
+    });
+    expect(editAssetSearchInput("bgm", 3).page).toBe(3);
+  });
+
+  it("adds unique intro/outro, multiple boundary cutins, and one BGM per section", () => {
+    const emptyPlan = { videoElements: [], sectionBgms: [] };
+    const selectableVideo = videoAsset as SelectableEditAsset;
+    const selectableReplacement = replacementVideoAsset as SelectableEditAsset;
+    const selectableBgm = bgmAsset as SelectableEditAsset;
+    const withIntro = addEditVideoElement(
+      emptyPlan,
+      "intro",
+      undefined,
+      selectableVideo
+    );
+    const duplicateIntro = addEditVideoElement(
+      withIntro,
+      "intro",
+      undefined,
+      selectableReplacement
+    );
+    expect(duplicateIntro.videoElements).toHaveLength(1);
+
+    const withCutins = addEditVideoElement(
+      addEditVideoElement(withIntro, "cutin", "section-main", selectableVideo),
+      "cutin",
+      "section-main",
+      selectableReplacement
+    );
+    expect(
+      withCutins.videoElements
+        .filter((element) => element.role === "cutin")
+        .map((element) =>
+          element.placement.kind === "before_section"
+            ? element.placement.order
+            : -1
+        )
+    ).toEqual([0, 1]);
+
+    const withBgm = addSectionBgm(withCutins, "section-main", selectableBgm);
+    expect(
+      addSectionBgm(withBgm, "section-main", selectableBgm).sectionBgms
+    ).toHaveLength(1);
+  });
+
+  it("does not add a cutin before the first script section", () => {
+    const emptyPlan = { videoElements: [], sectionBgms: [] };
+    const selectableVideo = videoAsset as SelectableEditAsset;
+
+    expect(
+      addEditVideoElement(
+        emptyPlan,
+        "cutin",
+        "section-intro",
+        selectableVideo,
+        sections[0]?.id
+      )
+    ).toEqual(emptyPlan);
+
+    expect(
+      addEditVideoElement(
+        emptyPlan,
+        "cutin",
+        "section-main",
+        selectableVideo,
+        sections[0]?.id
+      ).videoElements
+    ).toHaveLength(1);
+  });
+
+  it("replaces and removes edit elements without changing their placement", () => {
+    const selectableVideo = videoAsset as SelectableEditAsset;
+    const selectableReplacement = replacementVideoAsset as SelectableEditAsset;
+    const selectableBgm = bgmAsset as SelectableEditAsset;
+    const plan = addSectionBgm(
+      addEditVideoElement(
+        { videoElements: [], sectionBgms: [] },
+        "outro",
+        undefined,
+        selectableVideo
+      ),
+      "section-main",
+      selectableBgm
+    );
+    const replacedVideo = replaceEditVideoElement(
+      plan,
+      plan.videoElements[0]!.id,
+      selectableReplacement
+    );
+    expect(replacedVideo.videoElements[0]?.assetId).toBe(
+      replacementVideoAsset.assetId
+    );
+    expect(replacedVideo.videoElements[0]?.placement).toEqual({
+      kind: "after_last_section"
+    });
+
+    const replacedBgm = replaceSectionBgm(
+      replacedVideo,
+      replacedVideo.sectionBgms[0]!.id,
+      selectableBgm
+    );
+    expect(replacedBgm.sectionBgms[0]?.sectionId).toBe("section-main");
+    expect(
+      removeSectionBgm(
+        removeEditVideoElement(replacedBgm, replacedBgm.videoElements[0]!.id),
+        replacedBgm.sectionBgms[0]!.id
+      )
+    ).toEqual({ videoElements: [], sectionBgms: [] });
+  });
+
+  it("keeps server-owned snapshots after an edit save", () => {
+    const submitted = {
+      videoElements: [
+        {
+          id: "intro",
+          role: "intro" as const,
+          assetId: videoAsset.assetId,
+          assetVersion: 1,
+          assetChecksum: videoAsset.checksum!,
+          projectMediaPath: "media/pending-edit-asset",
+          placement: { kind: "before_first_section" as const },
+          volume: 1
+        }
+      ],
+      sectionBgms: []
+    };
+    const saved = {
+      ...submitted,
+      videoElements: [
+        {
+          ...submitted.videoElements[0]!,
+          assetChecksum: "d".repeat(64),
+          projectMediaPath: "media/edits/video-asset/v1.mp4"
+        }
+      ]
+    };
+
+    const reconciled = reconcileSavedEditPlan(submitted, saved, submitted);
+    expect(reconciled.videoElements[0]?.assetChecksum).toBe("d".repeat(64));
+    expect(reconciled.videoElements[0]?.projectMediaPath).toBe(
+      "media/edits/video-asset/v1.mp4"
+    );
   });
 });

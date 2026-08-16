@@ -24,6 +24,7 @@ import {
 import {
   buildMultipartBody,
   jpegBytes,
+  mp3Bytes,
   mp4Bytes,
   pdfBytes,
   pngBytes,
@@ -872,6 +873,131 @@ describe("asset upload API", () => {
     });
     expect(thumbnailResponse.statusCode).toBe(200);
     expect(thumbnailResponse.headers["content-type"]).toMatch(/^image\/png/);
+  });
+
+  it("returns the requested asset version for snapshot metadata and thumbnails", async () => {
+    const uploadResponse = await upload([
+      field("kind", "photo"),
+      field("title", "版管理素材"),
+      file(pngBytes, "image/png", "shot.png")
+    ]);
+    const receipt = assetUploadResponseSchema.parse(uploadResponse.json()).data;
+    const database = server.database.database;
+    const now = "2026-08-07T00:00:00.000Z";
+    const versionOneChecksum = "1".repeat(64);
+
+    database
+      .update(assetVersions)
+      .set({
+        checksum: versionOneChecksum,
+        sizeBytes: 101,
+        width: 100,
+        height: 80,
+        durationMs: 111,
+        thumbnailPaths: JSON.stringify(["thumbnails/versioned/v1.png"])
+      })
+      .where(
+        and(
+          eq(assetVersions.assetId, receipt.assetId),
+          eq(assetVersions.version, 1)
+        )
+      )
+      .run();
+    database
+      .insert(assetVersions)
+      .values({
+        assetId: receipt.assetId,
+        version: 2,
+        libraryMediaPath: `media/${receipt.assetId}/v2.png`,
+        mimeType: "image/png",
+        checksum: "2".repeat(64),
+        sizeBytes: 202,
+        width: 200,
+        height: 160,
+        durationMs: 222,
+        pageCount: null,
+        thumbnailPaths: null,
+        createdAt: now,
+        updatedAt: now
+      })
+      .run();
+    database
+      .update(assets)
+      .set({ status: "inactive" })
+      .where(eq(assets.assetId, receipt.assetId))
+      .run();
+
+    await fs.mkdir(
+      path.join(workspaceRoot, "library", "thumbnails", "versioned"),
+      {
+        recursive: true
+      }
+    );
+    await fs.writeFile(
+      path.join(workspaceRoot, "library", "thumbnails", "versioned", "v1.png"),
+      pngBytes
+    );
+
+    const detailResponse = await server.app.inject({
+      method: "GET",
+      url: `/api/assets/${receipt.assetId}?version=1`
+    });
+    expect(detailResponse.statusCode).toBe(200);
+    const detail = assetDetailResponseSchema.parse(detailResponse.json()).data;
+    expect(detail).toMatchObject({
+      assetId: receipt.assetId,
+      version: 1,
+      status: "inactive",
+      checksum: versionOneChecksum,
+      durationMs: 111,
+      thumbnailPaths: ["thumbnails/versioned/v1.png"]
+    });
+
+    const thumbnailResponse = await server.app.inject({
+      method: "GET",
+      url: `/api/assets/${receipt.assetId}/thumbnails/0?version=1`
+    });
+    expect(thumbnailResponse.statusCode).toBe(200);
+    expect(thumbnailResponse.headers["content-type"]).toMatch(/^image\/png/);
+  });
+
+  it("serves the requested asset version media for preview", async () => {
+    const assetId = "asset-bgm-preview";
+    insertSearchAsset(assetId, {
+      kind: "bgm",
+      libraryMediaPath: `media/${assetId}/v1.mp3`
+    });
+    server.database.database
+      .insert(assetVersions)
+      .values({
+        assetId,
+        version: 2,
+        libraryMediaPath: `media/${assetId}/v2.mp3`,
+        mimeType: "audio/mpeg",
+        checksum: "2".repeat(64),
+        sizeBytes: mp3Bytes.length,
+        width: null,
+        height: null,
+        durationMs: 222,
+        pageCount: null,
+        thumbnailPaths: null,
+        createdAt: "2026-08-08T00:00:00.000Z",
+        updatedAt: "2026-08-08T00:00:00.000Z"
+      })
+      .run();
+    const mediaRoot = path.join(workspaceRoot, "library", "media", assetId);
+    await fs.mkdir(mediaRoot, { recursive: true });
+    await fs.writeFile(path.join(mediaRoot, "v1.mp3"), mp3Bytes);
+    await fs.writeFile(path.join(mediaRoot, "v2.mp3"), Buffer.from([1, 2, 3]));
+
+    const response = await server.app.inject({
+      method: "GET",
+      url: `/api/assets/${assetId}/media?version=1`
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.headers["content-type"]).toMatch(/^audio\/mpeg/);
+    expect([...response.rawPayload]).toEqual([...mp3Bytes]);
   });
 
   it("returns 404 ASSET_NOT_FOUND for an unknown asset id", async () => {

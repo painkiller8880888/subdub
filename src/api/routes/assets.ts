@@ -26,6 +26,7 @@ import {
   assetListQuerySchema,
   assetListResponseSchema,
   assetUploadResponseSchema,
+  assetVersionQuerySchema,
   createApiSuccessResponse
 } from "../../schema/api.js";
 
@@ -33,7 +34,7 @@ export type AssetServicePort = Pick<
   AssetService,
   "stageUpload" | "commitUpload" | "discardStaged" | "findDetail" | "list"
 > &
-  Partial<Pick<AssetService, "getThumbnailPath">>;
+  Partial<Pick<AssetService, "getMediaPath" | "getThumbnailPath">>;
 
 const allowedFieldNames = new Set([
   "kind",
@@ -190,26 +191,51 @@ export function registerAssetRoutes(
     }
   });
 
-  app.get<{ Params: { assetId: string } }>(
-    "/api/assets/:assetId",
-    async (request) => {
+  app.get<{
+    Params: { assetId: string };
+    Querystring: { version?: string };
+  }>("/api/assets/:assetId", async (request) => {
+    const params = assetIdParamsSchema.parse(request.params);
+    const query = assetVersionQuerySchema.parse(request.query);
+    return assetDetailResponseSchema.parse(
+      createApiSuccessResponse(
+        assetService.findDetail(params.assetId, query.version)
+      )
+    );
+  });
+
+  if (assetService.getMediaPath !== undefined) {
+    app.get<{
+      Params: { assetId: string };
+      Querystring: { version?: string };
+    }>("/api/assets/:assetId/media", async (request, reply) => {
       const params = assetIdParamsSchema.parse(request.params);
-      return assetDetailResponseSchema.parse(
-        createApiSuccessResponse(assetService.findDetail(params.assetId))
+      const query = assetVersionQuerySchema.parse(request.query);
+      const detail = assetService.findDetail(params.assetId, query.version);
+      const mediaPath = assetService.getMediaPath?.(
+        params.assetId,
+        query.version
       );
-    }
-  );
+      if (mediaPath === undefined) {
+        throw new Error("Asset media service is unavailable.");
+      }
+      return reply.type(detail.mimeType).send(createReadStream(mediaPath));
+    });
+  }
 
   if (assetService.getThumbnailPath !== undefined) {
     app.get<{
       Params: { assetId: string; thumbnailIndex: string };
+      Querystring: { version?: string };
     }>(
       "/api/assets/:assetId/thumbnails/:thumbnailIndex",
       async (request, reply) => {
         const params = assetThumbnailParamsSchema.parse(request.params);
+        const query = assetVersionQuerySchema.parse(request.query);
         const thumbnailPath = assetService.getThumbnailPath?.(
           params.assetId,
-          params.thumbnailIndex
+          params.thumbnailIndex,
+          query.version
         );
         if (thumbnailPath === undefined) {
           throw new Error("Asset thumbnail service is unavailable.");

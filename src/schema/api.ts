@@ -983,6 +983,10 @@ export const assetIdParamsSchema = strictObject({
   assetId: idSchema
 });
 
+export const assetVersionQuerySchema = strictObject({
+  version: z.coerce.number().int().positive().optional()
+});
+
 export const assetThumbnailParamsSchema = strictObject({
   assetId: idSchema,
   thumbnailIndex: z.coerce.number().int().nonnegative()
@@ -1207,6 +1211,7 @@ export type AiRunSearchSummary = z.infer<typeof aiRunSearchSummarySchema>;
 export type AiRunSearchData = z.infer<typeof aiRunSearchDataSchema>;
 export type AiRunSearchResponse = z.infer<typeof aiRunSearchResponseSchema>;
 export type AssetIdParams = z.infer<typeof assetIdParamsSchema>;
+export type AssetVersionQuery = z.infer<typeof assetVersionQuerySchema>;
 export type AssetThumbnailParams = z.infer<typeof assetThumbnailParamsSchema>;
 export type VisualAssignmentParams = z.infer<
   typeof visualAssignmentParamsSchema

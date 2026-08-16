@@ -5,6 +5,7 @@ import {
   aiRunExportQuerySchema,
   aiRunSearchQuerySchema,
   aiRunSearchResponseSchema,
+  assetVersionQuerySchema,
   assetListQuerySchema,
   assetListResponseSchema,
   characterVisualCatalogResponseSchema,
@@ -24,6 +25,7 @@ import {
   projectCreateResponseSchema,
   projectDetailResponseSchema,
   projectEditResponseSchema,
+  projectEditSaveRequestSchema,
   projectListResponseSchema,
   projectMutationResponseSchema,
   projectSourceReadResponseSchema,
@@ -74,6 +76,7 @@ import {
   type ProjectCharactersSaveRequest,
   type ProjectCreateRequest,
   type ProjectEditResponse,
+  type ProjectEditSaveRequest,
   type ModelsResponse,
   type ProjectSourceContent,
   type ProjectSourceSaveRequest,
@@ -353,6 +356,23 @@ export async function fetchProjectEdit(
     `/api/projects/${encodeURIComponent(projectId)}/edit`,
     projectEditResponseSchema
   );
+}
+
+export async function saveProjectEdit(
+  projectId: string,
+  input: ProjectEditSaveRequest
+): Promise<VideoProject> {
+  const validatedInput = projectEditSaveRequestSchema.parse(input);
+  const response = await fetchApi(
+    `/api/projects/${encodeURIComponent(projectId)}/edit`,
+    projectMutationResponseSchema,
+    {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(validatedInput)
+    }
+  );
+  return response.data;
 }
 
 export async function fetchCharacterVisualCatalog(): Promise<CharacterVisualCatalogSnapshot> {
@@ -982,9 +1002,18 @@ export async function approveProjectVisuals(
   return response.data;
 }
 
-export async function fetchAsset(assetId: string): Promise<AssetDetail> {
+export async function fetchAsset(
+  assetId: string,
+  version?: number
+): Promise<AssetDetail> {
+  const query = assetVersionQuerySchema.parse({ version });
+  const searchParams = new URLSearchParams();
+  if (query.version !== undefined) {
+    searchParams.set("version", String(query.version));
+  }
+  const queryString = searchParams.toString();
   const response = await fetchApi(
-    `/api/assets/${encodeURIComponent(assetId)}`,
+    `/api/assets/${encodeURIComponent(assetId)}${queryString.length > 0 ? `?${queryString}` : ""}`,
     assetDetailResponseSchema
   );
   return response.data;
