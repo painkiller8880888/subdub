@@ -39,6 +39,7 @@ describe("character visual management route", () => {
     const appSource = await fs.readFile("src/web/App.tsx", "utf8");
 
     expect(appSource).toContain('path="/projects/:projectId/script"');
+    expect(appSource).toContain('path="/projects/:projectId/edit"');
     expect(appSource).toContain('path="/projects/:projectId/characters"');
     expect(appSource).toContain('path="/terminology"');
     expect(appSource).toContain('path="/ai-runs"');

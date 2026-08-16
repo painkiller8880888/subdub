@@ -23,6 +23,7 @@ import {
   projectCreateRequestSchema,
   projectCreateResponseSchema,
   projectDetailResponseSchema,
+  projectEditResponseSchema,
   projectListResponseSchema,
   projectMutationResponseSchema,
   projectSourceReadResponseSchema,
@@ -72,6 +73,7 @@ import {
   type ProjectBriefSaveRequest,
   type ProjectCharactersSaveRequest,
   type ProjectCreateRequest,
+  type ProjectEditResponse,
   type ModelsResponse,
   type ProjectSourceContent,
   type ProjectSourceSaveRequest,
@@ -342,6 +344,15 @@ export async function fetchProject(projectId: string): Promise<VideoProject> {
     projectDetailResponseSchema
   );
   return response.data;
+}
+
+export async function fetchProjectEdit(
+  projectId: string
+): Promise<ProjectEditResponse> {
+  return fetchApi(
+    `/api/projects/${encodeURIComponent(projectId)}/edit`,
+    projectEditResponseSchema
+  );
 }
 
 export async function fetchCharacterVisualCatalog(): Promise<CharacterVisualCatalogSnapshot> {

@@ -11,8 +11,13 @@ export const WORKFLOW_STEPS = [
   },
   {
     id: "production",
-    label: "制作",
+    label: "台本",
     description: "台本・ビジュアル・VOICEVOX音声"
+  },
+  {
+    id: "edit",
+    label: "編集",
+    description: "編集要素とセクションBGM"
   },
   {
     id: "output",
@@ -34,9 +39,11 @@ export function workflowStepPath(
       ? `${projectPath}/brief`
       : step === "outline"
         ? `${projectPath}/outline`
-        : step === "output"
-          ? `${projectPath}/preview`
-          : `${projectPath}/script`;
+        : step === "edit"
+          ? `${projectPath}/edit`
+          : step === "output"
+            ? `${projectPath}/preview`
+            : `${projectPath}/script`;
 
   return path;
 }
