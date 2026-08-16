@@ -579,6 +579,31 @@ describe("compileRenderManifest", () => {
     expect(diagnosticCodes(result)).toContain("EDIT_VIDEO_FORMAT_INVALID");
   });
 
+  it("rejects BGM metadata when MIME or detected format is missing", () => {
+    const input = validInput();
+    const bgmPath = videoProjectFixture.edit.sectionBgms[0]?.projectMediaPath;
+    if (bgmPath === undefined) {
+      throw new Error("fixture BGM is missing");
+    }
+
+    for (const field of ["mimeType", "format"] as const) {
+      const assetMetadata = (
+        input.assetMetadata as readonly RenderManifestAssetMetadata[]
+      ).map((asset) => {
+        if (asset.path !== bgmPath) {
+          return asset;
+        }
+        const copy = { ...asset };
+        Reflect.deleteProperty(copy, field);
+        return copy;
+      });
+      const result = compileRenderManifest({ ...input, assetMetadata });
+
+      expect(result.success).toBe(false);
+      expect(diagnosticCodes(result)).toContain("EDIT_BGM_FORMAT_INVALID");
+    }
+  });
+
   it("shares a physical visual variant without assigning ownership to one speaker", () => {
     const input = validInput();
     const project = structuredClone(input.project) as VideoProject;

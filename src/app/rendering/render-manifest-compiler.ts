@@ -731,8 +731,8 @@ function validateEditAssetFormat(
   const format = typeof rawFormat === "string" ? rawFormat : undefined;
   if (
     extension !== expectedExtension ||
-    (mimeType !== undefined && mimeType !== expectedMimeType) ||
-    (format !== undefined && format !== expectedExtension)
+    mimeType !== expectedMimeType ||
+    format !== expectedExtension
   ) {
     addDiagnostic(
       diagnostics,

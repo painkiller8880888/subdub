@@ -16,8 +16,12 @@ import { assetDetailSchema } from "../../src/schema/asset.js";
 import { characterVisualCatalogSnapshotSchema } from "../../src/schema/character-visual.js";
 import type { VideoProject } from "../../src/schema/index.js";
 import { mp4Bytes, pngBytes } from "../fixtures/asset-fixtures.js";
-import { createRenderManifestAudioIndex } from "../fixtures/render-manifest-input.js";
+import {
+  createRenderManifestAudioIndex,
+  createRenderManifestInput
+} from "../fixtures/render-manifest-input.js";
 import { videoProjectFixture } from "../fixtures/video-project.js";
+import { mediaFixture } from "../fixtures/media-fixtures.js";
 
 const snapshot = characterVisualCatalogSnapshotSchema.parse([
   {
@@ -293,4 +297,219 @@ describe("RenderManifestInputBuilder", () => {
       await fs.rm(workspaceRoot, { recursive: true, force: true });
     }
   });
+
+  it("collects BGM registration, snapshot checksum, MIME, and detected format", async () => {
+    const workspaceRoot = await fs.mkdtemp(
+      path.join(tmpdir(), "subdub-bgm-input-builder-")
+    );
+    try {
+      const project = structuredClone(videoProjectFixture) as VideoProject;
+      const contents = await mediaFixture("bgm-1s.mp3");
+      const checksum = createHash("sha256").update(contents).digest("hex");
+      project.edit.sectionBgms = [
+        {
+          id: "bgm-selected",
+          sectionId: "section-intro",
+          assetId: "asset-bgm-selected",
+          assetVersion: 3,
+          assetChecksum: checksum,
+          projectMediaPath: "audio/bgm/selected.mp3",
+          volume: 0.5
+        }
+      ];
+      const filePath = path.join(
+        workspaceRoot,
+        "projects",
+        project.metadata.id,
+        ...project.edit.sectionBgms[0].projectMediaPath.split("/")
+      );
+      await fs.mkdir(path.dirname(filePath), { recursive: true });
+      await fs.writeFile(filePath, contents);
+
+      const detail = assetDetailSchema.parse({
+        assetId: "asset-bgm-selected",
+        version: 3,
+        kind: "bgm",
+        title: "Selected BGM",
+        description: "",
+        confidentiality: "internal",
+        department: null,
+        system: null,
+        mimeType: "audio/mpeg",
+        libraryMediaPath: "media/asset-bgm-selected.mp3",
+        checksum,
+        sizeBytes: contents.length,
+        width: null,
+        height: null,
+        durationMs: 1_045,
+        pageCount: null,
+        thumbnailPaths: [],
+        status: "active",
+        errorCode: null,
+        errorMessage: null,
+        createdAt: "2026-08-15T00:00:00.000Z",
+        updatedAt: "2026-08-15T00:00:00.000Z"
+      });
+      const findAssetDetail = vi.fn((assetId: string, version?: number) =>
+        assetId === detail.assetId && version === detail.version
+          ? detail
+          : undefined
+      );
+      const audioIndex = createRenderManifestAudioIndex(project);
+      const builder = new RenderManifestInputBuilder({
+        workspaceRoot,
+        projectRepository: { read: async () => project },
+        assetRepository: { findAssetDetail },
+        characterVisualCatalogService: {
+          verifyFiles: async () => createLegacySnapshot()
+        },
+        audioStore: { readIndex: async () => audioIndex }
+      });
+
+      const input = await builder.build(project.metadata.id);
+      const bgmMetadata = (
+        input.assetMetadata as readonly RenderManifestAssetMetadata[]
+      ).find((asset) => asset.path === "audio/bgm/selected.mp3");
+      expect(bgmMetadata).toEqual({
+        path: "audio/bgm/selected.mp3",
+        kind: "bgm",
+        sha256: checksum,
+        durationMs: expect.any(Number),
+        mimeType: "audio/mpeg",
+        format: "mp3"
+      });
+      expect(findAssetDetail).toHaveBeenCalledWith("asset-bgm-selected", 3);
+    } finally {
+      await fs.rm(workspaceRoot, { recursive: true, force: true });
+    }
+  });
+
+  it.each([
+    {
+      name: "missing asset",
+      detail: undefined,
+      expectedCode: "ASSET_METADATA_MISSING"
+    },
+    {
+      name: "wrong version",
+      detail: "version-mismatch",
+      requestedVersion: 2,
+      expectedCode: "ASSET_METADATA_MISSING"
+    },
+    {
+      name: "wrong kind",
+      detail: "kind-mismatch",
+      expectedCode: "ASSET_KIND_MISMATCH"
+    },
+    {
+      name: "wrong MIME",
+      detail: "mime-mismatch",
+      expectedCode: "EDIT_BGM_FORMAT_INVALID"
+    }
+  ])(
+    "rejects production BGM compile when the DB has $name",
+    async ({ detail: detailCase, requestedVersion, expectedCode }) => {
+      const workspaceRoot = await fs.mkdtemp(
+        path.join(tmpdir(), "subdub-bgm-validation-")
+      );
+      try {
+        const project = structuredClone(videoProjectFixture) as VideoProject;
+        const contents = await mediaFixture("bgm-1s.mp3");
+        const checksum = createHash("sha256").update(contents).digest("hex");
+        const assetVersion = requestedVersion ?? 1;
+        project.edit.sectionBgms = [
+          {
+            id: "bgm-selected",
+            sectionId: "section-intro",
+            assetId: "asset-bgm-selected",
+            assetVersion,
+            assetChecksum: checksum,
+            projectMediaPath: "audio/bgm/selected.mp3",
+            volume: 0.5
+          }
+        ];
+        const filePath = path.join(
+          workspaceRoot,
+          "projects",
+          project.metadata.id,
+          ...project.edit.sectionBgms[0].projectMediaPath.split("/")
+        );
+        await fs.mkdir(path.dirname(filePath), { recursive: true });
+        await fs.writeFile(filePath, contents);
+
+        const detail =
+          detailCase === undefined
+            ? undefined
+            : assetDetailSchema.parse({
+                assetId: "asset-bgm-selected",
+                version: detailCase === "version-mismatch" ? 1 : 1,
+                kind: detailCase === "kind-mismatch" ? "video" : "bgm",
+                title: "Selected BGM",
+                description: "",
+                confidentiality: "internal",
+                department: null,
+                system: null,
+                mimeType:
+                  detailCase === "mime-mismatch"
+                    ? "audio/wav"
+                    : detailCase === "kind-mismatch"
+                      ? "video/mp4"
+                      : "audio/mpeg",
+                libraryMediaPath: "media/asset-bgm-selected.mp3",
+                checksum,
+                sizeBytes: contents.length,
+                width: null,
+                height: null,
+                durationMs: 1_045,
+                pageCount: null,
+                thumbnailPaths: [],
+                status: "active",
+                errorCode: null,
+                errorMessage: null,
+                createdAt: "2026-08-15T00:00:00.000Z",
+                updatedAt: "2026-08-15T00:00:00.000Z"
+              });
+        const findAssetDetail = vi.fn((assetId: string, version?: number) =>
+          detail !== undefined &&
+          assetId === detail.assetId &&
+          version === detail.version
+            ? detail
+            : undefined
+        );
+        const audioIndex = createRenderManifestAudioIndex(project);
+        const builder = new RenderManifestInputBuilder({
+          workspaceRoot,
+          projectRepository: { read: async () => project },
+          assetRepository: { findAssetDetail },
+          characterVisualCatalogService: {
+            verifyFiles: async () => createLegacySnapshot()
+          },
+          audioStore: { readIndex: async () => audioIndex }
+        });
+        const built = await builder.build(project.metadata.id);
+        const baseInput = createRenderManifestInput(project);
+        const bgmPath = "audio/bgm/selected.mp3";
+        const baseMetadata = (
+          baseInput.assetMetadata as readonly RenderManifestAssetMetadata[]
+        ).filter((asset) => asset.path !== bgmPath);
+        const builtBgmMetadata = (
+          built.assetMetadata as readonly RenderManifestAssetMetadata[]
+        ).filter((asset) => asset.path === bgmPath);
+        const result = compileRenderManifest({
+          ...baseInput,
+          assetMetadata: [...baseMetadata, ...builtBgmMetadata]
+        });
+
+        expect(result.success).toBe(false);
+        if (result.success) {
+          return;
+        }
+        expect(
+          result.diagnostics.map((diagnostic) => diagnostic.code)
+        ).toContain(expectedCode);
+      } finally {
+        await fs.rm(workspaceRoot, { recursive: true, force: true });
+      }
+    }
+  );
 });

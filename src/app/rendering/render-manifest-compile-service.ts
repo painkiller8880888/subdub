@@ -149,7 +149,8 @@ async function appendEditVideoMetadata(
 async function appendBgmMetadata(
   metadata: AssetMetadataByPath,
   workspaceRoot: string,
-  project: VideoProject
+  project: VideoProject,
+  assetRepository: AssetDetailReader
 ): Promise<void> {
   const projectRoot = path.resolve(
     workspaceRoot,
@@ -157,6 +158,18 @@ async function appendBgmMetadata(
     project.metadata.id
   );
   for (const bgm of project.edit.sectionBgms) {
+    const detail = assetRepository.findAssetDetail(
+      bgm.assetId,
+      bgm.assetVersion
+    );
+    if (
+      detail === undefined ||
+      detail.checksum === null ||
+      detail.checksum.toLowerCase() !== bgm.assetChecksum.toLowerCase()
+    ) {
+      continue;
+    }
+
     const filePath = path.resolve(
       projectRoot,
       ...bgm.projectMediaPath.split("/")
@@ -169,11 +182,12 @@ async function appendBgmMetadata(
         readFile(filePath),
         processAudioMedia(filePath)
       ]);
-      addAssetMetadata(metadata, {
+      metadata.set(bgm.projectMediaPath, {
         path: bgm.projectMediaPath,
-        kind: "bgm",
+        kind: detail.kind,
         sha256: createHash("sha256").update(contents).digest("hex"),
         durationMs: processed.metadata.durationMs,
+        mimeType: detail.mimeType,
         format: detectedFormat(contents)
       });
     } catch {
@@ -276,7 +290,7 @@ async function assetMetadataForProject(
     project,
     assetRepository
   );
-  await appendBgmMetadata(metadata, workspaceRoot, project);
+  await appendBgmMetadata(metadata, workspaceRoot, project, assetRepository);
   return [...metadata.values()];
 }
 

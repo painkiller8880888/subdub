@@ -59,6 +59,9 @@ export function createRenderManifestAssetMetadata(
     kind: assignment.display.kind,
     sha256: assignment.assetChecksum,
     ...(assignment.display.kind === "video" ? { durationMs: 5_000 } : {}),
+    ...(assignment.display.kind === "video"
+      ? { mimeType: "video/mp4", format: "mp4" }
+      : {}),
     ...(assignment.display.kind === "document_scan" ? { pageCount: 3 } : {})
   }));
   const backgrounds = project.script.sections.flatMap((section) =>
@@ -76,7 +79,9 @@ export function createRenderManifestAssetMetadata(
     path: bgm.projectMediaPath,
     kind: "bgm",
     sha256: bgm.assetChecksum,
-    durationMs: 60_000
+    durationMs: 60_000,
+    mimeType: "audio/mpeg",
+    format: "mp3"
   }));
   const effects = project.audio.soundEffects.map((effect) => ({
     path: effect.projectMediaPath,
