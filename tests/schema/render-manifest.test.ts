@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  legacyRenderManifestV22Schema,
   renderManifestSchema,
   type RenderVisual,
   type RenderManifest
@@ -49,21 +50,54 @@ describe("renderManifestSchema", () => {
     expect(result.success).toBe(true);
   });
 
-  it("keeps the project volume field separate from the frozen muted field", () => {
-    const legacy = clone(renderManifestFixture);
+  it("keeps the 2.2.0 muted parser separate from the 2.3.0 volume contract", () => {
+    const legacy = structuredClone(renderManifestFixture) as unknown as {
+      manifestVersion: string;
+      visuals: Array<{ display: Record<string, unknown> }>;
+      audioTracks: Array<Record<string, unknown>>;
+      inserts: Array<{
+        id: string;
+        role: "intro" | "outro" | "cutin";
+        from: number;
+        durationInFrames: number;
+        src: string;
+        volume: number;
+      }>;
+    };
+    legacy.manifestVersion = "2.2.0";
+    for (const track of legacy.audioTracks) {
+      Object.assign(track, { fadeInFrames: 0, fadeOutFrames: 0 });
+    }
     const legacyDisplay = legacy.visuals[0]?.display;
     if (legacyDisplay?.kind !== "video") {
       throw new Error("fixture must contain a video display");
     }
-    expect(legacyDisplay.muted).toBe(true);
-    expect(renderManifestSchema.safeParse(legacy).success).toBe(true);
+    (legacyDisplay as unknown as { muted: boolean }).muted =
+      legacyDisplay.volume === 0;
+    Reflect.deleteProperty(legacyDisplay, "volume");
+    legacy.inserts = legacy.inserts.map((insert) => ({
+      id: insert.id,
+      kind: "placeholder" as const,
+      slot:
+        insert.role === "intro"
+          ? ("opening" as const)
+          : insert.role === "outro"
+            ? ("ending" as const)
+            : ("eye_catch" as const),
+      beforeSectionId: insert.role === "cutin" ? "section-main" : null,
+      from: insert.from,
+      durationInFrames: insert.durationInFrames,
+      label: insert.role
+    })) as unknown as typeof legacy.inserts;
+    expect(legacyRenderManifestV22Schema.safeParse(legacy).success).toBe(true);
+    expect(renderManifestSchema.safeParse(legacy).success).toBe(false);
 
     const projectDisplay = clone(renderManifestFixture).visuals[0]?.display;
     if (projectDisplay?.kind !== "video") {
       throw new Error("fixture must contain a video display");
     }
-    Reflect.deleteProperty(projectDisplay, "muted");
-    (projectDisplay as unknown as Record<string, unknown>).volume = 0;
+    Reflect.deleteProperty(projectDisplay, "volume");
+    (projectDisplay as unknown as Record<string, unknown>).muted = true;
     const projectShape = clone(renderManifestFixture);
     projectShape.visuals[0]!.display = projectDisplay;
     expectInvalid(projectShape, ["visuals", 0, "display"]);
@@ -152,9 +186,13 @@ describe("renderManifestSchema", () => {
     invalidLineDuration.lines[0].durationInFrames = 0;
     expectInvalid(invalidLineDuration, ["lines", 0, "durationInFrames"]);
 
-    const invalidFade = clone(renderManifestFixture);
-    invalidFade.audioTracks[0].fadeOutFrames = -1;
-    expectInvalid(invalidFade, ["audioTracks", 0, "fadeOutFrames"]);
+    const legacyFadeField = clone(renderManifestFixture);
+    Object.assign(legacyFadeField.audioTracks[0], { fadeInFrames: 0 });
+    expectInvalid(legacyFadeField, ["audioTracks", 0]);
+
+    const invalidLoop = clone(renderManifestFixture);
+    (invalidLoop.audioTracks[0] as unknown as { loop: boolean }).loop = false;
+    expectInvalid(invalidLoop, ["audioTracks", 0, "loop"]);
 
     const invalidVolume = clone(renderManifestFixture);
     invalidVolume.audioTracks[0].volume = 1.1;
@@ -210,9 +248,9 @@ describe("renderManifestSchema", () => {
     expectInvalid(mismatchedVisual, ["visuals", 0, "display", "kind"]);
   });
 
-  it("requires correctly placed 2000ms placeholder inserts", () => {
+  it("requires correctly placed resolved video inserts", () => {
     const invalidOpeningDuration = clone(renderManifestFixture);
-    invalidOpeningDuration.inserts[0].durationInFrames = 1;
+    invalidOpeningDuration.inserts[0].durationInFrames = 0;
     expectInvalid(invalidOpeningDuration, [
       "inserts",
       0,
@@ -227,12 +265,12 @@ describe("renderManifestSchema", () => {
     invalidEndingPosition.inserts[2].from = 419;
     expectInvalid(invalidEndingPosition, ["inserts", 2, "from"]);
 
-    const invalidEyeCatchDuration = clone(renderManifestFixture);
-    invalidEyeCatchDuration.inserts[1].durationInFrames = 59;
-    expectInvalid(invalidEyeCatchDuration, [
+    const invalidCutinOverlap = clone(renderManifestFixture);
+    invalidCutinOverlap.inserts[1].from = 30;
+    expectInvalid(invalidCutinOverlap, [
       "inserts",
       1,
-      "durationInFrames"
+      "from"
     ]);
   });
 
@@ -312,24 +350,25 @@ describe("renderManifestSchema", () => {
     expectInvalid(duplicateAudio, ["audioTracks", 1, "sectionId"]);
   });
 
-  it("requires one opening and one ending insert and validates slots", () => {
-    const missingOpening = clone(renderManifestFixture);
-    missingOpening.inserts = missingOpening.inserts.filter(
-      (insert) => insert.slot !== "opening"
-    );
-    expectInvalid(missingOpening, ["inserts"]);
+  it("allows an empty edit result and validates resolved insert roles", () => {
+    const empty = clone(renderManifestFixture);
+    empty.inserts = [];
+    expect(renderManifestSchema.safeParse(empty).success).toBe(true);
 
-    const wrongBeforeSection = clone(renderManifestFixture);
-    wrongBeforeSection.inserts[0].beforeSectionId = "section-intro";
-    expectInvalid(wrongBeforeSection, ["inserts", 0, "beforeSectionId"]);
+    const duplicateIntro = clone(renderManifestFixture);
+    duplicateIntro.inserts.push({
+      ...duplicateIntro.inserts[0]!,
+      id: "insert-intro-duplicate"
+    });
+    expectInvalid(duplicateIntro, ["inserts"]);
 
-    const nullEyeCatch = clone(renderManifestFixture);
-    nullEyeCatch.inserts[1].beforeSectionId = null;
-    expectInvalid(nullEyeCatch, ["inserts", 1, "beforeSectionId"]);
+    const invalidIntroPosition = clone(renderManifestFixture);
+    invalidIntroPosition.inserts[0]!.from = 1;
+    expectInvalid(invalidIntroPosition, ["inserts", 0, "from"]);
 
-    const wrongEyeCatchSection = clone(renderManifestFixture);
-    wrongEyeCatchSection.inserts[1].beforeSectionId = "missing-section";
-    expectInvalid(wrongEyeCatchSection, ["inserts", 1, "beforeSectionId"]);
+    const invalidOutroPosition = clone(renderManifestFixture);
+    invalidOutroPosition.inserts[2]!.from = 419;
+    expectInvalid(invalidOutroPosition, ["inserts", 2, "from"]);
   });
 
   it.each([

@@ -108,6 +108,29 @@ export const legacyRenderVideoDisplayV22Schema = strictObject({
   }
 });
 
+/** RenderManifest 2.3.0 resolves the project volume without a legacy adapter. */
+export const renderVideoDisplayV23Schema = strictObject({
+  kind: z.literal("video"),
+  fit: fitSchema,
+  crop: cropSchema,
+  scale: positiveNumberSchema,
+  position: positionSchema,
+  prioritizeVisual: z.boolean(),
+  annotations: z.array(staticAnnotationSchema),
+  startMs: nonNegativeIntegerSchema,
+  endMs: nonNegativeIntegerSchema,
+  playbackRate: positiveNumberSchema,
+  volume: unitIntervalSchema
+}).superRefine((display, ctx) => {
+  if (display.endMs <= display.startMs) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["endMs"],
+      message: "endMs must be greater than startMs"
+    });
+  }
+});
+
 const renderVisualFields = {
   id: idSchema,
   from: nonNegativeIntegerSchema,
@@ -116,6 +139,12 @@ const renderVisualFields = {
 };
 
 export const renderVideoSchema = strictObject({
+  ...renderVisualFields,
+  kind: z.literal("video"),
+  display: renderVideoDisplayV23Schema
+});
+
+const legacyRenderVideoSchema = strictObject({
   ...renderVisualFields,
   kind: z.literal("video"),
   display: legacyRenderVideoDisplayV22Schema
@@ -139,6 +168,12 @@ export const renderVisualSchema = z.discriminatedUnion("kind", [
   renderDocumentScanSchema
 ]);
 
+const legacyRenderVisualSchema = z.discriminatedUnion("kind", [
+  legacyRenderVideoSchema,
+  renderPhotoSchema,
+  renderDocumentScanSchema
+]);
+
 export const renderBackgroundSchema = strictObject({
   sectionId: idSchema,
   from: nonNegativeIntegerSchema,
@@ -147,6 +182,16 @@ export const renderBackgroundSchema = strictObject({
 });
 
 export const renderAudioTrackSchema = strictObject({
+  id: idSchema,
+  sectionId: idSchema,
+  from: nonNegativeIntegerSchema,
+  durationInFrames: positiveIntegerSchema,
+  src: relativePosixPathSchema,
+  volume: unitIntervalSchema,
+  loop: z.literal(true),
+});
+
+const legacyRenderAudioTrackSchema = strictObject({
   id: idSchema,
   sectionId: idSchema,
   from: nonNegativeIntegerSchema,
@@ -168,18 +213,19 @@ export const renderSoundEffectSchema = strictObject({
   volume: unitIntervalSchema
 });
 
+/** A resolved production video insert in RenderManifest 2.3.0. */
 export const renderInsertSchema = strictObject({
   id: idSchema,
-  kind: z.literal("placeholder"),
-  slot: z.enum(["opening", "ending", "eye_catch"]),
-  beforeSectionId: idSchema.nullable(),
+  role: z.enum(["intro", "outro", "cutin"]),
   from: nonNegativeIntegerSchema,
   durationInFrames: positiveIntegerSchema,
-  label: z.string()
+  src: relativePosixPathSchema,
+  volume: unitIntervalSchema
 });
+export const renderVideoInsertSchema = renderInsertSchema;
 
 const renderManifestBaseSchema = strictObject({
-  manifestVersion: z.literal("2.2.0"),
+  manifestVersion: z.literal("2.3.0"),
   sourceProjectHash: sha256Schema,
   compilerInputHash: sha256Schema,
   characterCatalogVersion: z.string().min(1),
@@ -200,6 +246,43 @@ const renderManifestBaseSchema = strictObject({
   soundEffects: z.array(renderSoundEffectSchema),
   inserts: z.array(renderInsertSchema)
 });
+
+/**
+ * Explicit legacy parser boundary. It is intentionally not used by the
+ * current compiler, API, or cache; old 2.2.0 files must be recompiled.
+ */
+export const legacyRenderInsertV22Schema = strictObject({
+  id: idSchema,
+  kind: z.literal("placeholder"),
+  slot: z.enum(["opening", "ending", "eye_catch"]),
+  beforeSectionId: idSchema.nullable(),
+  from: nonNegativeIntegerSchema,
+  durationInFrames: positiveIntegerSchema,
+  label: z.string()
+});
+
+const legacyRenderManifestBaseSchema = strictObject({
+  manifestVersion: z.literal("2.2.0"),
+  sourceProjectHash: sha256Schema,
+  compilerInputHash: sha256Schema,
+  characterCatalogVersion: z.string().min(1),
+  characterMappingVersion: z.string().min(1),
+  characters: z.array(renderCharacterSchema),
+  characterVariants: z.array(renderCharacterVariantSchema),
+  sourceAssetChecksums: z.array(sourceAssetChecksumSchema),
+  fps: positiveIntegerSchema,
+  width: positiveIntegerSchema,
+  height: positiveIntegerSchema,
+  durationInFrames: positiveIntegerSchema,
+  lines: z.array(renderLineSchema),
+  visuals: z.array(legacyRenderVisualSchema),
+  backgrounds: z.array(renderBackgroundSchema),
+  audioTracks: z.array(legacyRenderAudioTrackSchema),
+  soundEffects: z.array(renderSoundEffectSchema),
+  inserts: z.array(legacyRenderInsertV22Schema)
+});
+
+export const legacyRenderManifestV22Schema = legacyRenderManifestBaseSchema;
 
 type IssuePath = Array<string | number>;
 
@@ -362,6 +445,7 @@ export const renderManifestSchema = renderManifestBaseSchema.superRefine(
     validateTimelineOrder(manifest.soundEffects, "soundEffects", ctx);
     validateTimelineOrder(manifest.inserts, "inserts", ctx);
     validateTimelineNoOverlap(manifest.lines, "lines", ctx);
+    validateTimelineNoOverlap(manifest.inserts, "inserts", ctx);
 
     validateTimelineBounds(
       manifest.lines,
@@ -399,6 +483,21 @@ export const renderManifestSchema = renderManifestBaseSchema.superRefine(
       manifest.durationInFrames,
       ctx
     );
+
+    for (const [audioIndex, track] of manifest.audioTracks.entries()) {
+      for (const [insertIndex, insert] of manifest.inserts.entries()) {
+        if (
+          track.from < insert.from + insert.durationInFrames &&
+          insert.from < track.from + track.durationInFrames
+        ) {
+          addIssue(
+            ctx,
+            ["audioTracks", audioIndex, "from"],
+            `audio track must not overlap video insert at index ${insertIndex}`
+          );
+        }
+      }
+    }
 
     const lineById = new Map<string, (typeof manifest.lines)[number]>();
     const sectionIds = new Set<string>();
@@ -538,99 +637,49 @@ export const renderManifestSchema = renderManifestBaseSchema.superRefine(
       }
     }
 
-    const openingInserts = manifest.inserts.filter(
-      (insert) => insert.slot === "opening"
+    const introInserts = manifest.inserts.filter(
+      (insert) => insert.role === "intro"
     );
-    const endingInserts = manifest.inserts.filter(
-      (insert) => insert.slot === "ending"
+    const outroInserts = manifest.inserts.filter(
+      (insert) => insert.role === "outro"
     );
-    if (openingInserts.length !== 1) {
-      addIssue(ctx, ["inserts"], "exactly one opening insert is required");
+    if (introInserts.length > 1) {
+      addIssue(ctx, ["inserts"], "at most one intro insert is allowed");
     }
-    if (endingInserts.length !== 1) {
-      addIssue(ctx, ["inserts"], "exactly one ending insert is required");
+    if (outroInserts.length > 1) {
+      addIssue(ctx, ["inserts"], "at most one outro insert is allowed");
     }
-
-    const expectedPlaceholderDurationInFrames = Math.ceil(2 * manifest.fps);
-    for (const [index, insert] of manifest.inserts.entries()) {
-      if (
-        insert.durationInFrames !== expectedPlaceholderDurationInFrames
-      ) {
+    if (introInserts.length === 1) {
+      const introIndex = manifest.inserts.findIndex(
+        (insert) => insert.role === "intro"
+      );
+      if (introInserts[0].from !== 0) {
         addIssue(
           ctx,
-          ["inserts", index, "durationInFrames"],
-          "placeholder durationInFrames must match 2000ms at the manifest fps"
+          ["inserts", introIndex, "from"],
+          "intro insert must start at frame 0"
         );
       }
     }
-
-    if (openingInserts.length === 1) {
-      const openingIndex = manifest.inserts.findIndex(
-        (insert) => insert.slot === "opening"
+    if (outroInserts.length === 1) {
+      const outroIndex = manifest.inserts.findIndex(
+        (insert) => insert.role === "outro"
       );
-      if (openingInserts[0].from !== 0) {
-        addIssue(
-          ctx,
-          ["inserts", openingIndex, "from"],
-          "opening insert must start at frame 0"
-        );
-      }
-    }
-
-    if (endingInserts.length === 1) {
-      const endingIndex = manifest.inserts.findIndex(
-        (insert) => insert.slot === "ending"
-      );
-      const ending = endingInserts[0];
+      const outro = outroInserts[0];
       if (
-        ending.from + ending.durationInFrames !==
+        outro.from + outro.durationInFrames !==
         manifest.durationInFrames
       ) {
         addIssue(
           ctx,
-          ["inserts", endingIndex, "from"],
-          "ending insert must end at the manifest duration"
+          ["inserts", outroIndex, "from"],
+          "outro insert must end at the manifest duration"
         );
-      }
-    }
-
-    const firstSectionId = manifest.lines[0]?.sectionId;
-    for (const [index, insert] of manifest.inserts.entries()) {
-      if (
-        (insert.slot === "opening" || insert.slot === "ending") &&
-        insert.beforeSectionId !== null
-      ) {
-        addIssue(
-          ctx,
-          ["inserts", index, "beforeSectionId"],
-          "opening and ending inserts must have a null beforeSectionId"
-        );
-      }
-
-      if (insert.slot === "eye_catch") {
-        if (insert.beforeSectionId === null) {
-          addIssue(
-            ctx,
-            ["inserts", index, "beforeSectionId"],
-            "eye catch beforeSectionId must identify a section"
-          );
-        } else if (!sectionIds.has(insert.beforeSectionId)) {
-          addIssue(
-            ctx,
-            ["inserts", index, "beforeSectionId"],
-            "eye catch beforeSectionId must reference a section present in lines"
-          );
-        } else if (insert.beforeSectionId === firstSectionId) {
-          addIssue(
-            ctx,
-            ["inserts", index, "beforeSectionId"],
-            "eye catch cannot be placed before the first section"
-          );
-        }
       }
     }
   }
 );
+export const renderManifestV23Schema = renderManifestSchema;
 
 export type SourceAssetChecksum = z.infer<typeof sourceAssetChecksumSchema>;
 export type RenderLine = z.infer<typeof renderLineSchema>;
@@ -641,9 +690,16 @@ export type RenderCharacterVariant = z.infer<
 export type LegacyRenderVideoDisplayV22 = z.infer<
   typeof legacyRenderVideoDisplayV22Schema
 >;
+export type RenderVideoDisplayV23 = z.infer<
+  typeof renderVideoDisplayV23Schema
+>;
 export type RenderVisual = z.infer<typeof renderVisualSchema>;
 export type RenderBackground = z.infer<typeof renderBackgroundSchema>;
 export type RenderAudioTrack = z.infer<typeof renderAudioTrackSchema>;
 export type RenderSoundEffect = z.infer<typeof renderSoundEffectSchema>;
 export type RenderInsert = z.infer<typeof renderInsertSchema>;
+export type RenderVideoInsert = z.infer<typeof renderVideoInsertSchema>;
 export type RenderManifest = z.infer<typeof renderManifestSchema>;
+export type LegacyRenderManifestV22 = z.infer<
+  typeof legacyRenderManifestV22Schema
+>;

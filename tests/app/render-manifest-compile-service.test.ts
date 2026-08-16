@@ -12,8 +12,10 @@ import {
   compileRenderManifest,
   type RenderManifestAssetMetadata
 } from "../../src/app/rendering/render-manifest-compiler.js";
+import { assetDetailSchema } from "../../src/schema/asset.js";
 import { characterVisualCatalogSnapshotSchema } from "../../src/schema/character-visual.js";
-import { pngBytes } from "../fixtures/asset-fixtures.js";
+import type { VideoProject } from "../../src/schema/index.js";
+import { mp4Bytes, pngBytes } from "../fixtures/asset-fixtures.js";
 import { createRenderManifestAudioIndex } from "../fixtures/render-manifest-input.js";
 import { videoProjectFixture } from "../fixtures/video-project.js";
 
@@ -202,6 +204,91 @@ describe("RenderManifestInputBuilder", () => {
           (asset) => asset.path === "backgrounds/application-system.png"
         )
       ).toHaveLength(1);
+    } finally {
+      await fs.rm(workspaceRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("collects edit video checksum, metadata, and detected format from the project file", async () => {
+    const workspaceRoot = await fs.mkdtemp(
+      path.join(tmpdir(), "subdub-edit-video-input-builder-")
+    );
+    try {
+      const project = structuredClone(videoProjectFixture) as VideoProject;
+      const contents = mp4Bytes;
+      const checksum = createHash("sha256").update(contents).digest("hex");
+      project.edit.videoElements = [
+        {
+          id: "edit-intro",
+          role: "intro",
+          assetId: "asset-edit-video",
+          assetVersion: 2,
+          assetChecksum: checksum,
+          projectMediaPath: "media/edits/intro.mp4",
+          placement: { kind: "before_first_section" },
+          volume: 0.25
+        }
+      ];
+      const filePath = path.join(
+        workspaceRoot,
+        "projects",
+        project.metadata.id,
+        ...project.edit.videoElements[0].projectMediaPath.split("/")
+      );
+      await fs.mkdir(path.dirname(filePath), { recursive: true });
+      await fs.writeFile(filePath, contents);
+
+      const detail = assetDetailSchema.parse({
+        assetId: "asset-edit-video",
+        version: 2,
+        kind: "video",
+        title: "Edit video",
+        description: "",
+        confidentiality: "internal",
+        department: null,
+        system: null,
+        mimeType: "video/mp4",
+        libraryMediaPath: "library/edit-video.mp4",
+        checksum,
+        sizeBytes: contents.length,
+        width: 1920,
+        height: 1080,
+        durationMs: 2_500,
+        pageCount: null,
+        thumbnailPaths: [],
+        status: "active",
+        errorCode: null,
+        errorMessage: null,
+        createdAt: "2026-08-15T00:00:00.000Z",
+        updatedAt: "2026-08-15T00:00:00.000Z"
+      });
+      const findAssetDetail = vi.fn((assetId: string, version?: number) =>
+        assetId === "asset-edit-video" && version === 2 ? detail : undefined
+      );
+      const audioIndex = createRenderManifestAudioIndex(project);
+      const builder = new RenderManifestInputBuilder({
+        workspaceRoot,
+        projectRepository: { read: async () => project },
+        assetRepository: { findAssetDetail },
+        characterVisualCatalogService: {
+          verifyFiles: async () => createLegacySnapshot()
+        },
+        audioStore: { readIndex: async () => audioIndex }
+      });
+
+      const input = await builder.build(project.metadata.id);
+      const editMetadata = (
+        input.assetMetadata as readonly RenderManifestAssetMetadata[]
+      ).find((asset) => asset.path === "media/edits/intro.mp4");
+      expect(editMetadata).toEqual({
+        path: "media/edits/intro.mp4",
+        kind: "video",
+        sha256: checksum,
+        durationMs: 2_500,
+        mimeType: "video/mp4",
+        format: "mp4"
+      });
+      expect(findAssetDetail).toHaveBeenCalledWith("asset-edit-video", 2);
     } finally {
       await fs.rm(workspaceRoot, { recursive: true, force: true });
     }

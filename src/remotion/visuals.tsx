@@ -34,7 +34,7 @@ export function VideoVisual({
         trimBefore={millisecondsToFrames(visual.display.startMs, fps)}
         trimAfter={millisecondsToFrames(visual.display.endMs, fps)}
         playbackRate={visual.display.playbackRate}
-        muted={visual.display.muted}
+        volume={visual.display.volume}
         style={{
           ...mediaAssetStyle,
           objectFit: visual.display.fit

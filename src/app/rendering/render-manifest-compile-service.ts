@@ -8,6 +8,10 @@ import {
 } from "../../assets/character-asset-manifest.js";
 import type { CharacterVisualCatalogService } from "../character-visuals/character-visual-service.js";
 import type { AssetRepository } from "../assets/asset-repository.js";
+import {
+  ASSET_DETECTION_HEAD_BYTES,
+  detectAssetFormat
+} from "../assets/asset-formats.js";
 import { processAudioMedia } from "../assets/processing/video-audio.js";
 import type { ProjectRepository } from "../projects/project-repository.js";
 import {
@@ -62,6 +66,13 @@ function addAssetMetadata(
   }
 }
 
+function detectedFormat(contents: Buffer): string {
+  const detection = detectAssetFormat(
+    contents.subarray(0, ASSET_DETECTION_HEAD_BYTES)
+  );
+  return detection.status === "matched" ? detection.format : "unsupported";
+}
+
 function appendAssetMetadata(
   metadata: AssetMetadataByPath,
   assetRepository: AssetDetailReader,
@@ -71,9 +82,11 @@ function appendAssetMetadata(
   options: {
     readonly includeDuration: boolean;
     readonly includePageCount: boolean;
+    readonly assetVersion?: number;
+    readonly includeMimeType?: boolean;
   }
 ): void {
-  const detail = assetRepository.findAssetDetail(assetId);
+  const detail = assetRepository.findAssetDetail(assetId, options.assetVersion);
   if (detail === undefined || detail.checksum === null) {
     return;
   }
@@ -86,8 +99,51 @@ function appendAssetMetadata(
       : {}),
     ...(options.includePageCount && detail.pageCount !== null
       ? { pageCount: detail.pageCount }
-      : {})
+      : {}),
+    ...(options.includeMimeType ? { mimeType: detail.mimeType } : {})
   });
+}
+
+async function appendEditVideoMetadata(
+  metadata: AssetMetadataByPath,
+  workspaceRoot: string,
+  project: VideoProject,
+  assetRepository: AssetDetailReader
+): Promise<void> {
+  const projectRoot = path.resolve(
+    workspaceRoot,
+    "projects",
+    project.metadata.id
+  );
+  for (const element of project.edit.videoElements) {
+    const filePath = path.resolve(
+      projectRoot,
+      ...element.projectMediaPath.split("/")
+    );
+    if (!isPathInside(projectRoot, filePath)) {
+      continue;
+    }
+    const detail = assetRepository.findAssetDetail(
+      element.assetId,
+      element.assetVersion
+    );
+    if (detail === undefined || detail.checksum === null) {
+      continue;
+    }
+    try {
+      const contents = await readFile(filePath);
+      metadata.set(element.projectMediaPath, {
+        path: element.projectMediaPath,
+        kind: detail.kind,
+        sha256: createHash("sha256").update(contents).digest("hex"),
+        durationMs: detail.durationMs,
+        mimeType: detail.mimeType,
+        format: detectedFormat(contents)
+      });
+    } catch {
+      // Let the compiler report the missing project file or metadata.
+    }
+  }
 }
 
 async function appendBgmMetadata(
@@ -117,7 +173,8 @@ async function appendBgmMetadata(
         path: bgm.projectMediaPath,
         kind: "bgm",
         sha256: createHash("sha256").update(contents).digest("hex"),
-        durationMs: processed.metadata.durationMs
+        durationMs: processed.metadata.durationMs,
+        format: detectedFormat(contents)
       });
     } catch {
       // Let the compiler report missing or incomplete BGM metadata.
@@ -213,6 +270,12 @@ async function assetMetadataForProject(
     }
   }
 
+  await appendEditVideoMetadata(
+    metadata,
+    workspaceRoot,
+    project,
+    assetRepository
+  );
   await appendBgmMetadata(metadata, workspaceRoot, project);
   return [...metadata.values()];
 }

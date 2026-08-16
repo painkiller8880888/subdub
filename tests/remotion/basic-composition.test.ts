@@ -428,22 +428,22 @@ describe("RenderManifest interval selection", () => {
     });
   });
 
-  it("selects opening, eye catch, and ending placeholders as half-open intervals", () => {
+  it("selects intro, cutin, and outro inserts as half-open intervals", () => {
     const manifest = renderManifestFixture as RenderManifest;
 
-    expect(selectActiveInsert(manifest, 0)?.slot).toBe("opening");
-    expect(selectActiveInsert(manifest, 59)?.slot).toBe("opening");
+    expect(selectActiveInsert(manifest, 0)?.role).toBe("intro");
+    expect(selectActiveInsert(manifest, 59)?.role).toBe("intro");
     expect(selectActiveInsert(manifest, 60)).toBeUndefined();
     expect(selectActiveInsert(manifest, 149)).toBeUndefined();
-    expect(selectActiveInsert(manifest, 150)?.slot).toBe("eye_catch");
-    expect(selectActiveInsert(manifest, 209)?.slot).toBe("eye_catch");
+    expect(selectActiveInsert(manifest, 150)?.role).toBe("cutin");
+    expect(selectActiveInsert(manifest, 209)?.role).toBe("cutin");
     expect(selectActiveInsert(manifest, 210)).toBeUndefined();
-    expect(selectActiveInsert(manifest, 420)?.slot).toBe("ending");
-    expect(selectActiveInsert(manifest, 479)?.slot).toBe("ending");
+    expect(selectActiveInsert(manifest, 420)?.role).toBe("outro");
+    expect(selectActiveInsert(manifest, 479)?.role).toBe("outro");
     expect(selectActiveInsert(manifest, 480)).toBeUndefined();
   });
 
-  it("maps manifest audio tracks to bounded sequences and deterministic fades", () => {
+  it("maps manifest audio tracks to bounded fixed-volume sequences", () => {
     const track = renderManifestFixture.audioTracks[1];
     const effect = renderManifestFixture.soundEffects[0];
     if (track === undefined || effect === undefined) {
@@ -463,35 +463,12 @@ describe("RenderManifest interval selection", () => {
     });
     expect(soundEffectSequenceProps(effect).src).toContain(effect.src);
 
-    expect(audioTrackVolumeAtFrame(track, 0)).toBe(0);
-    expect(audioTrackVolumeAtFrame(track, 4)).toBeCloseTo(
-      track.volume * (4 / track.fadeInFrames),
-      10
-    );
-    expect(audioTrackVolumeAtFrame(track, track.fadeInFrames)).toBe(
+    expect(audioTrackVolumeAtFrame(track, 0)).toBe(track.volume);
+    expect(audioTrackVolumeAtFrame(track, track.durationInFrames - 1)).toBe(
       track.volume
     );
-    expect(
-      audioTrackVolumeAtFrame(track, track.durationInFrames - 1)
-    ).toBeCloseTo(track.volume / track.fadeOutFrames, 10);
-    expect(audioTrackVolumeAtFrame(track, track.durationInFrames)).toBe(0);
-
-    const overlappingFade = {
-      ...track,
-      durationInFrames: 10,
-      volume: 0.8,
-      fadeInFrames: 10,
-      fadeOutFrames: 10
-    };
-    expect(audioTrackVolumeAtFrame(overlappingFade, 5)).toBe(0.2);
-    expect(audioTrackVolumeAtFrame(overlappingFade, 5)).toBeLessThanOrEqual(
-      overlappingFade.volume
-    );
-
-    const noFade = { ...track, fadeInFrames: 0, fadeOutFrames: 0 };
-    expect(audioTrackVolumeAtFrame(noFade, 0)).toBe(noFade.volume);
-    expect(audioTrackVolumeAtFrame(noFade, noFade.durationInFrames)).toBe(
-      noFade.volume
+    expect(audioTrackVolumeAtFrame(track, track.durationInFrames)).toBe(
+      track.volume
     );
   });
 });

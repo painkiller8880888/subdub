@@ -130,6 +130,13 @@ function sourceAssetTarget(
     return toTarget("visuals", { assignmentId: visual.id, path: assetPath });
   }
 
+  const insert = manifest.inserts.find(
+    (candidate) => candidate.src === assetPath
+  );
+  if (insert !== undefined) {
+    return toTarget("asset", { assignmentId: insert.id, path: assetPath });
+  }
+
   const background = manifest.backgrounds.find(
     (candidate) =>
       candidate.background.kind === "image" &&

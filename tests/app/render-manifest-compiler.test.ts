@@ -127,7 +127,7 @@ describe("compileRenderManifest", () => {
       return;
     }
 
-    expect(result.manifest.manifestVersion).toBe("2.2.0");
+    expect(result.manifest.manifestVersion).toBe("2.3.0");
     expect(result.manifest.characterCatalogVersion).toBe(
       CHARACTER_VARIANT_CATALOG_VERSION
     );
@@ -197,37 +197,27 @@ describe("compileRenderManifest", () => {
       files: { single: { path: expect.stringContaining("stand.png") } }
     });
 
-    expect(
-      result.manifest.inserts.map(({ slot, from, durationInFrames }) => [
-        slot,
-        from,
-        durationInFrames
-      ])
-    ).toEqual([
-      ["opening", 0, 60],
-      ["ending", 253, 60]
-    ]);
+    expect(result.manifest.inserts).toEqual([]);
     expect(
       result.manifest.lines.map(({ from, durationInFrames }) => [
         from,
         durationInFrames
       ])
     ).toEqual([
-      [60, 38],
-      [98, 41],
-      [139, 38],
-      [177, 38],
-      [215, 38]
+      [0, 38],
+      [38, 41],
+      [79, 38],
+      [117, 38],
+      [155, 38]
     ]);
-    expect(result.manifest.durationInFrames).toBe(313);
+    expect(result.manifest.durationInFrames).toBe(193);
     expect(result.manifest.visuals[0]?.display).toMatchObject({
       kind: "video",
-      muted: true
+      volume: 0
     });
-    expect(result.manifest.visuals[0]?.display).not.toHaveProperty("volume");
     expect(result.manifest.soundEffects[0]).toMatchObject({
       lineId: "main-learner-1",
-      from: 180,
+      from: 120,
       durationInFrames: 12
     });
     const mainLearnerLine = result.manifest.lines.find(
@@ -243,29 +233,19 @@ describe("compileRenderManifest", () => {
     );
     expect(
       result.manifest.audioTracks.map(
-        ({
+        ({ sectionId, from, durationInFrames, volume, loop }) => [
           sectionId,
           from,
           durationInFrames,
           volume,
-          loop,
-          fadeInFrames,
-          fadeOutFrames
-        }) => [
-          sectionId,
-          from,
-          durationInFrames,
-          volume,
-          loop,
-          fadeInFrames,
-          fadeOutFrames
+          loop
         ]
       )
     ).toEqual([
-      ["section-intro", 60, 79, 0.25, true, 0, 0],
-      ["section-main", 139, 76, 0.2, true, 0, 0]
+      ["section-intro", 0, 79, 0.25, true],
+      ["section-main", 79, 76, 0.2, true]
     ]);
-    const placeholderRanges = result.manifest.inserts.map((insert) => ({
+    const insertRanges = result.manifest.inserts.map((insert) => ({
       from: insert.from,
       to: insert.from + insert.durationInFrames
     }));
@@ -274,27 +254,17 @@ describe("compileRenderManifest", () => {
       ...result.manifest.soundEffects
     ]) {
       expect(
-        placeholderRanges.some(
-          (placeholder) =>
-            range.from < placeholder.to &&
-            placeholder.from < range.from + range.durationInFrames
+        insertRanges.some(
+          (insert) =>
+            range.from < insert.to &&
+            insert.from < range.from + range.durationInFrames
         )
       ).toBe(false);
     }
-    const ending = result.manifest.inserts.find(
-      (insert) => insert.slot === "ending"
-    );
-    const lastLine = result.manifest.lines[result.manifest.lines.length - 1];
-    expect(ending?.from).toBe(
-      (lastLine?.from ?? 0) + (lastLine?.durationInFrames ?? 0)
-    );
-    expect(ending?.from).toBeGreaterThan(
+    expect(result.manifest.durationInFrames).toBe(
       Math.max(
-        ...result.manifest.audioTracks.map(
-          (track) => track.from + track.durationInFrames
-        ),
-        ...result.manifest.soundEffects.map(
-          (effect) => effect.from + effect.durationInFrames
+        ...result.manifest.lines.map(
+          (line) => line.from + line.durationInFrames
         )
       )
     );
@@ -308,32 +278,25 @@ describe("compileRenderManifest", () => {
     );
   });
 
-  it("rejects project video volumes that the legacy manifest cannot represent", () => {
+  it("preserves arbitrary project video volumes in the 2.3.0 manifest", () => {
     const input = validInput();
     const project = structuredClone(input.project) as VideoProject;
     const display = project.visuals.assignments[0]?.display;
     if (display?.kind !== "video") {
       throw new Error("fixture must contain a video display");
     }
-    display.volume = 0.5;
+    display.volume = 0.25;
 
     const result = compileRenderManifest({ ...input, project });
 
-    expect(result.success).toBe(false);
-    expect(diagnosticCodes(result)).toContain(
-      "LEGACY_MANIFEST_VIDEO_VOLUME_UNREPRESENTABLE"
-    );
-    if (result.success) {
+    expect(result.success).toBe(true);
+    if (!result.success) {
       return;
     }
-    expect(result.diagnostics).toContainEqual(
-      expect.objectContaining({
-        path: ["visuals", "assignments", 0, "display", "volume"]
-      })
-    );
+    expect(result.manifest.visuals[0]?.display).toMatchObject({ volume: 0.25 });
   });
 
-  it("adapts project video volume 1 to muted false in the legacy manifest", () => {
+  it("preserves project video volume 1 in the 2.3.0 manifest", () => {
     const input = validInput();
     const project = structuredClone(input.project) as VideoProject;
     const display = project.visuals.assignments[0]?.display;
@@ -350,8 +313,270 @@ describe("compileRenderManifest", () => {
     }
     expect(result.manifest.visuals[0]?.display).toMatchObject({
       kind: "video",
-      muted: false
+      volume: 1
     });
+  });
+
+  it("resolves real EditPlan video durations and shifts every dependent timeline", () => {
+    const project = structuredClone(videoProjectFixture) as VideoProject;
+    const videoAssignment = project.visuals.assignments.find(
+      (assignment) => assignment.display.kind === "video"
+    );
+    if (videoAssignment === undefined) {
+      throw new Error("fixture video assignment is missing");
+    }
+    project.edit.videoElements = [
+      {
+        id: "edit-intro",
+        role: "intro",
+        assetId: "asset-application-demo",
+        assetVersion: 1,
+        assetChecksum: videoAssignment.assetChecksum,
+        projectMediaPath: videoAssignment.projectMediaPath,
+        placement: { kind: "before_first_section" },
+        volume: 0
+      },
+      {
+        id: "edit-cutin-one",
+        role: "cutin",
+        assetId: "asset-application-demo",
+        assetVersion: 1,
+        assetChecksum: videoAssignment.assetChecksum,
+        projectMediaPath: videoAssignment.projectMediaPath,
+        placement: {
+          kind: "before_section",
+          sectionId: "section-main",
+          order: 1
+        },
+        volume: 0.25
+      },
+      {
+        id: "edit-cutin-zero",
+        role: "cutin",
+        assetId: "asset-application-demo",
+        assetVersion: 1,
+        assetChecksum: videoAssignment.assetChecksum,
+        projectMediaPath: videoAssignment.projectMediaPath,
+        placement: {
+          kind: "before_section",
+          sectionId: "section-main",
+          order: 0
+        },
+        volume: 1
+      },
+      {
+        id: "edit-outro",
+        role: "outro",
+        assetId: "asset-application-demo",
+        assetVersion: 1,
+        assetChecksum: videoAssignment.assetChecksum,
+        projectMediaPath: videoAssignment.projectMediaPath,
+        placement: { kind: "after_last_section" },
+        volume: 0.25
+      }
+    ];
+    const input = createRenderManifestInput(project);
+    const assetMetadata = (
+      input.assetMetadata as readonly RenderManifestAssetMetadata[]
+    ).map((asset) =>
+      asset.kind === "bgm" ? { ...asset, durationMs: 400 } : asset
+    );
+
+    const result = compileRenderManifest({ ...input, assetMetadata });
+
+    expect(result.success).toBe(true);
+    if (!result.success) {
+      return;
+    }
+    expect(result.manifest.inserts).toEqual([
+      expect.objectContaining({
+        id: "edit-intro",
+        role: "intro",
+        from: 0,
+        durationInFrames: 150,
+        src: videoAssignment.projectMediaPath,
+        volume: 0
+      }),
+      expect.objectContaining({
+        id: "edit-cutin-zero",
+        role: "cutin",
+        from: 229,
+        durationInFrames: 150,
+        volume: 1
+      }),
+      expect.objectContaining({
+        id: "edit-cutin-one",
+        role: "cutin",
+        from: 379,
+        durationInFrames: 150,
+        volume: 0.25
+      }),
+      expect.objectContaining({
+        id: "edit-outro",
+        role: "outro",
+        from: 643,
+        durationInFrames: 150,
+        volume: 0.25
+      })
+    ]);
+    expect(result.manifest.lines.map(({ from }) => from)).toEqual([
+      150, 188, 529, 567, 605
+    ]);
+    expect(result.manifest.visuals.map(({ from }) => from)).toEqual([
+      150, 529, 605
+    ]);
+    expect(result.manifest.audioTracks).toEqual([
+      expect.objectContaining({
+        sectionId: "section-intro",
+        from: 150,
+        durationInFrames: 79,
+        loop: true
+      }),
+      expect.objectContaining({
+        sectionId: "section-main",
+        from: 529,
+        durationInFrames: 76,
+        loop: true
+      })
+    ]);
+    expect(result.manifest.durationInFrames).toBe(793);
+    expect(
+      result.manifest.audioTracks.every((track) =>
+        result.manifest.inserts.every(
+          (insert) =>
+            track.from >= insert.from + insert.durationInFrames ||
+            insert.from >= track.from + track.durationInFrames
+        )
+      )
+    ).toBe(true);
+    expect(
+      result.manifest.sourceAssetChecksums.some(
+        (asset) => asset.path === videoAssignment.projectMediaPath
+      )
+    ).toBe(true);
+  });
+
+  it("invalidates the compiler hash when edit order, asset snapshot, or volume changes", () => {
+    const createProject = (): VideoProject => {
+      const project = structuredClone(videoProjectFixture) as VideoProject;
+      const videoAssignment = project.visuals.assignments.find(
+        (assignment) => assignment.display.kind === "video"
+      );
+      if (videoAssignment === undefined) {
+        throw new Error("fixture video assignment is missing");
+      }
+      project.edit.videoElements = [
+        {
+          id: "edit-cutin-a",
+          role: "cutin",
+          assetId: videoAssignment.assetId,
+          assetVersion: 1,
+          assetChecksum: videoAssignment.assetChecksum,
+          projectMediaPath: videoAssignment.projectMediaPath,
+          placement: {
+            kind: "before_section",
+            sectionId: "section-main",
+            order: 0
+          },
+          volume: 0.25
+        },
+        {
+          id: "edit-cutin-b",
+          role: "cutin",
+          assetId: videoAssignment.assetId,
+          assetVersion: 1,
+          assetChecksum: videoAssignment.assetChecksum,
+          projectMediaPath: videoAssignment.projectMediaPath,
+          placement: {
+            kind: "before_section",
+            sectionId: "section-main",
+            order: 1
+          },
+          volume: 1
+        }
+      ];
+      return project;
+    };
+
+    const baseProject = createProject();
+    const first = compileRenderManifest(validInput(baseProject));
+    const changedVolumeProject = structuredClone(baseProject) as VideoProject;
+    changedVolumeProject.edit.videoElements[0]!.volume = 0.5;
+    const changedVolume = compileRenderManifest(
+      validInput(changedVolumeProject)
+    );
+    const changedOrderProject = structuredClone(baseProject) as VideoProject;
+    changedOrderProject.edit.videoElements[0]!.placement = {
+      kind: "before_section",
+      sectionId: "section-main",
+      order: 2
+    };
+    changedOrderProject.edit.videoElements[1]!.placement = {
+      kind: "before_section",
+      sectionId: "section-main",
+      order: 0
+    };
+    const changedOrder = compileRenderManifest(validInput(changedOrderProject));
+    const changedAssetProject = structuredClone(baseProject) as VideoProject;
+    changedAssetProject.edit.videoElements[0]!.assetId = "asset-replaced-video";
+    changedAssetProject.edit.videoElements[0]!.assetVersion = 2;
+    const changedAsset = compileRenderManifest(validInput(changedAssetProject));
+
+    expect(first.success).toBe(true);
+    expect(changedVolume.success).toBe(true);
+    expect(changedOrder.success).toBe(true);
+    expect(changedAsset.success).toBe(true);
+    if (
+      !first.success ||
+      !changedVolume.success ||
+      !changedOrder.success ||
+      !changedAsset.success
+    ) {
+      return;
+    }
+    expect(changedVolume.manifest.compilerInputHash).not.toBe(
+      first.manifest.compilerInputHash
+    );
+    expect(changedOrder.manifest.compilerInputHash).not.toBe(
+      first.manifest.compilerInputHash
+    );
+    expect(changedAsset.manifest.compilerInputHash).not.toBe(
+      first.manifest.compilerInputHash
+    );
+  });
+
+  it("rejects edit video metadata that is not a supported MP4", () => {
+    const project = structuredClone(videoProjectFixture) as VideoProject;
+    project.edit.videoElements = [
+      {
+        id: "edit-intro-invalid-format",
+        role: "intro",
+        assetId: "asset-invalid-video",
+        assetVersion: 1,
+        assetChecksum: "1".repeat(64),
+        projectMediaPath: "media/intro.avi",
+        placement: { kind: "before_first_section" },
+        volume: 1
+      }
+    ];
+    const input = validInput(project);
+    const result = compileRenderManifest({
+      ...input,
+      assetMetadata: [
+        ...(input.assetMetadata ?? []),
+        {
+          path: "media/intro.avi",
+          kind: "video",
+          sha256: "1".repeat(64),
+          durationMs: 1_000,
+          mimeType: "video/avi",
+          format: "unsupported"
+        }
+      ]
+    });
+
+    expect(result.success).toBe(false);
+    expect(diagnosticCodes(result)).toContain("EDIT_VIDEO_FORMAT_INVALID");
   });
 
   it("shares a physical visual variant without assigning ownership to one speaker", () => {

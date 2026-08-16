@@ -1533,8 +1533,8 @@ describe("MVP final verification E2E", () => {
           /^audio\/wav/
         );
 
-        const bgmProjectMediaPath = "media/fixture-section-bgm.wav";
-        const bgmSourcePath = mediaFixturePath("effect-2s.wav");
+        const bgmProjectMediaPath = "media/fixture-section-bgm.mp3";
+        const bgmSourcePath = mediaFixturePath("bgm-1s.mp3");
         const bgmTargetPath = resolvePosixPath(
           path.join(workspaceRoot, "projects", projectId),
           bgmProjectMediaPath
@@ -1737,18 +1737,7 @@ describe("MVP final verification E2E", () => {
           loop: true
         });
         expect(manifest.soundEffects).toHaveLength(1);
-        const requiredPlaceholderInserts = manifest.inserts.filter(
-          (insert) =>
-            insert.slot === "opening" ||
-            insert.slot === "ending" ||
-            insert.slot === "eye_catch"
-        );
-        expect(requiredPlaceholderInserts).toHaveLength(2);
-        expect(
-          requiredPlaceholderInserts.every(
-            (insert) => insert.durationInFrames === 60
-          )
-        ).toBe(true);
+        expect(manifest.inserts).toEqual([]);
 
         const storedManifestResponse = await server.app.inject({
           method: "GET",
