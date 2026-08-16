@@ -72,14 +72,16 @@ describe("BGM asset migration", () => {
 
   afterEach(async () => {
     await Promise.all(
-      workspaceRoots.splice(0).map((root) =>
-        fs.rm(root, { recursive: true, force: true })
-      )
+      workspaceRoots
+        .splice(0)
+        .map((root) => fs.rm(root, { recursive: true, force: true }))
     );
   });
 
   it("preserves existing rows, tag links, statuses, and FTS synchronization", async () => {
-    const workspaceRoot = await fs.mkdtemp(path.join(tmpdir(), "subdub-bgm-migration-"));
+    const workspaceRoot = await fs.mkdtemp(
+      path.join(tmpdir(), "subdub-bgm-migration-")
+    );
     workspaceRoots.push(workspaceRoot);
     const definitions = await readDefinitions();
 
@@ -167,7 +169,9 @@ describe("BGM asset migration", () => {
     });
     expect(
       after.connection
-        .prepare("SELECT tag_id FROM asset_tags WHERE asset_id = 'legacy-video'")
+        .prepare(
+          "SELECT tag_id FROM asset_tags WHERE asset_id = 'legacy-video'"
+        )
         .all()
     ).toEqual([{ tag_id: "legacy-tag" }]);
     expect(
