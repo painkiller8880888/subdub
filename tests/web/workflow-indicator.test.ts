@@ -7,12 +7,20 @@ import {
 } from "../../src/web/workflow-indicator";
 
 describe("workflow indicator", () => {
-  it("keeps the production steps in order", () => {
+  it("keeps the script and edit steps in order", () => {
     expect(WORKFLOW_STEPS.map((step) => step.id)).toEqual([
       "brief",
       "outline",
       "production",
+      "edit",
       "output"
+    ]);
+    expect(WORKFLOW_STEPS.map((step) => step.label)).toEqual([
+      "企画",
+      "構成案",
+      "台本",
+      "編集",
+      "出力"
     ]);
   });
 
@@ -26,14 +34,17 @@ describe("workflow indicator", () => {
     expect(workflowStepPath("project/1", "production")).toBe(
       "/projects/project%2F1/script"
     );
+    expect(workflowStepPath("project/1", "edit")).toBe(
+      "/projects/project%2F1/edit"
+    );
     expect(workflowStepPath("project/1", "output")).toBe(
       "/projects/project%2F1/preview"
     );
   });
 
   it("marks earlier, current, and later steps distinctly", () => {
-    expect(workflowStepStatus("production", "outline")).toBe("past");
-    expect(workflowStepStatus("production", "production")).toBe("current");
-    expect(workflowStepStatus("production", "output")).toBe("future");
+    expect(workflowStepStatus("edit", "production")).toBe("past");
+    expect(workflowStepStatus("edit", "edit")).toBe("current");
+    expect(workflowStepStatus("edit", "output")).toBe("future");
   });
 });

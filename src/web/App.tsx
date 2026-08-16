@@ -45,6 +45,7 @@ import { sameBriefDraft, type BriefDraft } from "./brief-draft";
 import { CharacterAssetsPage } from "./CharacterAssetsPage";
 import { AssetsPage } from "./AssetsPage";
 import { CharacterVisualsPage } from "./CharacterVisualsPage";
+import { EditPage } from "./EditPage";
 import { OutlinePage } from "./OutlinePage";
 import { ScriptPage } from "./ScriptPage";
 import { TerminologyPage } from "./TerminologyPage";
@@ -1027,6 +1028,7 @@ export function App() {
           element={<ScriptPage />}
           path="/projects/:projectId/script"
         />
+        <Route element={<EditPage />} path="/projects/:projectId/edit" />
         <Route
           element={<PreviewPage />}
           path="/projects/:projectId/preview"

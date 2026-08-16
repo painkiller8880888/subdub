@@ -70,6 +70,10 @@ function outlinePath(projectId: string): string {
   return `/projects/${encodeURIComponent(projectId)}/outline`;
 }
 
+function editPath(projectId: string): string {
+  return `/projects/${encodeURIComponent(projectId)}/edit`;
+}
+
 function getErrorMessage(error: unknown, fallback: string): string {
   if (error instanceof ApiClientError) {
     return `${error.message}（エラーコード: ${error.code}）`;
@@ -1234,6 +1238,15 @@ export function ScriptPage() {
           台本を編集し、話者ごとのビジュアルセットからセリフ単位で表示 variant
           を明示的に選択します。
         </p>
+        <div className="page-header-actions">
+          <Link
+            className="button button-primary"
+            to={editPath(projectId)}
+            onClick={(event) => void navigateAway(event, editPath(projectId))}
+          >
+            編集へ進む
+          </Link>
+        </div>
       </header>
 
       <div className="autosave-status" role="status" aria-live="polite">
