@@ -538,7 +538,11 @@ function VisualAssignmentEditor({
             type="checkbox"
             checked={display.prioritizeVisual}
             onChange={(event) =>
-              updateDisplay({ prioritizeVisual: event.target.checked })
+              updateDisplay({
+                prioritizeVisual: Boolean(
+                  (event.target as unknown as { checked: boolean }).checked
+                )
+              })
             }
           />
           画像を前面に表示

@@ -207,7 +207,7 @@ function targetView(
     case "visuals":
       return {
         label: "ビジュアル割り当てを確認",
-        href: `/projects/${projectPath}/script#visual-plan`
+        href: `/projects/${projectPath}/visual-assignments`
       };
     case "voice":
       return {
@@ -220,7 +220,7 @@ function targetView(
         href:
           target.assignmentId === undefined
             ? `/projects/${projectPath}/script`
-            : `/projects/${projectPath}/script#visual-plan`
+            : `/projects/${projectPath}/visual-assignments`
       };
     case "manifest":
       return {
