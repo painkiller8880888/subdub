@@ -1,7 +1,10 @@
-PRAGMA foreign_keys=OFF;--> statement-breakpoint
 DROP TRIGGER IF EXISTS `asset_search_assets_ai`;--> statement-breakpoint
 DROP TRIGGER IF EXISTS `asset_search_assets_au`;--> statement-breakpoint
 DROP TRIGGER IF EXISTS `asset_search_assets_ad`;--> statement-breakpoint
+CREATE TABLE `__asset_versions_backup` AS SELECT * FROM `asset_versions`;--> statement-breakpoint
+CREATE TABLE `__asset_tags_backup` AS SELECT * FROM `asset_tags`;--> statement-breakpoint
+DELETE FROM `asset_tags`;--> statement-breakpoint
+DELETE FROM `asset_versions`;--> statement-breakpoint
 CREATE TABLE `__new_assets` (
 	`asset_id` text PRIMARY KEY NOT NULL,
 	`kind` text NOT NULL,
@@ -51,6 +54,41 @@ FROM `assets`;
 DROP TABLE `assets`;--> statement-breakpoint
 ALTER TABLE `__new_assets` RENAME TO `assets`;--> statement-breakpoint
 CREATE INDEX `assets_status_idx` ON `assets` (`status`);--> statement-breakpoint
+INSERT INTO `asset_versions` (
+	`asset_id`,
+	`version`,
+	`library_media_path`,
+	`mime_type`,
+	`checksum`,
+	`size_bytes`,
+	`width`,
+	`height`,
+	`duration_ms`,
+	`page_count`,
+	`thumbnail_paths`,
+	`created_at`,
+	`updated_at`
+)
+SELECT
+	`asset_id`,
+	`version`,
+	`library_media_path`,
+	`mime_type`,
+	`checksum`,
+	`size_bytes`,
+	`width`,
+	`height`,
+	`duration_ms`,
+	`page_count`,
+	`thumbnail_paths`,
+	`created_at`,
+	`updated_at`
+FROM `__asset_versions_backup`;--> statement-breakpoint
+INSERT INTO `asset_tags` (`asset_id`, `tag_id`, `created_at`)
+SELECT `asset_id`, `tag_id`, `created_at`
+FROM `__asset_tags_backup`;--> statement-breakpoint
+DROP TABLE `__asset_versions_backup`;--> statement-breakpoint
+DROP TABLE `__asset_tags_backup`;--> statement-breakpoint
 CREATE TRIGGER `asset_search_assets_ai`
 AFTER INSERT ON assets
 BEGIN
@@ -75,5 +113,3 @@ AFTER DELETE ON assets
 BEGIN
 	DELETE FROM asset_search WHERE asset_id = OLD.asset_id;
 END;
---> statement-breakpoint
-PRAGMA foreign_keys=ON;
