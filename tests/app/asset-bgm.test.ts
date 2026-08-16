@@ -15,6 +15,7 @@ import { AssetService } from "../../src/app/assets/asset-service.js";
 import { createRealMediaProcessingPort } from "../../src/app/assets/processing/real-media-processing.js";
 import type { AssetMediaProcessingPort } from "../../src/app/assets/processing/types.js";
 import { mp3Bytes, mp4Bytes } from "../fixtures/asset-fixtures.js";
+import { mediaFixture } from "../fixtures/media-fixtures.js";
 
 const NOW = "2026-08-16T00:00:00.000Z";
 
@@ -176,6 +177,77 @@ describe("BGM assets", () => {
       durationMs: 12_345,
       status: "active"
     });
+  });
+
+  it("activates a real MP3 BGM and returns it from an explicit BGM listing", async () => {
+    await setup();
+    const bytes = await mediaFixture("bgm-1s.mp3");
+    const receipt = await register("bgm", bytes, "audio/mpeg", "music.mp3");
+    const processingService = new AssetProcessingService({
+      repository,
+      fileStore,
+      processingPort: createRealMediaProcessingPort(),
+      now: () => new Date(NOW)
+    });
+
+    await expect(
+      processingService.processAsset(receipt.assetId, 1)
+    ).resolves.toEqual({
+      status: "processed"
+    });
+
+    expect(repository.findAsset(receipt.assetId)?.status).toBe("active");
+    const version = repository.findAssetVersion(receipt.assetId, 1);
+    expect(version).toMatchObject({
+      checksum: sha256(bytes),
+      sizeBytes: bytes.length,
+      width: null,
+      height: null,
+      pageCount: null
+    });
+    expect(version?.durationMs).toBeGreaterThan(0);
+
+    const list = repository.list({
+      kind: "bgm",
+      status: "active",
+      tagIds: [],
+      page: 1,
+      pageSize: 20
+    });
+    expect(list.items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          assetId: receipt.assetId,
+          kind: "bgm",
+          durationMs: version?.durationMs,
+          status: "active"
+        })
+      ])
+    );
+  });
+
+  it("activates a real MP4 video through registration and processing", async () => {
+    await setup();
+    const bytes = await mediaFixture("clip.mp4");
+    const receipt = await register("video", bytes, "video/mp4", "clip.mp4");
+    const processingService = new AssetProcessingService({
+      repository,
+      fileStore,
+      processingPort: createRealMediaProcessingPort(),
+      now: () => new Date(NOW)
+    });
+
+    await expect(
+      processingService.processAsset(receipt.assetId, 1)
+    ).resolves.toEqual({
+      status: "processed"
+    });
+
+    expect(repository.findAsset(receipt.assetId)?.status).toBe("active");
+    const version = repository.findAssetVersion(receipt.assetId, 1);
+    expect(version?.width).toBeGreaterThan(0);
+    expect(version?.height).toBeGreaterThan(0);
+    expect(version?.durationMs).toBeGreaterThan(0);
   });
 
   it("moves invalid BGM metadata to error instead of active", async () => {
