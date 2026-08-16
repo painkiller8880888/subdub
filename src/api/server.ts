@@ -10,6 +10,7 @@ import {
   ProjectRepository
 } from "../app/projects/project-repository.js";
 import { ProjectService } from "../app/projects/project-service.js";
+import { ProjectEditService } from "../app/projects/project-edit-service.js";
 import { OutlineGenerationService } from "../app/projects/outline-generation-service.js";
 import { VisualSuggestionService } from "../app/projects/visual-suggestion-service.js";
 import { VisualAssignmentService } from "../app/projects/visual-assignment-service.js";
@@ -73,6 +74,7 @@ export type ServerOptions = AppOptions & {
   databasePath?: string;
   migrationsFolder?: MigrationFolder;
   projectRepository?: ProjectRepository;
+  projectEditService?: ProjectEditService;
   improvementLogRepository?: ImprovementLogRepositoryPort &
     AiRunSearchImprovementLogRepositoryPort;
   terminologyRepository?: TerminologyRepository;
@@ -124,6 +126,7 @@ export async function initializeServer(
     assetProcessingWorker,
     terminologyService: suppliedTerminologyService,
     projectService: suppliedProjectService,
+    projectEditService: suppliedProjectEditService,
     visualAssignmentService: suppliedVisualAssignmentService,
     voiceAdjustmentService: suppliedVoiceAdjustmentService,
     voiceGenerationService: suppliedVoiceGenerationService,
@@ -179,6 +182,14 @@ export async function initializeServer(
       new ProjectService({
         repository: resolvedProjectRepository,
         improvementLogRepository: resolvedImprovementLogRepository
+      });
+    const resolvedProjectEditService =
+      suppliedProjectEditService ??
+      new ProjectEditService({
+        repository: resolvedProjectRepository,
+        assetRepository: resolvedAssetRepository,
+        workspaceRoot,
+        libraryRoot: path.join(workspaceRoot, "library")
       });
     const resolvedOutlineGenerationService =
       appOptions.outlineGenerationService ??
@@ -294,6 +305,7 @@ export async function initializeServer(
       visualSuggestionService: resolvedVisualSuggestionService,
       visualAssignmentService: resolvedVisualAssignmentService,
       projectService: resolvedProjectService,
+      projectEditService: resolvedProjectEditService,
       terminologyService: resolvedTerminologyService,
       assetService: resolvedAssetService,
       assetUploadLimits: options.assetUploadLimits,

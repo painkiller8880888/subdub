@@ -16,7 +16,10 @@ import { registerNotFoundHandler } from "./middleware/not-found-handler.js";
 import { registerModelRoutes } from "./routes/models.js";
 import { registerOutlineRoutes } from "./routes/outline.js";
 import { registerVisualSuggestionRoutes } from "./routes/visual-suggestions.js";
-import { registerProjectRoutes } from "./routes/projects.js";
+import {
+  registerProjectRoutes,
+  type ProjectEditServicePort
+} from "./routes/projects.js";
 import {
   registerTerminologyRoutes,
   type TerminologyServicePort
@@ -69,6 +72,7 @@ export type AppOptions = {
     "listModels"
   >;
   projectService?: ProjectService;
+  projectEditService?: ProjectEditServicePort;
   outlineGenerationService?: Pick<OutlineGenerationService, "generate">;
   visualSuggestionService?: Pick<VisualSuggestionService, "generate"> &
     Partial<Pick<VisualSuggestionService, "rejectCandidate">>;
@@ -131,7 +135,11 @@ export function buildApp(options: AppOptions = {}): FastifyInstance {
   }
 
   if (options.projectService !== undefined) {
-    registerProjectRoutes(app, options.projectService);
+    registerProjectRoutes(
+      app,
+      options.projectService,
+      options.projectEditService
+    );
   }
 
   if (options.outlineGenerationService !== undefined) {

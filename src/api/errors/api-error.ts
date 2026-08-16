@@ -28,6 +28,10 @@ import {
   VisualAssignmentError
 } from "../../app/projects/visual-assignment-errors.js";
 import {
+  PROJECT_EDIT_ERROR_CODE,
+  ProjectEditError
+} from "../../app/projects/project-edit-errors.js";
+import {
   VoicevoxAdapterError,
   VoicevoxResolutionError
 } from "../../voicevox/errors.js";
@@ -154,6 +158,25 @@ export const API_ERROR_CODE = {
   visualAssignmentApprovalValidationFailed:
     VISUAL_ASSIGNMENT_ERROR_CODE.approvalValidationFailed,
   visualAssignmentCleanupFailed: VISUAL_ASSIGNMENT_ERROR_CODE.cleanupFailed,
+  projectEditProjectPathInvalid: PROJECT_EDIT_ERROR_CODE.projectPathInvalid,
+  projectEditAssetNotFound: PROJECT_EDIT_ERROR_CODE.assetNotFound,
+  projectEditAssetNotActive: PROJECT_EDIT_ERROR_CODE.assetNotActive,
+  projectEditAssetKindMismatch: PROJECT_EDIT_ERROR_CODE.assetKindMismatch,
+  projectEditAssetFormatMismatch: PROJECT_EDIT_ERROR_CODE.assetFormatMismatch,
+  projectEditAssetChecksumUnavailable:
+    PROJECT_EDIT_ERROR_CODE.assetChecksumUnavailable,
+  projectEditLibraryPathInvalid: PROJECT_EDIT_ERROR_CODE.libraryPathInvalid,
+  projectEditLibraryFileNotFound: PROJECT_EDIT_ERROR_CODE.libraryFileNotFound,
+  projectEditMediaPathInvalid: PROJECT_EDIT_ERROR_CODE.mediaPathInvalid,
+  projectEditMediaPathCheckFailed:
+    PROJECT_EDIT_ERROR_CODE.mediaPathCheckFailed,
+  projectEditCopyFailed: PROJECT_EDIT_ERROR_CODE.copyFailed,
+  projectEditHashFailed: PROJECT_EDIT_ERROR_CODE.hashFailed,
+  projectEditChecksumMismatch: PROJECT_EDIT_ERROR_CODE.checksumMismatch,
+  projectEditMediaPathConflict: PROJECT_EDIT_ERROR_CODE.mediaPathConflict,
+  projectEditRenameFailed: PROJECT_EDIT_ERROR_CODE.renameFailed,
+  projectEditCandidateInvalid: PROJECT_EDIT_ERROR_CODE.candidateInvalid,
+  projectEditCleanupFailed: PROJECT_EDIT_ERROR_CODE.cleanupFailed,
   improvementCandidateNotFound: "IMPROVEMENT_CANDIDATE_NOT_FOUND",
   improvementCandidateDuplicate: "IMPROVEMENT_CANDIDATE_DUPLICATE",
   improvementDecisionConflict: "IMPROVEMENT_DECISION_CONFLICT",
@@ -726,6 +749,16 @@ export function mapApiError(error: unknown): MappedApiError {
   }
 
   if (error instanceof VisualAssignmentError) {
+    return {
+      code: error.code,
+      status: error.status,
+      message: error.message,
+      details: error.details,
+      shouldLog: error.status >= 500
+    };
+  }
+
+  if (error instanceof ProjectEditError) {
     return {
       code: error.code,
       status: error.status,
