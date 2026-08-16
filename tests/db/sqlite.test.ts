@@ -107,7 +107,7 @@ describe("workspace SQLite", () => {
     const first = await initializeWorkspaceDatabase({ workspaceRoot });
     const firstHistory = migrationHistory(first.connection);
     expect(first.migrationResult.applied).toBe(true);
-    expect(firstHistory).toHaveLength(9);
+    expect(firstHistory).toHaveLength(10);
     first.close();
 
     const second = await initializeWorkspaceDatabase({ workspaceRoot });
@@ -276,7 +276,7 @@ describe("workspace SQLite", () => {
       tableSql(name);
     }
     expect(tableSql("assets")).toContain("assets_kind_check");
-    expect(tableSql("assets")).toContain("IN ('video', 'photo', 'document_scan', 'sound_effect')");
+    expect(tableSql("assets")).toContain("IN ('video', 'bgm', 'photo', 'document_scan', 'sound_effect')");
     expect(tableSql("assets")).toContain("assets_status_check");
     expect(tableSql("tags")).toContain("tags_axis_check");
     expect(tableSql("tags")).toContain("tags_status_check");
