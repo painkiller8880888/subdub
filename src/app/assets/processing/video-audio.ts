@@ -1,6 +1,7 @@
 import { registerMediabunnyServer } from "@mediabunny/server";
 import {
   ALL_FORMATS,
+  AudioSampleSink,
   FilePathSource,
   Input,
   VideoSample,
@@ -142,6 +143,23 @@ export async function processAudioMedia(
     if (!Number.isFinite(durationSeconds) || durationSeconds <= 0) {
       throw new AssetProcessingError("PROCESSING_METADATA_FAILED");
     }
+    const audioTrack = await input.getPrimaryAudioTrack();
+    if (audioTrack === null) {
+      throw new AssetProcessingError("PROCESSING_METADATA_FAILED");
+    }
+    if (!(await audioTrack.canDecode())) {
+      throw new AssetProcessingError("PROCESSING_MEDIA_CORRUPTED");
+    }
+
+    // Decode one representative sample so a file with a plausible container or
+    // frame header cannot become active solely because metadata was readable.
+    const sink = new AudioSampleSink(audioTrack);
+    const sample = await sink.getSample(durationSeconds / 2);
+    if (sample === null) {
+      throw new AssetProcessingError("PROCESSING_MEDIA_CORRUPTED");
+    }
+    sample.close();
+
     return {
       metadata: {
         width: null,
