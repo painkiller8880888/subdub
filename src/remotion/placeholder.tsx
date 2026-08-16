@@ -13,7 +13,7 @@ export function PlaceholderLayer({
 }): ReactNode {
   return (
     <AbsoluteFill
-      data-placeholder-slot={insert.slot}
+      data-video-insert-role={insert.role}
       style={{
         alignItems: "center",
         justifyContent: "center",
@@ -33,7 +33,7 @@ export function PlaceholderLayer({
           letterSpacing: "0.08em"
         }}
       >
-        {insert.label}
+        {insert.role}
       </div>
     </AbsoluteFill>
   );

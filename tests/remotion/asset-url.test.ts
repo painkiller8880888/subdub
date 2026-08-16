@@ -23,9 +23,7 @@ describe("RenderManifest asset URL boundary", () => {
       durationInFrames: 30,
       src: "audio/bgm.ogg",
       volume: 0.5,
-      loop: true,
-      fadeInFrames: 0,
-      fadeOutFrames: 0
+      loop: true
     };
     const effect: RenderSoundEffect = {
       id: "effect-confirm",

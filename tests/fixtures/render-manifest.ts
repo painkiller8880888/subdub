@@ -14,7 +14,7 @@ const COMPILER_INPUT_HASH =
   "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff";
 
 export const renderManifestFixture = {
-  manifestVersion: "2.2.0",
+  manifestVersion: "2.3.0",
   sourceProjectHash: SOURCE_HASH,
   compilerInputHash: COMPILER_INPUT_HASH,
   characterCatalogVersion: "1.0.0",
@@ -256,7 +256,7 @@ export const renderManifestFixture = {
         startMs: 0,
         endMs: 3000,
         playbackRate: 1,
-        muted: true
+        volume: 0
       }
     },
     {
@@ -325,9 +325,7 @@ export const renderManifestFixture = {
       durationInFrames: 85,
       src: "audio/bgm-intro.ogg",
       volume: 0.25,
-      loop: true,
-      fadeInFrames: 0,
-      fadeOutFrames: 9
+      loop: true
     },
     {
       id: "bgm-main",
@@ -336,9 +334,7 @@ export const renderManifestFixture = {
       durationInFrames: 95,
       src: "audio/bgm-main.ogg",
       volume: 0.2,
-      loop: true,
-      fadeInFrames: 9,
-      fadeOutFrames: 9
+      loop: true
     }
   ],
   soundEffects: [
@@ -364,30 +360,27 @@ export const renderManifestFixture = {
   inserts: [
     {
       id: "insert-opening",
-      kind: "placeholder",
-      slot: "opening",
-      beforeSectionId: null,
+      role: "intro",
       from: 0,
       durationInFrames: 60,
-      label: "opening"
+      src: "media/application-demo.mp4",
+      volume: 1
     },
     {
       id: "insert-eye-main",
-      kind: "placeholder",
-      slot: "eye_catch",
-      beforeSectionId: "section-main",
+      role: "cutin",
       from: 150,
       durationInFrames: 60,
-      label: "section-main"
+      src: "media/application-demo.mp4",
+      volume: 0.8
     },
     {
       id: "insert-ending",
-      kind: "placeholder",
-      slot: "ending",
-      beforeSectionId: null,
+      role: "outro",
       from: 420,
       durationInFrames: 60,
-      label: "ending"
+      src: "media/application-demo.mp4",
+      volume: 1
     }
   ]
 } satisfies RenderManifest;

@@ -68,7 +68,7 @@ import {
   buildMultipartBody,
   type MultipartPart
 } from "../fixtures/asset-fixtures.js";
-import { mediaFixture, mediaFixturePath } from "../fixtures/media-fixtures.js";
+import { mediaFixture } from "../fixtures/media-fixtures.js";
 import {
   createVoicevoxAudioQueryFixture,
   createVoicevoxSpeakersFixture,
@@ -392,7 +392,7 @@ async function uploadAsset(
   workspaceRoot: string,
   input: {
     readonly fileName: string;
-    readonly kind: "video" | "photo" | "document_scan" | "sound_effect";
+    readonly kind: "video" | "bgm" | "photo" | "document_scan" | "sound_effect";
     readonly mimeType: string;
     readonly title: string;
     readonly tagIds?: readonly string[];
@@ -433,7 +433,11 @@ async function uploadAsset(
   expect(detail.libraryMediaPath).toMatch(/^media\//);
 
   const expectedThumbnailCount =
-    input.kind === "document_scan" ? 3 : input.kind === "sound_effect" ? 0 : 1;
+    input.kind === "document_scan"
+      ? 3
+      : input.kind === "bgm" || input.kind === "sound_effect"
+        ? 0
+        : 1;
   expect(detail.thumbnailPaths).toHaveLength(expectedThumbnailCount);
   for (const thumbnailPath of detail.thumbnailPaths) {
     expect(thumbnailPath).toMatch(/^thumbnails\//);
@@ -1450,6 +1454,12 @@ describe("MVP final verification E2E", () => {
           tagIds: ["confirm"],
           data: soundEffectFixture
         });
+        const bgmAsset = await uploadAsset(server, workspaceRoot, {
+          fileName: "bgm-1s.mp3",
+          kind: "bgm",
+          mimeType: "audio/mpeg",
+          title: "Fixture section BGM"
+        });
         const introLines = project.script.sections[0]?.lines ?? [];
         const mainLines = project.script.sections[1]?.lines ?? [];
         const outroLines = project.script.sections[2]?.lines ?? [];
@@ -1533,14 +1543,20 @@ describe("MVP final verification E2E", () => {
           /^audio\/wav/
         );
 
-        const bgmProjectMediaPath = "media/fixture-section-bgm.wav";
-        const bgmSourcePath = mediaFixturePath("effect-2s.wav");
+        const bgmProjectMediaPath = "media/fixture-section-bgm.mp3";
+        const bgmSourcePath = resolvePosixPath(
+          path.join(workspaceRoot, "library"),
+          bgmAsset.detail.libraryMediaPath
+        );
         const bgmTargetPath = resolvePosixPath(
           path.join(workspaceRoot, "projects", projectId),
           bgmProjectMediaPath
         );
         await fs.copyFile(bgmSourcePath, bgmTargetPath);
-        const bgmChecksum = await sha256File(bgmSourcePath);
+        const bgmChecksum = bgmAsset.detail.checksum;
+        if (bgmChecksum === null) {
+          throw new Error("The uploaded BGM checksum is missing.");
+        }
         expect(await sha256File(bgmTargetPath)).toBe(bgmChecksum);
 
         const currentProject = await projectRepository.read(projectId);
@@ -1575,8 +1591,8 @@ describe("MVP final verification E2E", () => {
                 {
                   id: "bgm-fixture-main",
                   sectionId: mainSectionId,
-                  assetId: "asset-bgm-fixture-main",
-                  assetVersion: 1,
+                  assetId: bgmAsset.receipt.assetId,
+                  assetVersion: bgmAsset.detail.version,
                   assetChecksum: bgmChecksum,
                   projectMediaPath: bgmProjectMediaPath,
                   volume: 0.1
@@ -1737,18 +1753,7 @@ describe("MVP final verification E2E", () => {
           loop: true
         });
         expect(manifest.soundEffects).toHaveLength(1);
-        const requiredPlaceholderInserts = manifest.inserts.filter(
-          (insert) =>
-            insert.slot === "opening" ||
-            insert.slot === "ending" ||
-            insert.slot === "eye_catch"
-        );
-        expect(requiredPlaceholderInserts).toHaveLength(2);
-        expect(
-          requiredPlaceholderInserts.every(
-            (insert) => insert.durationInFrames === 60
-          )
-        ).toBe(true);
+        expect(manifest.inserts).toEqual([]);
 
         const storedManifestResponse = await server.app.inject({
           method: "GET",

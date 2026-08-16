@@ -10,9 +10,9 @@ import {
 import { computeOutlineHash } from "../projects/script-domain.js";
 import {
   calculateLineRanges,
+  calculateEditVideoTimeline,
   calculateSectionRanges,
   calculateVisualRanges,
-  getEndExclusive,
   msToFrames,
   type TimelineLineRange
 } from "../../timeline/index.js";
@@ -27,6 +27,7 @@ import {
   type RenderCharacterVariant,
   type RenderLine,
   type RenderManifest,
+  type RenderInsert,
   type RenderSoundEffect,
   type RenderVisual,
   type Display,
@@ -37,7 +38,7 @@ import {
   type VoicevoxAudioIndexEntry
 } from "../voicevox/audio-index.js";
 
-export const RENDER_MANIFEST_VERSION = "2.2.0" as const;
+export const RENDER_MANIFEST_VERSION = "2.3.0" as const;
 
 export const renderManifestAssetMetadataSchema = z
   .object({
@@ -84,6 +85,8 @@ export const RENDER_MANIFEST_ERROR_CODE = {
   assetDurationMissing: "ASSET_DURATION_MISSING",
   assetDurationInvalid: "ASSET_DURATION_INVALID",
   assetRangeInvalid: "ASSET_RANGE_INVALID",
+  editVideoFormatInvalid: "EDIT_VIDEO_FORMAT_INVALID",
+  editBgmFormatInvalid: "EDIT_BGM_FORMAT_INVALID",
   legacyVideoVolumeUnsupported: "LEGACY_MANIFEST_VIDEO_VOLUME_UNREPRESENTABLE",
   assetPageCountMissing: "ASSET_PAGE_COUNT_MISSING",
   visualRangeInvalid: "VISUAL_RANGE_INVALID",
@@ -225,14 +228,6 @@ type RenderProjectLine = {
   readonly characterVariantId?: string | null;
   readonly pauseBeforeMs: number;
   readonly pauseAfterMs: number;
-};
-
-type EyeCatchEntry = {
-  readonly inputIndex: number;
-  readonly id: string;
-  readonly beforeSectionId: string;
-  readonly sectionIndex: number;
-  readonly label: string;
 };
 
 function addDiagnostic(
@@ -720,6 +715,37 @@ function requireAsset(
   return asset;
 }
 
+function validateEditAssetFormat(
+  asset: RenderManifestAssetMetadata,
+  expected: "video" | "bgm",
+  diagnostics: RenderManifestDiagnostic[],
+  path: ReadonlyArray<string | number>,
+  context: DiagnosticContext
+): void {
+  const extension = asset.path.toLowerCase().split(".").pop();
+  const expectedExtension = expected === "video" ? "mp4" : "mp3";
+  const expectedMimeType = expected === "video" ? "video/mp4" : "audio/mpeg";
+  const rawMimeType = asset.mimeType;
+  const mimeType = typeof rawMimeType === "string" ? rawMimeType : undefined;
+  const rawFormat = asset.format;
+  const format = typeof rawFormat === "string" ? rawFormat : undefined;
+  if (
+    extension !== expectedExtension ||
+    mimeType !== expectedMimeType ||
+    format !== expectedExtension
+  ) {
+    addDiagnostic(
+      diagnostics,
+      expected === "video"
+        ? RENDER_MANIFEST_ERROR_CODE.editVideoFormatInvalid
+        : RENDER_MANIFEST_ERROR_CODE.editBgmFormatInvalid,
+      path,
+      `edit ${expected} asset must be a supported ${expectedExtension.toUpperCase()} file`,
+      context
+    );
+  }
+}
+
 function addSourceAsset(
   sourceAssets: Map<string, string>,
   asset: RenderManifestAssetMetadata,
@@ -798,15 +824,14 @@ function variantForId(
 
 function shiftedFrom(
   from: number,
-  sectionIndex: number,
-  eyeCatchSectionIndices: readonly number[],
-  openingFrames: number,
-  eyeCatchFrames: number
+  sectionId: string,
+  sectionShiftById: ReadonlyMap<string, number>
 ): number {
-  const eyeCatchCount = eyeCatchSectionIndices.filter(
-    (index) => index <= sectionIndex
-  ).length;
-  return from + openingFrames + eyeCatchCount * eyeCatchFrames;
+  const shift = sectionShiftById.get(sectionId);
+  if (shift === undefined) {
+    throw new Error(`section shift is missing: ${sectionId}`);
+  }
+  return from + shift;
 }
 
 function stableTimelineSort<T extends { readonly from: number }>(
@@ -909,7 +934,7 @@ function orderedVisualDisplay(
       startMs: display.startMs,
       endMs: display.endMs,
       playbackRate: display.playbackRate,
-      muted: display.muted
+      volume: display.volume
     };
   }
   if (display.kind === "photo") {
@@ -935,26 +960,10 @@ function orderedVisualDisplay(
   };
 }
 
-function toLegacyRenderDisplayV22(
-  display: Display,
-  diagnostics: RenderManifestDiagnostic[],
-  path: ReadonlyArray<string | number>,
-  assignmentId: string
-): RenderVisual["display"] {
+function toRenderDisplayV23(display: Display): RenderVisual["display"] {
   if (display.kind !== "video") {
     return display;
   }
-
-  if (display.volume !== 0 && display.volume !== 1) {
-    addDiagnostic(
-      diagnostics,
-      RENDER_MANIFEST_ERROR_CODE.legacyVideoVolumeUnsupported,
-      [...path, "volume"],
-      "RenderManifest 2.2.0 cannot represent a non-binary video volume",
-      { assignmentId }
-    );
-  }
-
   return {
     kind: display.kind,
     fit: display.fit,
@@ -966,7 +975,7 @@ function toLegacyRenderDisplayV22(
     startMs: display.startMs,
     endMs: display.endMs,
     playbackRate: display.playbackRate,
-    muted: display.volume === 0
+    volume: display.volume
   };
 }
 
@@ -1092,9 +1101,7 @@ function orderedManifest(manifest: RenderManifest): RenderManifest {
       durationInFrames: track.durationInFrames,
       src: track.src,
       volume: track.volume,
-      loop: track.loop,
-      fadeInFrames: track.fadeInFrames,
-      fadeOutFrames: track.fadeOutFrames
+      loop: track.loop
     })),
     soundEffects: manifest.soundEffects.map((effect): RenderSoundEffect => ({
       id: effect.id,
@@ -1105,14 +1112,13 @@ function orderedManifest(manifest: RenderManifest): RenderManifest {
       src: effect.src,
       volume: effect.volume
     })),
-    inserts: manifest.inserts.map((insert) => ({
+    inserts: manifest.inserts.map((insert): RenderInsert => ({
       id: insert.id,
-      kind: insert.kind,
-      slot: insert.slot,
-      beforeSectionId: insert.beforeSectionId,
+      role: insert.role,
       from: insert.from,
       durationInFrames: insert.durationInFrames,
-      label: insert.label
+      src: insert.src,
+      volume: insert.volume
     }))
   };
 }
@@ -1435,6 +1441,34 @@ export function compileRenderManifest(
     }
   }
 
+  const editVideoAssets = new Map<string, RenderManifestAssetMetadata>();
+  for (const [elementIndex, element] of project.edit.videoElements.entries()) {
+    const asset = requireAsset(
+      assetLookup,
+      element.projectMediaPath,
+      ["video"],
+      diagnostics,
+      ["edit", "videoElements", elementIndex, "projectMediaPath"],
+      { assignmentId: element.id, assetPath: element.projectMediaPath },
+      element.assetChecksum,
+      true
+    );
+    if (asset !== undefined) {
+      validateEditAssetFormat(
+        asset,
+        "video",
+        diagnostics,
+        ["edit", "videoElements", elementIndex, "projectMediaPath"],
+        { assignmentId: element.id, assetPath: element.projectMediaPath }
+      );
+      editVideoAssets.set(element.id, asset);
+      addSourceAsset(sourceAssets, asset, diagnostics, {
+        assignmentId: element.id,
+        assetPath: element.projectMediaPath
+      });
+    }
+  }
+
   for (const [bgmIndex, bgm] of project.edit.sectionBgms.entries()) {
     const asset = requireAsset(
       assetLookup,
@@ -1447,6 +1481,13 @@ export function compileRenderManifest(
       true
     );
     if (asset !== undefined) {
+      validateEditAssetFormat(
+        asset,
+        "bgm",
+        diagnostics,
+        ["edit", "sectionBgms", bgmIndex, "projectMediaPath"],
+        { sectionId: bgm.sectionId, assetPath: bgm.projectMediaPath }
+      );
       addSourceAsset(sourceAssets, asset, diagnostics, {
         sectionId: bgm.sectionId
       });
@@ -1766,14 +1807,6 @@ export function compileRenderManifest(
     }
   }
 
-  const sectionIndexById = new Map(
-    project.script.sections.map((section, index) => [section.id, index])
-  );
-  // RenderManifest 2.2.0 is a frozen compatibility output. ED-08 will map
-  // current EditPlan video elements to real inserts; until then the legacy
-  // output keeps only its historical fixed opening/ending placeholders.
-  const eyeCatches: EyeCatchEntry[] = [];
-
   if (
     diagnostics.length > 0 ||
     lineRanges === undefined ||
@@ -1784,16 +1817,28 @@ export function compileRenderManifest(
   }
 
   const fps = project.metadata.outputSettings.fps;
-  const openingFrames = msToFrames(2000, fps);
-  const endingFrames = msToFrames(2000, fps);
-  const eyeCatchFrames = msToFrames(2000, fps);
-  const eyeCatchSectionIndices = eyeCatches.map(
-    ({ sectionIndex }) => sectionIndex
-  );
   const sectionRangeById = new Map(
     sectionRanges.map((range) => [range.sectionId, range])
   );
   const lineRangeById = new Map(lineRanges.map((range) => [range.id, range]));
+  const editVideoTimeline = calculateEditVideoTimeline(
+    project.edit.videoElements.map((element, inputIndex) => {
+      const asset = editVideoAssets.get(element.id);
+      if (asset?.durationMs === undefined || asset.durationMs === null) {
+        throw new Error(`edit video duration is missing: ${element.id}`);
+      }
+      return {
+        id: element.id,
+        role: element.role,
+        placement: element.placement,
+        volume: element.volume,
+        projectMediaPath: element.projectMediaPath,
+        durationInFrames: msToFrames(asset.durationMs, fps),
+        inputIndex
+      };
+    }),
+    sectionRanges
+  );
 
   const sourceAssetChecksums = [...sourceAssets.entries()]
     .sort(([left], [right]) => compareStrings(left, right))
@@ -1807,7 +1852,11 @@ export function compileRenderManifest(
       ...(asset.durationMs === undefined
         ? {}
         : { durationMs: asset.durationMs }),
-      ...(asset.pageCount === undefined ? {} : { pageCount: asset.pageCount })
+      ...(asset.pageCount === undefined ? {} : { pageCount: asset.pageCount }),
+      ...(typeof asset.mimeType === "string"
+        ? { mimeType: asset.mimeType }
+        : {}),
+      ...(typeof asset.format === "string" ? { format: asset.format } : {})
     }))
     .sort((left, right) => compareStrings(left.path, right.path));
   const catalogForHash = catalog.map((variant) => ({
@@ -1850,10 +1899,8 @@ export function compileRenderManifest(
     }
     const from = shiftedFrom(
       baseRange.from,
-      entry.sectionIndex,
-      eyeCatchSectionIndices,
-      openingFrames,
-      eyeCatchFrames
+      entry.sectionId,
+      editVideoTimeline.sectionShiftById
     );
     const audioEntry = lineAudio.get(entry.line.id);
     const characterVariantId = lineVariantIds.get(entry.line.id);
@@ -1895,47 +1942,35 @@ export function compileRenderManifest(
     if (assignmentIndex === undefined) {
       throw new Error(`visual assignment index is missing: ${range.id}`);
     }
-    const sectionIndex = lineIndexById.get(
-      assignment.startLineId
-    )?.sectionIndex;
-    if (sectionIndex === undefined) {
+    const sectionId = lineIndexById.get(assignment.startLineId)?.sectionId;
+    if (sectionId === undefined) {
       throw new Error(`visual assignment section is missing: ${assignment.id}`);
     }
     return {
       id: assignment.id,
       from: shiftedFrom(
         range.from,
-        sectionIndex,
-        eyeCatchSectionIndices,
-        openingFrames,
-        eyeCatchFrames
+        sectionId,
+        editVideoTimeline.sectionShiftById
       ),
       durationInFrames: range.durationInFrames,
       kind: assignment.display.kind,
       src: assignment.projectMediaPath,
-      display: toLegacyRenderDisplayV22(
-        assignment.display,
-        diagnostics,
-        ["visuals", "assignments", assignmentIndex, "display"],
-        assignment.id
-      )
+      display: toRenderDisplayV23(assignment.display)
     } as RenderVisual;
   });
 
   const renderBackgrounds = project.script.sections.map((section) => {
     const range = sectionRangeById.get(section.id);
-    const sectionIndex = sectionIndexById.get(section.id);
-    if (range === undefined || sectionIndex === undefined) {
+    if (range === undefined) {
       throw new Error(`section range is missing: ${section.id}`);
     }
     return {
       sectionId: section.id,
       from: shiftedFrom(
         range.from,
-        sectionIndex,
-        eyeCatchSectionIndices,
-        openingFrames,
-        eyeCatchFrames
+        section.id,
+        editVideoTimeline.sectionShiftById
       ),
       durationInFrames: range.durationInFrames,
       background: section.background
@@ -1945,8 +1980,7 @@ export function compileRenderManifest(
   const renderAudioTracks = stableTimelineSort(
     project.edit.sectionBgms.map((bgm, inputIndex) => {
       const range = sectionRangeById.get(bgm.sectionId);
-      const sectionIndex = sectionIndexById.get(bgm.sectionId);
-      if (range === undefined || sectionIndex === undefined) {
+      if (range === undefined) {
         throw new Error(`BGM section range is missing: ${bgm.sectionId}`);
       }
       return {
@@ -1956,17 +1990,13 @@ export function compileRenderManifest(
           sectionId: bgm.sectionId,
           from: shiftedFrom(
             range.from,
-            sectionIndex,
-            eyeCatchSectionIndices,
-            openingFrames,
-            eyeCatchFrames
+            bgm.sectionId,
+            editVideoTimeline.sectionShiftById
           ),
           durationInFrames: range.durationInFrames,
           src: bgm.projectMediaPath,
           volume: bgm.volume,
-          loop: true,
-          fadeInFrames: 0,
-          fadeOutFrames: 0
+          loop: true
         }
       };
     })
@@ -1989,10 +2019,8 @@ export function compileRenderManifest(
       const from =
         shiftedFrom(
           lineRange.from,
-          lineEntry.sectionIndex,
-          eyeCatchSectionIndices,
-          openingFrames,
-          eyeCatchFrames
+          lineEntry.sectionId,
+          editVideoTimeline.sectionShiftById
         ) +
         lineRange.speechFrom +
         msToFrames(effect.offsetMs, fps);
@@ -2000,10 +2028,8 @@ export function compileRenderManifest(
         from + durationInFrames >
         shiftedFrom(
           lineRange.from,
-          lineEntry.sectionIndex,
-          eyeCatchSectionIndices,
-          openingFrames,
-          eyeCatchFrames
+          lineEntry.sectionId,
+          editVideoTimeline.sectionShiftById
         ) +
           lineRange.durationInFrames
       ) {
@@ -2031,54 +2057,17 @@ export function compileRenderManifest(
   );
   const warnings = detectSoundEffectWarnings(renderSoundEffects);
 
-  const renderInserts = [
-    {
-      id: "insert-opening",
-      kind: "placeholder" as const,
-      slot: "opening" as const,
-      beforeSectionId: null,
-      from: 0,
-      durationInFrames: openingFrames,
-      label: "opening"
-    },
-    ...eyeCatches.map((eyeCatch) => {
-      const range = sectionRangeById.get(eyeCatch.beforeSectionId);
-      if (range === undefined) {
-        throw new Error(
-          `eye catch section range is missing: ${eyeCatch.beforeSectionId}`
-        );
-      }
-      const previousEyeCatchCount = eyeCatches.filter(
-        (candidate) => candidate.sectionIndex < eyeCatch.sectionIndex
-      ).length;
-      return {
-        id: eyeCatch.id,
-        kind: "placeholder" as const,
-        slot: "eye_catch" as const,
-        beforeSectionId: eyeCatch.beforeSectionId,
-        from:
-          range.from + openingFrames + previousEyeCatchCount * eyeCatchFrames,
-        durationInFrames: eyeCatchFrames,
-        label: eyeCatch.label
-      };
-    }),
-    {
-      id: "insert-ending",
-      kind: "placeholder" as const,
-      slot: "ending" as const,
-      beforeSectionId: null,
-      from:
-        getEndExclusive(
-          lineRanges[lineRanges.length - 1] ?? { from: 0, durationInFrames: 0 }
-        ) +
-        openingFrames +
-        eyeCatches.length * eyeCatchFrames,
-      durationInFrames: endingFrames,
-      label: "ending"
-    }
-  ];
-  const durationInFrames =
-    (renderInserts[renderInserts.length - 1]?.from ?? 0) + endingFrames;
+  const renderInserts: RenderInsert[] = editVideoTimeline.inserts.map(
+    (insert) => ({
+      id: insert.id,
+      role: insert.role,
+      from: insert.from,
+      durationInFrames: insert.durationInFrames,
+      src: insert.src,
+      volume: insert.volume
+    })
+  );
+  const durationInFrames = editVideoTimeline.durationInFrames;
 
   const characters: RenderCharacter[] = project.characters.map((character) => {
     const visualId = character.characterVisual.visualId;
