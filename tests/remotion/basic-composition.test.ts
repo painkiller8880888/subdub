@@ -39,6 +39,7 @@ import {
   subtitleTypographyScale,
   subtitleContainerStyle
 } from "../../src/remotion/layout-helpers.js";
+import { videoInsertSequenceProps } from "../../src/remotion/video-insert.js";
 
 const repositoryRoot = fileURLToPath(new URL("../../", import.meta.url));
 const remotionEntryPoint = path.join(
@@ -443,6 +444,20 @@ describe("RenderManifest interval selection", () => {
     expect(selectActiveInsert(manifest, 480)).toBeUndefined();
   });
 
+  it("passes insert ranges, sources, and manifest volume to the video layer", () => {
+    const insert = renderManifestFixture.inserts[1];
+    if (insert === undefined) {
+      throw new Error("video insert fixture is incomplete");
+    }
+
+    expect(videoInsertSequenceProps(insert)).toEqual({
+      from: insert.from,
+      durationInFrames: insert.durationInFrames,
+      src: expect.stringContaining(insert.src),
+      volume: insert.volume
+    });
+  });
+
   it("maps manifest audio tracks to bounded fixed-volume sequences", () => {
     const track = renderManifestFixture.audioTracks[1];
     const effect = renderManifestFixture.soundEffects[0];
@@ -590,42 +605,34 @@ describe("basic Remotion composition", () => {
     ).toBe(0);
   }, 180_000);
 
-  it("renders placeholder frames as isolated labeled screens", async () => {
-    const opening = await renderFixtureFrame(30, "placeholder-opening");
-    const eyeCatch = await renderFixtureFrame(170, "placeholder-eye-catch");
-    const ending = await renderFixtureFrame(450, "placeholder-ending");
-    const content = await renderFixtureFrame(220, "placeholder-content");
+  it("renders registered insert videos instead of placeholder screens", async () => {
+    const opening = await renderFixtureFrame(30, "video-insert-opening");
+    const eyeCatch = await renderFixtureFrame(170, "video-insert-eye-catch");
+    const ending = await renderFixtureFrame(450, "video-insert-ending");
+    const content = await renderFixtureFrame(220, "video-insert-content");
 
     expect(
-      await differentPixelsInRegion(opening, eyeCatch, {
+      await differentPixelsInRegion(opening, content, {
         left: 0,
-        right: 0.25,
-        top: 0,
-        bottom: 1
-      })
-    ).toBe(0);
-    expect(
-      await differentPixelsInRegion(eyeCatch, ending, {
-        left: 0,
-        right: 0.25,
-        top: 0,
-        bottom: 1
-      })
-    ).toBe(0);
-    expect(
-      await differentPixelsInRegion(eyeCatch, content, {
-        left: 0,
-        right: 0.25,
+        right: 1,
         top: 0,
         bottom: 1
       })
     ).toBeGreaterThan(0);
     expect(
-      await differentPixelsInRegion(opening, eyeCatch, {
-        left: 0.25,
-        right: 0.75,
-        top: 0.4,
-        bottom: 0.6
+      await differentPixelsInRegion(eyeCatch, content, {
+        left: 0,
+        right: 1,
+        top: 0,
+        bottom: 1
+      })
+    ).toBeGreaterThan(0);
+    expect(
+      await differentPixelsInRegion(ending, content, {
+        left: 0,
+        right: 1,
+        top: 0,
+        bottom: 1
       })
     ).toBeGreaterThan(0);
   }, 180_000);

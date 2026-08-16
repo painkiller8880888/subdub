@@ -245,7 +245,7 @@ describe("edit page DnD UI", () => {
   afterAll(async () => {
     await browser?.close();
     await webServer?.close();
-  });
+  }, 30_000);
 
   async function openPage(
     saveMode: "success" | "error" | "conflict",
