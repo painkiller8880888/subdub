@@ -13,7 +13,6 @@ import { CharacterLayer } from "./characters";
 import { DocumentVisual } from "./document-visual";
 import { REMOTION_FONT_FAMILY, RemotionFontLoader } from "./font";
 import { DESIGN_COLORS } from "./layout";
-import { PlaceholderLayer } from "./placeholder";
 import {
   selectActiveBackground,
   selectActiveInsert,
@@ -21,6 +20,7 @@ import {
   selectActiveVisuals
 } from "./selection";
 import { SubtitleLayer } from "./subtitle";
+import { VideoInsert } from "./video-insert";
 import { PhotoVisual, VideoVisual } from "./visuals";
 
 function RenderVisual({
@@ -94,7 +94,17 @@ export function RenderManifestComposition(
         }}
       >
         <RemotionFontLoader />
-        <PlaceholderLayer insert={activeInsert} />
+        <Sequence
+          from={activeInsert.from}
+          durationInFrames={activeInsert.durationInFrames}
+          layout="none"
+          name={`insert:${activeInsert.id}`}
+        >
+          <VideoInsert
+            insert={activeInsert}
+            assetUrlResolver={assetUrlResolver}
+          />
+        </Sequence>
       </AbsoluteFill>
     );
   }

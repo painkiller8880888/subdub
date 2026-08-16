@@ -65,5 +65,9 @@ export const renderManifestRenderingFixture = {
   soundEffects: renderManifestFixture.soundEffects.map((effect, index) => ({
     ...effect,
     src: index === 0 ? "media/effect-1s.wav" : "media/effect-2s.wav"
+  })),
+  inserts: renderManifestFixture.inserts.map((insert) => ({
+    ...insert,
+    src: renderingPath(insert.src)
   }))
 } satisfies RenderManifest;

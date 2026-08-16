@@ -194,8 +194,21 @@ type UploadedAsset = {
 
 type RepresentativeFrame = {
   readonly name:
-    "opening" | "video-content" | "photo-content" | "document-page-2";
+    | "opening"
+    | "video-content"
+    | "photo-content"
+    | "document-page-2"
+    | "ed09-intro"
+    | "ed09-cutin-1"
+    | "ed09-cutin-2"
+    | "ed09-section-content"
+    | "ed09-outro";
   readonly frame: number;
+};
+
+type PreviewAssetExpectation = {
+  readonly path: string;
+  readonly contentType: RegExp;
 };
 
 type RenderWaitResult = {
@@ -723,7 +736,7 @@ async function validateWebPreviewPath(
   server: InitializedServer,
   projectId: string,
   manifest: RenderManifest,
-  expectedAssetPaths: readonly string[]
+  expectedAssets: readonly PreviewAssetExpectation[]
 ): Promise<void> {
   const executable = browserExecutable();
   if (typeof executable !== "string") {
@@ -824,28 +837,29 @@ async function validateWebPreviewPath(
     const startedAt = Date.now();
     while (
       Date.now() - startedAt < 15_000 &&
-      expectedAssetPaths.some(
-        (assetPath) =>
-          !requestedAssetPaths.has(assetPath) || !assetResponses.has(assetPath)
+      expectedAssets.some(
+        (asset) =>
+          !requestedAssetPaths.has(asset.path) ||
+          !assetResponses.has(asset.path)
       )
     ) {
       await page.waitForTimeout(100);
     }
-    for (const assetPath of expectedAssetPaths) {
-      expect([...requestedAssetPaths]).toContain(assetPath);
-      const assetResponse = assetResponses.get(assetPath);
+    for (const asset of expectedAssets) {
+      expect([...requestedAssetPaths]).toContain(asset.path);
+      const assetResponse = assetResponses.get(asset.path);
       expect(assetResponse).toBeDefined();
       if (assetResponse === undefined) {
         throw new Error(
-          `No response was observed for preview asset ${assetPath}.`
+          `No response was observed for preview asset ${asset.path}.`
         );
       }
       expect(
         assetResponse.status,
-        `Preview asset ${assetPath} did not load successfully`
+        `Preview asset ${asset.path} did not load successfully`
       ).toBeGreaterThanOrEqual(200);
       expect(assetResponse.status).toBeLessThan(300);
-      expect(assetResponse.contentType).toMatch(/^audio\//i);
+      expect(assetResponse.contentType).toMatch(asset.contentType);
     }
     await page.waitForTimeout(500);
     expect(await playerPanel.locator('[role="alert"]').count()).toBe(0);
@@ -1775,8 +1789,8 @@ describe("MVP final verification E2E", () => {
           serializeRenderManifest(manifest)
         );
         await validateWebPreviewPath(server, projectId, previewManifest, [
-          bgmProjectMediaPath,
-          effectProjectMediaPath
+          { path: bgmProjectMediaPath, contentType: /^audio\//i },
+          { path: effectProjectMediaPath, contentType: /^audio\//i }
         ]);
 
         const secondCompileResponse = await server.app.inject({
@@ -2197,6 +2211,261 @@ describe("MVP final verification E2E", () => {
           expect(persistedRun.status).toBe("succeeded");
           expect(persistedRun.projectRevision).toBeGreaterThanOrEqual(0);
         }
+
+        if (restartedServer === undefined) {
+          throw new Error(
+            "The restarted server is required for the ED-09 fixture."
+          );
+        }
+        const ed09BaseProject = await projectRepository.read(projectId);
+        const ed09IntroSectionId = ed09BaseProject.script.sections[0]?.id;
+        const ed09MainSectionId = ed09BaseProject.script.sections[1]?.id;
+        const ed09VideoChecksum = videoAsset.detail.checksum;
+        if (
+          ed09IntroSectionId === undefined ||
+          ed09MainSectionId === undefined ||
+          ed09VideoChecksum === null
+        ) {
+          throw new Error(
+            "The ED-09 fixture sections or video asset are missing."
+          );
+        }
+        const createEd09VideoElement = (
+          id: string,
+          role: VideoProject["edit"]["videoElements"][number]["role"],
+          placement: VideoProject["edit"]["videoElements"][number]["placement"],
+          volume: number
+        ): VideoProject["edit"]["videoElements"][number] => ({
+          id,
+          role,
+          assetId: videoAsset.receipt.assetId,
+          assetVersion: videoAsset.detail.version,
+          assetChecksum: ed09VideoChecksum,
+          projectMediaPath: videoAssignment.assignment.projectMediaPath,
+          placement,
+          volume
+        });
+        project = await projectRepository.save(
+          projectId,
+          {
+            ...ed09BaseProject,
+            edit: {
+              ...ed09BaseProject.edit,
+              videoElements: [
+                createEd09VideoElement(
+                  "insert-ed09-intro",
+                  "intro",
+                  { kind: "before_first_section" },
+                  0.4
+                ),
+                createEd09VideoElement(
+                  "insert-ed09-cutin-1",
+                  "cutin",
+                  {
+                    kind: "before_section",
+                    sectionId: ed09MainSectionId,
+                    order: 0
+                  },
+                  0.25
+                ),
+                createEd09VideoElement(
+                  "insert-ed09-cutin-2",
+                  "cutin",
+                  {
+                    kind: "before_section",
+                    sectionId: ed09MainSectionId,
+                    order: 1
+                  },
+                  0.75
+                ),
+                createEd09VideoElement(
+                  "insert-ed09-outro",
+                  "outro",
+                  { kind: "after_last_section" },
+                  0.6
+                )
+              ],
+              sectionBgms: [
+                {
+                  id: "bgm-ed09-intro",
+                  sectionId: ed09IntroSectionId,
+                  assetId: bgmAsset.receipt.assetId,
+                  assetVersion: bgmAsset.detail.version,
+                  assetChecksum: bgmChecksum,
+                  projectMediaPath: bgmProjectMediaPath,
+                  volume: 0.15
+                },
+                {
+                  id: "bgm-ed09-main",
+                  sectionId: ed09MainSectionId,
+                  assetId: bgmAsset.receipt.assetId,
+                  assetVersion: bgmAsset.detail.version,
+                  assetChecksum: bgmChecksum,
+                  projectMediaPath: bgmProjectMediaPath,
+                  volume: 0.1
+                }
+              ]
+            }
+          },
+          ed09BaseProject.revision
+        );
+        expect(project.edit.videoElements).toHaveLength(4);
+        expect(project.edit.sectionBgms).toHaveLength(2);
+
+        const ed09CompileResponse = await restartedServer.app.inject({
+          method: "POST",
+          url: `/api/projects/${projectId}/manifest/compile`
+        });
+        expect(ed09CompileResponse.statusCode, ed09CompileResponse.body).toBe(
+          200
+        );
+        const ed09Compile = manifestCompileResponseSchema.parse(
+          ed09CompileResponse.json()
+        ).data;
+        expect(ed09Compile.status).toBe("compiled");
+        if (ed09Compile.manifest === null) {
+          throw new Error(
+            `ED-09 manifest compilation failed: ${JSON.stringify(ed09Compile.diagnostics)}`
+          );
+        }
+        const ed09Manifest = renderManifestSchema.parse(ed09Compile.manifest);
+        expect(ed09Manifest.inserts.map((insert) => insert.role)).toEqual([
+          "intro",
+          "cutin",
+          "cutin",
+          "outro"
+        ]);
+        expect(ed09Manifest.inserts.map((insert) => insert.volume)).toEqual([
+          0.4, 0.25, 0.75, 0.6
+        ]);
+        expect(ed09Manifest.inserts[0]).toMatchObject({
+          from: 0,
+          src: videoAssignment.assignment.projectMediaPath
+        });
+        expect(
+          (ed09Manifest.inserts[1]?.from ?? 0) +
+            (ed09Manifest.inserts[1]?.durationInFrames ?? 0)
+        ).toBe(ed09Manifest.inserts[2]?.from);
+        expect(
+          (ed09Manifest.inserts[3]?.from ?? 0) +
+            (ed09Manifest.inserts[3]?.durationInFrames ?? 0)
+        ).toBe(ed09Manifest.durationInFrames);
+        expect(ed09Manifest.audioTracks).toHaveLength(2);
+        expect(ed09Manifest.audioTracks[0]).toMatchObject({
+          sectionId: ed09IntroSectionId,
+          src: bgmProjectMediaPath,
+          volume: 0.15,
+          loop: true
+        });
+        expect(ed09Manifest.audioTracks[1]).toMatchObject({
+          sectionId: ed09MainSectionId,
+          src: bgmProjectMediaPath,
+          volume: 0.1,
+          loop: true
+        });
+        expect(
+          ed09Manifest.audioTracks.every((track) =>
+            ed09Manifest.inserts.every(
+              (insert) =>
+                track.from + track.durationInFrames <= insert.from ||
+                insert.from + insert.durationInFrames <= track.from
+            )
+          )
+        ).toBe(true);
+
+        const ed09PreviewResponse = await restartedServer.app.inject({
+          method: "GET",
+          url: `/api/projects/${projectId}/manifest`
+        });
+        expect(ed09PreviewResponse.statusCode).toBe(200);
+        const ed09Preview = manifestPreviewResponseSchema.parse(
+          ed09PreviewResponse.json()
+        ).data;
+        expect(ed09Preview.state).toBe("current");
+        expect(ed09Preview.canPlay).toBe(true);
+        expect(ed09Preview.manifest).not.toBeNull();
+        expect(serializeRenderManifest(ed09Preview.manifest!)).toBe(
+          serializeRenderManifest(ed09Manifest)
+        );
+        await validateWebPreviewPath(restartedServer, projectId, ed09Manifest, [
+          { path: bgmProjectMediaPath, contentType: /^audio\//i },
+          {
+            path: videoAssignment.assignment.projectMediaPath,
+            contentType: /^video\//i
+          }
+        ]);
+
+        const ed09SectionVisual = ed09Manifest.visuals.find(
+          (visual) => visual.id === "visual-fixture-photo"
+        );
+        const ed09IntroInsert = ed09Manifest.inserts[0];
+        const ed09FirstCutin = ed09Manifest.inserts[1];
+        const ed09SecondCutin = ed09Manifest.inserts[2];
+        const ed09OutroInsert = ed09Manifest.inserts[3];
+        if (
+          ed09SectionVisual === undefined ||
+          ed09IntroInsert === undefined ||
+          ed09FirstCutin === undefined ||
+          ed09SecondCutin === undefined ||
+          ed09OutroInsert === undefined
+        ) {
+          throw new Error("The ED-09 representative ranges are incomplete.");
+        }
+        const ed09Frames: RepresentativeFrame[] = [
+          { name: "ed09-intro", frame: ed09IntroInsert.from + 5 },
+          { name: "ed09-cutin-1", frame: ed09FirstCutin.from + 5 },
+          { name: "ed09-cutin-2", frame: ed09SecondCutin.from + 5 },
+          {
+            name: "ed09-section-content",
+            frame: ed09SectionVisual.from + 5
+          },
+          { name: "ed09-outro", frame: ed09OutroInsert.from + 5 }
+        ];
+        for (const frame of ed09Frames) {
+          expect(frame.frame).toBeLessThan(ed09Manifest.durationInFrames);
+        }
+        const ed09RenderedFrames = await renderRepresentativeFrames(
+          workspaceRoot,
+          projectId,
+          ed09Manifest,
+          ed09Frames,
+          ed09Frames[0]
+        );
+        for (const frame of ed09Frames) {
+          const outputPath = ed09RenderedFrames.actualPaths[frame.name];
+          if (outputPath === undefined) {
+            throw new Error(
+              `ED-09 representative frame did not render: ${frame.name}`
+            );
+          }
+          expect((await fs.stat(outputPath)).size).toBeGreaterThan(0);
+        }
+        await compareRepresentativeImages(
+          ed09RenderedFrames.actualPaths["ed09-intro"]!,
+          ed09RenderedFrames.repeatPath,
+          "ed09-insert-rerender"
+        );
+
+        const ed09Mp4AcceptedResponse = await restartedServer.app.inject({
+          method: "POST",
+          url: `/api/projects/${projectId}/render`
+        });
+        expect(ed09Mp4AcceptedResponse.statusCode).toBe(202);
+        const ed09Mp4Accepted = renderAcceptedResponseSchema.parse(
+          ed09Mp4AcceptedResponse.json()
+        ).data;
+        const ed09Mp4Run = await waitForRenderRun(
+          restartedServer,
+          projectId,
+          ed09Mp4Accepted.runId,
+          RENDER_TIMEOUT_MS
+        );
+        const ed09Mp4Path = assertRelativeOutputPath(
+          workspaceRoot,
+          projectId,
+          ed09Mp4Run.log.outputPath
+        );
+        await validateMp4Output(ed09Mp4Path, ed09Manifest);
 
         const stagingEntries = (await fs.readdir(workspaceRoot)).filter(
           (entry) =>
