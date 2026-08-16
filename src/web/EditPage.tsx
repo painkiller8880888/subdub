@@ -1,10 +1,15 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo, useRef, useState } from "react";
-import { Link, Navigate, useParams } from "react-router";
+import {
+  useMutation,
+  useQueries,
+  useQuery,
+  useQueryClient
+} from "@tanstack/react-query";
+import { type MouseEvent, useEffect, useMemo, useRef, useState } from "react";
+import { Link, Navigate, useNavigate, useParams } from "react-router";
 import { ZodError } from "zod";
 
 import type { ProjectEditResponse, ProjectSummary } from "../schema/api.js";
-import type { AssetListItem } from "../schema/asset.js";
+import type { AssetDetail, AssetListItem } from "../schema/asset.js";
 import {
   editPlanSchema,
   type EditPlan,
@@ -15,6 +20,7 @@ import {
 import {
   ApiClientError,
   ApiClientProtocolError,
+  fetchAsset,
   fetchProject,
   fetchProjectEdit,
   saveProjectEdit,
@@ -36,11 +42,16 @@ import {
   removeSectionBgm,
   replaceEditVideoElement,
   replaceSectionBgm,
+  editAssetReferenceKey,
   type EditPlanReadModel,
   type EditSectionReadModel,
   type SelectableEditAsset
 } from "./edit-page";
-import { AutosaveCoordinator, type AutosaveState } from "./brief-autosave";
+import {
+  AutosaveCoordinator,
+  navigateAfterAutosave,
+  type AutosaveState
+} from "./brief-autosave";
 import { WorkflowIndicator } from "./WorkflowIndicator";
 
 function projectPath(projectId: string, path: string): string {
@@ -106,15 +117,15 @@ function placementLabel(
   return `「${sectionName}」の前・順序 ${placement.order + 1}`;
 }
 
-function assetThumbnailUrl(assetId: string): string {
-  return `/api/assets/${encodeURIComponent(assetId)}/thumbnails/0`;
+function assetThumbnailUrl(assetId: string, assetVersion: number): string {
+  return `/api/assets/${encodeURIComponent(assetId)}/thumbnails/0?version=${assetVersion}`;
 }
 
-function assetTitle(asset: AssetListItem | undefined, assetId: string): string {
+function assetTitle(asset: AssetDetail | undefined, assetId: string): string {
   return asset?.title ?? `素材（${assetId}）`;
 }
 
-function assetDuration(asset: AssetListItem | undefined): string {
+function assetDuration(asset: AssetDetail | undefined): string {
   return formatDurationMs(asset?.durationMs ?? null);
 }
 
@@ -141,7 +152,7 @@ function EditVideoElementCard({
   onVolumeChange
 }: {
   readonly element: EditVideoElement;
-  readonly asset: AssetListItem | undefined;
+  readonly asset: AssetDetail | undefined;
   readonly sections: VideoProject["script"]["sections"];
   readonly disabled: boolean;
   readonly volumeDisabled: boolean;
@@ -170,7 +181,7 @@ function EditVideoElementCard({
         <img
           alt={`${title}のサムネイル`}
           className="edit-asset-thumbnail"
-          src={assetThumbnailUrl(element.assetId)}
+          src={assetThumbnailUrl(element.assetId, element.assetVersion)}
         />
       ) : (
         <div className="edit-asset-thumbnail edit-asset-thumbnail-empty">
@@ -245,7 +256,7 @@ function SectionBgmSlot({
 }: {
   readonly section: EditSectionReadModel["section"];
   readonly bgm: SectionBgmAssignment | undefined;
-  readonly asset: AssetListItem | undefined;
+  readonly asset: AssetDetail | undefined;
   readonly disabled: boolean;
   readonly volumeDisabled: boolean;
   readonly onAdd: () => void;
@@ -441,7 +452,7 @@ function EditAssetPicker({
                   <img
                     alt={`${asset.title}のサムネイル`}
                     className="edit-picker-thumbnail"
-                    src={assetThumbnailUrl(asset.assetId)}
+                    src={assetThumbnailUrl(asset.assetId, asset.version)}
                   />
                 ) : (
                   <div className="edit-picker-thumbnail edit-picker-thumbnail-empty">
@@ -556,6 +567,7 @@ function EditPlanEditor({
   readonly bgmPickerQuery: AssetPickerQueryState;
   readonly onRetry: () => void;
 }) {
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [draft, setDraft] = useState<EditPlan>(() =>
     cloneEditPlan(editResponse.data)
@@ -577,6 +589,7 @@ function EditPlanEditor({
   const coordinatorRef = useRef<AutosaveCoordinator<EditPlan> | null>(null);
   const [coordinator, setCoordinator] =
     useState<AutosaveCoordinator<EditPlan> | null>(null);
+  const [pendingNavigation, setPendingNavigation] = useState(false);
 
   const saveMutation = useMutation({
     mutationFn: ({
@@ -595,13 +608,49 @@ function EditPlanEditor({
   const saveMutationRef = useRef(saveMutation);
   saveMutationRef.current = saveMutation;
 
-  const assetById = useMemo(() => {
-    const assets = new Map<string, AssetListItem>();
-    for (const asset of [...videoPickerQuery.items, ...bgmPickerQuery.items]) {
-      assets.set(asset.assetId, asset);
+  const assignedAssetRefs = useMemo(() => {
+    const refs = new Map<string, { assetId: string; assetVersion: number }>();
+    for (const element of draft.videoElements) {
+      refs.set(editAssetReferenceKey(element.assetId, element.assetVersion), {
+        assetId: element.assetId,
+        assetVersion: element.assetVersion
+      });
     }
+    for (const bgm of draft.sectionBgms) {
+      refs.set(editAssetReferenceKey(bgm.assetId, bgm.assetVersion), {
+        assetId: bgm.assetId,
+        assetVersion: bgm.assetVersion
+      });
+    }
+    return [...refs.values()];
+  }, [draft]);
+  const assignedAssetQueries = useQueries({
+    queries: assignedAssetRefs.map((asset) => ({
+      queryKey: [
+        "assets",
+        "edit",
+        "assignment",
+        asset.assetId,
+        asset.assetVersion
+      ],
+      queryFn: () => fetchAsset(asset.assetId, asset.assetVersion),
+      retry: false
+    }))
+  });
+  const assignedAssetByRef = useMemo(() => {
+    const assets = new Map<string, AssetDetail>();
+    assignedAssetQueries.forEach((query, index) => {
+      const asset = query.data;
+      const reference = assignedAssetRefs[index];
+      if (asset !== undefined && reference !== undefined) {
+        assets.set(
+          editAssetReferenceKey(reference.assetId, reference.assetVersion),
+          asset
+        );
+      }
+    });
     return assets;
-  }, [bgmPickerQuery.items, videoPickerQuery.items]);
+  }, [assignedAssetQueries, assignedAssetRefs]);
 
   function updateMutationCaches(savedProject: VideoProject): void {
     queryClient.setQueryData(["projects", projectId], savedProject);
@@ -775,6 +824,35 @@ function EditPlanEditor({
     onRetry();
   }
 
+  async function navigateAway(
+    event: MouseEvent<HTMLAnchorElement>,
+    destination: string
+  ): Promise<void> {
+    if (
+      event.button !== 0 ||
+      event.metaKey ||
+      event.altKey ||
+      event.ctrlKey ||
+      event.shiftKey
+    ) {
+      return;
+    }
+    event.preventDefault();
+    if (pendingNavigation) {
+      return;
+    }
+    setPendingNavigation(true);
+    const flushed = await navigateAfterAutosave(
+      coordinatorRef.current,
+      destination,
+      navigate
+    );
+    if (flushed) {
+      return;
+    }
+    setPendingNavigation(false);
+  }
+
   const readModel = createEditPlanReadModel(draft);
   const sectionModels = createEditSectionReadModels(
     project.script.sections,
@@ -784,8 +862,9 @@ function EditPlanEditor({
     autosaveState.status === "pending" || autosaveState.status === "saving";
   const interactionDisabled =
     saveInProgress || autosaveState.status === "conflict";
-  const autosaveMessage =
-    pendingAction !== null
+  const autosaveMessage = pendingNavigation
+    ? "移動前に保存しています…"
+    : pendingAction !== null
       ? pendingActionLabel(pendingAction)
       : autosaveState.status === "saving"
         ? "保存中…"
@@ -803,9 +882,20 @@ function EditPlanEditor({
     <>
       <main className="page-shell edit-page">
         <p className="back-link">
-          <Link to={projectPath(projectId, "script")}>台本へ戻る</Link>
+          <Link
+            to={projectPath(projectId, "script")}
+            onClick={(event) => {
+              void navigateAway(event, projectPath(projectId, "script"));
+            }}
+          >
+            台本へ戻る
+          </Link>
         </p>
-        <WorkflowIndicator projectId={projectId} currentStep="edit" />
+        <WorkflowIndicator
+          projectId={projectId}
+          currentStep="edit"
+          onNavigate={navigateAway}
+        />
         <header className="page-header page-header-stacked">
           <p className="eyebrow">編集</p>
           <h1>{project.metadata.title} の編集</h1>
@@ -814,10 +904,22 @@ function EditPlanEditor({
             を素材ライブラリから設定します。
           </p>
           <div className="page-header-actions">
-            <Link className="button" to={projectPath(projectId, "script")}>
+            <Link
+              className="button"
+              to={projectPath(projectId, "script")}
+              onClick={(event) => {
+                void navigateAway(event, projectPath(projectId, "script"));
+              }}
+            >
               台本を開く
             </Link>
-            <Link className="button" to={projectPath(projectId, "preview")}>
+            <Link
+              className="button"
+              to={projectPath(projectId, "preview")}
+              onClick={(event) => {
+                void navigateAway(event, projectPath(projectId, "preview"));
+              }}
+            >
               プレビューを開く
             </Link>
           </div>
@@ -921,7 +1023,13 @@ function EditPlanEditor({
             <p>
               台本を初期化すると、編集画面にセクションカードが表示されます。
             </p>
-            <Link className="button" to={projectPath(projectId, "script")}>
+            <Link
+              className="button"
+              to={projectPath(projectId, "script")}
+              onClick={(event) => {
+                void navigateAway(event, projectPath(projectId, "script"));
+              }}
+            >
               台本を開く
             </Link>
           </section>
@@ -929,7 +1037,12 @@ function EditPlanEditor({
           <section className="edit-section-list" aria-label="編集セクション">
             {readModel.intro !== undefined ? (
               <EditVideoElementCard
-                asset={assetById.get(readModel.intro.assetId)}
+                asset={assignedAssetByRef.get(
+                  editAssetReferenceKey(
+                    readModel.intro.assetId,
+                    readModel.intro.assetVersion
+                  )
+                )}
                 disabled={interactionDisabled}
                 element={readModel.intro}
                 volumeDisabled={
@@ -954,7 +1067,9 @@ function EditPlanEditor({
               <div className="edit-section-flow" key={model.section.id}>
                 {model.cutins.map((cutin) => (
                   <EditVideoElementCard
-                    asset={assetById.get(cutin.assetId)}
+                    asset={assignedAssetByRef.get(
+                      editAssetReferenceKey(cutin.assetId, cutin.assetVersion)
+                    )}
                     disabled={interactionDisabled}
                     element={cutin}
                     key={cutin.id}
@@ -1008,7 +1123,12 @@ function EditPlanEditor({
                     asset={
                       model.bgm === undefined
                         ? undefined
-                        : assetById.get(model.bgm.assetId)
+                        : assignedAssetByRef.get(
+                            editAssetReferenceKey(
+                              model.bgm.assetId,
+                              model.bgm.assetVersion
+                            )
+                          )
                     }
                     bgm={model.bgm}
                     disabled={interactionDisabled}
@@ -1049,7 +1169,12 @@ function EditPlanEditor({
             ))}
             {readModel.outro !== undefined ? (
               <EditVideoElementCard
-                asset={assetById.get(readModel.outro.assetId)}
+                asset={assignedAssetByRef.get(
+                  editAssetReferenceKey(
+                    readModel.outro.assetId,
+                    readModel.outro.assetVersion
+                  )
+                )}
                 disabled={interactionDisabled}
                 element={readModel.outro}
                 sections={project.script.sections}

@@ -16,6 +16,13 @@ export type SelectableEditAsset = AssetListItem & {
   readonly mimeType: string;
 };
 
+export function editAssetReferenceKey(
+  assetId: string,
+  assetVersion: number
+): string {
+  return `${assetId}@v${assetVersion}`;
+}
+
 export function editAssetSearchInput(kind: EditPickerAssetKind) {
   return kind === "video"
     ? {

@@ -26,6 +26,7 @@ import {
   assetListQuerySchema,
   assetListResponseSchema,
   assetUploadResponseSchema,
+  assetVersionQuerySchema,
   createApiSuccessResponse
 } from "../../schema/api.js";
 
@@ -190,26 +191,32 @@ export function registerAssetRoutes(
     }
   });
 
-  app.get<{ Params: { assetId: string } }>(
-    "/api/assets/:assetId",
-    async (request) => {
-      const params = assetIdParamsSchema.parse(request.params);
-      return assetDetailResponseSchema.parse(
-        createApiSuccessResponse(assetService.findDetail(params.assetId))
-      );
-    }
-  );
+  app.get<{
+    Params: { assetId: string };
+    Querystring: { version?: string };
+  }>("/api/assets/:assetId", async (request) => {
+    const params = assetIdParamsSchema.parse(request.params);
+    const query = assetVersionQuerySchema.parse(request.query);
+    return assetDetailResponseSchema.parse(
+      createApiSuccessResponse(
+        assetService.findDetail(params.assetId, query.version)
+      )
+    );
+  });
 
   if (assetService.getThumbnailPath !== undefined) {
     app.get<{
       Params: { assetId: string; thumbnailIndex: string };
+      Querystring: { version?: string };
     }>(
       "/api/assets/:assetId/thumbnails/:thumbnailIndex",
       async (request, reply) => {
         const params = assetThumbnailParamsSchema.parse(request.params);
+        const query = assetVersionQuerySchema.parse(request.query);
         const thumbnailPath = assetService.getThumbnailPath?.(
           params.assetId,
-          params.thumbnailIndex
+          params.thumbnailIndex,
+          query.version
         );
         if (thumbnailPath === undefined) {
           throw new Error("Asset thumbnail service is unavailable.");

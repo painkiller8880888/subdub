@@ -122,16 +122,20 @@ export class AssetService {
     await this.fileStore.removeBestEffort(staged.stagingRelativePath);
   }
 
-  findDetail(assetId: string): AssetDetail {
-    const detail = this.repository.findAssetDetail(assetId);
+  findDetail(assetId: string, requestedVersion?: number): AssetDetail {
+    const detail = this.repository.findAssetDetail(assetId, requestedVersion);
     if (detail === undefined) {
       throw new AssetNotFoundError();
     }
     return detail;
   }
 
-  getThumbnailPath(assetId: string, thumbnailIndex: number): string {
-    const detail = this.findDetail(assetId);
+  getThumbnailPath(
+    assetId: string,
+    thumbnailIndex: number,
+    requestedVersion?: number
+  ): string {
+    const detail = this.findDetail(assetId, requestedVersion);
     const thumbnailPath = detail.thumbnailPaths[thumbnailIndex];
     if (thumbnailPath === undefined) {
       throw new AssetNotFoundError();

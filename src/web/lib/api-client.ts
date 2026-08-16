@@ -5,6 +5,7 @@ import {
   aiRunExportQuerySchema,
   aiRunSearchQuerySchema,
   aiRunSearchResponseSchema,
+  assetVersionQuerySchema,
   assetListQuerySchema,
   assetListResponseSchema,
   characterVisualCatalogResponseSchema,
@@ -1001,9 +1002,18 @@ export async function approveProjectVisuals(
   return response.data;
 }
 
-export async function fetchAsset(assetId: string): Promise<AssetDetail> {
+export async function fetchAsset(
+  assetId: string,
+  version?: number
+): Promise<AssetDetail> {
+  const query = assetVersionQuerySchema.parse({ version });
+  const searchParams = new URLSearchParams();
+  if (query.version !== undefined) {
+    searchParams.set("version", String(query.version));
+  }
+  const queryString = searchParams.toString();
   const response = await fetchApi(
-    `/api/assets/${encodeURIComponent(assetId)}`,
+    `/api/assets/${encodeURIComponent(assetId)}${queryString.length > 0 ? `?${queryString}` : ""}`,
     assetDetailResponseSchema
   );
   return response.data;

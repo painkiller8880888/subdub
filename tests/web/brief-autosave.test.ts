@@ -11,10 +11,10 @@ describe("AutosaveCoordinator", () => {
     vi.useRealTimers();
   });
 
-  function setup(save: (draft: string) => Promise<void>) {
+  function setup(save: (draft: string) => Promise<void>, debounceMs = 100) {
     const states: AutosaveState[] = [];
     const coordinator = new AutosaveCoordinator({
-      debounceMs: 100,
+      debounceMs,
       save,
       isConflict: (error) =>
         typeof error === "object" &&
@@ -71,6 +71,25 @@ describe("AutosaveCoordinator", () => {
 
     expect(save).toHaveBeenCalledWith("edited immediately before navigation");
     expect(navigate).toHaveBeenCalledWith("/projects/project/script");
+    coordinator.dispose();
+  });
+
+  it("flushes a change made 349ms before navigation", async () => {
+    vi.useFakeTimers();
+    const save = vi.fn(async () => undefined);
+    const navigate = vi.fn();
+    const { coordinator } = setup(save, 350);
+
+    coordinator.update("edited before the debounce expires");
+    await vi.advanceTimersByTimeAsync(349);
+    expect(save).not.toHaveBeenCalled();
+
+    await expect(
+      navigateAfterAutosave(coordinator, "/projects/project/preview", navigate)
+    ).resolves.toBe(true);
+
+    expect(save).toHaveBeenCalledWith("edited before the debounce expires");
+    expect(navigate).toHaveBeenCalledWith("/projects/project/preview");
     coordinator.dispose();
   });
 
