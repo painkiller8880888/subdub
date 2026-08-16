@@ -225,6 +225,23 @@ describe("ProjectEditService", () => {
     };
   }
 
+  function cutinInput(
+    id: string,
+    sectionId: string,
+    order: number,
+    assetId = "asset-video",
+    assetVersion = 1
+  ) {
+    return {
+      id,
+      role: "cutin" as const,
+      assetId,
+      assetVersion,
+      placement: { kind: "before_section" as const, sectionId, order },
+      volume: 0.4
+    };
+  }
+
   function bgmInput(assetId = "asset-bgm", id = "main-bgm", assetVersion = 1) {
     return {
       id,
@@ -237,7 +254,9 @@ describe("ProjectEditService", () => {
 
   function request(
     edit: {
-      videoElements: ReturnType<typeof videoInput>[];
+      videoElements: Array<
+        ReturnType<typeof videoInput> | ReturnType<typeof cutinInput>
+      >;
       sectionBgms: ReturnType<typeof bgmInput>[];
     },
     expectedRevision = 0
@@ -349,6 +368,69 @@ describe("ProjectEditService", () => {
       result.data.edit
     );
     expect(await readProject(context.projectFile)).toEqual(result.data);
+  });
+
+  it("persists cutin boundary moves and normalized order with the revision", async () => {
+    const context = await setup({ assets: [defaultVideo()] });
+    const first = await context.service.save(
+      PROJECT_ID,
+      request({
+        videoElements: [
+          cutinInput("cutin-a", "section-main", 0),
+          cutinInput("cutin-b", "section-main", 1),
+          cutinInput("cutin-c", "section-outro", 0)
+        ],
+        sectionBgms: []
+      })
+    );
+
+    const moved = await context.service.save(
+      PROJECT_ID,
+      request(
+        {
+          videoElements: [
+            cutinInput("cutin-a", "section-outro", 1),
+            cutinInput("cutin-b", "section-main", 0),
+            cutinInput("cutin-c", "section-outro", 0)
+          ],
+          sectionBgms: []
+        },
+        first.revision
+      )
+    );
+
+    expect(moved.revision).toBe(2);
+    expect(moved.data.edit.videoElements).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: "cutin-a",
+          placement: {
+            kind: "before_section",
+            sectionId: "section-outro",
+            order: 1
+          }
+        }),
+        expect.objectContaining({
+          id: "cutin-b",
+          placement: {
+            kind: "before_section",
+            sectionId: "section-main",
+            order: 0
+          }
+        }),
+        expect.objectContaining({
+          id: "cutin-c",
+          placement: {
+            kind: "before_section",
+            sectionId: "section-outro",
+            order: 0
+          }
+        })
+      ])
+    );
+    expect((await context.service.read(PROJECT_ID)).data).toEqual(
+      moved.data.edit
+    );
   });
 
   it("imports the explicitly selected Asset version for video and BGM", async () => {

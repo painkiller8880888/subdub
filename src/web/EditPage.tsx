@@ -5,7 +5,16 @@ import {
   useQuery,
   useQueryClient
 } from "@tanstack/react-query";
-import { type MouseEvent, useEffect, useMemo, useRef, useState } from "react";
+import {
+  Fragment,
+  type DragEvent,
+  type KeyboardEvent,
+  type MouseEvent,
+  useEffect,
+  useMemo,
+  useRef,
+  useState
+} from "react";
 import { Link, Navigate, useNavigate, useParams } from "react-router";
 import { ZodError } from "zod";
 
@@ -15,6 +24,7 @@ import {
   editPlanSchema,
   type EditPlan,
   type EditVideoElement,
+  type ScriptSection,
   type SectionBgmAssignment,
   type VideoProject
 } from "../schema/video-project.js";
@@ -32,18 +42,21 @@ import {
   addSectionBgm,
   clampUnitInterval,
   cloneEditPlan,
+  createEditCutinDropTargets,
   createEditPlanReadModel,
   createEditSectionReadModels,
   createProjectEditInput,
   editAssetSearchInput,
   formatDurationMs,
   isSelectableEditAsset,
+  moveEditVideoElement,
   reconcileSavedEditPlan,
   removeEditVideoElement,
   removeSectionBgm,
   replaceEditVideoElement,
   replaceSectionBgm,
   editAssetReferenceKey,
+  type EditCutinDropTarget,
   type EditPlanReadModel,
   type EditSectionReadModel,
   type SelectableEditAsset
@@ -152,34 +165,75 @@ function EditVideoElementCard({
   sections,
   disabled,
   volumeDisabled,
+  isKeyboardDragging = false,
+  isDragging = false,
   onReplace,
   onDelete,
-  onVolumeChange
+  onVolumeChange,
+  onDragStart,
+  onDragEnd,
+  onKeyboardKey
 }: {
   readonly element: EditVideoElement;
   readonly asset: AssetDetail | undefined;
   readonly sections: VideoProject["script"]["sections"];
   readonly disabled: boolean;
   readonly volumeDisabled: boolean;
+  readonly isKeyboardDragging?: boolean;
+  readonly isDragging?: boolean;
   readonly onReplace: () => void;
   readonly onDelete: () => void;
   readonly onVolumeChange: (volume: number) => void;
+  readonly onDragStart?: (event: DragEvent<HTMLButtonElement>) => void;
+  readonly onDragEnd?: () => void;
+  readonly onKeyboardKey?: (event: KeyboardEvent<HTMLButtonElement>) => void;
 }) {
   const title = assetTitle(asset, element.assetId);
   const volumeId = `${element.id}-video-volume`;
   const thumbnailAvailable = asset?.thumbnailPaths[0] !== undefined;
+  const canReorder = element.role === "cutin" && onDragStart !== undefined;
 
   return (
     <article
       aria-label={`${editRoleLabel(element.role)}動画`}
-      className="edit-video-element-card"
+      className={`edit-video-element-card${isDragging ? " is-dragging" : ""}`}
+      data-edit-video-element-id={element.id}
     >
       <header className="edit-card-header">
         <div>
           <p className="eyebrow">動画要素</p>
           <h3>{editRoleLabel(element.role)}動画</h3>
         </div>
-        <span className="edit-role-badge">{editRoleLabel(element.role)}</span>
+        <div className="edit-card-header-actions">
+          <span className="edit-role-badge">{editRoleLabel(element.role)}</span>
+          {canReorder ? (
+            <button
+              aria-keyshortcuts="Space Enter ArrowUp ArrowDown Escape"
+              aria-label={`${title}のカットインを移動`}
+              aria-pressed={isKeyboardDragging}
+              className="edit-drag-handle"
+              disabled={disabled}
+              draggable={!disabled}
+              title="ドラッグ、またはSpace/Enterで選択して矢印キーで移動"
+              type="button"
+              onDragEnd={onDragEnd}
+              onDragStart={(event) => {
+                const dataTransfer = event.dataTransfer as unknown as {
+                  effectAllowed: string;
+                  setData: (format: string, data: string) => void;
+                };
+                dataTransfer.effectAllowed = "move";
+                dataTransfer.setData("text/plain", element.id);
+                onDragStart(event);
+              }}
+              onKeyDown={onKeyboardKey}
+            >
+              ↕ 並べ替え
+            </button>
+          ) : (
+            <span className="edit-fixed-placement">固定配置</span>
+          )}
+        </div>
       </header>
 
       {thumbnailAvailable ? (
@@ -245,6 +299,51 @@ function EditVideoElementCard({
         </button>
       </div>
     </article>
+  );
+}
+
+function CutinDropTarget({
+  target,
+  section,
+  active,
+  disabled,
+  onDragOver,
+  onDrop
+}: {
+  readonly target: EditCutinDropTarget;
+  readonly section: ScriptSection;
+  readonly active: boolean;
+  readonly disabled: boolean;
+  readonly onDragOver: (event: DragEvent<HTMLDivElement>) => void;
+  readonly onDrop: (event: DragEvent<HTMLDivElement>) => void;
+}) {
+  return (
+    <div
+      aria-disabled={disabled}
+      aria-label={`「${section.name}」の前・順序 ${target.index + 1} にカットインを配置`}
+      className={`edit-cutin-drop-target${active ? " is-active" : ""}`}
+      data-cutin-drop-target={`${target.sectionId}:${target.index}`}
+      role="button"
+      tabIndex={-1}
+      onDragOver={(event) => {
+        if (disabled) {
+          return;
+        }
+        event.preventDefault();
+        (event.dataTransfer as unknown as { dropEffect: string }).dropEffect =
+          "move";
+        onDragOver(event);
+      }}
+      onDrop={(event) => {
+        if (disabled) {
+          return;
+        }
+        event.preventDefault();
+        onDrop(event);
+      }}
+    >
+      <span>{active ? "ここにドロップ" : "カットインをここへ"}</span>
+    </div>
   );
 }
 
@@ -570,7 +669,8 @@ function EditLoadError({
   );
 }
 
-type PendingAction = "adding" | "replacing" | "removing" | "saving";
+type PendingAction =
+  "adding" | "replacing" | "removing" | "reordering" | "saving";
 
 function pendingActionLabel(action: PendingAction): string {
   switch (action) {
@@ -580,6 +680,8 @@ function pendingActionLabel(action: PendingAction): string {
       return "差し替え中…";
     case "removing":
       return "削除中…";
+    case "reordering":
+      return "並べ替え中…";
     case "saving":
       return "保存中…";
   }
@@ -619,10 +721,20 @@ function EditPlanEditor({
   const handledServerRevisionRef = useRef(editResponse.revision);
   const lastAttemptActionRef = useRef<PendingAction | null>(null);
   const restoreRemovalOnNextSuccessRef = useRef(false);
+  const reorderRollbackDraftRef = useRef<EditPlan | null>(null);
   const coordinatorRef = useRef<AutosaveCoordinator<EditPlan> | null>(null);
   const [coordinator, setCoordinator] =
     useState<AutosaveCoordinator<EditPlan> | null>(null);
   const [pendingNavigation, setPendingNavigation] = useState(false);
+  const [draggingElementId, setDraggingElementId] = useState<string | null>(
+    null
+  );
+  const [keyboardDraggingElementId, setKeyboardDraggingElementId] = useState<
+    string | null
+  >(null);
+  const [activeDropTarget, setActiveDropTarget] =
+    useState<EditCutinDropTarget | null>(null);
+  const [rollbackNotice, setRollbackNotice] = useState(false);
 
   const saveMutation = useMutation({
     mutationFn: ({
@@ -714,6 +826,8 @@ function EditPlanEditor({
     revisionRef.current = savedProject.revision;
     handledServerRevisionRef.current = savedProject.revision;
     lastSavedRef.current = cloneEditPlan(savedProject.edit);
+    reorderRollbackDraftRef.current = null;
+    setRollbackNotice(false);
 
     const reconciledDraft = restoreRemovalOnNextSuccessRef.current
       ? cloneEditPlan(savedProject.edit)
@@ -761,6 +875,21 @@ function EditPlanEditor({
 
   useEffect(() => {
     if (
+      (autosaveState.status === "error" ||
+        autosaveState.status === "conflict") &&
+      lastAttemptActionRef.current === "reordering"
+    ) {
+      const restoredDraft = cloneEditPlan(
+        reorderRollbackDraftRef.current ?? lastSavedRef.current
+      );
+      reorderRollbackDraftRef.current = null;
+      draftRef.current = restoredDraft;
+      coordinatorRef.current?.replaceDraft(restoredDraft);
+      setDraft(restoredDraft);
+      setRollbackNotice(true);
+      lastAttemptActionRef.current = null;
+    }
+    if (
       autosaveState.status === "error" &&
       lastAttemptActionRef.current === "removing"
     ) {
@@ -784,6 +913,7 @@ function EditPlanEditor({
     draftRef.current = clonedDraft;
     setDraft(clonedDraft);
     setPendingAction(action);
+    setRollbackNotice(false);
     lastAttemptActionRef.current = action;
     if (action !== "removing") {
       restoreRemovalOnNextSuccessRef.current = false;
@@ -897,6 +1027,175 @@ function EditPlanEditor({
     project.script.sections,
     readModel
   );
+  const sectionIds = project.script.sections.map((section) => section.id);
+  const cutinDropTargets = createEditCutinDropTargets(sectionModels);
+
+  function isSameDropTarget(
+    left: EditCutinDropTarget | null,
+    right: EditCutinDropTarget | null
+  ): boolean {
+    return left?.sectionId === right?.sectionId && left?.index === right?.index;
+  }
+
+  function clearDragState(): void {
+    setDraggingElementId(null);
+    setKeyboardDraggingElementId(null);
+    setActiveDropTarget(null);
+  }
+
+  function commitCutinDrop(
+    elementId: string,
+    target: EditCutinDropTarget
+  ): void {
+    const current = draftRef.current;
+    const next = moveEditVideoElement(current, elementId, target, sectionIds);
+    clearDragState();
+    if (JSON.stringify(current) === JSON.stringify(next)) {
+      return;
+    }
+    reorderRollbackDraftRef.current = cloneEditPlan(current);
+    updateDraft(next, "reordering");
+  }
+
+  function startNativeDrag(elementId: string): void {
+    setDraggingElementId(elementId);
+    setKeyboardDraggingElementId(null);
+    setActiveDropTarget(null);
+  }
+
+  function handleNativeDragOver(
+    target: EditCutinDropTarget,
+    event: DragEvent<HTMLDivElement>
+  ): void {
+    if (draggingElementId === null || keyboardDraggingElementId !== null) {
+      return;
+    }
+    if (!isSameDropTarget(activeDropTarget, target)) {
+      setActiveDropTarget(target);
+    }
+    (event.dataTransfer as unknown as { dropEffect: string }).dropEffect =
+      "move";
+  }
+
+  function handleNativeDrop(
+    target: EditCutinDropTarget,
+    event: DragEvent<HTMLDivElement>
+  ): void {
+    if (draggingElementId === null || keyboardDraggingElementId !== null) {
+      return;
+    }
+    event.preventDefault();
+    commitCutinDrop(draggingElementId, target);
+  }
+
+  function currentCutinDropTarget(
+    element: EditVideoElement
+  ): EditCutinDropTarget | null {
+    const placement = element.placement;
+    if (element.role !== "cutin" || placement.kind !== "before_section") {
+      return null;
+    }
+    const sectionModel = sectionModels.find(
+      (model) => model.section.id === placement.sectionId
+    );
+    const index = sectionModel?.cutins.findIndex(
+      (cutin) => cutin.id === element.id
+    );
+    return index === undefined || index < 0
+      ? null
+      : { sectionId: placement.sectionId, index };
+  }
+
+  function moveKeyboardDropTarget(direction: "previous" | "next"): void {
+    if (activeDropTarget === null || keyboardDraggingElementId === null) {
+      return;
+    }
+    const currentIndex = cutinDropTargets.findIndex((target) =>
+      isSameDropTarget(target, activeDropTarget)
+    );
+    if (currentIndex < 0) {
+      return;
+    }
+    const step = direction === "next" ? 1 : -1;
+    const cutinPositionSignature = (
+      plan: EditPlan
+    ): Array<readonly [string, string]> =>
+      createEditSectionReadModels(
+        project.script.sections,
+        createEditPlanReadModel(plan)
+      ).flatMap((model) =>
+        model.cutins.map((cutin) => [model.section.id, cutin.id] as const)
+      );
+    const currentCutinPosition = cutinPositionSignature(draftRef.current);
+    let nextIndex = currentIndex + step;
+    while (nextIndex >= 0 && nextIndex < cutinDropTargets.length) {
+      const nextTarget = cutinDropTargets[nextIndex];
+      if (nextTarget === undefined) {
+        return;
+      }
+      const nextDraft = moveEditVideoElement(
+        draftRef.current,
+        keyboardDraggingElementId,
+        nextTarget,
+        sectionIds
+      );
+      if (
+        JSON.stringify(cutinPositionSignature(nextDraft)) !==
+        JSON.stringify(currentCutinPosition)
+      ) {
+        setActiveDropTarget(nextTarget);
+        return;
+      }
+      // A slot immediately after the source card can describe the same
+      // result after the source is removed. Skip that no-op slot so one
+      // ArrowDown/ArrowRight always advances the cutin when possible.
+      nextIndex += step;
+    }
+  }
+
+  function handleKeyboardKey(
+    element: EditVideoElement,
+    event: KeyboardEvent<HTMLButtonElement>
+  ): void {
+    const isConfirmKey = event.key === " " || event.key === "Enter";
+    if (keyboardDraggingElementId === null) {
+      if (!isConfirmKey) {
+        return;
+      }
+      const target = currentCutinDropTarget(element);
+      if (target === null || interactionDisabled) {
+        return;
+      }
+      event.preventDefault();
+      setDraggingElementId(element.id);
+      setKeyboardDraggingElementId(element.id);
+      setActiveDropTarget(target);
+      return;
+    }
+    if (keyboardDraggingElementId !== element.id) {
+      return;
+    }
+    if (event.key === "Escape") {
+      event.preventDefault();
+      clearDragState();
+      return;
+    }
+    if (isConfirmKey) {
+      event.preventDefault();
+      if (activeDropTarget !== null) {
+        commitCutinDrop(element.id, activeDropTarget);
+      }
+      return;
+    }
+    if (event.key === "ArrowUp" || event.key === "ArrowLeft") {
+      event.preventDefault();
+      moveKeyboardDropTarget("previous");
+    } else if (event.key === "ArrowDown" || event.key === "ArrowRight") {
+      event.preventDefault();
+      moveKeyboardDropTarget("next");
+    }
+  }
+
   const saveInProgress =
     autosaveState.status === "pending" || autosaveState.status === "saving";
   const interactionDisabled =
@@ -982,6 +1281,9 @@ function EditPlanEditor({
                 "現在の編集内容は画面に保持されています。"
               )}
             </p>
+            {rollbackNotice ? (
+              <p>並べ替えの保存に失敗したため、変更前の順序へ戻しました。</p>
+            ) : null}
             {errorDetails(autosaveState.error).length > 0 ? (
               <ul>
                 {errorDetails(autosaveState.error).map((detail) => (
@@ -1002,8 +1304,11 @@ function EditPlanEditor({
           <section className="message-panel message-panel-error" role="alert">
             <h2>保存競合</h2>
             <p>
-              別の画面でプロジェクトが更新されました。現在の編集内容は保持しています。最新データを再読込するまで自動保存を停止します。
+              別の画面でプロジェクトが更新されました。最新データを再読込するまで自動保存を停止します。
             </p>
+            {rollbackNotice ? (
+              <p>競合した並べ替えは適用せず、変更前の順序へ戻しました。</p>
+            ) : null}
             <button className="button" type="button" onClick={reloadLatest}>
               最新データを再読込
             </button>
@@ -1011,6 +1316,19 @@ function EditPlanEditor({
         ) : null}
 
         <EditPlanSummary readModel={readModel} />
+
+        {draggingElementId !== null && activeDropTarget !== null ? (
+          <p className="edit-dnd-status" role="status" aria-live="polite">
+            {keyboardDraggingElementId !== null
+              ? "カットインを選択中。矢印キーで配置先を選び、SpaceまたはEnterで決定、Escapeでキャンセルできます。"
+              : "カットインをドラッグ中です。点線の配置先へドロップしてください。"}{" "}
+            現在の配置先: 「
+            {project.script.sections.find(
+              (section) => section.id === activeDropTarget.sectionId
+            )?.name ?? activeDropTarget.sectionId}
+            」前・順序 {activeDropTarget.index + 1}
+          </p>
+        ) : null}
 
         <section
           aria-labelledby="edit-video-title"
@@ -1104,31 +1422,96 @@ function EditPlanEditor({
             ) : null}
             {sectionModels.map((model) => (
               <div className="edit-section-flow" key={model.section.id}>
-                {model.cutins.map((cutin) => (
-                  <EditVideoElementCard
-                    asset={assignedAssetByRef.get(
-                      editAssetReferenceKey(cutin.assetId, cutin.assetVersion)
-                    )}
-                    disabled={interactionDisabled}
-                    element={cutin}
-                    key={cutin.id}
-                    sections={project.script.sections}
-                    volumeDisabled={
-                      autosaveState.status === "saving" ||
-                      autosaveState.status === "conflict"
+                {model.order > 1 ? (
+                  <CutinDropTarget
+                    active={isSameDropTarget(activeDropTarget, {
+                      sectionId: model.section.id,
+                      index: 0
+                    })}
+                    disabled={interactionDisabled || draggingElementId === null}
+                    section={model.section}
+                    target={{ sectionId: model.section.id, index: 0 }}
+                    onDragOver={(event) =>
+                      handleNativeDragOver(
+                        { sectionId: model.section.id, index: 0 },
+                        event
+                      )
                     }
-                    onDelete={() => removeVideo(cutin.id)}
-                    onReplace={() =>
-                      setPicker({
-                        kind: "video",
-                        action: "replace",
-                        elementId: cutin.id
-                      })
-                    }
-                    onVolumeChange={(volume) =>
-                      updateVideoVolume(cutin.id, volume)
+                    onDrop={(event) =>
+                      handleNativeDrop(
+                        { sectionId: model.section.id, index: 0 },
+                        event
+                      )
                     }
                   />
+                ) : (
+                  <div
+                    aria-disabled="true"
+                    className="edit-cutin-drop-target edit-cutin-drop-target-invalid"
+                    role="note"
+                  >
+                    最初のセクションより前にはカットインを配置できません
+                  </div>
+                )}
+                {model.cutins.map((cutin, index) => (
+                  <Fragment key={cutin.id}>
+                    <EditVideoElementCard
+                      asset={assignedAssetByRef.get(
+                        editAssetReferenceKey(cutin.assetId, cutin.assetVersion)
+                      )}
+                      disabled={interactionDisabled}
+                      element={cutin}
+                      isDragging={draggingElementId === cutin.id}
+                      isKeyboardDragging={
+                        keyboardDraggingElementId === cutin.id
+                      }
+                      sections={project.script.sections}
+                      volumeDisabled={
+                        autosaveState.status === "saving" ||
+                        autosaveState.status === "conflict"
+                      }
+                      onDelete={() => removeVideo(cutin.id)}
+                      onReplace={() =>
+                        setPicker({
+                          kind: "video",
+                          action: "replace",
+                          elementId: cutin.id
+                        })
+                      }
+                      onVolumeChange={(volume) =>
+                        updateVideoVolume(cutin.id, volume)
+                      }
+                      onDragEnd={clearDragState}
+                      onDragStart={() => startNativeDrag(cutin.id)}
+                      onKeyboardKey={(event) => handleKeyboardKey(cutin, event)}
+                    />
+                    <CutinDropTarget
+                      active={isSameDropTarget(activeDropTarget, {
+                        sectionId: model.section.id,
+                        index: index + 1
+                      })}
+                      disabled={
+                        interactionDisabled || draggingElementId === null
+                      }
+                      section={model.section}
+                      target={{
+                        sectionId: model.section.id,
+                        index: index + 1
+                      }}
+                      onDragOver={(event) =>
+                        handleNativeDragOver(
+                          { sectionId: model.section.id, index: index + 1 },
+                          event
+                        )
+                      }
+                      onDrop={(event) =>
+                        handleNativeDrop(
+                          { sectionId: model.section.id, index: index + 1 },
+                          event
+                        )
+                      }
+                    />
+                  </Fragment>
                 ))}
                 <section className="script-section-card edit-section-card">
                   <header className="script-section-header">

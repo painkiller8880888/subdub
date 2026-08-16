@@ -11,10 +11,12 @@ import {
   addEditVideoElement,
   addSectionBgm,
   createProjectEditInput,
+  createEditCutinDropTargets,
   createEditPlanReadModel,
   createEditSectionReadModels,
   editAssetSearchInput,
   isSelectableEditAsset,
+  moveEditVideoElement,
   reconcileSavedEditPlan,
   removeEditVideoElement,
   removeSectionBgm,
@@ -305,6 +307,117 @@ describe("edit page read model", () => {
         sections[0]?.id
       ).videoElements
     ).toHaveLength(1);
+  });
+
+  it("moves cutins between valid boundaries and normalizes each order", () => {
+    const dndSections = [
+      ...sections,
+      {
+        id: "section-outro",
+        outlineSectionId: "outline-outro",
+        name: "まとめ",
+        background: { kind: "solid", colorToken: "background" },
+        lines: []
+      },
+      {
+        id: "section-tail",
+        outlineSectionId: "outline-tail",
+        name: "補足",
+        background: { kind: "solid", colorToken: "background" },
+        lines: []
+      }
+    ] satisfies ScriptSection[];
+    const cutin = (id: string, sectionId: string, order: number) => ({
+      id,
+      role: "cutin" as const,
+      assetId: `asset-${id}`,
+      assetVersion: 1,
+      assetChecksum: "a".repeat(64),
+      projectMediaPath: `media/${id}.mp4`,
+      placement: { kind: "before_section" as const, sectionId, order },
+      volume: 1
+    });
+    const editPlan = {
+      videoElements: [
+        cutin("cutin-a", "section-main", 0),
+        cutin("cutin-b", "section-main", 1),
+        cutin("cutin-c", "section-outro", 0),
+        cutin("cutin-d", "section-tail", 5),
+        cutin("cutin-e", "section-tail", 10)
+      ],
+      sectionBgms: []
+    };
+    const sectionModels = createEditSectionReadModels(
+      dndSections,
+      createEditPlanReadModel(editPlan)
+    );
+
+    expect(createEditCutinDropTargets(sectionModels)).toEqual([
+      { sectionId: "section-main", index: 0 },
+      { sectionId: "section-main", index: 1 },
+      { sectionId: "section-main", index: 2 },
+      { sectionId: "section-outro", index: 0 },
+      { sectionId: "section-outro", index: 1 },
+      { sectionId: "section-tail", index: 0 },
+      { sectionId: "section-tail", index: 1 },
+      { sectionId: "section-tail", index: 2 }
+    ]);
+
+    const reordered = moveEditVideoElement(
+      editPlan,
+      "cutin-a",
+      { sectionId: "section-main", index: 2 },
+      dndSections.map((section) => section.id)
+    );
+    expect(
+      reordered.videoElements.map((element) => [element.id, element.placement])
+    ).toEqual([
+      [
+        "cutin-a",
+        { kind: "before_section", sectionId: "section-main", order: 1 }
+      ],
+      [
+        "cutin-b",
+        { kind: "before_section", sectionId: "section-main", order: 0 }
+      ],
+      [
+        "cutin-c",
+        { kind: "before_section", sectionId: "section-outro", order: 0 }
+      ],
+      [
+        "cutin-d",
+        { kind: "before_section", sectionId: "section-tail", order: 5 }
+      ],
+      [
+        "cutin-e",
+        { kind: "before_section", sectionId: "section-tail", order: 10 }
+      ]
+    ]);
+
+    const movedBoundary = moveEditVideoElement(
+      editPlan,
+      "cutin-a",
+      { sectionId: "section-outro", index: 1 },
+      dndSections.map((section) => section.id)
+    );
+    expect(
+      movedBoundary.videoElements.map((element) => element.placement)
+    ).toEqual([
+      { kind: "before_section", sectionId: "section-outro", order: 1 },
+      { kind: "before_section", sectionId: "section-main", order: 0 },
+      { kind: "before_section", sectionId: "section-outro", order: 0 },
+      { kind: "before_section", sectionId: "section-tail", order: 5 },
+      { kind: "before_section", sectionId: "section-tail", order: 10 }
+    ]);
+
+    expect(
+      moveEditVideoElement(
+        editPlan,
+        "cutin-a",
+        { sectionId: "section-intro", index: 0 },
+        dndSections.map((section) => section.id)
+      )
+    ).toEqual(editPlan);
   });
 
   it("replaces and removes edit elements without changing their placement", () => {

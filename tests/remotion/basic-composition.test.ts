@@ -1,4 +1,3 @@
-import { existsSync } from "node:fs";
 import { cp, mkdtemp, readFile, readdir, rm, mkdir } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -20,6 +19,7 @@ import {
   renderManifestSchema,
   type RenderManifest
 } from "../../src/schema/index.js";
+import { browserExecutable as resolveBrowserExecutable } from "../../src/app/rendering/remotion-mp4-renderer.js";
 import {
   findCharacterVariant,
   selectCharacterImagePathForFrame,
@@ -47,14 +47,7 @@ const remotionEntryPoint = path.join(
   "remotion",
   "entry-point.tsx"
 );
-const browserExecutable = [
-  process.env.CHROME_BIN,
-  "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
-  "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe"
-].find(
-  (candidate): candidate is string =>
-    candidate !== undefined && existsSync(candidate)
-);
+const browserExecutable = resolveBrowserExecutable();
 
 let testRoot: string | undefined;
 let bundleDirectory: string | undefined;
@@ -507,7 +500,7 @@ describe("basic Remotion composition", () => {
   beforeAll(async () => {
     if (browserExecutable === undefined) {
       throw new Error(
-        "A local Chrome/Edge executable is required for the offline Remotion still test"
+        "A local Chrome/Chromium/Edge executable is required for the offline Remotion still test"
       );
     }
     expect(

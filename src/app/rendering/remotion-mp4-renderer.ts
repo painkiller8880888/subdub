@@ -50,6 +50,13 @@ function isMissingPathError(error: unknown): boolean {
 export function browserExecutable(): BrowserExecutable | undefined {
   const candidates = [
     process.env.CHROME_BIN,
+    process.env.CHROMIUM_BIN,
+    "/usr/bin/google-chrome",
+    "/usr/bin/google-chrome-stable",
+    "/usr/bin/chromium",
+    "/usr/bin/chromium-browser",
+    "/snap/bin/chromium",
+    "/opt/google/chrome/google-chrome",
     "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
     "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",
     "C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe",
