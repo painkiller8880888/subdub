@@ -279,8 +279,6 @@ function createFixtureOutlineGenerationService(
   return new OutlineGenerationService({
     repository,
     modelService: {
-      // The service remains production code; only the model-list adapter is
-      // local and deterministic for this E2E.
       listModels: async () => ({
         models: [model],
         fetchedAt: "2026-08-11T00:00:00.000Z",
@@ -288,8 +286,6 @@ function createFixtureOutlineGenerationService(
       })
     },
     chatAdapter: {
-      // Do not replace the generation service: this is the external adapter
-      // boundary that the test stubs to avoid OpenRouter network access.
       complete: async () => ({
         candidate: createRepresentativeFrameOutlineCandidate(),
         responseModel: model.id,
@@ -474,10 +470,10 @@ async function uploadAsset(
 }
 
 function visualDisplay(
-  kind: "video" | "photo" | "document_scan" | "sound_effect"
+  kind: "video" | "bgm" | "photo" | "document_scan" | "sound_effect"
 ) {
-  if (kind === "sound_effect") {
-    throw new Error("Sound effects cannot be visual assignments.");
+  if (kind === "sound_effect" || kind === "bgm") {
+    throw new Error("Audio assets cannot be visual assignments.");
   }
   const common = {
     fit: "contain" as const,
@@ -671,8 +667,6 @@ async function writeOrRequireGolden(
   goldenPath: string,
   frameName: string
 ): Promise<void> {
-  // Normal runs are read-only. Baseline changes require an explicit opt-in
-  // environment variable so a render cannot silently rewrite checked-in PNGs.
   if (process.env.UPDATE_REPRESENTATIVE_GOLDENS === "1") {
     await fs.mkdir(path.dirname(goldenPath), { recursive: true });
     await fs.copyFile(actualPath, goldenPath);
@@ -713,8 +707,6 @@ async function validateMp4Output(
     const packetStats = await videoTrack.computePacketStats();
     expect(packetStats.averagePacketRate).toBeCloseTo(manifest.fps, 1);
     const durationSeconds = await input.computeDuration();
-    // Container/audio timestamp rounding may add a few decoded samples; keep
-    // the check explicit and well below a frame-sized regression.
     expect(
       Math.abs(durationSeconds - manifest.durationInFrames / manifest.fps)
     ).toBeLessThanOrEqual(0.25);
@@ -1447,9 +1439,6 @@ describe("MVP final verification E2E", () => {
           mimeType: "application/pdf",
           title: "Fixture completion report"
         });
-        // Derive a second deterministic tone from the checked-in WAV fixture.
-        // Distinct markers let the final MP4 PCM assertion distinguish BGM
-        // from SFX instead of accepting one shared audio stream.
         const soundEffectFixture = createDistinctSoundEffectFixture(
           await mediaFixture("effect-1s.wav")
         );
@@ -1545,10 +1534,6 @@ describe("MVP final verification E2E", () => {
         );
 
         const bgmProjectMediaPath = "media/fixture-section-bgm.wav";
-        // BGM is part of VideoProject.edit, but the current asset API only
-        // exposes the sound_effect kind and requires a usage tag. Copy the
-        // checked-in BGM fixture at the existing project-media boundary rather
-        // than misclassifying it as a sound effect or adding a new API.
         const bgmSourcePath = mediaFixturePath("effect-2s.wav");
         const bgmTargetPath = resolvePosixPath(
           path.join(workspaceRoot, "projects", projectId),
@@ -1566,9 +1551,6 @@ describe("MVP final verification E2E", () => {
         if (mainSectionId === undefined || effectLineId === undefined) {
           throw new Error("The fixture main/outro section is missing.");
         }
-        // The current API has no project-level audio/edit/thumbnail mutation
-        // route, so this fixture-only configuration uses the existing validated
-        // repository boundary instead of inventing an E2E-only endpoint.
         project = await projectRepository.save(
           projectId,
           {
@@ -2120,10 +2102,6 @@ describe("MVP final verification E2E", () => {
           expect.arrayContaining(["ai", "voice", "manifest", "render"])
         );
 
-        // Cross-layer failure case: an invalid derived-input snapshot is
-        // rejected after the normal manifest and both outputs exist. This
-        // exercises the manifest store's existing atomic/cache boundary while
-        // proving the already-approved project and artifacts remain intact.
         const normalProject = await projectRepository.read(projectId);
         const firstLineId = allProjectLines(project)[0]?.id;
         if (firstLineId === undefined) {
@@ -2154,8 +2132,6 @@ describe("MVP final verification E2E", () => {
         expect(await sha256File(mp4Path)).toBe(mp4OutputChecksum);
         expect(await sha256File(thumbnailPath)).toBe(thumbnailOutputChecksum);
 
-        // Close the first Fastify app (which closes its worker and database)
-        // before opening a fresh app against the same workspace root.
         if (server === undefined) {
           throw new Error("The initial server was not initialized.");
         }
