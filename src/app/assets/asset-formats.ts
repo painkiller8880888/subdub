@@ -1,4 +1,6 @@
-import type { AssetKind } from "../../schema/asset.js";
+import type { AssetFormat, AssetKind } from "../../schema/asset.js";
+
+export type { AssetFormat } from "../../schema/asset.js";
 
 export const ASSET_FORMATS = {
   mp4: {
@@ -38,8 +40,6 @@ export const ASSET_FORMATS = {
     label: "WAV"
   }
 } as const;
-
-export type AssetFormat = keyof typeof ASSET_FORMATS;
 
 export type AssetFormatInfo = (typeof ASSET_FORMATS)[AssetFormat];
 

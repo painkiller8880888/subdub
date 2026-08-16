@@ -11,6 +11,8 @@ import {
   projectCreateRequestSchema,
   projectCreateResponseSchema,
   projectDetailResponseSchema,
+  projectEditResponseSchema,
+  projectEditSaveRequestSchema,
   projectListResponseSchema,
   projectMutationResponseSchema,
   projectSourceReadResponseSchema,
@@ -20,10 +22,14 @@ import {
   scriptSaveRequestSchema
 } from "../../schema/api.js";
 import { ProjectService } from "../../app/projects/project-service.js";
+import { ProjectEditService } from "../../app/projects/project-edit-service.js";
+
+export type ProjectEditServicePort = Pick<ProjectEditService, "read" | "save">;
 
 export function registerProjectRoutes(
   app: FastifyInstance,
-  projectService: ProjectService
+  projectService: ProjectService,
+  projectEditService?: ProjectEditServicePort
 ): void {
   app.get("/api/projects", async () => {
     const projects = await projectService.list();
@@ -200,4 +206,30 @@ export function registerProjectRoutes(
       );
     }
   );
+
+  if (projectEditService !== undefined) {
+    app.get<{ Params: { projectId: string } }>(
+      "/api/projects/:projectId/edit",
+      async (request) => {
+        const result = await projectEditService.read(request.params.projectId);
+        return projectEditResponseSchema.parse(
+          createApiSuccessResponse(result.data, result.revision)
+        );
+      }
+    );
+
+    app.put<{ Params: { projectId: string } }>(
+      "/api/projects/:projectId/edit",
+      async (request) => {
+        const input = projectEditSaveRequestSchema.parse(request.body);
+        const result = await projectEditService.save(
+          request.params.projectId,
+          input
+        );
+        return projectMutationResponseSchema.parse(
+          createApiSuccessResponse(result.data, result.revision)
+        );
+      }
+    );
+  }
 }

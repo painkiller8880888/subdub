@@ -4,9 +4,11 @@ import {
   idSchema,
   isoUtcDateTimeSchema,
   nonNegativeIntegerSchema,
+  positiveIntegerSchema,
   relativePosixPathSchema,
   sha256Schema,
   finiteNumberSchema,
+  unitIntervalSchema,
   strictObject
 } from "./primitives.js";
 import {
@@ -14,6 +16,8 @@ import {
   projectBriefSchema,
   pronunciationSchema,
   scriptSchema,
+  editPlanSchema,
+  editVideoPlacementSchema,
   videoProjectSchema,
   aiTaskKindSchema,
   characterVisualBindingSchema
@@ -29,6 +33,7 @@ import {
 } from "./terminology.js";
 import {
   assetDetailSchema,
+  assetFormatSchema,
   assetListResultSchema,
   assetKindSchema,
   assetStatusSchema,
@@ -625,6 +630,43 @@ export const projectBriefSaveRequestSchema = z
   })
   .strict();
 
+/**
+ * Edit mutations accept the selected asset ID and version. The checksum and
+ * project path are resolved by the backend after that exact version has been
+ * validated and copied into the project.
+ */
+export const projectEditVideoElementInputSchema = strictObject({
+  id: idSchema,
+  role: z.enum(["intro", "outro", "cutin"]),
+  assetId: idSchema,
+  assetVersion: positiveIntegerSchema,
+  placement: editVideoPlacementSchema,
+  volume: unitIntervalSchema
+});
+
+export const projectEditSectionBgmInputSchema = strictObject({
+  id: idSchema,
+  sectionId: idSchema,
+  assetId: idSchema,
+  assetVersion: positiveIntegerSchema,
+  volume: unitIntervalSchema
+});
+
+export const projectEditPlanInputSchema = strictObject({
+  videoElements: z.array(projectEditVideoElementInputSchema),
+  sectionBgms: z.array(projectEditSectionBgmInputSchema)
+});
+
+export const projectEditSaveRequestSchema = strictObject({
+  edit: projectEditPlanInputSchema,
+  expectedRevision: nonNegativeIntegerSchema
+});
+
+export const projectEditResponseSchema = strictObject({
+  data: editPlanSchema,
+  revision: nonNegativeIntegerSchema
+});
+
 export const projectMutationResponseSchema = z
   .object({
     data: videoProjectSchema,
@@ -913,6 +955,7 @@ export const assetListQuerySchema = strictObject({
   q: z.string().optional(),
   query: z.string().optional(),
   kind: assetKindSchema.optional(),
+  format: assetFormatSchema.optional(),
   department: z.string().transform(normalizeAssetOptionalField).optional(),
   system: z.string().transform(normalizeAssetOptionalField).optional(),
   status: assetStatusSchema.optional(),
@@ -922,6 +965,7 @@ export const assetListQuerySchema = strictObject({
 }).transform((query) => ({
   q: normalizeAssetSearchQuery(query.q ?? query.query ?? ""),
   kind: query.kind,
+  format: query.format,
   department: query.department,
   system: query.system,
   status: query.status ?? "active",
@@ -1028,6 +1072,17 @@ export type ProjectSourceSaveRequest = z.infer<
 export type ProjectBriefSaveRequest = z.infer<
   typeof projectBriefSaveRequestSchema
 >;
+export type ProjectEditVideoElementInput = z.infer<
+  typeof projectEditVideoElementInputSchema
+>;
+export type ProjectEditSectionBgmInput = z.infer<
+  typeof projectEditSectionBgmInputSchema
+>;
+export type ProjectEditPlanInput = z.infer<typeof projectEditPlanInputSchema>;
+export type ProjectEditSaveRequest = z.infer<
+  typeof projectEditSaveRequestSchema
+>;
+export type ProjectEditResponse = z.infer<typeof projectEditResponseSchema>;
 export type ProjectMutationResponse = z.infer<
   typeof projectMutationResponseSchema
 >;

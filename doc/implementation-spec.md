@@ -1592,7 +1592,7 @@ GET    /api/projects/{projectId}/validation
 
 現行の project character mutation（CV-05 実装）は、VOICEVOX 話者と `CharacterVisualBinding` を `project.json` へ保存する責務を持つ。`CharacterVisualSet` の visual / variant / file metadata は `GET /api/character-visuals` 系の workspace catalog から取得し、project API が SQLite へ project binding を保存する設計にはしない。
 
-ED-03〜ED-05 の edit mutation は `EditPlan` を `expectedRevision` 付きで保存する。`PUT /api/projects/{projectId}/edit` は台本の section order を受け付けず、video element の role / placement / order、登録済み Asset の `assetId` / `assetVersion` / `assetChecksum` / `projectMediaPath` snapshot、section BGM 0/1、volume だけを更新する。Asset の選択・差し替え時には `active` を要求するが、snapshot 後の live な status は出力条件にしない。Asset の取り込みと `project.json` 更新は、片方だけが成功した状態を残さない。
+ED-03〜ED-05 の edit mutation は `EditPlan` を `expectedRevision` 付きで保存する。`PUT /api/projects/{projectId}/edit` は台本の section order を受け付けず、video element の role / placement / order、登録済み Asset の `assetId` / `assetVersion` / `assetChecksum` / `projectMediaPath` snapshot、section BGM 0/1、volume だけを更新する。編集候補は `GET /api/assets?kind=video&format=mp4&status=active` または `GET /api/assets?kind=bgm&format=mp3&status=active` で取得し、`format` は最新 Asset version の MIME と library path 拡張子を同時に絞る。picker が送る `assetVersion` は選択した版の識別子として exact lookup し、backend が別の最新版へ置き換えない。Asset の選択・差し替え時には `active` を要求するが、snapshot 後の live な status は出力条件にしない。Asset の取り込みと `project.json` 更新は、片方だけが成功した状態を残さない。
 
 ### 11.3 構成案と台本
 

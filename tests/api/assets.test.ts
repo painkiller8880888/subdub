@@ -95,16 +95,29 @@ describe("asset upload API", () => {
       description: string;
       department: string | null;
       system: string | null;
-      kind: "photo" | "video" | "document_scan" | "sound_effect";
+      kind: "photo" | "video" | "bgm" | "document_scan" | "sound_effect";
       status: "processing" | "active" | "inactive" | "error";
+      libraryMediaPath: string;
+      mimeType: string;
     }> = {}
   ) {
     const now = "2026-08-07T00:00:00.000Z";
+    const kind = values.kind ?? "photo";
+    const defaultFormat =
+      kind === "video"
+        ? { extension: "mp4", mimeType: "video/mp4" }
+        : kind === "bgm"
+          ? { extension: "mp3", mimeType: "audio/mpeg" }
+          : kind === "document_scan"
+            ? { extension: "pdf", mimeType: "application/pdf" }
+            : kind === "sound_effect"
+              ? { extension: "wav", mimeType: "audio/wav" }
+              : { extension: "png", mimeType: "image/png" };
     server.database.database
       .insert(assets)
       .values({
         assetId,
-        kind: values.kind ?? "photo",
+        kind,
         title: values.title ?? assetId,
         description: values.description ?? "",
         confidentiality: "internal",
@@ -120,8 +133,10 @@ describe("asset upload API", () => {
       .values({
         assetId,
         version: 1,
-        libraryMediaPath: `media/${assetId}/v1.png`,
-        mimeType: "image/png",
+        libraryMediaPath:
+          values.libraryMediaPath ??
+          `media/${assetId}/v1.${defaultFormat.extension}`,
+        mimeType: values.mimeType ?? defaultFormat.mimeType,
         createdAt: now,
         updatedAt: now
       })
@@ -253,6 +268,37 @@ describe("asset upload API", () => {
         .parse(response.json())
         .data.items.map((item) => item.assetId)
     ).toEqual(["asset-photo"]);
+  });
+
+  it("filters asset list results by the exact registered format", async () => {
+    insertSearchAsset("asset-mp4", { kind: "video" });
+    insertSearchAsset("asset-legacy-video", {
+      kind: "video",
+      libraryMediaPath: "media/asset-legacy-video/v1.avi"
+    });
+    insertSearchAsset("asset-mp3", { kind: "bgm" });
+
+    const videoResponse = await server.app.inject({
+      method: "GET",
+      url: "/api/assets?kind=video&format=mp4&page=1&pageSize=20"
+    });
+    expect(videoResponse.statusCode).toBe(200);
+    expect(
+      assetListResponseSchema
+        .parse(videoResponse.json())
+        .data.items.map((item) => item.assetId)
+    ).toEqual(["asset-mp4"]);
+
+    const bgmResponse = await server.app.inject({
+      method: "GET",
+      url: "/api/assets?kind=bgm&format=mp3&page=1&pageSize=20"
+    });
+    expect(bgmResponse.statusCode).toBe(200);
+    expect(
+      assetListResponseSchema
+        .parse(bgmResponse.json())
+        .data.items.map((item) => item.assetId)
+    ).toEqual(["asset-mp3"]);
   });
 
   it("does not treat FTS punctuation as query language or return a server error", async () => {

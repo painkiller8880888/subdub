@@ -12,6 +12,8 @@ import {
   projectCharactersSaveRequestSchema,
   projectCreateResponseSchema,
   projectDetailResponseSchema,
+  projectEditResponseSchema,
+  projectEditSaveRequestSchema,
   projectMutationResponseSchema,
   projectSourceReadResponseSchema
 } from "../../src/schema/api.js";
@@ -288,6 +290,92 @@ describe("project source and brief APIs", () => {
     expect(readResponse.statusCode).toBe(422);
     expect(serialized).not.toContain(workspaceRoot);
     expect(serialized).not.toContain(tampered);
+  });
+
+  it("reads and saves the edit plan with a revision and server-owned input contract", async () => {
+    const project = await createProject();
+    const initialResponse = await server.app.inject({
+      method: "GET",
+      url: `/api/projects/${project.metadata.id}/edit`
+    });
+    const initial = projectEditResponseSchema.parse(initialResponse.json());
+
+    expect(initialResponse.statusCode).toBe(200);
+    expect(initial.data).toEqual({ videoElements: [], sectionBgms: [] });
+    expect(initial.revision).toBe(0);
+
+    const request = {
+      edit: { videoElements: [], sectionBgms: [] },
+      expectedRevision: initial.revision
+    };
+    expect(projectEditSaveRequestSchema.safeParse(request).success).toBe(true);
+    const saveResponse = await server.app.inject({
+      method: "PUT",
+      url: `/api/projects/${project.metadata.id}/edit`,
+      payload: request
+    });
+    const saved = projectMutationResponseSchema.parse(saveResponse.json());
+
+    expect(saveResponse.statusCode).toBe(200);
+    expect(saved.data.edit).toEqual(request.edit);
+    expect(saved.revision).toBe(1);
+
+    const reloadedResponse = await server.app.inject({
+      method: "GET",
+      url: `/api/projects/${project.metadata.id}/edit`
+    });
+    const reloaded = projectEditResponseSchema.parse(reloadedResponse.json());
+    expect(reloaded.data).toEqual(request.edit);
+    expect(reloaded.revision).toBe(1);
+  });
+
+  it("rejects client-supplied snapshots and stale edit revisions", async () => {
+    const project = await createProject();
+    const snapshotInput = await server.app.inject({
+      method: "PUT",
+      url: `/api/projects/${project.metadata.id}/edit`,
+      payload: {
+        edit: {
+          videoElements: [
+            {
+              id: "intro-video",
+              role: "intro",
+              assetId: "asset-video",
+              assetVersion: 1,
+              assetChecksum: "0".repeat(64),
+              projectMediaPath: "C:/private/video.mp4",
+              placement: { kind: "before_first_section" },
+              volume: 0.5
+            }
+          ],
+          sectionBgms: []
+        },
+        expectedRevision: 0
+      }
+    });
+    expect(snapshotInput.statusCode).toBe(422);
+    expect(parseError(snapshotInput).code).toBe("REQUEST_VALIDATION_FAILED");
+
+    const firstSave = await server.app.inject({
+      method: "PUT",
+      url: `/api/projects/${project.metadata.id}/edit`,
+      payload: {
+        edit: { videoElements: [], sectionBgms: [] },
+        expectedRevision: 0
+      }
+    });
+    expect(firstSave.statusCode).toBe(200);
+
+    const stale = await server.app.inject({
+      method: "PUT",
+      url: `/api/projects/${project.metadata.id}/edit`,
+      payload: {
+        edit: { videoElements: [], sectionBgms: [] },
+        expectedRevision: 0
+      }
+    });
+    expect(stale.statusCode).toBe(409);
+    expect(parseError(stale).code).toBe("PROJECT_REVISION_CONFLICT");
   });
 
   it("keeps the API contracts strict", () => {
