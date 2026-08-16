@@ -60,6 +60,7 @@ import {
 import { CharacterVisualPickerModal } from "./CharacterVisualPicker";
 import { characterVisualFileUrl } from "./character-visual-picker";
 import { VoiceAdjustmentEditor } from "./VoiceAdjustmentEditor";
+import { visualAssignmentsPath } from "./VisualAssignmentsPage";
 import { WorkflowIndicator } from "./WorkflowIndicator";
 
 function charactersPath(projectId: string): string {
@@ -1251,6 +1252,15 @@ export function ScriptPage() {
           を明示的に選択します。
         </p>
         <div className="page-header-actions">
+          <Link
+            className="button"
+            to={visualAssignmentsPath(projectId)}
+            onClick={(event) =>
+              void navigateAway(event, visualAssignmentsPath(projectId))
+            }
+          >
+            現場素材の表示設定
+          </Link>
           <Link
             className="button button-primary"
             to={editPath(projectId)}

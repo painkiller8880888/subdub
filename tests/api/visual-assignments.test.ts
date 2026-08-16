@@ -28,6 +28,20 @@ function assignmentPayload() {
   };
 }
 
+function videoAssignmentPayload(volume = 0.25) {
+  const source = videoProjectFixture.visuals.assignments[0];
+  if (source?.display.kind !== "video") {
+    throw new Error("fixture must contain a video assignment");
+  }
+  return {
+    id: "api-video-assignment",
+    startLineId: source.startLineId,
+    endLineId: source.endLineId,
+    assetId: source.assetId,
+    display: { ...structuredClone(source.display), volume }
+  };
+}
+
 describe("visual assignments API", () => {
   const apps: Array<ReturnType<typeof buildApp>> = [];
   const roots: string[] = [];
@@ -116,6 +130,87 @@ describe("visual assignments API", () => {
       apiErrorResponseSchema.parse(checksumResponse.json()).error.code
     ).toBe("REQUEST_VALIDATION_FAILED");
     expect(apiErrorResponseSchema.parse(pathResponse.json()).error.code).toBe(
+      "REQUEST_VALIDATION_FAILED"
+    );
+  });
+
+  it("passes an arbitrary generic video volume through the API contract", async () => {
+    let receivedInput: unknown;
+    const app = buildApp({
+      visualAssignmentService: {
+        assign: async (_projectId, input) => {
+          receivedInput = input;
+          return { data: videoProjectFixture, revision: 1 };
+        }
+      }
+    });
+    apps.push(app);
+
+    const response = await app.inject({
+      method: "PUT",
+      url: "/api/projects/api-project/visual-assignments",
+      payload: {
+        expectedRevision: 0,
+        assignment: videoAssignmentPayload(0.25)
+      }
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(receivedInput).toEqual({
+      expectedRevision: 0,
+      assignment: videoAssignmentPayload(0.25)
+    });
+  });
+
+  it.each([-0.01, 1.01])(
+    "rejects generic video volume %s outside the 0..1 range",
+    async (volume) => {
+      const app = buildApp({
+        visualAssignmentService: {
+          assign: async () => ({ data: videoProjectFixture, revision: 1 })
+        }
+      });
+      apps.push(app);
+
+      const response = await app.inject({
+        method: "PUT",
+        url: "/api/projects/api-project/visual-assignments",
+        payload: {
+          expectedRevision: 0,
+          assignment: videoAssignmentPayload(volume)
+        }
+      });
+
+      expect(response.statusCode).toBe(422);
+      expect(apiErrorResponseSchema.parse(response.json()).error.code).toBe(
+        "REQUEST_VALIDATION_FAILED"
+      );
+    }
+  );
+
+  it("does not accept legacy muted as a generic video API field", async () => {
+    const app = buildApp({
+      visualAssignmentService: {
+        assign: async () => ({ data: videoProjectFixture, revision: 1 })
+      }
+    });
+    apps.push(app);
+    const assignment = videoAssignmentPayload(0.25) as {
+      display: Record<string, unknown>;
+    };
+    assignment.display.muted = false;
+
+    const response = await app.inject({
+      method: "PUT",
+      url: "/api/projects/api-project/visual-assignments",
+      payload: {
+        expectedRevision: 0,
+        assignment
+      }
+    });
+
+    expect(response.statusCode).toBe(422);
+    expect(apiErrorResponseSchema.parse(response.json()).error.code).toBe(
       "REQUEST_VALIDATION_FAILED"
     );
   });

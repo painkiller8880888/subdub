@@ -51,6 +51,7 @@ import { ScriptPage } from "./ScriptPage";
 import { TerminologyPage } from "./TerminologyPage";
 import { PreviewPage } from "./PreviewPage";
 import { AiRunsPage } from "./AiRunsPage";
+import { VisualAssignmentsPage } from "./VisualAssignmentsPage";
 import { WorkflowIndicator } from "./WorkflowIndicator";
 import { WorkspaceLayout } from "./WorkspaceLayout";
 
@@ -1029,6 +1030,10 @@ export function App() {
           path="/projects/:projectId/script"
         />
         <Route element={<EditPage />} path="/projects/:projectId/edit" />
+        <Route
+          element={<VisualAssignmentsPage />}
+          path="/projects/:projectId/visual-assignments"
+        />
         <Route
           element={<PreviewPage />}
           path="/projects/:projectId/preview"

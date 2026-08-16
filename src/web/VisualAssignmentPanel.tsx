@@ -9,6 +9,7 @@ import type {
 } from "../schema/index.js";
 import {
   addVisualAnnotation,
+  updateVisualAssignmentVideoVolume,
   removeVisualAnnotation,
   updateVisualAnnotation
 } from "./visual-assignment-editor";
@@ -377,6 +378,7 @@ function VisualAssignmentEditor({
   };
   const display = draft.display;
   const thumbnailPath = asset?.thumbnailPaths[0];
+  const volumeId = `${draft.id}-video-volume`;
 
   return (
     <article
@@ -536,7 +538,11 @@ function VisualAssignmentEditor({
             type="checkbox"
             checked={display.prioritizeVisual}
             onChange={(event) =>
-              updateDisplay({ prioritizeVisual: event.target.checked })
+              updateDisplay({
+                prioritizeVisual: Boolean(
+                  (event.target as unknown as { checked: boolean }).checked
+                )
+              })
             }
           />
           画像を前面に表示
@@ -636,16 +642,27 @@ function VisualAssignmentEditor({
                 }
               />
             </div>
-            <label className="checkbox-field">
+            <div className="edit-volume-control">
+              <label htmlFor={volumeId}>動画の音量（0〜1）</label>
               <input
-                type="checkbox"
-                checked={display.volume === 0}
+                aria-valuetext={display.volume.toFixed(2)}
+                id={volumeId}
+                max={1}
+                min={0}
                 onChange={(event) =>
-                  updateDisplay({ volume: event.target.checked ? 0 : 1 })
+                  updateDraft((current) =>
+                    updateVisualAssignmentVideoVolume(
+                      current,
+                      Number(event.target.value)
+                    )
+                  )
                 }
+                step={0.01}
+                type="range"
+                value={display.volume}
               />
-              音声を消す
-            </label>
+              <output htmlFor={volumeId}>{display.volume.toFixed(2)}</output>
+            </div>
           </div>
         </fieldset>
       ) : null}

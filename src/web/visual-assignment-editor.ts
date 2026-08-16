@@ -15,6 +15,13 @@ export type DefaultDisplayResult =
   | { readonly display: Display; readonly reason?: undefined }
   | { readonly display: undefined; readonly reason: string };
 
+export function clampUnitInterval(value: number): number {
+  if (!Number.isFinite(value)) {
+    return 0;
+  }
+  return Math.min(1, Math.max(0, value));
+}
+
 export function defaultDisplayForAsset(
   asset: VisualAsset | undefined
 ): DefaultDisplayResult {
@@ -125,6 +132,23 @@ export function removeVisualAnnotation(
       annotations: assignment.display.annotations.filter(
         (annotation) => annotation.id !== annotationId
       )
+    }
+  };
+}
+
+export function updateVisualAssignmentVideoVolume(
+  assignment: VisualAssignment,
+  volume: number
+): VisualAssignment {
+  if (assignment.display.kind !== "video") {
+    return assignment;
+  }
+
+  return {
+    ...assignment,
+    display: {
+      ...assignment.display,
+      volume: clampUnitInterval(volume)
     }
   };
 }

@@ -172,6 +172,31 @@ describe("videoProjectSchema", () => {
     invalidVolume.edit.sectionBgms[0].volume = 1.1;
     expectInvalid(invalidVolume, ["edit", "sectionBgms", 0, "volume"]);
 
+    const invalidVideoVolume = clone(videoProjectFixture);
+    const invalidVideoDisplay = invalidVideoVolume.visuals.assignments[0].display;
+    if (invalidVideoDisplay.kind !== "video") {
+      throw new Error("fixture must contain a video display");
+    }
+    invalidVideoDisplay.volume = -0.1;
+    expectInvalid(invalidVideoVolume, [
+      "visuals",
+      "assignments",
+      0,
+      "display",
+      "volume"
+    ]);
+
+    const intermediateVideoVolume = clone(videoProjectFixture);
+    const intermediateVideoDisplay =
+      intermediateVideoVolume.visuals.assignments[0].display;
+    if (intermediateVideoDisplay.kind !== "video") {
+      throw new Error("fixture must contain a video display");
+    }
+    intermediateVideoDisplay.volume = 0.25;
+    expect(videoProjectSchema.safeParse(intermediateVideoVolume).success).toBe(
+      true
+    );
+
     const invalidCrop = clone(videoProjectFixture);
     invalidCrop.visuals.assignments[0].display.crop.width = 1.1;
     expectInvalid(invalidCrop, [
