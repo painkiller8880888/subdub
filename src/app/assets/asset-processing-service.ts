@@ -30,9 +30,7 @@ export type AssetProcessingServiceOptions = {
 };
 
 export type AssetProcessingOutcome =
-  | { status: "processed" }
-  | { status: "skipped" }
-  | { status: "failed" };
+  { status: "processed" } | { status: "skipped" } | { status: "failed" };
 
 function isErrnoCode(error: unknown, code: string): boolean {
   return (
