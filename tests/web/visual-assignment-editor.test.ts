@@ -2,10 +2,12 @@ import { describe, expect, it } from "vitest";
 
 import {
   addVisualAnnotation,
+  clampUnitInterval,
   defaultDisplayForAsset,
   nextVisualAssignmentId,
   removeVisualAnnotation,
-  updateVisualAnnotation
+  updateVisualAnnotation,
+  updateVisualAssignmentVideoVolume
 } from "../../src/web/visual-assignment-editor.js";
 import type { VisualAssignment } from "../../src/schema/index.js";
 import { videoProjectFixture } from "../fixtures/video-project.js";
@@ -108,5 +110,37 @@ describe("visual assignment editor helpers", () => {
     const assignments = clone(videoProjectFixture.visuals.assignments);
     assignments[0].id = "visual-assignment-1";
     expect(nextVisualAssignmentId(assignments)).toBe("visual-assignment-4");
+  });
+
+  it("updates generic video volume across the full unit interval", () => {
+    const assignment = clone(
+      videoProjectFixture.visuals.assignments[0]
+    ) as VisualAssignment;
+
+    expect(
+      updateVisualAssignmentVideoVolume(assignment, 0).display
+    ).toMatchObject({ kind: "video", volume: 0 });
+    expect(
+      updateVisualAssignmentVideoVolume(assignment, 0.25).display
+    ).toMatchObject({ kind: "video", volume: 0.25 });
+    expect(
+      updateVisualAssignmentVideoVolume(assignment, 1).display
+    ).toMatchObject({ kind: "video", volume: 1 });
+    expect(
+      updateVisualAssignmentVideoVolume(assignment, 1.5).display
+    ).toMatchObject({ kind: "video", volume: 1 });
+    expect(
+      updateVisualAssignmentVideoVolume(assignment, -0.5).display
+    ).toMatchObject({ kind: "video", volume: 0 });
+    expect(
+      updateVisualAssignmentVideoVolume(assignment, Number.NaN).display
+    ).toMatchObject({ kind: "video", volume: 0 });
+    expect(
+      updateVisualAssignmentVideoVolume(
+        clone(videoProjectFixture.visuals.assignments[1]),
+        0.25
+      )
+    ).toEqual(videoProjectFixture.visuals.assignments[1]);
+    expect(clampUnitInterval(0.25)).toBe(0.25);
   });
 });
