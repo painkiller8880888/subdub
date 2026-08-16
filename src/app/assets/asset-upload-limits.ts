@@ -1,5 +1,7 @@
 import type { AssetKind } from "../../schema/asset.js";
 
+type LegacyAssetKind = Exclude<AssetKind, "bgm">;
+
 export type AssetUploadLimits = {
   /** Maximum number of file parts in a single upload request. */
   readonly maxFileCount: number;
@@ -15,8 +17,14 @@ export type AssetUploadLimits = {
   readonly maxFileNameLength: number;
   /** Global file size cap enforced while streaming; the largest allowed kind is video. */
   readonly maxGlobalFileBytes: number;
-  /** Per-kind file size caps enforced at commit time. */
-  readonly perKindMaxBytes: Record<AssetKind, number>;
+  /**
+   * Per-kind file size caps enforced at commit time. BGM is optional here so
+   * pre-ED-02 custom limit objects remain compatible; omission uses the BGM
+   * default below.
+   */
+  readonly perKindMaxBytes: Record<LegacyAssetKind, number> & {
+    readonly bgm?: number;
+  };
 };
 
 // Initial values. Rationale is documented in the P3-01 PR body.
@@ -29,8 +37,9 @@ export type AssetUploadLimits = {
 // - maxFileNameLength 255: never trusted as a path, capped only as abuse defense.
 // - maxGlobalFileBytes 2 GiB: matches the largest per-kind cap (video) so the
 //   streaming parser and per-kind caps stay consistent.
-// - perKindMaxBytes: video 2 GiB (現場動画), photo 50 MiB (写真),
-//   document_scan 200 MiB (帳票スキャン), sound_effect 200 MiB (効果音 WAV).
+// - perKindMaxBytes: video 2 GiB (現場動画), bgm 200 MiB (BGM MP3),
+//   photo 50 MiB (写真), document_scan 200 MiB (帳票スキャン),
+//   sound_effect 200 MiB (効果音 WAV).
 export const DEFAULT_ASSET_UPLOAD_LIMITS: AssetUploadLimits = {
   maxFileCount: 1,
   maxPartCount: 64,
@@ -41,6 +50,7 @@ export const DEFAULT_ASSET_UPLOAD_LIMITS: AssetUploadLimits = {
   maxGlobalFileBytes: 2 * 1024 * 1024 * 1024,
   perKindMaxBytes: {
     video: 2 * 1024 * 1024 * 1024,
+    bgm: 200 * 1024 * 1024,
     photo: 50 * 1024 * 1024,
     document_scan: 200 * 1024 * 1024,
     sound_effect: 200 * 1024 * 1024

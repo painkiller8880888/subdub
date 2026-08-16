@@ -64,6 +64,13 @@
       "when": 1786716188634,
       "tag": "0008_small_blockbuster",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1786837440000,
+      "tag": "0009_black_mandroid",
+      "breakpoints": true
     }
   ]
 }

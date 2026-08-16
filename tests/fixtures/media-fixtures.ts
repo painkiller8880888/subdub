@@ -44,6 +44,18 @@ export const realMediaFixtures: readonly MediaFixture[] = [
     }
   },
   {
+    fileName: "bgm-1s.mp3",
+    kind: "bgm",
+    mimeType: "audio/mpeg",
+    expected: {
+      width: null,
+      height: null,
+      durationMs: 1045,
+      pageCount: null,
+      thumbnailCount: 0
+    }
+  },
+  {
     fileName: "shot.png",
     kind: "photo",
     mimeType: "image/png",

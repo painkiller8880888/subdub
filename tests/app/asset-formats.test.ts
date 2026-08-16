@@ -9,6 +9,7 @@ import {
 } from "../../src/app/assets/asset-formats.js";
 import {
   jpegBytes,
+  mp3Bytes,
   mp4Bytes,
   pdfBytes,
   pngBytes,
@@ -37,6 +38,14 @@ describe("asset format detection", () => {
       status: "matched",
       format: "mp4"
     });
+    expect(detectAssetFormat(mp3Bytes)).toEqual({
+      status: "matched",
+      format: "mp3"
+    });
+    expect(detectAssetFormat(Buffer.from([0xff, 0xfb, 0x90, 0x64]))).toEqual({
+      status: "matched",
+      format: "mp3"
+    });
   });
 
   it("rejects empty, short, and unsupported heads", () => {
@@ -60,6 +69,10 @@ describe("asset format detection", () => {
     expect(detectAssetFormat(jpegBytes.subarray(0, 3))).toEqual({
       status: "matched",
       format: "jpeg"
+    });
+    expect(detectAssetFormat(Buffer.from("ID3", "latin1"))).toEqual({
+      status: "matched",
+      format: "mp3"
     });
   });
 
@@ -90,6 +103,7 @@ describe("asset format detection", () => {
     expect(assetFormatForMimeType("audio/x-wav")).toBe("wav");
     expect(assetFormatForMimeType("audio/wave")).toBe("wav");
     expect(assetFormatForMimeType("audio/vnd.wave")).toBe("wav");
+    expect(assetFormatForMimeType("audio/mpeg")).toBe("mp3");
     expect(assetFormatForMimeType("image/jpeg")).toBe("jpeg");
     expect(assetFormatForMimeType("image/pjpeg")).toBe("jpeg");
     expect(assetFormatForMimeType("image/png")).toBe("png");

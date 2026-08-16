@@ -64,6 +64,33 @@ function resolveManagementRoot(managementRoot: string | undefined): string {
   return path.resolve(managementRoot ?? "library");
 }
 
+function hasRequiredEditingAssetExtension(
+  kind: AssetKind,
+  filename: string | undefined,
+  extension: string
+): boolean {
+  if (kind !== "video" && kind !== "bgm") {
+    return true;
+  }
+  if (filename === undefined) {
+    return false;
+  }
+  return path.extname(filename).toLowerCase() === `.${extension}`;
+}
+
+function maxUploadBytesForKind(
+  limits: AssetUploadLimits,
+  kind: AssetKind
+): number {
+  if (kind === "bgm") {
+    return (
+      limits.perKindMaxBytes.bgm ??
+      DEFAULT_ASSET_UPLOAD_LIMITS.perKindMaxBytes.bgm!
+    );
+  }
+  return limits.perKindMaxBytes[kind];
+}
+
 export class AssetService {
   private readonly repository: AssetRepository;
   private readonly fileStore: AssetFileStore;
@@ -136,7 +163,7 @@ export class AssetService {
       ) {
         throw new AssetInvalidFieldError();
       }
-      if (staged.bytes > limits.perKindMaxBytes[kind]) {
+      if (staged.bytes > maxUploadBytesForKind(limits, kind)) {
         throw new AssetFileTooLargeError();
       }
 
@@ -164,6 +191,16 @@ export class AssetService {
       }
 
       const format = ASSET_FORMATS[detection.format];
+      if (
+        !hasRequiredEditingAssetExtension(
+          kind,
+          staged.filename,
+          format.extension
+        )
+      ) {
+        throw new AssetFormatMismatchError();
+      }
+
       const assetId = idSchema.parse(this.createId());
       const version = 1;
       const now = this.now().toISOString();

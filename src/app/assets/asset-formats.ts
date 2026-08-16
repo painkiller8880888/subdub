@@ -7,6 +7,12 @@ export const ASSET_FORMATS = {
     extension: "mp4",
     label: "MP4"
   },
+  mp3: {
+    kind: "bgm" as const,
+    mimeType: "audio/mpeg",
+    extension: "mp3",
+    label: "MP3"
+  },
   png: {
     kind: "photo" as const,
     mimeType: "image/png",
@@ -43,6 +49,7 @@ export type AssetFormatInfo = (typeof ASSET_FORMATS)[AssetFormat];
 export const ASSET_FORMAT_MIME_ALIASES: Record<AssetFormat, readonly string[]> =
   {
     mp4: ["video/mp4"],
+    mp3: ["audio/mpeg"],
     png: ["image/png"],
     jpeg: ["image/jpeg", "image/pjpeg"],
     pdf: ["application/pdf"],
@@ -51,6 +58,7 @@ export const ASSET_FORMAT_MIME_ALIASES: Record<AssetFormat, readonly string[]> =
 
 export const ASSET_KIND_FORMATS: Record<AssetKind, readonly AssetFormat[]> = {
   video: ["mp4"],
+  bgm: ["mp3"],
   photo: ["png", "jpeg"],
   document_scan: ["pdf"],
   sound_effect: ["wav"]
@@ -95,6 +103,33 @@ function detectMp4(head: Buffer): boolean {
   return size >= 8 && matchesAscii(head, 4, "ftyp");
 }
 
+function detectMp3(head: Buffer): boolean {
+  // MP3 files commonly begin with an ID3v2 tag.
+  if (matchesAscii(head, 0, "ID3")) {
+    return true;
+  }
+
+  // Otherwise require a plausible MPEG audio frame header. The full stream is
+  // still decoded by the processing worker before the asset becomes active.
+  if (!hasBytes(head, 4)) {
+    return false;
+  }
+  if (head[0] !== 0xff || (head[1] & 0xe0) !== 0xe0) {
+    return false;
+  }
+  const versionBits = (head[1] >> 3) & 0x03;
+  const layerBits = (head[1] >> 1) & 0x03;
+  const bitrateIndex = (head[2] >> 4) & 0x0f;
+  const sampleRateIndex = (head[2] >> 2) & 0x03;
+  return (
+    versionBits !== 0x01 &&
+    layerBits !== 0x00 &&
+    bitrateIndex !== 0x00 &&
+    bitrateIndex !== 0x0f &&
+    sampleRateIndex !== 0x03
+  );
+}
+
 export function detectAssetFormat(head: Buffer): AssetFormatDetection {
   if (head.length === 0) {
     return { status: "too_short" };
@@ -125,6 +160,10 @@ export function detectAssetFormat(head: Buffer): AssetFormatDetection {
 
   if (detectMp4(head)) {
     return { status: "matched", format: "mp4" };
+  }
+
+  if (detectMp3(head)) {
+    return { status: "matched", format: "mp3" };
   }
 
   if (head.length < 12) {

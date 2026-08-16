@@ -13,6 +13,7 @@ import {
 
 export const assetKindSchema = z.enum([
   "video",
+  "bgm",
   "photo",
   "document_scan",
   "sound_effect"

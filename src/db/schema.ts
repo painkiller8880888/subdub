@@ -39,7 +39,7 @@ export const assets = sqliteTable(
   {
     assetId: text("asset_id").primaryKey(),
     kind: text("kind", {
-      enum: ["video", "photo", "document_scan", "sound_effect"]
+      enum: ["video", "bgm", "photo", "document_scan", "sound_effect"]
     }).notNull(),
     title: text("title").notNull(),
     description: text("description").notNull().default(""),
@@ -58,7 +58,7 @@ export const assets = sqliteTable(
     index("assets_status_idx").on(table.status),
     check(
       "assets_kind_check",
-      sql`${table.kind} IN ('video', 'photo', 'document_scan', 'sound_effect')`
+      sql`${table.kind} IN ('video', 'bgm', 'photo', 'document_scan', 'sound_effect')`
     ),
     check(
       "assets_status_check",
