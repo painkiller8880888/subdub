@@ -402,6 +402,11 @@ describe("RenderManifestInputBuilder", () => {
       expectedCode: "ASSET_KIND_MISMATCH"
     },
     {
+      name: "inactive asset",
+      detail: "inactive",
+      expectedCode: "ASSET_METADATA_MISSING"
+    },
+    {
       name: "wrong MIME",
       detail: "mime-mismatch",
       expectedCode: "EDIT_BGM_FORMAT_INVALID"
@@ -463,7 +468,7 @@ describe("RenderManifestInputBuilder", () => {
                 durationMs: 1_045,
                 pageCount: null,
                 thumbnailPaths: [],
-                status: "active",
+                status: detailCase === "inactive" ? "inactive" : "active",
                 errorCode: null,
                 errorMessage: null,
                 createdAt: "2026-08-15T00:00:00.000Z",
@@ -507,6 +512,118 @@ describe("RenderManifestInputBuilder", () => {
         expect(
           result.diagnostics.map((diagnostic) => diagnostic.code)
         ).toContain(expectedCode);
+      } finally {
+        await fs.rm(workspaceRoot, { recursive: true, force: true });
+      }
+    }
+  );
+
+  it.each([
+    {
+      name: "inactive asset",
+      status: "inactive" as const,
+      checksum: "matches" as const
+    },
+    {
+      name: "DB checksum mismatch",
+      status: "active" as const,
+      checksum: "mismatch" as const
+    }
+  ])(
+    "rejects production edit video compile when the DB has $name",
+    async ({ status, checksum: checksumCase }) => {
+      const workspaceRoot = await fs.mkdtemp(
+        path.join(tmpdir(), "subdub-edit-video-validation-")
+      );
+      try {
+        const project = structuredClone(videoProjectFixture) as VideoProject;
+        const contents = mp4Bytes;
+        const projectChecksum = createHash("sha256")
+          .update(contents)
+          .digest("hex");
+        const projectMediaPath = "media/edits/intro.mp4";
+        project.edit.videoElements = [
+          {
+            id: "edit-intro",
+            role: "intro",
+            assetId: "asset-edit-video",
+            assetVersion: 2,
+            assetChecksum: projectChecksum,
+            projectMediaPath,
+            placement: { kind: "before_first_section" },
+            volume: 0.25
+          }
+        ];
+        const filePath = path.join(
+          workspaceRoot,
+          "projects",
+          project.metadata.id,
+          ...projectMediaPath.split("/")
+        );
+        await fs.mkdir(path.dirname(filePath), { recursive: true });
+        await fs.writeFile(filePath, contents);
+
+        const detail = assetDetailSchema.parse({
+          assetId: "asset-edit-video",
+          version: 2,
+          kind: "video",
+          title: "Edit video",
+          description: "",
+          confidentiality: "internal",
+          department: null,
+          system: null,
+          mimeType: "video/mp4",
+          libraryMediaPath: "library/edit-video.mp4",
+          checksum:
+            checksumCase === "mismatch" ? "f".repeat(64) : projectChecksum,
+          sizeBytes: contents.length,
+          width: 1920,
+          height: 1080,
+          durationMs: 2_500,
+          pageCount: null,
+          thumbnailPaths: [],
+          status,
+          errorCode: null,
+          errorMessage: null,
+          createdAt: "2026-08-15T00:00:00.000Z",
+          updatedAt: "2026-08-15T00:00:00.000Z"
+        });
+        const findAssetDetail = vi.fn((assetId: string, version?: number) =>
+          assetId === detail.assetId && version === detail.version
+            ? detail
+            : undefined
+        );
+        const audioIndex = createRenderManifestAudioIndex(project);
+        const builder = new RenderManifestInputBuilder({
+          workspaceRoot,
+          projectRepository: { read: async () => project },
+          assetRepository: { findAssetDetail },
+          characterVisualCatalogService: {
+            verifyFiles: async () => createLegacySnapshot()
+          },
+          audioStore: { readIndex: async () => audioIndex }
+        });
+
+        const built = await builder.build(project.metadata.id);
+        const baseInput = createRenderManifestInput(project);
+        const baseMetadata = (
+          baseInput.assetMetadata as readonly RenderManifestAssetMetadata[]
+        ).filter((asset) => asset.path !== projectMediaPath);
+        const builtEditMetadata = (
+          built.assetMetadata as readonly RenderManifestAssetMetadata[]
+        ).filter((asset) => asset.path === projectMediaPath);
+        const result = compileRenderManifest({
+          ...baseInput,
+          assetMetadata: [...baseMetadata, ...builtEditMetadata]
+        });
+
+        expect(result.success).toBe(false);
+        if (result.success) {
+          return;
+        }
+        expect(
+          result.diagnostics.map((diagnostic) => diagnostic.code)
+        ).toContain("ASSET_METADATA_MISSING");
       } finally {
         await fs.rm(workspaceRoot, { recursive: true, force: true });
       }

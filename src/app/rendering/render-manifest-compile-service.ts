@@ -73,6 +73,22 @@ function detectedFormat(contents: Buffer): string {
   return detection.status === "matched" ? detection.format : "unsupported";
 }
 
+function matchesActiveAssetSnapshot(
+  detail: ReturnType<AssetDetailReader["findAssetDetail"]>,
+  assetId: string,
+  assetVersion: number,
+  assetChecksum: string
+): detail is NonNullable<ReturnType<AssetDetailReader["findAssetDetail"]>> {
+  return (
+    detail !== undefined &&
+    detail.assetId === assetId &&
+    detail.version === assetVersion &&
+    detail.status === "active" &&
+    detail.checksum !== null &&
+    detail.checksum.toLowerCase() === assetChecksum.toLowerCase()
+  );
+}
+
 function appendAssetMetadata(
   metadata: AssetMetadataByPath,
   assetRepository: AssetDetailReader,
@@ -127,7 +143,14 @@ async function appendEditVideoMetadata(
       element.assetId,
       element.assetVersion
     );
-    if (detail === undefined || detail.checksum === null) {
+    if (
+      !matchesActiveAssetSnapshot(
+        detail,
+        element.assetId,
+        element.assetVersion,
+        element.assetChecksum
+      )
+    ) {
       continue;
     }
     try {
@@ -163,9 +186,12 @@ async function appendBgmMetadata(
       bgm.assetVersion
     );
     if (
-      detail === undefined ||
-      detail.checksum === null ||
-      detail.checksum.toLowerCase() !== bgm.assetChecksum.toLowerCase()
+      !matchesActiveAssetSnapshot(
+        detail,
+        bgm.assetId,
+        bgm.assetVersion,
+        bgm.assetChecksum
+      )
     ) {
       continue;
     }
