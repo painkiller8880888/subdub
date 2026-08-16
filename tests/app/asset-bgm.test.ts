@@ -78,9 +78,9 @@ describe("BGM assets", () => {
       mimeType: "video/mp4",
       status: "processing"
     });
-    expect(repository.findAssetVersion(video.assetId, 1)?.libraryMediaPath).toBe(
-      `media/${video.assetId}/v1.mp4`
-    );
+    expect(
+      repository.findAssetVersion(video.assetId, 1)?.libraryMediaPath
+    ).toBe(`media/${video.assetId}/v1.mp4`);
 
     const bgm = await register("bgm", mp3Bytes, "audio/mpeg", "music.MP3");
     expect(bgm).toMatchObject({
@@ -140,7 +140,9 @@ describe("BGM assets", () => {
       now: () => new Date(NOW)
     });
 
-    await expect(processingService.processAsset(receipt.assetId, 1)).resolves.toEqual({
+    await expect(
+      processingService.processAsset(receipt.assetId, 1)
+    ).resolves.toEqual({
       status: "processed"
     });
 
@@ -198,7 +200,9 @@ describe("BGM assets", () => {
       now: () => new Date(NOW)
     });
 
-    await expect(processingService.processAsset(receipt.assetId, 1)).resolves.toEqual({
+    await expect(
+      processingService.processAsset(receipt.assetId, 1)
+    ).resolves.toEqual({
       status: "failed"
     });
     expect(repository.findAsset(receipt.assetId)).toMatchObject({
@@ -217,7 +221,9 @@ describe("BGM assets", () => {
       now: () => new Date(NOW)
     });
 
-    await expect(processingService.processAsset(receipt.assetId, 1)).resolves.toEqual({
+    await expect(
+      processingService.processAsset(receipt.assetId, 1)
+    ).resolves.toEqual({
       status: "failed"
     });
     expect(repository.findAsset(receipt.assetId)?.status).toBe("error");
@@ -226,9 +232,7 @@ describe("BGM assets", () => {
   it("defensively excludes BGM from generic visual search", async () => {
     await setup();
     const unsafeKinds = ["bgm"] as unknown as readonly (
-      | "video"
-      | "photo"
-      | "document_scan"
+      "video" | "photo" | "document_scan"
     )[];
     expect(
       repository.searchVisual({
