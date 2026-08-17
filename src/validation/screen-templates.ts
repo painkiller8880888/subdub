@@ -41,6 +41,9 @@ export type RotatedScreenRectBounds = Readonly<{
   bottom: number;
 }>;
 
+const TRIGONOMETRY_EPSILON = 1e-12;
+const CANVAS_BOUNDS_EPSILON = 1e-9;
+
 /**
  * Returns the canvas-relative AABB after rotating around the rect center.
  * Width and height are converted to pixels first because the canvas is not
@@ -52,9 +55,14 @@ export function rotatedScreenRectBounds(
   canvasHeight = SCREEN_TEMPLATE_CANVAS_HEIGHT
 ): RotatedScreenRectBounds {
   const { rect } = element.transform;
-  const radians = (element.transform.rotationDeg * Math.PI) / 180;
-  const absCosine = Math.abs(Math.cos(radians));
-  const absSine = Math.abs(Math.sin(radians));
+  const normalizedRotationDeg =
+    ((element.transform.rotationDeg % 360) + 360) % 360;
+  const radians = (normalizedRotationDeg * Math.PI) / 180;
+  const cosine = Math.cos(radians);
+  const sine = Math.sin(radians);
+  const absCosine =
+    Math.abs(cosine) < TRIGONOMETRY_EPSILON ? 0 : Math.abs(cosine);
+  const absSine = Math.abs(sine) < TRIGONOMETRY_EPSILON ? 0 : Math.abs(sine);
   const rotatedWidth =
     rect.width * canvasWidth * absCosine + rect.height * canvasHeight * absSine;
   const rotatedHeight =
@@ -114,10 +122,10 @@ export function screenTemplateValidationReport(
   for (const [index, element] of elements.entries()) {
     const bounds = elementBounds(element);
     if (
-      bounds.left < 0 ||
-      bounds.top < 0 ||
-      bounds.right > 1 ||
-      bounds.bottom > 1
+      bounds.left < -CANVAS_BOUNDS_EPSILON ||
+      bounds.top < -CANVAS_BOUNDS_EPSILON ||
+      bounds.right > 1 + CANVAS_BOUNDS_EPSILON ||
+      bounds.bottom > 1 + CANVAS_BOUNDS_EPSILON
     ) {
       errors.push({
         path: ["elements", index, "transform", "rotationDeg"],

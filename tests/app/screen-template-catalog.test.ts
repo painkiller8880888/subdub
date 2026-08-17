@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   ScreenTemplateCatalogService,
   ScreenTemplateRepository,
+  ScreenTemplateRevisionConflictError,
   STANDARD_SCREEN_TEMPLATE_ID,
   createStandardScreenTemplate,
   screenTemplateContentHash
@@ -169,6 +170,18 @@ describe("screen template catalog", { timeout: 30_000 }, () => {
       template.revision
     );
     expect(updated.revision).toBe(template.revision + 1);
+    expect(() =>
+      service.update(
+        template.templateId,
+        {
+          name: template.name,
+          description: template.description,
+          status: "active",
+          elements: template.elements
+        },
+        template.revision
+      )
+    ).toThrow(ScreenTemplateRevisionConflictError);
     expect(
       repository.listActive().map((candidate) => candidate.templateId)
     ).toEqual([STANDARD_SCREEN_TEMPLATE_ID]);
@@ -279,6 +292,24 @@ describe("screen template catalog", { timeout: 30_000 }, () => {
     });
     expect(screenTemplateValidationReport(rotated).errors).not.toHaveLength(0);
 
+    for (const rotationDeg of [0, 90, 180, 270, 360]) {
+      const edgeTouching = screenTemplateSchema.parse({
+        ...template,
+        elements: template.elements.map((element) =>
+          element.type === "section-title"
+            ? {
+                ...element,
+                transform: {
+                  rect: { x: 0, y: 0.4, width: 0.1, height: 0.1 },
+                  rotationDeg
+                }
+              }
+            : element
+        )
+      });
+      expect(screenTemplateValidationReport(edgeTouching).errors).toEqual([]);
+    }
+
     const unknownKey = screenTemplateElementSchema.safeParse({
       ...dialogue,
       unexpected: true
@@ -309,6 +340,17 @@ describe("screen template catalog", { timeout: 30_000 }, () => {
         status: "inactive",
         revision: template.revision + 1,
         updatedAt: "2026-08-17T03:00:00.000Z"
+      })
+    ).toBe(hash);
+    expect(
+      screenTemplateContentHash({
+        ...template,
+        name: "Renamed template",
+        description: "Updated catalog description",
+        elements: template.elements.map((element, index) => ({
+          ...element,
+          elementId: `renamed-element-${index}`
+        }))
       })
     ).toBe(hash);
     expect(

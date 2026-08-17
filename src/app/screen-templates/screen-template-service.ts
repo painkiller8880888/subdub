@@ -89,16 +89,13 @@ export class ScreenTemplateCatalogService {
   update(
     templateId: string,
     input: ScreenTemplateUpdateInput,
-    expectedRevision?: number
+    expectedRevision: number
   ): ScreenTemplate {
     const current = this.repository.findById(templateId);
     if (current === undefined) {
       throw new ScreenTemplateNotFoundError(templateId);
     }
-    if (
-      expectedRevision !== undefined &&
-      expectedRevision !== current.revision
-    ) {
+    if (expectedRevision !== current.revision) {
       throw new ScreenTemplateRevisionConflictError(
         templateId,
         expectedRevision,
@@ -120,14 +117,6 @@ export class ScreenTemplateCatalogService {
         updatedAt: timestamp(this.now)
       })
     );
-  }
-
-  /** Saves a fully versioned snapshot without changing its revision. */
-  save(template: ScreenTemplate): ScreenTemplate {
-    const validated = assertValidScreenTemplate(template);
-    return this.repository.findById(validated.templateId) === undefined
-      ? this.repository.insert(validated)
-      : this.repository.replace(validated);
   }
 
   /**

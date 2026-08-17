@@ -6,7 +6,6 @@ import type {
 } from "../../schema/screen-template.js";
 
 type RenderContentElement = {
-  readonly elementId: string;
   readonly orderIndex: number;
   readonly type: ScreenTemplateElement["type"];
   readonly rect: ScreenTemplateElement["transform"]["rect"];
@@ -21,7 +20,6 @@ function renderContentElement(
   orderIndex: number
 ): RenderContentElement {
   const base = {
-    elementId: element.elementId,
     orderIndex,
     type: element.type,
     rect: element.transform.rect,
@@ -39,14 +37,13 @@ function renderContentElement(
 
 /**
  * Computes the hash of render-affecting template content. Status, revision,
- * and timestamps are deliberately excluded so freshness can distinguish a
- * semantic content change from bookkeeping-only updates.
+ * timestamps, name, description, and element IDs are deliberately excluded
+ * so freshness can distinguish a semantic content change from bookkeeping or
+ * catalog metadata updates.
  */
 export function screenTemplateContentHash(template: ScreenTemplate): string {
   const canonical = {
     templateId: template.templateId,
-    name: template.name,
-    description: template.description,
     canvasWidth: template.canvasWidth,
     canvasHeight: template.canvasHeight,
     elements: template.elements.map(renderContentElement)
