@@ -79,7 +79,7 @@ template editor は `/screen-templates` と `/screen-templates/{templateId}` に
 
 line-card preview は line ごとの適用 template、section title（`ScriptSection.name`）、背景、実際の subtitle、speaker / character variant、generic visual assignment を解決し、card 左側へ静的代表 frame を表示する。preview と Remotion は同じ geometry resolver / layout component を使う。ScreenTemplate の outer geometry と generic `VisualAssignment.display` の crop / fit / scale / position である inner transform を分離し、`prioritizeVisual` は template 解決後の互換的な character 縮小 policy としてのみ適用する。初期版では character element の非表示を表現せず、将来導入する場合は `visible` などを持つ manifest 契約を別途追加する。template 結果を無視して別の固定座標へ戻してはならない。
 
-`RenderManifest 2.4.0` は template ID だけでなく、template revision / deterministic hash、resolved geometry / transform、font size、`flipX`、content slot を section / line ごとに固定する。generic visual も `RenderVisualV24.display` へ override し、最終 canvas-relative `outerFrame`、content slot の `contentClip`、`fit`、`crop`、annotation を保存する。`section-title` の文字列は ScreenTemplate に保存せず、compiler が `ScriptSection.name` を `RenderSectionLayout.sectionTitle` として固定する。Remotion の section-title layer はこの `sectionTitle` と section layout の geometry を使用し、template catalog や project JSON を描画時に再検索しない。template revision / hash、section title、resolved input を `compilerInputHash` に含め、template または section name 更新後の古い manifest を current と誤認しない。Remotion は SQLite を直接参照せず、resolved manifest だけを描画入力とする。
+`RenderManifest 2.4.0` は template ID だけでなく、template revision / deterministic hash、resolved geometry / transform、font size、`flipX`、content slot を section / line ごとに固定する。generic visual segment も `RenderVisualV24.display` へ override し、最終 canvas-relative `outerFrame`、content slot の `contentClip`、`fit`、`crop`、annotation を保存する。`section-title` の文字列は ScreenTemplate に保存せず、compiler が `ScriptSection.name` を `RenderSectionLayout.sectionTitle` として固定する。Remotion の section-title layer はこの `sectionTitle` と section layout の geometry を使用し、template catalog や project JSON を描画時に再検索しない。template revision / hash、section title、resolved input を `compilerInputHash` に含め、template または section name 更新後の古い manifest を current と誤認しない。Remotion は SQLite を直接参照せず、resolved manifest だけを描画入力とする。
 
 ## 2. 今回確定した判断
 
@@ -1546,7 +1546,21 @@ type ResolvedVisualDisplay =
   | ResolvedImageDisplay
   | ResolvedDocumentDisplay;
 
-type RenderVisualV24 = Omit<RenderVisual, "display"> & {
+type RenderVisualV24 = Omit<
+  RenderVisual,
+  "id" | "from" | "durationInFrames" | "display"
+> & {
+  // id is the deterministic ID of this compiled segment.
+  id: string;
+  sourceAssignmentId: string;
+  segmentIndex: number;
+  segmentStartLineId: string;
+  segmentEndLineId: string;
+  screenTemplateId: string;
+  templateRevision: number;
+  templateHash: string;
+  from: number;
+  durationInFrames: number;
   display: ResolvedVisualDisplay;
 };
 
@@ -1581,9 +1595,29 @@ type RenderManifestV24 = Omit<
 
 `RenderVisualV24.display` は `RenderVisual.display` の raw `VideoDisplay` / `ImageDisplay` / `DocumentDisplay` を引き継がない。`outerFrame` は legacy-media-frame または content-slot-relative の計算後に得た最終 canvas-relative frame、`contentClip.transform` は選択された primary content slot、`contentClip.enabled` はその slot clipping を適用するかどうかを表す。`fit`、`crop`、annotation はこの `outerFrame` に対する表示値として保存し、`position` / `scale` / `displayCoordinateSpace` は resolved display に含めない。legacy adapter では既存 MediaFrame の frame を `outerFrame` にし、既存見た目互換のため `contentClip.enabled` を false とする。content-slot-relative では inner transform を `outerFrame` へ焼き込み、`contentClip.enabled` を true とする。したがって Remotion は coordinate space を判定したり resolver を再実行したりせず、`RenderVisualV24.display` の値だけで描画できる。
 
+`VisualAssignment` と `RenderVisualV24` は 1 対 1 ではない。`startLineId` から `endLineId` までの各 line について、line override が non-null ならそれを、null なら section default を effective template として解決する。assignment の line 範囲をこの effective template の連続区間へ partition し、`templateId`、`templateRevision`、`templateHash` のいずれかが変わる line 境界で `RenderVisualV24` segment を分割する。同じ effective template が続く区間は 1 segment にまとめるため、template-A → template-B → template-A は 3 segment になる。legacy-media-frame でもこの分割規則を共通に適用し、content-slot-relative では各 segment の template の content slot へ inner transform を解決する。
+
+各 segment は `sourceAssignmentId`、0 始まりの `segmentIndex`、`segmentStartLineId`、`segmentEndLineId`、effective template の ID / revision / hash、最終 timeline 上の `from` / `durationInFrames`、resolved `display` を持つ。`id` は `sourceAssignmentId`、segment の開始・終了 line ID、effective template snapshot を canonical JSON 化して hash した決定論的な segment ID とする。同じ assignment の segment は line 順に並べ、segment の半開区間が隣接して重複・欠落しないようにする。`from` と `durationInFrames` は intro / outro / cutin の shift 後に確定した line timeline と assignment 範囲の交差から計算し、template が変わる line 境界をそのまま segment 境界にする。
+
+動画 segment は各 segment で元の `startMs` をコピーして再生を先頭へ戻してはならない。`assignmentFrom` を最終 timeline 上の元 assignment 開始 frame、`elapsedMediaMs(frames) = round(frames * 1000 / fps * playbackRate)` とし、次で source range を継続させる。
+
+```text
+segment.startMs = original.startMs
+  + elapsedMediaMs(segment.from - assignmentFrom)
+segment.endMs = min(
+  original.endMs,
+  original.startMs
+    + elapsedMediaMs(
+        segment.from + segment.durationInFrames - assignmentFrom
+      )
+)
+```
+
+例えば元の `startMs` が 5000、`playbackRate` が 1、assignment 開始から 2 秒後に template が変わる場合、後続 segment の `startMs` は 7000 相当とする。`playbackRate` が 1 以外の場合も presentation elapsed time にその倍率を適用し、segment 境界で動画を再ロードして先頭から再生しない。source range を超える segment は validation error とする。
+
 speaker mapping は resolver の固定規則とする。`speaker-1` は `project.characters[0]`、`speaker-2` は `project.characters[1]` に対応し、現在 Remotion の `characters.slice(0, 2)` と index 0 = left / index 1 = right の挙動を維持する。`mentor` / `learner`、表示名、template 内の実素材選択から別 mapping を推測しない。2 件を解決できない場合は validation error とし、`characterId` と speaker slot を preview / manifest / Remotion で共通利用する。
 
-`RenderManifestV24.compilerInputHash` は、project JSON hash、section / line template selection、`ScriptSection.name` から得た `sectionTitle`、template revision、deterministic template hash、resolved normalized geometry、speaker-to-character mapping、generic assignment inner transform、解決済み generic visual の `outerFrame` / `contentClip` / `fit` / `crop` / annotation、`displayCoordinateSpace`、`prioritizeVisual` の適用結果、CharacterVisual snapshot、audio index、Asset snapshot を含めて生成する。`displayCoordinateSpace` は入力 display の legacy/content-slot の解釈を選ぶために hash へ含めるが、Remotion がその値を再解釈するための出力 field ではない。template の revision / hash、section title、または既存 display の互換モードが変わった場合は旧 manifest を current と判定しない。過去 revision を project.json に埋め込む immutable history や rollback UI は対象外とする。
+`RenderManifestV24.compilerInputHash` は、project JSON hash、section / line template selection、`ScriptSection.name` から得た `sectionTitle`、template revision、deterministic template hash、resolved normalized geometry、speaker-to-character mapping、generic assignment inner transform、VisualAssignment の segment partition（source assignment ID、segment line 境界、effective template ID / revision / hash、segment の `from` / `durationInFrames`）、解決済み generic visual の `outerFrame` / `contentClip` / `fit` / `crop` / annotation、動画 segment の resolved `startMs` / `endMs`、`displayCoordinateSpace`、`prioritizeVisual` の適用結果、CharacterVisual snapshot、audio index、Asset snapshot を含めて生成する。`displayCoordinateSpace` は入力 display の legacy/content-slot の解釈を選ぶために hash へ含めるが、Remotion がその値を再解釈するための出力 field ではない。template の revision / hash、section title、または既存 display の互換モードが変わった場合は旧 manifest を current と判定しない。過去 revision を project.json に埋め込む immutable history や rollback UI は対象外とする。
 
 layout resolver の順序は次のとおりとする。
 
@@ -1591,9 +1625,9 @@ layout resolver の順序は次のとおりとする。
 2. ScreenTemplate snapshot の status、revision、element cardinality、normalized rect、font size `> 0`、rect center rotation、回転後の canvas 範囲を検証する。missing / inactive は自動代替せず error とする。
 3. template の outer geometry を 1920 × 1080 canvas へ解決する。
 4. `speaker-1` / `speaker-2` を project character の配列先頭2件へ解決し、`characterId` を resolved layout へ固定する。
-5. generic `VisualAssignment` がある場合、`displayCoordinateSpace` に応じて legacy adapter または content-slot-relative の `fit`、`crop`、`scale`、`position`、annotation を解決し、`RenderVisualV24.display` の `outerFrame`、`contentClip`、`fit`、`crop`、annotation として保存する。legacy adapter は full-canvas の既存 MediaFrame semantics を `outerFrame` へ焼き込み、`contentClip.enabled: false` とする。content-slot-relative は content slot の内側へ inner transform を適用して `outerFrame` を確定し、`contentClip.enabled: true` とする。assignment の inner transform は template element の outer geometry を変更せず、raw `position` / `scale` / `displayCoordinateSpace` を Remotion 用 manifest に残さない。
+5. generic `VisualAssignment` がある場合、start / end line 範囲の effective template を解決し、template snapshot の ID / revision / hash が変わる line 境界で assignment を segment 化する。各 segment について `displayCoordinateSpace` に応じて legacy adapter または content-slot-relative の `fit`、`crop`、`scale`、`position`、annotation を解決し、`RenderVisualV24.display` の `outerFrame`、`contentClip`、`fit`、`crop`、annotation として保存する。legacy adapter は full-canvas の既存 MediaFrame semantics を `outerFrame` へ焼き込み、`contentClip.enabled: false` とする。content-slot-relative は segment ごとの content slot の内側へ inner transform を適用して `outerFrame` を確定し、`contentClip.enabled: true` とする。assignment の inner transform は template element の outer geometry を変更せず、raw `position` / `scale` / `displayCoordinateSpace` を Remotion 用 manifest に残さない。動画は segment 境界で source `startMs` / `endMs` を assignment 開始からの経過時間に合わせて継続させる。
 6. `prioritizeVisual` が true の場合だけ、既存互換 policy により解決済み character element を縮小する。初期版では非表示にせず、新しい固定座標も生成せず、適用後の状態を resolved layout に固定する。将来非表示を導入する場合は `visible` などを manifest 契約へ追加する。
-7. `sectionTitle`、実際の subtitle、speaker / character variant、background、generic assignment と共に section / line resolved layout を生成し、全 generic visual の `RenderVisualV24` を同じ compiler 出力へ追加する。
+7. `sectionTitle`、実際の subtitle、speaker / character variant、background、generic assignment と共に section / line resolved layout を生成し、全 generic visual segment の `RenderVisualV24` を同じ compiler 出力へ追加する。
 8. line-card preview / Remotion は同じ resolved layout を描画し、section-title layer は `RenderSectionLayout.sectionTitle` を表示する。
 
 `ScreenTemplate` の preview 素材選択は template snapshot / manifest へ保存しない。preview は active な CharacterVisualSet / variant と generic Asset の一時 view model で行い、production compile は project の明示参照と validated snapshot から再解決する。
@@ -2074,17 +2108,17 @@ ED-08 完了前の compile 経路では、既存 `RenderManifest 2.2.0` の gene
 5. section の `screenTemplateId` と line の nullable `screenTemplateId` を、line override → section default の順で解決する。明示参照が missing / inactive の場合は自動代替せず validation error とする。
 6. ScreenTemplate snapshot の revision、element cardinality、0..1 normalized rect、finite 値、rect center rotation、`fontSize > 0`、rotation 後の canvas 外、`flipX` を検証する。`screen-template-standard` も SQLite から取得した snapshot として扱い、静的配列を参照しない。
 7. valid な explicit reference から `RenderManifest.characters[].idleVariantId`、`RenderManifest.lines[].characterVariantId`、`RenderManifest.characterVariants[]` を解決する。compiler は SQLite を直接検索せず、渡された snapshot だけを使う。
-8. ST-05 の共有 resolver を使い、`ScriptSection.name` から `sectionTitle` を固定し、`speaker-1` / `speaker-2` を `project.characters[0]` / `[1]` へ解決する。valid な template snapshot から outer geometry を解決し、`ResolvedScreenLayout` を組み立てる。generic assignment がある場合は `displayCoordinateSpace` に応じ、legacy mode は full-canvas compatibility adapter、content-slot-relative は content slot 内の inner transform として解決し、`RenderVisualV24.display` の最終 `outerFrame` / `contentClip` / `fit` / `crop` / annotation へ固定する。outer template geometry を変更せず、Remotion が raw display を再解釈する余地を残さない。
+8. ST-05 の共有 resolver を使い、`ScriptSection.name` から `sectionTitle` を固定し、`speaker-1` / `speaker-2` を `project.characters[0]` / `[1]` へ解決する。valid な template snapshot から outer geometry を解決し、`ResolvedScreenLayout` を組み立てる。generic assignment がある場合は start / end line 範囲の effective template を解決し、template snapshot の ID / revision / hash が変わる line 境界で segment 化する。各 segment を `displayCoordinateSpace` に応じ、legacy mode は full-canvas compatibility adapter、content-slot-relative は segment ごとの content slot 内の inner transform として解決し、`RenderVisualV24.display` の最終 `outerFrame` / `contentClip` / `fit` / `crop` / annotation へ固定する。outer template geometry を変更せず、Remotion が raw display を再解釈する余地を残さない。
 9. `prioritizeVisual` が true の場合だけ既存互換の character 縮小 policy を resolved layout へ適用する。初期版では非表示にせず、新しい固定座標へ戻さず、適用後の geometry を manifest に固定する。
 10. `EditPlan` の snapshot について、project 内 `projectMediaPath` の存在、`assetChecksum` との一致、MP4 / MP3 の実ファイル形式を検証する。snapshot 作成後の live な Asset `status` は確認せず、Asset Service の SQLite を再検索しない。
 11. 無音時間と音声長をフレームへ変換する。
 12. セリフを累積して line range を作る。
-13. visual assignment の line ID 範囲を frame range へ解決する。
+13. visual assignment の line ID 範囲を frame range へ解決し、effective template の segment 境界、`sourceAssignmentId`、segment ID、segment 順序を記録する。各 segment の最終 `from` / `durationInFrames` は後続の timeline shift を反映して確定する。
 14. section background を frame range へ解決する。
 15. `EditPlan.videoElements` の cutin を、最初のセクションを除く `before_section` 境界へ `order` 順に挿入する。最初のセクション直前の cutin は validation error とする。
-16. 先頭へ intro、末尾へ outro を挿入し、後続の section / line / visual / background の frame range を shift する。
+16. 先頭へ intro、末尾へ outro を挿入し、後続の section / line / visual segment / background の frame range を shift する。visual segment の動画 `startMs` / `endMs` は shift 後の assignment 開始 frame からの経過時間で再計算し、segment 境界で再生を先頭へ戻さない。
 17. shift 後の section range へ `EditPlan.sectionBgms` を解決し、動画要素の区間では BGM を再生しない。効果音をセリフ基準の位置へ統合する。
-18. `RenderVideoInsert`、`RenderAudioTrack`、`sectionLayouts`（`sectionTitle` を含む）、line ごとの `resolvedLayout`、`RenderVisualV24.display`、全体 duration、hash、checksum を確定し、Zod で検証する。ST-06 の manifest では section title、template revision / hash、speaker mapping、入力 display coordinate space、resolved visual の outer frame / content clip / fit / crop / annotation を `compilerInputHash` に含める。
+18. `RenderVideoInsert`、`RenderAudioTrack`、`sectionLayouts`（`sectionTitle` を含む）、line ごとの `resolvedLayout`、segment 化済み `RenderVisualV24[]`（`sourceAssignmentId`、segment ID、`from` / `durationInFrames`、template snapshot、resolved display、動画の継続 source range を含む）、全体 duration、hash、checksum を確定し、Zod で検証する。ST-06 の manifest では section title、template revision / hash、speaker mapping、入力 display coordinate space、segment partition、resolved visual の outer frame / content clip / fit / crop / annotation、動画 segment の resolved `startMs` / `endMs` を `compilerInputHash` に含める。
 19. 一時ファイルから `cache/render-manifest.json` へ置換する。
 
 失敗時は新しいマニフェストを保存せず、全エラーを line ID、assignment ID、パスと関連付けて返す。
@@ -2296,6 +2330,7 @@ editor のサイドバーは active な CharacterVisualSet / variant と、必�
 - 現行 `RenderManifest 2.3.0` の `audioTracks[]` が shift 後の section 範囲、BGM src、`volume`、固定 loop を持ち、fade fields を持たないことを確認する。ST-06 の `RenderManifest 2.4.0` では `sectionLayouts[]`、line ごとの `resolvedLayout`、template revision / hash を確認する。
 - `RenderManifest 2.4.0` の `sectionLayouts[]` が `sectionId` と `sectionTitle`、resolved layout を持ち、section-title layer がその文字列を描画できることを確認する。
 - `RenderManifest 2.4.0` の `visuals[]` が `RenderVisualV24.display` を使い、`outerFrame`、`contentClip`、`fit`、`crop`、annotation を最終値として持つこと、Remotion が raw `displayCoordinateSpace` / `position` / `scale` を再解釈しないことを確認する。
+- line template override を跨ぐ `VisualAssignment` が effective template の変化ごとに `RenderVisualV24` segment へ分割され、`sourceAssignmentId`、決定論的 segment ID、line 境界、template snapshot、最終 frame range を持つこと、動画 segment の `startMs` / `endMs` が assignment 開始から連続することを確認する。
 - `RenderManifest 2.4.0` の `compilerInputHash` が project、section title、template revision / hash、resolved geometry、speaker mapping、generic inner transform、resolved visual display、display coordinate space、CharacterVisual / Asset snapshot を含み、template または section name 更新後に旧 manifest を current と誤認しないことを確認する。
 - 解決済み `variantId`、character ID、renderType、ファイルパス、checksum、mouth slot が manifest に固定されていることを確認する。
 - 正の duration
@@ -2357,6 +2392,7 @@ SQLite にはキー入力単位ではなく、保存、構成案の承認、レ�
 - `speaker-1` → `project.characters[0]`、`speaker-2` → `project.characters[1]`、`characterId` の resolved layout 固定
 - `ScriptSection.name` → `RenderSectionLayout.sectionTitle` の固定と、section-title layer の preview / Remotion 表示
 - `RenderVisualV24.display` の `outerFrame` / `contentClip` / `fit` / `crop` / annotation の固定、legacy mode の clipping 無効、content-slot-relative の clipping 有効、raw display の再解釈なし
+- line template override を跨ぐ VisualAssignment の segment 化、決定論的 ID / sourceAssignmentId / frame range、動画の source range 継続
 - `prioritizeVisual` の初期版が character element の縮小だけを行い、非表示を要求しないこと
 - template editor の drag / resize / rotation / numeric input / keyboard、実素材 preview の一時 state と template data 非保存
 - `mentor` / `learner` や project ID を登録時の必須入力にしないこと
@@ -2396,6 +2432,7 @@ SQLite にはキー入力単位ではなく、保存、構成案の承認、レ�
 - ScreenTemplate snapshot と project section / line selection から `RenderManifest 2.4.0` の section / line `resolvedLayout`、template revision / hash、`compilerInputHash` を解決すること
 - `ScriptSection.name`、speaker mapping、legacy/content-slot-relative display の resolved layout、`section-title` の preview / Remotion 描画を同じ shared resolver / layout component で解決すること
 - `RenderVisualV24.display` の最終 geometry と raw display 値の非依存性、line-card preview / production render の generic visual parity
+- VisualAssignment segment の template 切替、line-card preview / production render の frame range と動画再生位置の parity
 - template outer geometry と generic VisualAssignment inner transform の分離、`prioritizeVisual` の適用順、line-card preview / Remotion の resolved layout parity
 - レンダリングジョブの状態遷移
 
@@ -2615,7 +2652,7 @@ ST-00 は本書と `doc.md` の仕様確定だけを行い、コード、Zod sch
 | ST-03 | `VideoProject 1.3.0`、section `screenTemplateId`、line nullable override、`1.2.0 → 1.3.0` migration。既存 project の各 section に `screen-template-standard` を明示保存し、既存 VisualAssignment を `legacy-media-frame` として扱う coordinate-space migration を行う。 |
 | ST-04 | `/screen-templates`、`/screen-templates/{templateId}`、canvas editor、drag / resize / rotation / numeric input / keyboard、font size、`flipX`、実素材 preview の一時 state。 |
 | ST-05 | pure な ScreenTemplate geometry resolver と preview / production 共通 layout component の確定、ScriptPage の section / line assignment UI、active 候補、inactive / missing validation、line card 左側の resolved screen preview。 |
-| ST-06 | ST-05 の resolver / layout component の出力を `RenderManifest 2.4.0` の `sectionTitle`、`RenderVisualV24.display`、resolved layout / revision / hash へ固定し、`prioritizeVisual` の縮小結果と共に Remotion へ統合する。ST-05 と別の preview 専用 resolver は作らない。 |
+| ST-06 | ST-05 の resolver / layout component の出力を `RenderManifest 2.4.0` の `sectionTitle`、segment 化済み `RenderVisualV24[]`、resolved layout / revision / hash へ固定し、`prioritizeVisual` の縮小結果と共に Remotion へ統合する。VisualAssignment が line template override を跨ぐ場合の segment partition と動画 source range 継続も担当する。ST-05 と別の preview 専用 resolver は作らない。 |
 | ST-07 | layout validation、rotation / overflow / overlap、migration / API / editor / assignment の E2E、line-card preview と production render の parity。 |
 
 実装順序は `ST-01 → ST-02 → ST-03 → ST-04 → ST-05 → ST-06 → ST-07` とする。ST-05 が pure resolver と共通 layout component の提供元になり、ST-06 はそれを利用して Manifest の固定と Remotion 統合だけを行う。template の shared update は revision / hash を次回 compile input へ反映する。同じ template ID を参照する project の `project.json` を自動書き換えたり、過去 revision を埋め込んだりしない。3 人以上の話者、任意 element の追加・削除、custom CSS、animation / keyframe、template revision history / rollback UI は ST-00〜ST-07 の対象外とする。
