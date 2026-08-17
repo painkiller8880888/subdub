@@ -1725,6 +1725,7 @@ POST   /api/projects/{projectId}/thumbnail/render
 - 自動管理の標準実行ファイルは `%LOCALAPPDATA%\Programs\VOICEVOX\vv-engine\run.exe` とする。起動前に `/version` が空でない文字列、`/speakers` が VOICEVOX speaker 配列を返すことを確認し、単なる TCP port open だけでは起動済みと判定しない。
 - 既定 URL に応答する既存 ENGINE は再利用し、起動前から存在した ENGINE の PID を探索・終了しない。50021 が別サービスの HTTP 応答を返す場合は port collision として `run.exe` を起動せず、そのサービスも終了せず、Web/API の起動だけを継続する。
 - 自動起動は `run.exe --host 127.0.0.1 --port 50021 --use_gpu` を先に試し、readiness 成立を GPU 起動成功とする。GPU プロセスが readiness 前に終了、または readiness timeout になった場合は、その起動処理が所有するプロセスツリーを回収し、`--no-use_gpu` を 1 回だけ試す。CPU 起動にも失敗した場合は再試行せず、音声操作だけを無効にする。
+- GPU 起動後の再確認が `port-occupied` の場合は、GPU child が生存中でもまず所有する GPU child を終了し、50021 を再確認する。再確認が `unreachable` なら CPU fallback、`port-occupied` なら外部サービスを終了せず CPU を起動しない、`ready` なら外部 VOICEVOX ENGINE として再利用する。GPU child 終了後に `port-occupied` が判明した場合も同様に CPU を起動しない。
 - 自動起動した ENGINE は `stdio: "ignore"`、`windowsHide: true` で起動する。`SIGINT` / `SIGTERM`、Web/API 子プロセス終了、開発 console 終了時の cleanup は、その `spawn()` が返した PID だけを `taskkill /pid <pid> /t /f` 相当で終了し、既存・外部 ENGINE を終了しない。
 - readiness 待機は定数化した短い間隔の HTTP polling とし、shutdown signal で中断できる。ENGINE の途中終了は dev session の終了条件にせず、ENGINE 単体の自動再起動も行わない。起動ログは `VOICEVOX: existing`、`VOICEVOX: started(gpu)`、`VOICEVOX: started(cpu)`、`VOICEVOX: unavailable` の短い状態を出す。
 - 起動確認に失敗した場合、音声操作だけを無効にし、編集内容は保持する。

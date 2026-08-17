@@ -1192,6 +1192,7 @@ WebUI は Vite + React SPA、画面ルーティングは React Router、サー�
 - API の接続先は環境変数 `VOICEVOX_ENGINE_URL` で設定し、既定値を `http://127.0.0.1:50021` とする。
 - 起動前に `/version` と `/speakers` の両方が VOICEVOX として妥当な HTTP 応答を返すか確認する。既存 ENGINE は再利用し、起動前から存在したプロセスを終了しない。
 - 既定 URL に ENGINE がなく、標準パスに `run.exe` が存在する場合は、`--host 127.0.0.1 --port 50021 --use_gpu` でバックグラウンド起動し、readiness をポーリングする。GPU 起動が成立しない場合だけ、起動したプロセスを回収して `--no-use_gpu` を 1 回試す。
+- GPU 起動後の再確認が `port-occupied` の場合は、所有する GPU ENGINE を終了してから 50021 を再確認する。`unreachable` なら CPU fallback、`port-occupied` なら外部サービスを終了せず CPU を起動しない、`ready` なら外部 VOICEVOX ENGINE を再利用する。
 - `run.exe` は標準出力・標準エラーを捨て、Windows のコンソールウィンドウを表示しない。GPU/CPU の試行がともに失敗しても、Web/API は起動し、音声機能だけを利用不可とする。
 - 50021 が別の HTTP サービスに使われている場合は、そのサービスを起動・終了せず、VOICEVOX を利用不可として Web/API の起動を継続する。
 - `VOICEVOX_ENGINE_URL` に既定値以外が明示されている場合は外部管理とみなし、ローカル `run.exe` を起動・終了しない。

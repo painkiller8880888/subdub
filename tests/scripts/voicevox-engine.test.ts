@@ -265,6 +265,7 @@ describe("VOICEVOX engine lifecycle", () => {
   it("falls back to CPU when the owned GPU process stays alive but is not ready", async () => {
     const children = [new FakeChild(4361), new FakeChild(4362)];
     const modes: string[] = [];
+    let gpuStopped = false;
     const spawn = vi.fn((_path: string, args: string[]) => {
       const child = children[modes.length];
       if (child === undefined) {
@@ -279,13 +280,15 @@ describe("VOICEVOX engine lifecycle", () => {
         return { ready: true, reason: "ready" };
       }
 
-      if (modes.includes("gpu")) {
+      if (modes.includes("gpu") && !gpuStopped) {
         return { ready: false, reason: "port-occupied" };
       }
 
       return { ready: false, reason: "unreachable" };
     });
-    const terminateProcess = vi.fn(async () => {});
+    const terminateProcess = vi.fn(async () => {
+      gpuStopped = true;
+    });
     const manager = createVoicevoxEngineManager(
       managerOptions({
         readinessCheck,
@@ -305,6 +308,92 @@ describe("VOICEVOX engine lifecycle", () => {
 
     await manager.stop();
     expect(terminateProcess).toHaveBeenCalledWith(children[1]);
+  });
+
+  it("does not spawn CPU when an external service still owns the port after GPU cleanup", async () => {
+    const child = new FakeChild(4371);
+    const modes: string[] = [];
+    let externalServiceOwnsPort = false;
+    const spawn = vi.fn((_path: string, args: string[]) => {
+      modes.push(args.at(-1) === "--use_gpu" ? "gpu" : "cpu");
+      if (modes.at(-1) === "cpu") {
+        throw new Error("CPU fallback must not start");
+      }
+      return child;
+    });
+    const readinessCheck = vi.fn(async () => {
+      if (externalServiceOwnsPort) {
+        return { ready: false, reason: "port-occupied" };
+      }
+
+      if (modes.includes("gpu")) {
+        return { ready: false, reason: "port-occupied" };
+      }
+
+      return { ready: false, reason: "unreachable" };
+    });
+    const terminateProcess = vi.fn(async () => {
+      externalServiceOwnsPort = true;
+    });
+    const manager = createVoicevoxEngineManager(
+      managerOptions({
+        readinessCheck,
+        readinessTimeoutMs: 5,
+        pollIntervalMs: 1,
+        spawnImpl: spawn,
+        terminateProcess
+      })
+    );
+
+    await expect(manager.start()).resolves.toMatchObject({
+      status: "unavailable",
+      reason: "port-occupied"
+    });
+    expect(modes).toEqual(["gpu"]);
+    expect(terminateProcess).toHaveBeenCalledWith(child);
+  });
+
+  it("reuses an external VOICEVOX ENGINE that appears after GPU cleanup", async () => {
+    const child = new FakeChild(4381);
+    const modes: string[] = [];
+    let externalVoicevoxReady = false;
+    const spawn = vi.fn((_path: string, args: string[]) => {
+      modes.push(args.at(-1) === "--use_gpu" ? "gpu" : "cpu");
+      if (modes.at(-1) === "cpu") {
+        throw new Error("CPU fallback must not start");
+      }
+      return child;
+    });
+    const readinessCheck = vi.fn(async () => {
+      if (externalVoicevoxReady) {
+        return { ready: true, reason: "ready" };
+      }
+
+      if (modes.includes("gpu")) {
+        return { ready: false, reason: "port-occupied" };
+      }
+
+      return { ready: false, reason: "unreachable" };
+    });
+    const terminateProcess = vi.fn(async () => {
+      externalVoicevoxReady = true;
+    });
+    const manager = createVoicevoxEngineManager(
+      managerOptions({
+        readinessCheck,
+        readinessTimeoutMs: 5,
+        pollIntervalMs: 1,
+        spawnImpl: spawn,
+        terminateProcess
+      })
+    );
+
+    await expect(manager.start()).resolves.toMatchObject({
+      status: "existing",
+      managedBySubdub: false
+    });
+    expect(modes).toEqual(["gpu"]);
+    expect(terminateProcess).toHaveBeenCalledWith(child);
   });
 
   it("does not spawn when port 50021 belongs to a non-VOICEVOX HTTP service", async () => {
