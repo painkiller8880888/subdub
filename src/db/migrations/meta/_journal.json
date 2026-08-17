@@ -71,6 +71,13 @@
       "when": 1786837440000,
       "tag": "0009_black_mandroid",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1786947544641,
+      "tag": "0010_screen-template-catalog",
+      "breakpoints": true
     }
   ]
 }

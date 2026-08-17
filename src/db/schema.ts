@@ -4,6 +4,7 @@ import {
   index,
   integer,
   primaryKey,
+  real,
   sqliteTable,
   text,
   uniqueIndex
@@ -337,6 +338,75 @@ export const characterVisuals = sqliteTable(
   ]
 );
 
+export const screenTemplates = sqliteTable(
+  "screen_templates",
+  {
+    templateId: text("template_id").primaryKey(),
+    name: text("name").notNull(),
+    description: text("description").notNull().default(""),
+    status: text("status", { enum: ["active", "inactive"] }).notNull(),
+    canvasWidth: integer("canvas_width").notNull(),
+    canvasHeight: integer("canvas_height").notNull(),
+    revision: integer("revision").notNull().default(1),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull()
+  },
+  (table) => [
+    index("screen_templates_status_idx").on(table.status),
+    check(
+      "screen_templates_status_check",
+      sql`${table.status} IN ('active', 'inactive')`
+    ),
+    check(
+      "screen_templates_canvas_check",
+      sql`${table.canvasWidth} = 1920 AND ${table.canvasHeight} = 1080`
+    ),
+    check("screen_templates_revision_check", sql`${table.revision} > 0`)
+  ]
+);
+
+export const screenTemplateElements = sqliteTable(
+  "screen_template_elements",
+  {
+    elementId: text("element_id").primaryKey(),
+    templateId: text("template_id")
+      .notNull()
+      .references(() => screenTemplates.templateId, { onDelete: "cascade" }),
+    elementType: text("element_type", {
+      enum: [
+        "dialogue-window",
+        "section-title",
+        "character-visual",
+        "content-slot"
+      ]
+    }).notNull(),
+    x: real("x").notNull(),
+    y: real("y").notNull(),
+    width: real("width").notNull(),
+    height: real("height").notNull(),
+    rotationDeg: real("rotation_deg").notNull(),
+    orderIndex: integer("order_index").notNull(),
+    configJson: text("config_json").notNull(),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull()
+  },
+  (table) => [
+    uniqueIndex("screen_template_elements_template_order_uq").on(
+      table.templateId,
+      table.orderIndex
+    ),
+    index("screen_template_elements_template_id_idx").on(table.templateId),
+    check(
+      "screen_template_elements_type_check",
+      sql`${table.elementType} IN ('dialogue-window', 'section-title', 'character-visual', 'content-slot')`
+    ),
+    check(
+      "screen_template_elements_geometry_check",
+      sql`${table.x} = ${table.x} AND ${table.y} = ${table.y} AND ${table.width} = ${table.width} AND ${table.height} = ${table.height} AND ${table.rotationDeg} = ${table.rotationDeg} AND ${table.x} >= 0 AND ${table.y} >= 0 AND ${table.width} > 0 AND ${table.height} > 0 AND ${table.x} + ${table.width} <= 1 AND ${table.y} + ${table.height} <= 1`
+    )
+  ]
+);
+
 export const characterVariants = sqliteTable(
   "character_variants",
   {
@@ -415,6 +485,8 @@ export const schema = {
   aiGenerationCandidates,
   improvementDecisions,
   goldenExamples,
+  screenTemplates,
+  screenTemplateElements,
   characterVisuals,
   characterVariants,
   characterVariantFiles

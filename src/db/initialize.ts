@@ -1,6 +1,10 @@
 import { stat } from "node:fs/promises";
 import * as path from "node:path";
 
+import {
+  ScreenTemplateCatalogService,
+  ScreenTemplateRepository
+} from "../app/screen-templates/index.js";
 import type { BackupDatabase } from "./backup.js";
 import {
   closeNativeDatabase,
@@ -48,6 +52,20 @@ function isNodeError(error: unknown): error is NodeJS.ErrnoException {
   return error instanceof Error && "code" in error;
 }
 
+function hasScreenTemplateStorage(connection: NativeSqliteConnection): boolean {
+  const rows = connection
+    .prepare(
+      "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN (?, ?)"
+    )
+    .all("screen_templates", "screen_template_elements") as Array<{
+    name: string;
+  }>;
+  return (
+    rows.some((row) => row.name === "screen_templates") &&
+    rows.some((row) => row.name === "screen_template_elements")
+  );
+}
+
 export async function initializeWorkspaceDatabase(
   options: InitializeDatabaseOptions = {}
 ): Promise<WorkspaceDatabaseHandle> {
@@ -68,6 +86,11 @@ export async function initializeWorkspaceDatabase(
       databasePath,
       migrationsFolder
     });
+    if (hasScreenTemplateStorage(connection)) {
+      new ScreenTemplateCatalogService({
+        repository: new ScreenTemplateRepository(database)
+      }).seedStandardTemplate();
+    }
     let closed = false;
 
     return {

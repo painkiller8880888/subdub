@@ -386,6 +386,10 @@ template の geometry を先に解決し、その後に generic assignment の i
 
 `screen-template-standard` は、既存 layer については現在の Remotion / CSS / layout constants を調査して得た標準見た目を表す stable ID である。section-title だけは現行コードに描画 layer がないため、doc.md の「画面上端」という要件から ST-01 が新規 canonical geometry を確定し、その rect / rotation / font size / 根拠を seed / migration と仕様へ記録する。この値は現行実値の抽出結果とは区別し、後から変更する場合は template revision / hash を更新する。workspace SQLite の seed / migration は idempotent に実行し、既存 project の移行時は各 section へこの ID を明示保存する。workspace に mutable な default template 設定を追加して、project の参照を省略する方式は採用しない。
 
+ST-01 の `screen-template-standard` seed は次の値を canonical とする。`dialogue-window` は現行 `SubtitleLayer` の safe area（左右・上下 60px）を `x: 0.03125`、`y: 0.05555555555555555`、`width: 0.9375`、`height: 0.8888888888888888`、`rotationDeg: 0`、`fontSize: 38` として保存する。`content-slot` は現行 `MediaFrame` の 82% × 62% を `x: 0.09`、`y: 0.19`、`width: 0.82`、`height: 0.62`、`rotationDeg: 0` とする。`character-visual` は現行 `characterLayerStyle` の左右 4% inset、width 25%、height 48%、通常表示時の bottom 124px を使い、speaker-1 を `x: 0.04`、speaker-2 を `x: 0.71`、両方を `y: 0.4051851851851852`、`width: 0.25`、`height: 0.48`、`rotationDeg: 0`、`flipX: false` とする。
+
+現行 composition に存在しない `section-title` は、上端に常時確保する新規 canonical top band として `x: 0.05`、`y: 0.03`、`width: 0.9`、`height: 0.1`、`rotationDeg: 0`、`fontSize: 48` とする。これは既存コードからの抽出値でも目測値でもなく、5% の左右 inset、3% の上 inset、10% の上端領域、既存字幕本文 38px より一段上の 48px という ST-01 の設計定数である。これらの seed 値は `src/app/screen-templates/screen-template-seed.ts` に記録し、SQLite に同じ ID が存在する場合は geometry、metadata、status を上書きしない。
+
 既存 `VisualAssignment.display` は `VideoProject 1.2.0` の `MediaFrame` semantics を維持する。`1.2.0 → 1.3.0` migration では display に `displayCoordinateSpace: "legacy-media-frame" | "content-slot-relative"` を追加し、既存値を `legacy-media-frame` として扱う。legacy adapter は canvas-relative な `position`、82% × 62% の frame 全体へ適用する `scale`、`crop` / `fit` / annotation を変換せず、legacy mode では slot の再センタリング・clamp・追加 clipping を行わない。`content-slot-relative` への変換は人間の明示操作とし、推測変換や表現不能な overflow の隠蔽は行わない。
 
 #### 5.1.2 section / line への適用
