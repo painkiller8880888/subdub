@@ -406,6 +406,8 @@ line card または section header から明示された template が missing / 
 
 複数 line を対象にする `VisualAssignment` の範囲内で line template override を使用すること自体は禁止しない。compiler が effective template の連続区間ごとに `RenderVisualV24` を segment 化して解決するため、content-slot-relative assignment も line override を跨いで保存・描画できる。
 
+この migration の型境界でも `visuals` を旧 `VisualPlan` のまま継承しない。`VideoProjectV13.visuals` は `VisualPlanV13` とし、`VisualPlanV13.assignments` は `VisualAssignmentV13[]` とする。これにより既存 assignment へ付与する `legacy-media-frame` と、新規または明示変換済み assignment の `content-slot-relative` が、strict schema、migration、ST-05 resolver で同じ V13 契約として検証される。
+
 CV-05 で実装した概念モデルでは、各 character が次の project-specific binding を持つ。選択の正本を `project.json` に置く責務は変更しない。
 
 ```ts

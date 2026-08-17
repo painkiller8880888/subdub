@@ -528,6 +528,7 @@ ST-03 では ScreenTemplate selection を保存するために `schemaVersion: "
 - 既存 `VisualAssignment.display` の数値を、`1.2.0 → 1.3.0` migration で暗黙に content-slot-relative へ再解釈しない。`VideoProject 1.3.0` の display には `displayCoordinateSpace: "legacy-media-frame" | "content-slot-relative"` を追加し、migration で既存 assignment を `legacy-media-frame` として明示する。新規 assignment または人間が明示変換した assignment だけを `content-slot-relative` とする。
 - `legacy-media-frame` は現行 `MediaFrame` の意味を維持する compatibility adapter である。`position` は 1920 × 1080 canvas 上の frame 中心、`scale` は幅 82%・高さ 62% の frame 全体を中心回りに拡大縮小する値、`crop` / `fit` / annotation は現行と同じ意味として解決する。`screen-template-standard` の primary content slot は `x: 0.09`、`y: 0.19`、`width: 0.82`、`height: 0.62`、`rotationDeg: 0` を基準とし、legacy mode では slot が値を再センタリング・clamp・追加 clipping せず、既存 project の `position != 0.5` / `scale != 1` も現行の canvas-relative な見た目を保つ。
 - legacy adapter は `position` を勝手に clamp したり、custom template の slot に収まらない値を別位置へ推測変換したりしない。custom template で legacy frame と slot の同時表現ができない場合は validation error とし、既存値を保持したまま人間に content-slot-relative への変換または修正を要求する。`content-slot-relative` への変換は選択した slot の rect に対する中心・倍率として明示操作で行う。
+- `VideoProjectV13` の `visuals` は旧 `VisualPlan` をそのまま継承しない。`VisualPlanV13.assignments` を `VisualAssignmentV13[]` として root schema へ接続し、ST-03 の strict TypeScript / Zod schema / migration / ST-05 resolver が同じ V13 display 契約を使う。
 - migration は一時 JSON、strict validation、atomic rename、revision 更新を 1 操作として扱い、失敗時に既存の `project.json` を壊さない。migration log には `fromSchemaVersion`、`toSchemaVersion`、`migrationId` を記録し、同じ ID の再実行で重複させない。
 
 次の型は ST-03 後の project schema の差分を表す。
@@ -542,11 +543,19 @@ type ScriptLineV13 = ScriptLine & {
   screenTemplateId: string | null;
 };
 
-type VideoProjectV13 = Omit<VideoProject, "schemaVersion" | "script"> & {
+type VisualPlanV13 = Omit<VisualPlan, "assignments"> & {
+  assignments: VisualAssignmentV13[];
+};
+
+type VideoProjectV13 = Omit<
+  VideoProject,
+  "schemaVersion" | "script" | "visuals"
+> & {
   schemaVersion: "1.3.0";
   script: Omit<Script, "sections"> & {
     sections: ScriptSectionV13[];
   };
+  visuals: VisualPlanV13;
 };
 ```
 
