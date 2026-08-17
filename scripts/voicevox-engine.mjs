@@ -514,6 +514,12 @@ export function createVoicevoxEngineManager({
       return setResult("existing");
     }
 
+    if (afterGpu.reason === "port-occupied") {
+      await cleanupAttempt(gpuAttempt);
+      reportStatus("unavailable", "port 50021 is occupied by another service");
+      return setResult("unavailable", { reason: "port-occupied" });
+    }
+
     await cleanupAttempt(gpuAttempt);
     if (operationController?.signal.aborted) {
       return setResult("unavailable", { reason: "shutdown" });

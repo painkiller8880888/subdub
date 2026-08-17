@@ -228,6 +228,40 @@ describe("VOICEVOX engine lifecycle", () => {
     expect(terminateProcess).not.toHaveBeenCalled();
   });
 
+  it("stops CPU fallback when another service captures the port after GPU failure", async () => {
+    const child = new FakeChild(4351);
+    const modes: string[] = [];
+    const spawn = vi.fn((_path: string, args: string[]) => {
+      modes.push(args.at(-1) === "--use_gpu" ? "gpu" : "cpu");
+      setTimeout(() => child.emit("exit", 1, null), 0);
+      return child;
+    });
+    let readinessCalls = 0;
+    const readinessCheck = vi.fn(async () => {
+      readinessCalls += 1;
+      if (readinessCalls <= 2) {
+        return { ready: false, reason: "unreachable" };
+      }
+
+      return { ready: false, reason: "port-occupied" };
+    });
+    const terminateProcess = vi.fn(async () => {});
+    const manager = createVoicevoxEngineManager(
+      managerOptions({
+        readinessCheck,
+        spawnImpl: spawn,
+        terminateProcess
+      })
+    );
+
+    await expect(manager.start()).resolves.toMatchObject({
+      status: "unavailable",
+      reason: "port-occupied"
+    });
+    expect(modes).toEqual(["gpu"]);
+    expect(terminateProcess).not.toHaveBeenCalled();
+  });
+
   it("does not spawn when port 50021 belongs to a non-VOICEVOX HTTP service", async () => {
     const spawn = vi.fn();
     const log = vi.fn();
