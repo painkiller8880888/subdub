@@ -53,9 +53,25 @@ Issue #107（ED-00）では、MVP 完了後のワークフローを `企画 → 
 - 既存 `RenderManifest 2.2.0` の generic video display は `muted: boolean` の legacy schema として凍結し、`VideoProject 1.2.0` の `VideoDisplay` と runtime schema を共有しない。ED-01 は 1.2.0 project の `volume` を既存 2.2.0 compiler / render 経路へ渡す compatibility adapter も実装し、`0 → muted: true`、`1 → muted: false` と変換する。2.2.0 が表現できない 0 / 1 以外の値は丸めず、ED-08 の 2.3.0 経路が必要な validation error とする。
 - 旧 BGM は ED-01 で `edit.sectionBgms` へ復元せず、sectionId・旧 path・旧 volume を `projects/{projectId}/logs/migration-log.jsonl` へ永続化する。再登録または再選択でのみ `EditPlan` へ設定する。
 
-ED-00 は本書と `implementation-spec.md` だけを更新し、コード、schema、migration、API、UI、compiler、Remotion は変更しない。ED-01〜ED-09 の実装境界は 17.17 に定義する。
+ED-00 は本書と `implementation-spec.md` だけを更新し、コード、schema、migration、API、UI、compiler、Remotion は変更しない。ED-01〜ED-09 の実装境界は 17.17 に履歴として定義する。ED-00 で定義した編集フェーズの実装基準は現在の `VideoProject 1.2.0` / `RenderManifest 2.3.0` である。
 
-この文書で定義する `VideoProject 1.2.0` / `RenderManifest 2.3.0` は後続 Issue の採用仕様であり、ED-00 の文書変更だけで現行コードの version が変わることを意味しない。ED-01 / ED-08 の実装完了までは既存の `1.1.0` / `2.2.0` との互換境界を維持する。後続 Issue の実装順序は、任意の generic video volume を UI / API から保存可能にする前にレンダリング経路を完成させるため、`ED-01〜ED-06 → ED-08 → ED-07 → ED-09` とする。ED-08 前に ED-07 を単独で有効化しない。
+Issue #129（ST-00）はこの現行基準へ ScreenTemplate を追加する仕様改訂であり、`VideoProject 1.3.0` / `RenderManifest 2.4.0` への version bump は ST-03 / ST-06 の実装で行う。ED-01〜ED-09 の編集機能と、ST-01〜ST-07 の画面テンプレート機能はそれぞれの Issue 境界を越えて混在させない。
+
+### 1.4 Issue #129 / ST-00 による画面テンプレート方針の更新
+
+Issue #129（ST-00）は、固定配置を正規のレイアウト方式とする既存仕様を改訂する docs-only の Issue である。現在の実装基準は `VideoProject 1.2.0` / `RenderManifest 2.3.0` とし、画面テンプレート導入後の version は `VideoProject 1.3.0` / `RenderManifest 2.4.0` とする。この Issue ではコード、Zod schema、SQLite migration、API、React UI、compiler、Remotion、テストコードを変更しない。
+
+`ScreenTemplate` は workspace 共通資産であり、構造データの正本は workspace SQLite とする。テンプレートの実在一覧を TypeScript の静的配列と SQLite で二重管理しない。16:9（1920 × 1080）のキャンバス上で、セリフウィンドウ、セクション名、2 つの話者ビジュアル、コンテンツ予約領域の geometry を再利用可能なデータとして保持する。
+
+プロジェクト固有の適用先は `project.json` に保存する。section は `screenTemplateId` を必ず持ち、line は `screenTemplateId: string | null` を持つ。解決は `line.screenTemplateId != null` の場合に line override、`null` の場合に section の template を使用する。workspace SQLite に project ID、section ID、line ID の紐づけを保存しない。明示参照した template が missing または inactive になっても別 template へ自動代替せず、編集中は修正対象として表示し、出力 validation では error とする。
+
+既存の固定配置は `screen-template-standard` という stable ID の standard template として workspace SQLite へ idempotent に seed / migration する。seed geometry は目測で新規作成せず、現行 Remotion、CSS、layout constants の実値を調査して作る。既存 project の migration では各 section に `screen-template-standard` を明示参照させ、mutable な「現在の既定 template」だけには依存しない。
+
+template editor は `/screen-templates` と `/screen-templates/{templateId}` に置く。active な `CharacterVisualSet` / variant と、必要に応じて active な generic Asset を preview 素材として選択できるが、その選択は一時的な UI state であり `ScreenTemplate` に `visualId`、`variantId`、`assetId` を保存しない。drag、resize、rotation、character visual の `flipX`、dialogue / section title の font size、数値入力、keyboard 操作を提供し、固定要素の追加・削除、任意 React component、custom CSS、animation editor は初期版の対象外とする。
+
+各 line card の左側には、適用後 template、背景、実際の字幕、speaker / character variant、generic visual assignment を解決した静的 preview を表示する。preview と production render は同じ geometry resolver / layout component を使用し、line ごとに別 CSS レイアウトを実装しない。`RenderManifest 2.4.0` は template ID だけでなく、template revision / deterministic hash、解決済み geometry、transform、font size、`flipX`、content slot を固定し、Remotion は SQLite を直接参照しない。
+
+ScreenTemplate の outer geometry と generic `VisualAssignment.display` の inner transform は責務を分ける。template を先に解決して content slot の外枠を確定し、その内側へ `fit`、`crop`、`scale`、`position`、annotation を適用する。既存 `prioritizeVisual` は template geometry を上書きせず、解決済み template の character element に対する互換的な縮小・非表示ポリシーとして最後に適用し、適用結果も resolved layout として manifest へ固定する。template 適用結果を無視して別の固定座標へ戻す実装は許可しない。
 
 ## 2. プロジェクト概要
 
@@ -74,11 +90,16 @@ ED-00 は本書と `implementation-spec.md` だけを更新し、コード、sch
 ### 2.2 中核方針
 
 - 動画ごとの人間が編集する制作データの正本は、`project.json` とする。構成案の承認と、台本・ビジュアル・音声のレビュー状態に加え、プロジェクトで使用するキャラクタービジュアルの binding と各セリフの physical variant 参照もここへ保持する。
+- 画面構成の再利用可能な定義は `ScreenTemplate` とし、正本を workspace SQLite に置く。テンプレートの実在一覧を TypeScript の静的配列へ複製せず、`project.json` には catalog ではなく section / line の選択参照だけを保存する。
+- ScreenTemplate は 1920 × 1080 の 16:9 canvas、正規化された `x` / `y` / `width` / `height`、rotation、dialogue window、section title、`speaker-1` / `speaker-2` の character visual、`primary` content slot を持つ。初期版の element type と cardinality は固定し、任意 component editor へ広げない。
+- `screen-template-standard` は現行の固定配置を互換 seed として表す stable ID であり、workspace SQLite へ idempotent に保存する。project は section ごとにこの ID または別の明示 template ID を参照し、mutable な workspace default だけに依存しない。
+- project-specific な template selection は `project.json` の section / line に保存する。line override が null の場合だけ section の template を使い、missing / inactive な明示参照を別 template へ自動代替しない。
 - 利用可能なキャラクタービジュアルの登録済み visual / variant / file metadata の正本は、ワークスペース共通 SQLite の `CharacterVisualSet` とする。`project.json` へ catalog 一覧や登録ファイルを埋め込まず、project-specific な選択参照だけを保存する。
 - `CharacterVisualSet` の workspace SQLite は visual をプロジェクトや `mentor` / `learner` へ紐付けない。`visualId === characterId` を前提にせず、binding のない character は「未設定」として扱う。
 - `characterVariantCatalog` という TypeScript 型または catalog snapshot は、SQLite のレコードを型付け・検証・コンパイラ入力へ渡すために残してよいが、実在する登録項目を二重管理する静的な正本にはしない。
 - キャラクタービジュアルのファイル本体は `library/character-visuals/{visualId}/{variantId}/` 以下へ保存する。新規登録ファイルを `public/` へ直接保存せず、WebUI の画像表示は Fastify の管理された配信経路を使う。
 - `RenderManifest` は、`project.json`、バックエンドが解決したキャラクタービジュアル情報、音声などから生成する特定レンダリング向けの解決済み派生データであり、制作データや素材カタログの正本にはしない。コンパイラと Remotion は SQLite を直接参照しない。
+- ScreenTemplate を導入した後の `RenderManifest 2.4.0` は、compile 時の template snapshot、revision / hash、resolved layout、geometry / transform、font size、`flipX`、content slot を保持する。WebUI preview と Remotion は同じ resolved layout を描画する。
 - `ScriptLine.expression` は演出意図を表す論理表情・互換メタデータであり、PNG のファイル名、物理ポーズ名、`variantId` ではない。physical variant は各 line の `characterVariantId` を人間が明示的に選択して保存し、expression、tag、label から自動選択しない。
 - キャラクタービジュアルは登録時点で `mentor` / `learner` の役割や特定プロジェクトへ固定しない。同一キャラクターの別衣装、別キャラクター、差し替え候補をワークスペース共通資産として保持できる構造にする。
 - キャラクタービジュアル全体は一部の表情・ポーズ variant が未登録でも正常な登録状態とする。ただし、`single-image` は `single` が 1 ファイル、`mouth-pair` は `closed` と `open` が各 1 ファイル揃う場合だけ完成 variant とする。キャンバスサイズは visual 単位で統一し、最初の完成 variant のサイズを基準にする。既存素材の 600 × 1000 px は初期 seed の値であり、ワークスペース全体の固定値ではない。
@@ -104,6 +125,7 @@ ED-00 は本書と `implementation-spec.md` だけを更新し、コード、sch
 - プロジェクトで話者へ割り当てた `CharacterVisualSet` と待機用 `idleVariantId`
 - 発話時の論理表情（`ScriptLine.expression`）
 - 人間がセリフごとに選択した physical variant（`ScriptLine.characterVariantId`。未選択を許可）
+- section ごとの `screenTemplateId` と、line ごとの template override（`screenTemplateId: string | null`）
 - 画面表示用の字幕テキスト
 - セリフまたは連続する複数セリフに対応するビジュアル割り当て
 - 素材DBの素材 ID、プロジェクトへ取り込んだファイルの相対パス、動画の再生範囲、画像・帳票の表示範囲
@@ -246,6 +268,7 @@ VideoProject
 │  ├─ id
 │  ├─ name
 │  ├─ background
+│  ├─ screenTemplateId
 │  └─ lines[]
 │     ├─ id
 │     ├─ speaker
@@ -253,6 +276,7 @@ VideoProject
 │     ├─ subtitleText
 │     ├─ expression (論理表情)
 │     ├─ characterVariantId (人間による明示参照)
+│     ├─ screenTemplateId (line override; null は section を使用)
 │     └─ timing
 ├─ visuals
 │  ├─ status
@@ -287,6 +311,92 @@ VideoProject
 ```
 
 `VideoProject 1.2.0` は人間と WebUI が編集する制作データの正本であり、音声長、開始フレーム、終了フレームなど、素材と設定から再計算できる値は含めない。構成案の承認は初期化と制作コンテキストの前提として残すが、台本・ビジュアル・音声の status はレビューと stale を表す互換状態である。編集フェーズの正本は `edit: EditPlan` とし、旧 `audio.sectionBgms` と `inserts` は legacy input として migration でだけ扱う。`characters[].visualAssets` は旧 `1.0.0` プロジェクトを読み込むための互換フィールドとして意図的に残すが、CV-05 で導入済みの `characterVisual` binding や物理素材の正本とは別物である。確認画面と素材検証はこの互換フィールドを物理素材の正本として使用しない。
+
+#### 5.1.1 ScreenTemplate の概念モデル
+
+現行 main の `VideoProject 1.2.0` / `RenderManifest 2.3.0` は既存レイアウトを使用し、ST-03 / ST-06 の実装で `VideoProject 1.3.0` / `RenderManifest 2.4.0` へ明示的に version bump する。ScreenTemplate の定義は workspace SQLite に保存し、次の TypeScript 型は DB レコードの検証済み view model として使用する。
+
+```ts
+type ScreenTemplate = {
+  templateId: string;
+  name: string;
+  description: string;
+  status: "active" | "inactive";
+  canvasWidth: 1920;
+  canvasHeight: 1080;
+  revision: number;
+  elements: ScreenTemplateElement[];
+  createdAt: string;
+  updatedAt: string;
+};
+
+type ScreenRect = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+};
+
+type ScreenTransform = {
+  rect: ScreenRect;
+  rotationDeg: number;
+};
+
+type ScreenTemplateElementBase = {
+  elementId: string;
+  transform: ScreenTransform;
+};
+
+type ScreenTemplateElement =
+  | (ScreenTemplateElementBase & {
+      type: "dialogue-window";
+      fontSize: number;
+    })
+  | (ScreenTemplateElementBase & {
+      type: "section-title";
+      fontSize: number;
+    })
+  | (ScreenTemplateElementBase & {
+      type: "character-visual";
+      slot: "speaker-1" | "speaker-2";
+      flipX: boolean;
+    })
+  | (ScreenTemplateElementBase & {
+      type: "content-slot";
+      slot: "primary";
+    });
+```
+
+`elements` は初期版では `dialogue-window` 1 件、`section-title` 1 件、`character-visual` 2 件、`content-slot` 1 件を必ず持つ。2 つの character element は `speaker-1` と `speaker-2` を重複なく持ち、content slot の slot は `primary` とする。固定要素の追加・削除や任意の HTML / React component は許可しない。
+
+`ScreenRect` の `x`、`y`、`width`、`height` は 0..1 の有限な正規化値で、`width` と `height` は正、矩形は正規化 canvas の範囲内に収める。`rotationDeg` と `fontSize` も有限値として検証し、回転後の外接範囲が canvas 外へ出る場合は editor と layout validation で検出する。正規化 geometry は 1920 × 1080 へ解決してから WebUI と Remotion が共通利用する。
+
+element の責務は次のとおりである。
+
+- `dialogue-window`: 移動、拡大・縮小、回転、font size を持つ。背景、文字色、font family、行間などの既存 token は維持する。
+- `section-title`: 移動、拡大・縮小、回転、font size を持つ。
+- `character-visual`: 移動、拡大・縮小、回転、`flipX` を持つ。物理 PNG、variant、CharacterVisualSet は参照せず、speaker slot だけを表す。
+- `content-slot`: 移動、拡大・縮小、回転を持つ。generic `VisualAssignment` はこの outer slot 内へ表示し、素材側の crop / fit / scale / position は inner transform として適用する。
+
+template の geometry を先に解決し、その後に generic assignment の inner transform を content slot 内へ適用する。`display.prioritizeVisual` は互換表示ポリシーとして最後に適用できるが、template の element geometry を上書きしたり、固定座標へ戻したりしてはならない。適用後の character の縮小・非表示結果も resolved layout として manifest へ固定する。
+
+`screen-template-standard` は、現在の Remotion / CSS / layout constants を調査して得た標準見た目を表す stable ID である。workspace SQLite の seed / migration は idempotent に実行し、既存 project の移行時は各 section へこの ID を明示保存する。workspace に mutable な default template 設定を追加して、project の参照を省略する方式は採用しない。
+
+#### 5.1.2 section / line への適用
+
+ST-03 の `VideoProject 1.3.0` では、`script.sections[]` に `screenTemplateId: string`、各 `lines[]` に `screenTemplateId: string | null` を追加する。新規 section と `1.2.0 → 1.3.0` migration の初期値は `screen-template-standard`、line override の初期値は `null` とする。migration は既存の section / line ID、順序、台本、素材割り当てを変更しない。
+
+解決規則は次の 1 つだけとする。
+
+```text
+line.screenTemplateId != null
+  → line override
+
+line.screenTemplateId == null
+  → section.screenTemplateId
+```
+
+line card または section header から明示された template が missing / inactive の場合は、編集中に validation と修正導線を表示し、別 template へ自動代替しない。出力 validation では error とし、未解決の layout を持つ manifest を生成しない。workspace SQLite には project / section / line の適用関係を保存しない。
 
 CV-05 で実装した概念モデルでは、各 character が次の project-specific binding を持つ。選択の正本を `project.json` に置く責務は変更しない。
 
@@ -327,7 +437,7 @@ CharacterVisualSet
 レンダリング前には、バックエンドが SQLite から現在の `CharacterVisualCatalogSnapshot` を取得して検証し、`project.json` に保存された visual binding と line の `characterVariantId` を照合したうえでタイムラインコンパイラへ渡す。コンパイラは明示参照と検証済み snapshot、音声などを入力として Remotion へ渡す派生データ `RenderManifest` を生成する。コンパイラと Remotion は SQLite を直接検索しない。expression、tag、label から物理 variant を自動解決・代替しない。
 
 ```text
-RenderManifest（次期 `2.3.0`）
+RenderManifest（現行 `2.3.0`）
 ├─ manifestVersion
 ├─ compilerInputHash
 ├─ characterCatalogVersion
@@ -376,7 +486,7 @@ RenderManifest（次期 `2.3.0`）
 
 既存 `RenderManifest 2.2.0` の generic video は `muted` を持つ意味を維持する。`VideoProject 1.2.0` の `volume` をこの経路へ渡す場合は、ED-01で導入する adapter を通し、assignment の display をそのまま legacy manifest へ渡さない。ED-08で `RenderManifest 2.3.0` に移行した後は、generic video の任意 `volume` を現行 manifest と Remotion の正本経路へ流せる。ED-07 はその既存経路へ UI / API の保存導線を追加する後続 Issueであり、ED-08 前の2.2.0経路では 0 / 1 以外を保存可能なUIを公開しない。
 
-次期のキャラクター素材解決では、次の情報を `RenderManifest 2.3.0` へ固定する。登録機能とレンダリング解決は分離し、コンパイラが検証済み snapshot から派生データを生成する。実動画挿入と BGM の最終セクション範囲も同じ派生マニフェストへ解決する。
+現行のキャラクター素材解決では、次の情報を `RenderManifest 2.3.0` へ固定する。登録機能とレンダリング解決は分離し、コンパイラが検証済み snapshot から派生データを生成する。実動画挿入と BGM の最終セクション範囲も同じ派生マニフェストへ解決する。ScreenTemplate の resolved layout は ST-06 で追加する `RenderManifest 2.4.0` の責務とする。
 
 ```text
 project.characters[].characterVisual.visualId
@@ -395,6 +505,29 @@ Remotion
 ```
 
 解決済み snapshot の版または更新時点、variant 単位の版管理、manifest の互換性は実装仕様に従って管理する。missing、inactive、cross-visual、ファイルスロット欠落時は validation error とし、自動代替しない。
+
+#### 5.1.3 RenderManifest 2.4.0 の resolved layout
+
+ST-06 の `RenderManifest 2.4.0` は template ID だけを記録せず、compile 時に検証した template snapshot と、その snapshot から得た layout を固定する。section と line の各解決単位に `templateId`、`templateRevision`、deterministic `templateHash`、1920 × 1080 canvas、各 element の rect / rotation、dialogue / section title の font size、character の `flipX`、primary content slot を保存する。compiler と Remotion は DB を再参照せず、この解決済み layout を描画する。
+
+```text
+RenderManifest 2.4.0
+├─ manifestVersion: "2.4.0"
+├─ compilerInputHash（project、template revision/hash、素材 snapshot を含む）
+├─ sectionLayouts[]
+│  ├─ sectionId
+│  ├─ templateId
+│  ├─ templateRevision
+│  ├─ templateHash
+│  └─ resolvedLayout
+├─ lines[]
+│  ├─ ...（RenderManifest 2.3.0 の resolved line）
+│  ├─ screenTemplateId
+│  └─ resolvedLayout（line override を含む最終 layout）
+└─ ...（2.3.0 の characters / visuals / backgrounds / audioTracks / inserts）
+```
+
+template の revision / hash、project の section / line selection、ScreenTemplate の element geometry、generic assignment の inner transform、`prioritizeVisual` の適用結果のいずれかが変わった場合は `compilerInputHash` を変え、旧 manifest を current とみなさない。過去 revision の template を project.json に埋め込む snapshot history や rollback UI は今回対象外とする。
 
 ### 5.2 セリフ
 
@@ -498,6 +631,7 @@ AI に素材そのもの、完成スライド、図解を生成させない。AI
    - 説明が冗長または曖昧でないか
 5. 人間が台本を読み、内容、口調、話者、表情を修正する。
 6. 人間は台本を編集・確認しながら、各セリフカードで 6.4 のキャラクタービジュアルと 6.5 の音声を設定する。generic 現場素材の検索・割り当ては 6.4.1〜6.4.3 の別画面または補助導線で扱い、台本全体の承認操作を次工程の開始条件にはしない。
+7. ST-03 以降は、section header で section 全体の `screenTemplateId` を選択し、line card では section 設定を使うか `screenTemplateId` を個別 override として保存する。適用後の screen preview は各 line card の左側に表示する。
 
 キャラクターの性格と口調は、レビュー基準として参照できる形で文書化する。
 
@@ -561,7 +695,7 @@ AI に素材そのもの、完成スライド、図解を生成させない。AI
 3. 人間が素材を選び、適用する開始セリフと終了セリフを指定する。
 4. 選択時に素材を `projects/{projectId}/media/visuals/` へコピーし、プロジェクト JSON に `assetId`、チェックサム、相対パスを保存する。これをレンダリング用スナップショットとし、以後の素材DB変更から切り離す。
 5. 動画は使用区間、写真・帳票はページまたは切り抜き範囲を指定し、必要に応じて拡大、位置、注釈を設定する。
-6. 素材を大きく見せたい generic assignment では、保存値 `display.prioritizeVisual: boolean` により固定レイアウト規則を適用できる。有効な区間ではキャラクターを縮小または非表示にする。この値は generic `VisualAssignment` の表示設定として維持するが、CV-04 後の標準 `/projects/{projectId}/script` に旧「キャラクターペイン」のトグルや素材制作・表示設定カードを置くことは意味しない。編集 UI は別画面または補助導線で扱う。
+6. 素材を大きく見せたい generic assignment では、保存値 `display.prioritizeVisual: boolean` により ScreenTemplate 解決後の互換表示ポリシーを適用できる。有効な区間では template の character element を縮小または非表示にする。この値は generic `VisualAssignment` の表示設定として維持するが、ScreenTemplate の outer geometry を上書きしたり、CV-04 後の標準 `/projects/{projectId}/script` に旧「キャラクターペイン」のトグルや素材制作・表示設定カードを置いたりすることは意味しない。編集 UI は別画面または補助導線で扱う。
 7. 同じ台本範囲への割り当て変更、解除、前後の範囲への延長・短縮を行えるようにする。
 
 #### 6.4.4 確認と validation
@@ -673,7 +807,7 @@ BGM は音声生成の一部ではなく、次の 6.6 で定義する編集フ�
 11. 動画要素の挿入によって後続の section / line / visual / background の frame range を shift する。
 12. shift 後の section 範囲へ `edit.sectionBgms` を割り当てる。各 BGM はそのセクション全区間で loop し、intro / outro / cutin の区間では再生しない。編集 Asset は project snapshot と project 内ファイルだけから解決し、live な Asset `status` や SQLite を出力時に参照しない。
 13. 効果音をセリフ基準の位置へ割り当てる。
-14. 動画全体の `durationInFrames` を計算し、`RenderManifest 2.3.0` を生成する。
+14. section / line の template を解決し、resolved geometry、transform、font size、`flipX`、content slot を確定したうえで、動画全体の `durationInFrames` と current `RenderManifest 2.3.0` を生成する。ST-06 以降はこの layout を `RenderManifest 2.4.0` へ保存する。
 15. `sourceProjectHash` と参照素材のチェックサムを記録し、入力が同一の場合だけ生成済みキャッシュを再利用する。
 
 ミリ秒からフレームへの変換は、要素が途中で欠けないように次を基本とする。
@@ -699,7 +833,7 @@ const msToFrames = (ms: number, fps: number): number =>
 - 時間経過へ依存する通常の CSS アニメーションは基本的に使用しない。
 - 背景、字幕、キャラクター、ビジュアルをすべてフレーム番号から決定し、再現可能な描画にする。
 - 音声解析、素材探索、ID 解決、タイムラインの累積計算は描画コンポーネント内で繰り返さず、タイムラインコンパイラで完了させる。
-- WebUI のプレビューと MP4 レンダリングには、同じタイムラインコンパイラと同じ `RenderManifest` を使用する。
+- WebUI の line-card preview と MP4 レンダリングには、同じ timeline compiler、同じ ScreenTemplate geometry resolver、同じ layout component、同じ resolved `RenderManifest` を使用する。preview 専用の固定 CSS 座標を作らない。
 
 ### 6.9 キャラクター演出
 
@@ -707,22 +841,21 @@ const msToFrames = (ms: number, fps: number): number =>
 
 production compile は `POST /api/projects/{projectId}/manifest/compile` を標準経路とする。backend は SQLite の `CharacterVisualCatalogSnapshot` を `verifyFiles()` で検証し、file checksum を含む validated snapshot と asset metadata を compiler へ渡してから `RenderManifestStore` に保存する。compiler や Remotion が SQLite を直接検索したり、静的 legacy catalog を通常経路として渡したりしない。
 
-- 2 人のキャラクターを使用する。
-- 各キャラクターは画面下部の左右へ配置する。
+- 2 人のキャラクターを使用し、どの位置・大きさ・回転で表示するかは解決済み ScreenTemplate の `speaker-1` / `speaker-2` element が決める。`screen-template-standard` は現行固定配置との見た目互換を提供する初期 template であり、すべての template を画面下部左右へ固定しない。
 - `RenderManifest.lines[].expression` は台本の論理表情であり、PNG、物理ポーズ、`variantId` を直接指定する値ではない。
 - `RenderManifest.characters[].idleVariantId` と `RenderManifest.lines[].characterVariantId` は、`project.json` に人間が保存した明示参照から解決する。`neutral`、`smile`、`explain`、`caution`、tag、label から `stand`、`normal`、`pointing` などへ自動的に割り当てない。
 - 発話中のキャラクターだけ、解決済み `mouth-pair` variant の `closed` / `open` を切り替える。
 - `single-image` variant に存在しない `open` 画像を推測、複製、加工して口パクに使用しない。単一画像を発話中にどう表示するかは TBD とする。
 - 発話中は小さく上下に動かし、話者を視覚的に明示する。
 - キャラクターの話者、論理表情、口パク、発話中演出は、project.json の明示 binding / line variant 参照、検証済み snapshot、タイムラインから決定する。キャラクタービジュアル登録では物理 variant を追加・更新できるが、プロジェクトでの採用は登録画面で自動決定しない。ユーザーが Remotion 用の物理ファイルパスを直接編集する機能も持たない。
-- ビジュアル素材を大きく表示する場面では、ビジュアル割り当ての「ビジュアルを優先」トグルによりキャラクターを縮小または非表示にできる。
+- ビジュアル素材を大きく表示する場面では、generic assignment の `display.prioritizeVisual` を互換ポリシーとして resolved template の character element へ適用し、必要に応じて縮小または非表示にできる。ただし template geometry を無視して別の固定座標へ戻すことはできない。
 - `RenderManifest.inserts[]` は `edit.videoElements` から解決した実動画の `role`、`from`、`durationInFrames`、`src`、`volume` を保持する。placeholder の共通画面を通常経路へ挿入しない。
 - `RenderManifest.audioTracks[]` は shift 後の各セクション範囲、BGM の `src`、`volume`、固定 loop を保持する。現行マニフェストに `fadeInFrames` / `fadeOutFrames` を持たせない。
 - 話者、論理表情、発話区間は `RenderManifest.lines[]` から取得し、物理素材のパスは解決済みのキャラクター素材情報から取得する。
 - 口パクは、解決済み `mouth-pair` variant の発話区間内で相対フレームから計算し、設定された周期で `closed` と `open` を切り替える。無言区間と発話終了後は必ず `closed` とする。
 - 上下動、拡大縮小、フェードなどは現在フレームから決定する純粋な計算とし、実時間に依存する状態を持たない。
 
-現行の配置スキーマは固定とする。通常時は 2 人を画面下部の左右へ表示し、`visuals.assignments[].display.prioritizeVisual` が `true` の区間だけ、素材種別と表示領域に応じた既定規則で両者を縮小または非表示にする。ユーザーがキャラクターごとの座標、表情、アニメーションを直接編集する機能は持たせない。将来、複数の表示スキーマが必要になった場合は、座標値を各割り当てへ追加するのではなく、互換性を保った `layoutPreset` の切り替えとして拡張する。
+ScreenTemplate をレイアウトの authority とする。ユーザーは template editor で dialogue window、section title、2 つの character slot、primary content slot の位置、拡大縮小、回転を編集し、dialogue / section title の font size と character の `flipX` も設定できる。geometry は正規化値で保存し、回転後の canvas 外判定は editor / layout validation で行う。`VisualAssignment.display` の crop / fit / scale / position は content slot 内の inner transform とし、ScreenTemplate の outer geometry と混同しない。`prioritizeVisual` は template 解決後に適用する互換 policy であり、template の適用結果を無視しない。複数の固定プリセットを追加したり、各 assignment へ固定座標を追加したりする方式は採用しない。
 
 ### 6.10 背景
 
@@ -759,7 +892,7 @@ production compile は `POST /api/projects/{projectId}/manifest/compile` を標�
 
 ## 7. 独自 WebUI
 
-WebUI は Vite + React SPA、React Router、TanStack Query で構築し、Fastify のローカル API と接続する。開発時は Vite から `/api` を Fastify へ proxy し、製品実行時は Fastify がビルド済み SPA と API を同一 origin で配信する。ワークスペース共通ライブラリには、現場素材画面とは別に `/character-visuals` のキャラクタービジュアル画面を設ける。
+WebUI は Vite + React SPA、React Router、TanStack Query で構築し、Fastify のローカル API と接続する。開発時は Vite から `/api` を Fastify へ proxy し、製品実行時は Fastify がビルド済み SPA と API を同一 origin で配信する。ワークスペース共通ライブラリには、現場素材画面とは別に `/character-visuals` のキャラクタービジュアル画面と `/screen-templates` の ScreenTemplate 画面を設ける。
 
 JSON の通常編集は用途別フォームから行い、ファイルの直接編集を通常運用にしない。画面、保存、API、エラー処理の具体仕様は 17.4 および [`implementation-spec.md`](./implementation-spec.md) 14 章に記載する。
 
@@ -773,6 +906,9 @@ JSON の通常編集は用途別フォームから行い、ファイルの直接
 - 動画の開始・終了位置、帳票のページ、画像・帳票の切り抜き範囲が素材の有効範囲内であることを確認する。
 - セクション ID、セリフ ID、キャラクター ID の重複や不正参照を検出する。
 - character の `visualId` と `idleVariantId` が同じ `CharacterVisualSet` 配下の active variant を参照することを検出する。未設定は編集中に許可するが、出力前 validation ではエラーとする。
+- `ScreenTemplate` が workspace SQLite に存在し、active / inactive、revision、element cardinality、正規化 geometry、font size、`flipX` を検証する。TypeScript の静的配列を実在テンプレートの一覧として使用しない。
+- `screen-template-standard` が idempotent seed / migration で存在し、既存 project の section が stable ID を明示参照することを検証する。missing / inactive の明示参照は自動代替しない。
+- section の `screenTemplateId` と line の `screenTemplateId: string | null` を、line override → section default の一意な規則で解決する。
 - 編集の `videoElements` が role と配置規則に適合し、intro / outro が最大 1 件、cutin が最初のセクション直前に置かれず、各境界の `order` が一意であることを検出する。
 - 編集の動画 Asset が MP4、BGM Asset が MP3 で、snapshot の `assetVersion`・`assetChecksum`・`projectMediaPath` が一致することを検出する。出力時に live な Asset `status` は検証しない。
 - generic video、intro、outro、cutin、BGM の `volume` が 0〜1 であることを検出する。旧 generic `muted` は ED-01 migration で変換済みであることを検証する。
@@ -785,6 +921,10 @@ JSON の通常編集は用途別フォームから行い、ファイルの直接
 ### 8.2 レイアウト検証
 
 - 字幕が画面外へはみ出していないかを検証する。
+- 各 ScreenTemplate element の `ScreenRect` が有限な 0..1 の正規化値で、矩形が canvas 内に収まっているかを検証する。
+- 回転後の element 外接範囲と content slot が 1920 × 1080 canvas 外へ出ていないかを検証し、重なりや表示不能な geometry は editor と出力 validation の両方で表示する。
+- template の outer geometry と generic `VisualAssignment.display` の inner transform を分け、素材の crop / fit / scale / position が content slot 外へはみ出さないかを検証する。
+- line card preview と production render が同じ geometry resolver / layout component の出力を使うことを検証する。
 - 割り当て済みビジュアルを字幕とキャラクターを含むプレビュー画像として一括出力する。
 - AI が、切り抜き不良、はみ出し、重なり、コントラスト不足をレビューする。
 - 動画、写真、帳票上の注釈が対象箇所を隠していないか確認する。
@@ -827,12 +967,10 @@ JSON の通常編集は用途別フォームから行い、ファイルの直接
 元プロジェクトの画面構成を基礎としつつ、社内マニュアルとして操作画面と文字の視認性を優先する。
 
 - 16:9 の横長画面。
-- 中央にビジュアル表示領域を配置し、その中へ現場動画、写真、帳票スキャンをアスペクト比を保って表示する。
-- 2 人のキャラクターを画面下部の左右に表示する。
-- 字幕は画面下部中央へ大きく表示する。
-- 字幕は話者ごとに強調色を使い分ける。
-- 画面上端にセクション名を表示する。
-- 素材は可能な限り大きく表示し、必要な場合だけ重要箇所へ短い注釈を重ねる。
+- ScreenTemplate が dialogue window、section title、2 つの character visual、primary content slot の outer geometry を決める。`screen-template-standard` は従来の中央素材、下部左右のキャラクター、下部中央字幕、画面上端の section title と見た目互換な初期値を提供する。
+- テンプレート editor では 16:9 canvas 内で各 element を移動、拡大縮小、回転できる。字幕は話者ごとの強調色を維持し、font size は template の element 設定で調整する。
+- generic visual は content slot 内へアスペクト比を保って表示し、素材側の crop / fit / scale / position と注釈を inner transform として適用する。
+- 素材は可能な限り大きく表示し、必要な場合だけ重要箇所へ短い注釈を重ねる。`prioritizeVisual` は template を無視せず、content slot 内の素材優先と character element の互換的な縮小・非表示へ限定する。
 - 装飾的な動きより、操作対象と字幕の読みやすさを優先する。
 
 推奨デザイントークンは 17.13 に記載する。
@@ -886,6 +1024,11 @@ SQLite は素材メタデータの検索と、複数プロジェクトを横断�
 - JSON から Remotion 動画を生成できる。
 - 正本 JSON と素材メタデータから `RenderManifest` を生成できる。
 - `RenderManifest` を WebUI プレビューと MP4 レンダリングで共用できる。
+- workspace SQLite を正本とする ScreenTemplate を作成・更新・利用停止でき、`screen-template-standard` を idempotent に seed できる。
+- ScreenTemplate の 4 種類の固定 element（dialogue window、section title、2 character slots、primary content slot）について、移動、拡大縮小、回転、font size、`flipX` を編集・validation できる。
+- `VideoProject 1.3.0` の section default / line override を `project.json` へ保存し、line override → section default の規則で解決できる。
+- 各 line card 左側に、実際の subtitle、speaker / character variant、背景、generic visual assignment を含む resolved screen preview を表示できる。
+- `RenderManifest 2.4.0` に resolved layout、template revision / hash、font size、`flipX`、content slot を固定し、Remotion が SQLite を直接参照せずに描画できる。
 - 2 キャラクターの掛け合いを表現できる。
 - VOICEVOX でセリフ音声を一括生成できる。
 - セリフ音声長からタイムラインを自動生成できる。
@@ -911,6 +1054,7 @@ SQLite は素材メタデータの検索と、複数プロジェクトを横断�
 
 - 同じ JSON と素材から同じフレームを再現できること。
 - 同じ正本 JSON、素材、出力設定から同一の `RenderManifest` を再生成できること。
+- 同じ `ScreenTemplate` revision / hash、project selection、素材 snapshot から同一の resolved layout と preview frame を再生成できること。
 - 正本 JSON と `RenderManifest` の責務を分離し、自動計算値を正本へ書き戻さないこと。
 - 文字量が変わっても、既定範囲内でレイアウトが大きく崩れないこと。
 - 字幕、音声、ビジュアル素材、キャラクター動作がフレーム単位で同期すること。
@@ -919,6 +1063,8 @@ SQLite は素材メタデータの検索と、複数プロジェクトを横断�
 - AI が返した存在しないタグや素材を自動割り当てせず、人間が素材内容を確認して確定すること。
 - AI visual suggestion、Asset Search、generic `VisualAssignment` の backend / data を維持しつつ、キャラクタービジュアル選択の標準経路を人間の明示選択とすること。
 - `expression`、tag、label、旧固定 mapping から physical variant を自動代替せず、missing / inactive / cross-visual を validation error とすること。
+- ScreenTemplate の outer geometry、generic visual の inner transform、`prioritizeVisual` の適用順が明確で、template の解決結果を別の固定座標で上書きしないこと。
+- line-card preview と Remotion が同じ layout resolver / component を使用し、template editor の一時 preview 素材選択を `ScreenTemplate` 本体へ保存しないこと。
 - 機械検証、AI レビュー、人間レビューの段階を通せること。
 - 入力資料にない手順を AI が事実として追加しないこと。
 
@@ -939,6 +1085,9 @@ SQLite は素材メタデータの検索と、複数プロジェクトを横断�
 - 正本の `VideoProject` と派生データの `RenderManifest` は別の Zod スキーマと TypeScript 型で管理する。
 - `RenderManifest` には生成元となった正本 JSON のハッシュと参照素材のチェックサムを持たせ、いずれかが不一致の場合は再生成する。
 - CV-05 で導入済みの project-specific binding と line の explicit variant reference は、`schemaVersion: "1.0.0"` の意味を暗黙に変更せず、明示的な schema version bump と migration を経て保存する。migration は tag / label 検索による推測をせず、既知の旧固定 mapping を決定論的な compatibility input として使える場合だけ利用し、解決不能な値は未設定として人間の確認を要求する。
+- ScreenTemplate は workspace SQLite の strict schema として管理し、`ScreenRect` の有限性、0..1 の正規化範囲、回転後の canvas 外、element cardinality、`status`、`revision` を検証する。実在テンプレートを TypeScript 静的配列へ複製しない。
+- `VideoProject 1.2.0 → 1.3.0` migration は `screen-template-standard` を各 section に、`null` の line override を各 line に明示保存する。template missing / inactive の参照を別 template へ推測変換しない。
+- `RenderManifest 2.3.0 → 2.4.0` では template revision / deterministic hash と resolved layout を compiler input に含め、古い template で作られた manifest を current とみなさない。
 
 **確定**
 
@@ -1008,7 +1157,7 @@ project-root/
 
 **確定仕様**
 
-WebUI は単一ユーザーがローカル環境で使用し、同じ `project.json` を制作データの正本として編集する。workspace 共通の `CharacterVisualSet` と配下の visual / variant / file metadata は SQLite から取得し、project-specific な character binding と line の `characterVariantId`、および編集フェーズの `edit` だけを `project.json` に保存する。まず 6.1 の入力作成と 6.2 の構成案生成・レビューを行い、構成案の承認・最新性を確認した後、6.3 の `/script` を台本画面として使い、その後 6.6 の `/edit` で動画要素と BGM を編集する。キャラクタービジュアルの登録・更新は、これらのプロジェクト画面とは別の `/character-visuals` ワークスペース画面で行う。
+WebUI は単一ユーザーがローカル環境で使用し、同じ `project.json` を制作データの正本として編集する。workspace 共通の `CharacterVisualSet` と配下の visual / variant / file metadata、および `ScreenTemplate` は SQLite から取得し、project-specific な character binding、line の `characterVariantId`、section / line の template selection、編集フェーズの `edit` だけを `project.json` に保存する。まず 6.1 の入力作成と 6.2 の構成案生成・レビューを行い、構成案の承認・最新性を確認した後、6.3 の `/script` を台本画面として使い、その後 6.6 の `/edit` で動画要素と BGM を編集する。キャラクタービジュアルの登録・更新は `/character-visuals`、ScreenTemplate の登録・編集は `/screen-templates` のワークスペース画面で行う。
 
 #### 画面構成
 
@@ -1026,12 +1175,18 @@ WebUI は単一ユーザーがローカル環境で使用し、同じ `project.j
 - 構成案全体の承認
 - 生成中、失敗、再試行、保存状態の表示
 - `/projects/{projectId}/edit` 編集画面（section card、動画要素、BGM、volume）
+- `/screen-templates` 一覧・作成・status / revision 表示
+- `/screen-templates/{templateId}` の 16:9 canvas editor
 
 セクションは折りたたみ可能なカードとして表示する。各カードでは `intro`、`main`、`outro`、タイトル、概要、キーポイント、目標尺、必須事項、禁止事項、台本制約、入力資料への参照、要確認事項を編集できるようにする。
 
 AI が生成する内容と人間が入力する指示を視覚的にもデータ上も分離する。人間が入力した必須事項、禁止事項、台本制約は、明示的に削除しない限り AI の再生成で上書きしない。
 
 編集内容はプロジェクトフォルダーへ自動保存する。構成案だけは、台本の初期化と制作コンテキストの前提として承認・最新性を確認する。台本、セリフカード上のキャラクタービジュアル、音声は同じ制作画面で編集し、generic 現場素材の検索・割り当ては分離した補助導線で扱う。承認操作を後工程の開始条件にしない。
+
+`/screen-templates` は workspace SQLite に保存された active / inactive template の一覧を表示し、template の実在項目を TypeScript 静的配列から補わない。editor は `dialogue-window` 1 件、`section-title` 1 件、`speaker-1` / `speaker-2` の `character-visual` 2 件、`primary` の `content-slot` 1 件を編集対象として表示する。drag、resize、rotation、font size、`flipX`、数値入力、keyboard 操作を行い、矩形の canvas 外や cardinality 違反を保存前に表示する。
+
+editor のサイドバーでは active な CharacterVisualSet / variant と必要な generic Asset を preview 素材として選択できる。preview 選択は一時 UI state として扱い、`ScreenTemplate` に `visualId`、`variantId`、`assetId` を保存しない。production compile は template geometry と project の実際の line / background / assignment を別途解決する。
 
 #### 台本編集画面
 
@@ -1068,6 +1223,8 @@ AI が生成する内容と人間が入力する指示を視覚的にもデー�
 人間がセリフカードを 1 件ずつ追加できる操作に加え、話者付きテキストをまとめて貼り付け、セリフカードへ機械的に分割する一括入力を用意する。一括入力は AI 生成ではなく、入力テキストの構造化処理として扱う。
 
 台本の編集内容は自動保存する。各セリフカードから `characterVariantId` の明示選択と VOICEVOX 音声生成・調整を直接操作できる。現場素材の検索・割り当て backend は維持するが、現在の標準制作画面には上記の右ペイン UI を置かない。入力エラー、character binding の未設定・参照切れ・inactive・cross-visual、line variant の未選択・参照切れ、generic 素材参照切れ、音声 stale などは validation として表示し、台本承認操作を要求しない。
+
+section header では section 全体の template を選択し、line card では section template を使うか line override を選択する。inactive template は通常候補に出さないが、既存の明示参照が inactive / missing になった場合は自動置換せず、修正対象として表示する。各 line card の左側には、適用した template、背景、実際の字幕、speaker / character variant、generic visual assignment を同じ resolver で解決した静的代表 frame を表示する。大量の `@remotion/player` 起動は必須にせず、production render と同じ resolved layout であることを必須とする。
 
 #### 編集画面
 
@@ -1172,10 +1329,12 @@ WebUI は Vite + React SPA、画面ルーティングは React Router、サー�
 - 動画制作データの正本はプロジェクト JSON とし、生成音声、キャッシュ、出力、確定した現場素材の割り当て、character binding、line の explicit variant 参照をプロジェクト単位のフォルダーへ保存する。
 - ワークスペース共通の SQLite に、素材ライブラリのメタデータ、タグ辞書、サムネイル参照、継続改善のログ、生成ルール候補を保存する。
 - ワークスペース共通の SQLite に、キャラクタービジュアル本体の `CharacterVisualSet`、variant、file slot、checksum、キャンバス技術情報、status、作成・更新日時を保存する。キャラクタービジュアルのメタデータはこの DB だけを正本とする。
+- ワークスペース共通の SQLite に、`ScreenTemplate` の `templateId`、name、description、status、1920 × 1080 canvas、revision、element 定義、created / updated timestamps を保存する。テンプレートの実在一覧と構造データはこの DB だけを正本とし、TypeScript の静的配列と二重管理しない。
 - 素材ファイル本体とサムネイルは `library/` 配下へ保存し、SQLite にはバイナリ本体ではなく相対パス、技術情報、チェックサムを保持する。
 - キャラクタービジュアルのファイル本体は `library/character-visuals/{visualId}/{variantId}/` に保存し、新規登録ファイルを `public/` へ直接保存しない。WebUI の画像表示は Fastify の管理された配信経路を使う。
 - SQLite は素材の発見と改善分析には必要だが、確定済みプロジェクトのレンダリングには不要とする。generic `VisualAssignment` はプロジェクトの `media/visuals/` へコピーした素材の `assetId`、`assetChecksum`、`projectMediaPath` を固定し、ED-01 の編集 Asset は `assetVersion` / `assetChecksum` を含む専用 snapshot を固定する。
 - `project.json` は引き続き動画制作データの正本であり、ワークスペース共通の `CharacterVisualSet` 一覧や登録ファイルを埋め込まない。プロジェクトで採用する visual と待機用 variant の binding、各 line の physical variant 参照、編集 Asset の snapshot だけを保存する。logical expression から physical variant への自動 mapping は定義しない。
+- `project.json` には ScreenTemplate の catalog や preview 素材を埋め込まず、`script.sections[].screenTemplateId` と `script.sections[].lines[].screenTemplateId` の project-specific な選択参照だけを保存する。editor の実素材選択は一時 UI state とし、`visualId`、`variantId`、`assetId` を template 本体へ書き込まない。
 - ED-01 以降は、編集フェーズの `edit.videoElements` と `edit.sectionBgms` に登録済み Asset の `assetId`、`assetVersion`、`assetChecksum`、`projectMediaPath`、配置、順序、volume を保存する。旧 BGM path や placeholder を current `edit` の正本として保存しない。
 - 完成動画とサムネイルは `projects/{projectId}/output/` へ保存する。
 - 生成途中の音声・プレビューは `cache/` と `audio/` へ分離する。
@@ -1609,6 +1768,22 @@ Issue #107（ED-00）は仕様書だけを更新する。以下は後続 Issue �
 実装順序は `ED-01〜ED-06 → ED-08 → ED-07 → ED-09` とする。ED-08 の受け入れ条件には、UIから任意 volume を保存しなくても、fixture または手動作成した `VideoProject 1.2.0` の `volume: 0.25` を `RenderManifest 2.3.0` へ解決できることを含める。これにより ED-07 完了時点で UI / API が保存できる値が通常の preview / MP4 でレンダリング不能になる中間状態を作らない。
 
 ED-01〜ED-09 では、今回確定した配置規則、登録済み Asset 限定、project snapshot、volume、固定 loop、動画要素中の BGM 停止を拡張して自由編集機能へ広げない。
+
+### 17.18 ST-00〜ST-07 の画面テンプレート実装境界
+
+Issue #129（ST-00）は本書と `implementation-spec.md` の改訂だけを行い、コード、schema、migration、API、UI、compiler、Remotion、テストコードを変更しない。現行 main の `VideoProject 1.2.0` / `RenderManifest 2.3.0` を基準に、ScreenTemplate の実装は次の Issue へ分割する。
+
+| Issue | 実装責務 |
+|---|---|
+| ST-01 | workspace SQLite の ScreenTemplate entity、repository、strict validation、`screen-template-standard` の idempotent catalog / seed / migration。現行 Remotion / CSS / layout constants から standard geometry を作る。 |
+| ST-02 | ScreenTemplate CRUD API、status transition、revision / expected revision、element cardinality と normalized geometry の validation。 |
+| ST-03 | `VideoProject 1.3.0`、section の `screenTemplateId`、line の nullable override、`1.2.0 → 1.3.0` migration。既存 project の各 section に `screen-template-standard` を明示保存する。 |
+| ST-04 | `/screen-templates`、`/screen-templates/{templateId}`、canvas editor、drag / resize / rotation / numeric input / keyboard、font size、`flipX`、実素材 preview の一時 state。 |
+| ST-05 | ScriptPage の section / line assignment UI、inactive / missing validation、line card 左側の resolved screen preview。production と同じ resolver / layout component を使用する。 |
+| ST-06 | layout resolver、outer template geometry と generic assignment inner transform の責務分離、`prioritizeVisual` の適用順、`RenderManifest 2.4.0` の resolved layout / revision / hash、Remotion 描画。 |
+| ST-07 | layout validation、rotation / overflow / overlap の検証、line-card preview と production render の parity、ScreenTemplate / assignment / migration の E2E。 |
+
+実装順序は `ST-01 → ST-02 → ST-03 → ST-04 → ST-05 → ST-06 → ST-07` とする。ScreenTemplate の実装は任意 HTML、custom CSS、animation / keyframe editor、3 人以上の話者、template revision history / rollback UI、project ごとの template snapshot を追加しない。共有 template の更新は revision / hash を次回 compile input へ反映し、既存 project の明示参照を自動差し替えしない。
 
 ## 18. MVP 完了確認と再現条件
 
