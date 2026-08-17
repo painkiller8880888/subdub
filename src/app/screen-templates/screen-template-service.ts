@@ -9,7 +9,8 @@ import {
 import { assertValidScreenTemplate } from "../../validation/screen-templates.js";
 import {
   ScreenTemplateNotFoundError,
-  ScreenTemplateRevisionConflictError
+  ScreenTemplateRevisionConflictError,
+  ScreenTemplateInactiveError
 } from "./screen-template-errors.js";
 import {
   ScreenTemplateRepository,
@@ -37,7 +38,7 @@ export type ScreenTemplateCreateInput = Readonly<{
 export type ScreenTemplateUpdateInput = Readonly<{
   name: string;
   description: string;
-  status: ScreenTemplateStatus;
+  status?: ScreenTemplateStatus;
   elements: readonly ScreenTemplateElement[];
 }>;
 
@@ -86,6 +87,24 @@ export class ScreenTemplateCatalogService {
     );
   }
 
+  createFromBase(
+    input: Omit<ScreenTemplateCreateInput, "elements">,
+    baseTemplateId: string
+  ): ScreenTemplate {
+    const baseTemplate = this.repository.findById(baseTemplateId);
+    if (baseTemplate === undefined) {
+      throw new ScreenTemplateNotFoundError(baseTemplateId);
+    }
+
+    const templateId = input.templateId ?? this.createId();
+    const elements = baseTemplate.elements.map((element, index) => ({
+      ...element,
+      elementId: `${templateId}-element-${index + 1}`
+    }));
+
+    return this.create({ ...input, templateId, elements });
+  }
+
   update(
     templateId: string,
     input: ScreenTemplateUpdateInput,
@@ -102,13 +121,16 @@ export class ScreenTemplateCatalogService {
         current.revision
       );
     }
+    if (current.status === "inactive") {
+      throw new ScreenTemplateInactiveError(templateId);
+    }
 
     return this.repository.replace(
       assertValidScreenTemplate({
         templateId,
         name: input.name.trim(),
         description: input.description.trim(),
-        status: input.status,
+        status: input.status ?? current.status,
         canvasWidth: current.canvasWidth,
         canvasHeight: current.canvasHeight,
         revision: current.revision + 1,
@@ -117,6 +139,34 @@ export class ScreenTemplateCatalogService {
         updatedAt: timestamp(this.now)
       })
     );
+  }
+
+  deactivate(templateId: string): ScreenTemplate {
+    return this.changeStatus(templateId, "inactive");
+  }
+
+  activate(templateId: string): ScreenTemplate {
+    return this.changeStatus(templateId, "active");
+  }
+
+  private changeStatus(
+    templateId: string,
+    status: ScreenTemplateStatus
+  ): ScreenTemplate {
+    const current = this.repository.findById(templateId);
+    if (current === undefined) {
+      throw new ScreenTemplateNotFoundError(templateId);
+    }
+    if (current.status === status) {
+      return current;
+    }
+
+    return this.repository.replace({
+      ...current,
+      status,
+      revision: current.revision + 1,
+      updatedAt: timestamp(this.now)
+    });
   }
 
   /**

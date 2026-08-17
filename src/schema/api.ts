@@ -73,6 +73,12 @@ import {
   characterVisualSetSchema,
   characterVisualStatusSchema
 } from "./character-visual.js";
+import {
+  SCREEN_TEMPLATE_CANVAS_HEIGHT,
+  SCREEN_TEMPLATE_CANVAS_WIDTH,
+  screenTemplateElementSchema,
+  screenTemplateStatusSchema
+} from "./screen-template.js";
 
 const optionalImprovementReasonSchema = improvementReasonSchema
   .nullable()
@@ -322,6 +328,89 @@ export const voiceAdjustmentPreviewResponseSchema = strictObject({
   data: strictObject({
     previewId: idSchema
   })
+});
+
+const screenTemplateNameInputSchema = z
+  .string()
+  .transform((value) => value.normalize("NFC").trim())
+  .refine((value) => value.length > 0, "name must not be blank");
+
+const screenTemplateDescriptionInputSchema = z
+  .string()
+  .transform((value) => value.normalize("NFC").trim());
+
+export const screenTemplateElementSummarySchema = strictObject({
+  total: nonNegativeIntegerSchema,
+  byType: strictObject({
+    "dialogue-window": nonNegativeIntegerSchema,
+    "section-title": nonNegativeIntegerSchema,
+    "character-visual": nonNegativeIntegerSchema,
+    "content-slot": nonNegativeIntegerSchema
+  })
+});
+
+const screenTemplateBaseResponseFields = {
+  templateId: idSchema,
+  name: z.string().min(1),
+  description: z.string(),
+  status: screenTemplateStatusSchema,
+  canvasWidth: z.literal(SCREEN_TEMPLATE_CANVAS_WIDTH),
+  canvasHeight: z.literal(SCREEN_TEMPLATE_CANVAS_HEIGHT),
+  revision: positiveIntegerSchema,
+  contentHash: sha256Schema
+};
+
+export const screenTemplateSummarySchema = strictObject({
+  ...screenTemplateBaseResponseFields,
+  updatedAt: isoUtcDateTimeSchema,
+  elementSummary: screenTemplateElementSummarySchema
+});
+
+export const screenTemplateDetailSchema = strictObject({
+  ...screenTemplateBaseResponseFields,
+  elements: z.array(screenTemplateElementSchema),
+  createdAt: isoUtcDateTimeSchema,
+  updatedAt: isoUtcDateTimeSchema
+});
+
+export const screenTemplateListResponseSchema = strictObject({
+  data: z.array(screenTemplateSummarySchema),
+  revision: nonNegativeIntegerSchema.optional()
+});
+
+export const screenTemplateResponseSchema = strictObject({
+  data: screenTemplateDetailSchema,
+  revision: nonNegativeIntegerSchema.optional()
+});
+
+export const screenTemplateListQuerySchema = strictObject({
+  status: screenTemplateStatusSchema.optional()
+});
+
+export const screenTemplateParamsSchema = strictObject({
+  templateId: idSchema
+});
+
+export const screenTemplateCreateRequestSchema = strictObject({
+  name: screenTemplateNameInputSchema,
+  description: screenTemplateDescriptionInputSchema.optional().default(""),
+  baseTemplateId: idSchema.optional(),
+  elements: z.array(screenTemplateElementSchema).optional()
+}).superRefine((request, ctx) => {
+  if (request.baseTemplateId !== undefined && request.elements !== undefined) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["elements"],
+      message: "provide either baseTemplateId or elements, not both"
+    });
+  }
+});
+
+export const screenTemplateUpdateRequestSchema = strictObject({
+  name: screenTemplateNameInputSchema,
+  description: screenTemplateDescriptionInputSchema,
+  elements: z.array(screenTemplateElementSchema),
+  expectedRevision: positiveIntegerSchema
 });
 
 export const voiceAdjustmentMutationResponseSchema = strictObject({
@@ -1019,6 +1108,30 @@ export type CharacterVisualVariantParams = z.infer<
 >;
 export type CharacterVisualVariantMultipartRequest = z.infer<
   typeof characterVisualVariantMultipartRequestSchema
+>;
+export type ScreenTemplateElementSummary = z.infer<
+  typeof screenTemplateElementSummarySchema
+>;
+export type ScreenTemplateSummary = z.infer<
+  typeof screenTemplateSummarySchema
+>;
+export type ScreenTemplateDetail = z.infer<
+  typeof screenTemplateDetailSchema
+>;
+export type ScreenTemplateListResponse = z.infer<
+  typeof screenTemplateListResponseSchema
+>;
+export type ScreenTemplateResponse = z.infer<
+  typeof screenTemplateResponseSchema
+>;
+export type ScreenTemplateListQuery = z.infer<
+  typeof screenTemplateListQuerySchema
+>;
+export type ScreenTemplateCreateRequest = z.infer<
+  typeof screenTemplateCreateRequestSchema
+>;
+export type ScreenTemplateUpdateRequest = z.infer<
+  typeof screenTemplateUpdateRequestSchema
 >;
 export type VoicevoxStatusData = z.infer<typeof voicevoxStatusDataSchema>;
 export type VoicevoxStatusResponse = z.infer<

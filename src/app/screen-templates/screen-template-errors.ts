@@ -42,3 +42,13 @@ export class ScreenTemplateRevisionConflictError extends Error {
     this.actualRevision = actualRevision;
   }
 }
+
+export class ScreenTemplateInactiveError extends Error {
+  readonly templateId: string;
+
+  constructor(templateId: string) {
+    super(`screen template is inactive: ${templateId}`);
+    this.name = "ScreenTemplateInactiveError";
+    this.templateId = templateId;
+  }
+}

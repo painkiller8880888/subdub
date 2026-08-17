@@ -61,6 +61,10 @@ import {
   legacyCharacterVisualNames,
   legacyCharacterVisualSeed
 } from "../app/character-visuals/character-visual-seed.js";
+import {
+  ScreenTemplateCatalogService,
+  ScreenTemplateRepository
+} from "../app/screen-templates/index.js";
 
 export const SERVER_HOST = API_HOST;
 export const SERVER_PORT = API_PORT;
@@ -131,6 +135,7 @@ export async function initializeServer(
     voiceAdjustmentService: suppliedVoiceAdjustmentService,
     voiceGenerationService: suppliedVoiceGenerationService,
     renderJobService: suppliedRenderJobService,
+    screenTemplateService: suppliedScreenTemplateService,
     workspaceRoot = process.cwd(),
     ...appOptions
   } = options;
@@ -160,6 +165,11 @@ export async function initializeServer(
     const resolvedChatAdapter = createOpenRouterChatAdapter();
     const resolvedAssetRepository =
       assetRepository ?? new AssetRepository(database.database);
+    const resolvedScreenTemplateService =
+      suppliedScreenTemplateService ??
+      new ScreenTemplateCatalogService({
+        repository: new ScreenTemplateRepository(database.database)
+      });
     let resolvedCharacterVisualCatalogService =
       appOptions.characterVisualCatalogService;
     if (resolvedCharacterVisualCatalogService === undefined) {
@@ -316,7 +326,8 @@ export async function initializeServer(
       projectFileService: resolvedProjectFileService,
       renderJobService: resolvedRenderJobService,
       aiRunSearchService: resolvedAiRunSearchService,
-      characterVisualCatalogService: resolvedCharacterVisualCatalogService
+      characterVisualCatalogService: resolvedCharacterVisualCatalogService,
+      screenTemplateService: resolvedScreenTemplateService
     });
     resolvedProcessingWorker.start();
     resolvedRenderJobService.start();

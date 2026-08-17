@@ -64,6 +64,10 @@ import {
   registerCharacterVisualRoutes,
   type CharacterVisualCatalogServicePort
 } from "./routes/character-visuals.js";
+import {
+  registerScreenTemplateRoutes,
+  type ScreenTemplateServicePort
+} from "./routes/screen-templates.js";
 
 export type AppOptions = {
   logger?: FastifyServerOptions["logger"];
@@ -90,6 +94,7 @@ export type AppOptions = {
   renderJobService?: RenderJobServicePort;
   aiRunSearchService?: AiRunSearchServicePort;
   characterVisualCatalogService?: CharacterVisualCatalogServicePort;
+  screenTemplateService?: ScreenTemplateServicePort;
 };
 
 export function buildApp(options: AppOptions = {}): FastifyInstance {
@@ -186,6 +191,10 @@ export function buildApp(options: AppOptions = {}): FastifyInstance {
 
   if (options.characterVisualCatalogService !== undefined) {
     registerCharacterVisualRoutes(app, options.characterVisualCatalogService);
+  }
+
+  if (options.screenTemplateService !== undefined) {
+    registerScreenTemplateRoutes(app, options.screenTemplateService);
   }
 
   if (options.staticRoot !== undefined) {
