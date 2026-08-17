@@ -141,21 +141,29 @@ export class ScreenTemplateCatalogService {
     );
   }
 
-  deactivate(templateId: string): ScreenTemplate {
-    return this.changeStatus(templateId, "inactive");
+  deactivate(templateId: string, expectedRevision: number): ScreenTemplate {
+    return this.changeStatus(templateId, "inactive", expectedRevision);
   }
 
-  activate(templateId: string): ScreenTemplate {
-    return this.changeStatus(templateId, "active");
+  activate(templateId: string, expectedRevision: number): ScreenTemplate {
+    return this.changeStatus(templateId, "active", expectedRevision);
   }
 
   private changeStatus(
     templateId: string,
-    status: ScreenTemplateStatus
+    status: ScreenTemplateStatus,
+    expectedRevision: number
   ): ScreenTemplate {
     const current = this.repository.findById(templateId);
     if (current === undefined) {
       throw new ScreenTemplateNotFoundError(templateId);
+    }
+    if (expectedRevision !== current.revision) {
+      throw new ScreenTemplateRevisionConflictError(
+        templateId,
+        expectedRevision,
+        current.revision
+      );
     }
     if (current.status === status) {
       return current;

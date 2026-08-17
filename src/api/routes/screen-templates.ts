@@ -14,6 +14,7 @@ import {
   screenTemplateParamsSchema,
   screenTemplateResponseSchema,
   screenTemplateSummarySchema,
+  screenTemplateStatusChangeRequestSchema,
   screenTemplateUpdateRequestSchema
 } from "../../schema/api.js";
 import { ScreenTemplateNotFoundError } from "../../app/screen-templates/screen-template-errors.js";
@@ -149,7 +150,11 @@ export function registerScreenTemplateRoutes(
     "/api/screen-templates/:templateId/deactivate",
     async (request) => {
       const params = screenTemplateParamsSchema.parse(request.params);
-      const template = screenTemplateService.deactivate(params.templateId);
+      const input = screenTemplateStatusChangeRequestSchema.parse(request.body);
+      const template = screenTemplateService.deactivate(
+        params.templateId,
+        input.expectedRevision
+      );
       return screenTemplateResponseSchema.parse(
         createApiSuccessResponse(toDetail(template))
       );
@@ -160,7 +165,11 @@ export function registerScreenTemplateRoutes(
     "/api/screen-templates/:templateId/activate",
     async (request) => {
       const params = screenTemplateParamsSchema.parse(request.params);
-      const template = screenTemplateService.activate(params.templateId);
+      const input = screenTemplateStatusChangeRequestSchema.parse(request.body);
+      const template = screenTemplateService.activate(
+        params.templateId,
+        input.expectedRevision
+      );
       return screenTemplateResponseSchema.parse(
         createApiSuccessResponse(toDetail(template))
       );

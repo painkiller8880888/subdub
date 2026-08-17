@@ -133,9 +133,38 @@ describe("screen template API", () => {
       "SCREEN_TEMPLATE_REVISION_CONFLICT"
     );
 
+    const staleDeactivateResponse = await server.app.inject({
+      method: "POST",
+      url: `/api/screen-templates/${created.templateId}/deactivate`,
+      payload: { expectedRevision: created.revision }
+    });
+    expect(staleDeactivateResponse.statusCode).toBe(409);
+    expect(apiError(staleDeactivateResponse).code).toBe(
+      "SCREEN_TEMPLATE_REVISION_CONFLICT"
+    );
+    expect(await getTemplate(created.templateId)).toMatchObject({
+      status: "active",
+      revision: updated.revision
+    });
+
+    const unknownStatusKeyResponse = await server.app.inject({
+      method: "POST",
+      url: `/api/screen-templates/${created.templateId}/deactivate`,
+      payload: {
+        expectedRevision: updated.revision,
+        unknown: true,
+        assetId: "anything"
+      }
+    });
+    expect(unknownStatusKeyResponse.statusCode).toBe(422);
+    expect(apiError(unknownStatusKeyResponse).code).toBe(
+      "REQUEST_VALIDATION_FAILED"
+    );
+
     const deactivateResponse = await server.app.inject({
       method: "POST",
-      url: `/api/screen-templates/${created.templateId}/deactivate`
+      url: `/api/screen-templates/${created.templateId}/deactivate`,
+      payload: { expectedRevision: updated.revision }
     });
     expect(deactivateResponse.statusCode).toBe(200);
     const inactive = screenTemplateResponseSchema.parse(
@@ -167,9 +196,24 @@ describe("screen template API", () => {
     expect(inactiveUpdate.statusCode).toBe(409);
     expect(apiError(inactiveUpdate).code).toBe("SCREEN_TEMPLATE_INACTIVE");
 
+    const staleActivateResponse = await server.app.inject({
+      method: "POST",
+      url: `/api/screen-templates/${created.templateId}/activate`,
+      payload: { expectedRevision: updated.revision }
+    });
+    expect(staleActivateResponse.statusCode).toBe(409);
+    expect(apiError(staleActivateResponse).code).toBe(
+      "SCREEN_TEMPLATE_REVISION_CONFLICT"
+    );
+    expect(await getTemplate(created.templateId)).toMatchObject({
+      status: "inactive",
+      revision: inactive.revision
+    });
+
     const activateResponse = await server.app.inject({
       method: "POST",
-      url: `/api/screen-templates/${created.templateId}/activate`
+      url: `/api/screen-templates/${created.templateId}/activate`,
+      payload: { expectedRevision: inactive.revision }
     });
     expect(activateResponse.statusCode).toBe(200);
     expect(

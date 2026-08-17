@@ -413,6 +413,10 @@ export const screenTemplateUpdateRequestSchema = strictObject({
   expectedRevision: positiveIntegerSchema
 });
 
+export const screenTemplateStatusChangeRequestSchema = strictObject({
+  expectedRevision: positiveIntegerSchema
+});
+
 export const voiceAdjustmentMutationResponseSchema = strictObject({
   data: strictObject({
     lineId: idSchema
@@ -1132,6 +1136,9 @@ export type ScreenTemplateCreateRequest = z.infer<
 >;
 export type ScreenTemplateUpdateRequest = z.infer<
   typeof screenTemplateUpdateRequestSchema
+>;
+export type ScreenTemplateStatusChangeRequest = z.infer<
+  typeof screenTemplateStatusChangeRequestSchema
 >;
 export type VoicevoxStatusData = z.infer<typeof voicevoxStatusDataSchema>;
 export type VoicevoxStatusResponse = z.infer<
