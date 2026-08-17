@@ -23,7 +23,7 @@ jobs:
         shell: bash
         run: |
           corepack enable
-          corepack install --global pnpm@11.17.0
+          corepack install --global pnpm@11.22.0
           node --version
           pnpm --version
 

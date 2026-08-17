@@ -305,7 +305,7 @@ WebUI はプロジェクト保存、SQLite、キャラクターファイル、�
 | 分類 | パッケージ | 初期固定値 |
 |---|---|---:|
 | Runtime | Node.js | `24.18.0` |
-| Package manager | pnpm | `11.17.0` |
+| Package manager | pnpm | `11.22.0` |
 | UI | `react`, `react-dom` | `19.2.8` |
 | UI build | `vite` | `8.1.5` |
 | UI build | `@vitejs/plugin-react` | `6.0.4` |

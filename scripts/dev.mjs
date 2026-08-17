@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 
 const packageManagerCommand = process.platform === "win32" ? "corepack.cmd" : "corepack";
-const packageManagerArgs = ["pnpm@11.17.0"];
+const packageManagerArgs = ["pnpm@11.22.0"];
 const children = [
   spawn(packageManagerCommand, [...packageManagerArgs, "dev:web"], {
     stdio: "inherit",

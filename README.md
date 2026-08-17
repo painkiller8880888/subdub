@@ -5,13 +5,13 @@ P0-01の初期構成です。Vite + React SPAとFastify APIを、単一の`packa
 ## 前提
 
 - Node.js `24.18.0`
-- pnpm `11.17.0`
+- pnpm `11.22.0`
 
 `.node-version`と`package.json`の`engines`に対応バージョンを固定しています。Corepackを使う場合は、Node.jsを用意したあとに次を実行してください。
 
 ```text
 corepack enable
-corepack install --global pnpm@11.17.0
+corepack install --global pnpm@11.22.0
 node --version
 pnpm --version
 ```
@@ -69,7 +69,7 @@ pnpm start
 
 ## CI
 
-`.github/workflows/ci.yml`はNode.js `24.18.0`とpnpm `11.17.0`を使用し、依存導入、`pnpm verify`、開発サーバーのWebUI/API確認、製品サーバーのSPA/API確認を実行します。
+`.github/workflows/ci.yml`はNode.js `24.18.0`とpnpm `11.22.0`を使用し、依存導入、`pnpm verify`、開発サーバーのWebUI/API確認、製品サーバーのSPA/API確認を実行します。
 
 ## ディレクトリ境界
 

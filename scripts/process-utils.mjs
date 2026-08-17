@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 
 export const packageManagerCommand = process.platform === "win32" ? "corepack.cmd" : "corepack";
-export const packageManagerArgs = ["pnpm@11.17.0"];
+export const packageManagerArgs = ["pnpm@11.22.0"];
 
 export function run(command, args, options = {}) {
   return new Promise((resolve, reject) => {
