@@ -1,60 +1,62 @@
 import { spawn } from "node:child_process";
 
-const packageManagerCommand = process.platform === "win32" ? "corepack.cmd" : "corepack";
-const packageManagerArgs = ["pnpm@11.22.0"];
-const children = [
-  spawn(packageManagerCommand, [...packageManagerArgs, "dev:web"], {
-    stdio: "inherit",
-    windowsHide: true,
-    shell: process.platform === "win32"
-  }),
-  spawn(packageManagerCommand, [...packageManagerArgs, "dev:api"], {
-    stdio: "inherit",
-    windowsHide: true,
-    shell: process.platform === "win32"
-  })
-];
+import {
+  packageManagerArgs,
+  packageManagerCommand,
+  stopChildProcess
+} from "./process-utils.mjs";
+import { createVoicevoxEngineManager } from "./voicevox-engine.mjs";
+
+const children = [];
+const shutdownController = new AbortController();
+const voicevoxEngine = createVoicevoxEngineManager();
 
 let shuttingDown = false;
-
-function stopChild(child) {
-  if (child.pid === undefined) {
-    return;
-  }
-
-  if (process.platform === "win32") {
-    const killer = spawn("taskkill", ["/pid", String(child.pid), "/t", "/f"], {
-      stdio: "ignore",
-      windowsHide: true
-    });
-    killer.unref();
-    return;
-  }
-
-  child.kill("SIGTERM");
-}
+let shutdownPromise;
 
 function shutdown(exitCode) {
-  if (shuttingDown) {
-    return;
+  if (shutdownPromise !== undefined) {
+    return shutdownPromise;
   }
 
   shuttingDown = true;
-  for (const child of children) {
-    stopChild(child);
-  }
+  shutdownController.abort();
+  shutdownPromise = (async () => {
+    await Promise.all(children.map((child) => stopChildProcess(child)));
+    await voicevoxEngine.stop();
+    process.exit(exitCode);
+  })();
+  return shutdownPromise;
+}
 
-  setTimeout(() => process.exit(exitCode), 500);
+process.once("SIGINT", () => void shutdown(130));
+process.once("SIGTERM", () => void shutdown(143));
+
+await voicevoxEngine.start({ signal: shutdownController.signal });
+if (shuttingDown) {
+  await shutdownPromise;
+}
+
+if (!shuttingDown) {
+  children.push(
+    spawn(packageManagerCommand, [...packageManagerArgs, "dev:web"], {
+      stdio: "inherit",
+      windowsHide: true,
+      shell: process.platform === "win32"
+    }),
+    spawn(packageManagerCommand, [...packageManagerArgs, "dev:api"], {
+      stdio: "inherit",
+      windowsHide: true,
+      shell: process.platform === "win32"
+    })
+  );
 }
 
 for (const child of children) {
-  child.once("error", () => shutdown(1));
+  child.once("error", () => void shutdown(1));
   child.once("exit", (code) => {
     if (!shuttingDown) {
-      shutdown(code ?? 1);
+      void shutdown(code ?? 1);
     }
   });
 }
-
-process.once("SIGINT", () => shutdown(130));
-process.once("SIGTERM", () => shutdown(143));
