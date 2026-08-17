@@ -262,6 +262,51 @@ describe("VOICEVOX engine lifecycle", () => {
     expect(terminateProcess).not.toHaveBeenCalled();
   });
 
+  it("falls back to CPU when the owned GPU process stays alive but is not ready", async () => {
+    const children = [new FakeChild(4361), new FakeChild(4362)];
+    const modes: string[] = [];
+    const spawn = vi.fn((_path: string, args: string[]) => {
+      const child = children[modes.length];
+      if (child === undefined) {
+        throw new Error("unexpected extra spawn");
+      }
+
+      modes.push(args.at(-1) === "--use_gpu" ? "gpu" : "cpu");
+      return child;
+    });
+    const readinessCheck = vi.fn(async () => {
+      if (modes.includes("cpu")) {
+        return { ready: true, reason: "ready" };
+      }
+
+      if (modes.includes("gpu")) {
+        return { ready: false, reason: "port-occupied" };
+      }
+
+      return { ready: false, reason: "unreachable" };
+    });
+    const terminateProcess = vi.fn(async () => {});
+    const manager = createVoicevoxEngineManager(
+      managerOptions({
+        readinessCheck,
+        readinessTimeoutMs: 5,
+        pollIntervalMs: 1,
+        spawnImpl: spawn,
+        terminateProcess
+      })
+    );
+
+    await expect(manager.start()).resolves.toMatchObject({
+      status: "started(cpu)",
+      managedBySubdub: true
+    });
+    expect(modes).toEqual(["gpu", "cpu"]);
+    expect(terminateProcess).toHaveBeenCalledWith(children[0]);
+
+    await manager.stop();
+    expect(terminateProcess).toHaveBeenCalledWith(children[1]);
+  });
+
   it("does not spawn when port 50021 belongs to a non-VOICEVOX HTTP service", async () => {
     const spawn = vi.fn();
     const log = vi.fn();
