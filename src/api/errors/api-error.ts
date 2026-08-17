@@ -56,6 +56,13 @@ import {
   CharacterVisualSeedConflictError,
   CharacterVisualValidationError
 } from "../../app/character-visuals/character-visual-errors.js";
+import {
+  ScreenTemplateInactiveError,
+  ScreenTemplateNotFoundError,
+  ScreenTemplateRepositoryError,
+  ScreenTemplateRevisionConflictError
+} from "../../app/screen-templates/screen-template-errors.js";
+import { ScreenTemplateValidationError } from "../../validation/screen-templates.js";
 
 export class ApiResponseValidationError extends Error {
   constructor(cause: unknown) {
@@ -111,6 +118,12 @@ export const API_ERROR_CODE = {
   characterVisualStorageFailed: "CHARACTER_VISUAL_STORAGE_FAILED",
   characterVisualUploadInterrupted: "CHARACTER_VISUAL_UPLOAD_INTERRUPTED",
   characterVisualDatabaseFailed: "CHARACTER_VISUAL_DATABASE_FAILED",
+  screenTemplateNotFound: "SCREEN_TEMPLATE_NOT_FOUND",
+  screenTemplateRevisionConflict: "SCREEN_TEMPLATE_REVISION_CONFLICT",
+  screenTemplateInactive: "SCREEN_TEMPLATE_INACTIVE",
+  screenTemplateValidationFailed: "SCREEN_TEMPLATE_VALIDATION_FAILED",
+  screenTemplateConflict: "SCREEN_TEMPLATE_CONFLICT",
+  screenTemplateDatabaseFailed: "SCREEN_TEMPLATE_DATABASE_FAILED",
   visualAssignmentProjectPathInvalid:
     VISUAL_ASSIGNMENT_ERROR_CODE.projectPathInvalid,
   visualAssignmentAssetNotFound: VISUAL_ASSIGNMENT_ERROR_CODE.assetNotFound,
@@ -682,6 +695,77 @@ export function mapApiError(error: unknown): MappedApiError {
           : "The character visual registration conflicts with existing data.",
       details: [],
       shouldLog: error.constraint === "unknown"
+    };
+  }
+
+  if (error instanceof ScreenTemplateNotFoundError) {
+    return {
+      code: API_ERROR_CODE.screenTemplateNotFound,
+      status: 404,
+      message: "ScreenTemplateが見つかりません。",
+      details: [],
+      shouldLog: false
+    };
+  }
+
+  if (error instanceof ScreenTemplateRevisionConflictError) {
+    return {
+      code: API_ERROR_CODE.screenTemplateRevisionConflict,
+      status: 409,
+      message: "ScreenTemplateが別の内容へ更新されています。",
+      details: [
+        {
+          path: ["expectedRevision"],
+          message: "現在のrevisionと一致しません。"
+        },
+        {
+          path: ["revision"],
+          message: "最新のScreenTemplateを再取得してください。"
+        }
+      ],
+      shouldLog: false
+    };
+  }
+
+  if (error instanceof ScreenTemplateInactiveError) {
+    return {
+      code: API_ERROR_CODE.screenTemplateInactive,
+      status: 409,
+      message: "利用停止中のScreenTemplateは更新できません。",
+      details: [],
+      shouldLog: false
+    };
+  }
+
+  if (error instanceof ScreenTemplateValidationError) {
+    return {
+      code: API_ERROR_CODE.screenTemplateValidationFailed,
+      status: 422,
+      message: genericValidationMessage,
+      details: error.issues.map((issue) => ({
+        path: [...issue.path],
+        message: issue.message
+      })),
+      shouldLog: false
+    };
+  }
+
+  if (error instanceof ScreenTemplateRepositoryError) {
+    if (error.constraint !== "unknown") {
+      return {
+        code: API_ERROR_CODE.screenTemplateConflict,
+        status: 409,
+        message: "ScreenTemplateの保存内容が既存データと競合しました。",
+        details: [],
+        shouldLog: false
+      };
+    }
+    return {
+      code: API_ERROR_CODE.screenTemplateDatabaseFailed,
+      status: 500,
+      message: genericInternalMessage,
+      details: [],
+      shouldLog: true
     };
   }
 
