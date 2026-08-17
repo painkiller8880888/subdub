@@ -1207,6 +1207,10 @@ type ScreenTemplateElement =
 
 `screen-template-standard` は stable ID を持つ idempotent seed / migration である。既存 layer の geometry は現行 Remotion / CSS / layout constants の実値から作り、目測で再定義しない。現行 composition に存在しない section-title だけは、doc.md の「画面上端」という要件から ST-01 が新しい canonical geometry を確定し、rect / rotation / font size / 根拠 / 参照元を seed / migration と仕様へ記録する。seed は既存 row が同じ ID と内容を持つ場合は再作成せず、内容不一致を自動上書きしない。
 
+ST-01 の standard seed 値は、dialogue-window を `x: 0.03125`、`y: 0.05555555555555555`、`width: 0.9375`、`height: 0.8888888888888888`、`rotationDeg: 0`、`fontSize: 38`（現行 SubtitleLayer の 60px safe area と本文 38px）、content-slot を `x: 0.09`、`y: 0.19`、`width: 0.82`、`height: 0.62`、`rotationDeg: 0`（現行 MediaFrame の 82% × 62%）とする。character-visual は `x: 0.04` / `0.71`、`y: 0.4051851851851852`、`width: 0.25`、`height: 0.48`、`rotationDeg: 0`、`flipX: false`（現行 characterLayerStyle の左右 4%、width 25%、height 48%、通常表示 bottom 124px）とする。
+
+section-title は現行 composition に存在しないため、上端用の新規 canonical top band として `x: 0.05`、`y: 0.03`、`width: 0.9`、`height: 0.1`、`rotationDeg: 0`、`fontSize: 48` を採用する。5% の左右 inset、3% の上 inset、10% の領域、字幕本文 38px より一段上の 48px は ST-01 の設計定数であり、既存実値の抽出結果や目測値として扱わない。実際の seed input は `src/app/screen-templates/screen-template-seed.ts` に置き、SQLite に同じ stable ID がある場合は既存の user-editable row を変更しない。
+
 template selection は `project.json` にだけ保存する。`script.sections[].screenTemplateId` は non-null の section default、`script.sections[].lines[].screenTemplateId` は nullable line override とする。解決順序は line override → section default の一意な規則とし、missing / inactive の明示参照は自動代替しない。
 
 ## 8. 派生データ
