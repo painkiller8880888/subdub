@@ -27,3 +27,44 @@ export function run(command, args, options = {}) {
 export function runPnpm(args, options = {}) {
   return run(packageManagerCommand, [...packageManagerArgs, ...args], options);
 }
+
+export function stopChildProcess(child) {
+  if (child?.pid === undefined) {
+    return Promise.resolve();
+  }
+
+  if (process.platform === "win32") {
+    return new Promise((resolve) => {
+      let settled = false;
+      const finish = () => {
+        if (settled) {
+          return;
+        }
+
+        settled = true;
+        resolve();
+      };
+
+      let killer;
+      try {
+        killer = spawn("taskkill", ["/pid", String(child.pid), "/t", "/f"], {
+          stdio: "ignore",
+          windowsHide: true
+        });
+      } catch {
+        finish();
+        return;
+      }
+
+      killer.once("error", finish);
+      killer.once("exit", finish);
+    });
+  }
+
+  try {
+    child.kill?.("SIGTERM");
+  } catch {
+    // The process may have exited between the status check and kill request.
+  }
+  return Promise.resolve();
+}
