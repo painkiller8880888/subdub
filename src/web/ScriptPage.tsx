@@ -76,9 +76,11 @@ import { visualAssignmentsPath } from "./VisualAssignmentsPage";
 import { WorkflowIndicator } from "./WorkflowIndicator";
 import { ScreenLayoutFrame } from "../remotion/screen-template-layout";
 import {
-  findVisualAssignmentForLine,
+  findVisualAssignmentsForLine,
+  projectAssetVersion,
   resolveScriptLineScreenPreview,
   resolveScriptScreenTemplate,
+  screenPreviewAssetKey,
   screenTemplateIdsForScript,
   type ResolvedScriptScreenTemplate
 } from "./screen-template-preview";
@@ -799,17 +801,25 @@ export function ScriptPage() {
       retry: false
     }))
   });
-  const assetIds = [
-    ...new Set(
-      (projectQuery.data?.visuals.assignments ?? []).map(
-        (assignment) => assignment.assetId
-      )
-    )
+  const assetReferences = [
+    ...new Map(
+      (projectQuery.data?.visuals.assignments ?? []).map((assignment) => {
+        const key = screenPreviewAssetKey(assignment);
+        return [
+          key,
+          {
+            assetId: assignment.assetId,
+            key,
+            version: projectAssetVersion(assignment.projectMediaPath)
+          }
+        ];
+      })
+    ).values()
   ];
   const assetQueries = useQueries({
-    queries: assetIds.map((assetId) => ({
-      queryKey: ["assets", assetId],
-      queryFn: () => fetchAsset(assetId),
+    queries: assetReferences.map((reference) => ({
+      queryKey: ["assets", reference.key],
+      queryFn: () => fetchAsset(reference.assetId, reference.version),
       retry: false
     }))
   });
@@ -1301,8 +1311,8 @@ export function ScriptPage() {
     }
   });
   const assets = new Map<string, AssetDetail | undefined>();
-  assetIds.forEach((assetId, index) => {
-    assets.set(assetId, assetQueries[index]?.data);
+  assetReferences.forEach((reference, index) => {
+    assets.set(reference.key, assetQueries[index]?.data);
   });
   const isInitializing = initializeMutation.isPending;
   const isReadyToInitialize =
@@ -1782,7 +1792,7 @@ export function ScriptPage() {
                           templateDetails,
                           templateLoadingIds
                         );
-                        const assignment = findVisualAssignmentForLine(
+                        const assignments = findVisualAssignmentsForLine(
                           section,
                           line.id,
                           project.visuals.assignments
@@ -1806,11 +1816,8 @@ export function ScriptPage() {
                               section,
                               line,
                               catalog,
-                              assignment,
-                              asset:
-                                assignment === undefined
-                                  ? undefined
-                                  : assets.get(assignment.assetId)
+                              assignments,
+                              assets
                             })}
                             issues={issues}
                             voiceStatus={voiceStatusByLine.get(line.id)}

@@ -59,17 +59,35 @@ export function resolveScriptScreenTemplate(
   };
 }
 
-export function findVisualAssignmentForLine(
+export function projectAssetVersion(
+  projectMediaPath: string
+): number | undefined {
+  const fileName = projectMediaPath.split("/").at(-1) ?? "";
+  const match = /^v([1-9][0-9]*)\.[^/]+$/u.exec(fileName);
+  if (match === null) {
+    return undefined;
+  }
+  const version = Number(match[1]);
+  return Number.isSafeInteger(version) ? version : undefined;
+}
+
+export function screenPreviewAssetKey(
+  assignment: Pick<VisualAssignment, "assetId" | "projectMediaPath">
+): string {
+  return `${assignment.assetId}:${assignment.projectMediaPath}`;
+}
+
+export function findVisualAssignmentsForLine(
   section: Pick<ScriptSection, "id" | "lines">,
   lineId: string,
   assignments: readonly VisualAssignment[]
-): VisualAssignment | undefined {
+): VisualAssignment[] {
   const lineIndex = section.lines.findIndex((line) => line.id === lineId);
   if (lineIndex < 0) {
-    return undefined;
+    return [];
   }
 
-  return assignments.find((assignment) => {
+  return assignments.filter((assignment) => {
     const startIndex = section.lines.findIndex(
       (line) => line.id === assignment.startLineId
     );
@@ -158,14 +176,36 @@ function assetThumbnailUrl(
   asset: AssetDetail,
   thumbnailIndex: number
 ): string | null {
-  if (
-    asset.status !== "active" ||
-    asset.version === null ||
-    asset.thumbnailPaths[thumbnailIndex] === undefined
-  ) {
+  if (asset.thumbnailPaths[thumbnailIndex] === undefined) {
     return null;
   }
   return `/api/assets/${encodeURIComponent(asset.assetId)}/thumbnails/${thumbnailIndex}?version=${asset.version}`;
+}
+
+function matchesProjectAssetSnapshot(
+  assignment: VisualAssignment,
+  asset: AssetDetail
+): boolean {
+  const snapshotVersion = projectAssetVersion(assignment.projectMediaPath);
+  return (
+    asset.assetId === assignment.assetId &&
+    (snapshotVersion === undefined || asset.version === snapshotVersion) &&
+    asset.checksum !== null &&
+    asset.checksum.toLowerCase() === assignment.assetChecksum.toLowerCase()
+  );
+}
+
+function unresolvedContentPreview(
+  assignment: VisualAssignment | undefined
+): ScreenLayoutContentPreview {
+  return {
+    alt:
+      assignment === undefined
+        ? "primary content preview 未解決"
+        : "snapshot preview を解決できません",
+    ...(assignment === undefined ? {} : { display: assignment.display }),
+    src: null
+  };
 }
 
 export function resolveContentPreview(
@@ -173,7 +213,10 @@ export function resolveContentPreview(
   asset: AssetDetail | undefined
 ): ScreenLayoutContentPreview {
   if (assignment === undefined || asset === undefined) {
-    return { alt: "primary content preview 未解決", src: null };
+    return unresolvedContentPreview(assignment);
+  }
+  if (!matchesProjectAssetSnapshot(assignment, asset)) {
+    return unresolvedContentPreview(assignment);
   }
 
   const thumbnailIndex =
@@ -185,6 +228,21 @@ export function resolveContentPreview(
     display: assignment.display,
     src: assetThumbnailUrl(asset, thumbnailIndex)
   };
+}
+
+export function resolveContentPreviews(
+  assignments: readonly VisualAssignment[],
+  assets: ReadonlyMap<string, AssetDetail | undefined>
+): ScreenLayoutContentPreview[] {
+  if (assignments.length === 0) {
+    return [unresolvedContentPreview(undefined)];
+  }
+  return assignments.map((assignment) =>
+    resolveContentPreview(
+      assignment,
+      assets.get(screenPreviewAssetKey(assignment))
+    )
+  );
 }
 
 export function resolveBackgroundPreview(
@@ -208,8 +266,8 @@ export function resolveScriptLineScreenPreview({
   section,
   line,
   catalog,
-  assignment,
-  asset
+  assignments,
+  assets
 }: {
   readonly projectId: string;
   readonly project: Pick<VideoProject, "characters">;
@@ -219,13 +277,15 @@ export function resolveScriptLineScreenPreview({
     "speakerId" | "characterVariantId" | "subtitleText"
   >;
   readonly catalog: CharacterVisualCatalogSnapshot | undefined;
-  readonly assignment: VisualAssignment | undefined;
-  readonly asset: AssetDetail | undefined;
+  readonly assignments: readonly VisualAssignment[];
+  readonly assets: ReadonlyMap<string, AssetDetail | undefined>;
 }): ScreenLayoutPreview {
+  const contents = resolveContentPreviews(assignments, assets);
   return {
     background: resolveBackgroundPreview(projectId, section),
     characters: resolveCharacterPreviews(project, line, catalog),
-    content: resolveContentPreview(assignment, asset),
+    content: contents[0] ?? unresolvedContentPreview(undefined),
+    contents,
     dialogueText: line.subtitleText,
     sectionTitleText: section.name
   };

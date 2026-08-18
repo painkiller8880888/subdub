@@ -30,7 +30,7 @@ function annotationStyle(annotation: StaticAnnotation): CSSProperties {
   };
 }
 
-function AnnotationLayer({
+export function AnnotationLayer({
   annotations
 }: {
   annotations: readonly StaticAnnotation[];

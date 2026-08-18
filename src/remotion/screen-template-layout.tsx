@@ -1,10 +1,15 @@
 import type { CSSProperties, ReactNode } from "react";
 
-import type { CommonDisplay, DisplayCoordinateSpace } from "../schema/common";
+import type {
+  CommonDisplay,
+  DisplayCoordinateSpace,
+  StaticAnnotation
+} from "../schema/common";
 import type {
   ScreenTemplate,
   ScreenTemplateElement
 } from "../schema/screen-template";
+import { AnnotationLayer } from "./layout";
 
 export type ScreenCharacterSlot = "speaker-1" | "speaker-2";
 
@@ -18,6 +23,7 @@ export type ScreenLayoutContentDisplay = Readonly<
     CommonDisplay,
     "fit" | "crop" | "scale" | "position" | "prioritizeVisual"
   > & {
+    annotations: readonly StaticAnnotation[];
     displayCoordinateSpace?: DisplayCoordinateSpace;
   }
 >;
@@ -40,6 +46,7 @@ export type ScreenLayoutPreview = Readonly<{
     Partial<Record<ScreenCharacterSlot, ScreenLayoutCharacterPreview>>
   >;
   content: ScreenLayoutContentPreview;
+  contents?: readonly ScreenLayoutContentPreview[];
   background?: ScreenLayoutBackground;
 }>;
 
@@ -123,6 +130,14 @@ function previewOrDefault(
   return preview ?? DEFAULT_SCREEN_LAYOUT_PREVIEW;
 }
 
+function contentPreviews(
+  preview: ScreenLayoutPreview
+): readonly ScreenLayoutContentPreview[] {
+  return preview.contents === undefined || preview.contents.length === 0
+    ? [preview.content]
+    : preview.contents;
+}
+
 function renderCharacterPreview(
   element: Extract<ScreenTemplateElement, { type: "character-visual" }>,
   preview: ScreenLayoutPreview
@@ -151,9 +166,12 @@ function renderScreenTemplateElement(
   element: ScreenTemplateElement,
   preview: ScreenLayoutPreview
 ): ReactNode {
+  const contentPreviewsForLayout = contentPreviews(preview);
   const prioritizeVisual =
     element.type === "character-visual" &&
-    preview.content.display?.prioritizeVisual === true;
+    contentPreviewsForLayout.some(
+      (content) => content.display?.prioritizeVisual === true
+    );
   const baseStyle = {
     ...screenTemplateElementStyle(element),
     ...(prioritizeVisual
@@ -218,12 +236,6 @@ function renderScreenTemplateElement(
     );
   }
 
-  if (
-    preview.content.display?.displayCoordinateSpace === "legacy-media-frame"
-  ) {
-    return null;
-  }
-
   return (
     <div
       aria-hidden="true"
@@ -231,42 +243,50 @@ function renderScreenTemplateElement(
       key={element.elementId}
       style={baseStyle}
     >
-      {renderScreenLayoutContent(preview)}
+      {contentPreviewsForLayout
+        .filter(
+          (content) =>
+            content.display?.displayCoordinateSpace !== "legacy-media-frame"
+        )
+        .map((content, index) =>
+          renderScreenLayoutContent(content, `${element.elementId}-${index}`)
+        )}
     </div>
   );
 }
 
 function renderScreenLayoutContent(
-  preview: ScreenLayoutPreview,
-  className = "screen-layout-content-frame"
+  content: ScreenLayoutContentPreview,
+  key: string
 ): ReactNode {
   return (
     <div
-      className={className}
+      className="screen-layout-content-frame"
+      key={key}
       style={{
-        ...screenLayoutContentFrameStyle(preview.content.display),
-        ...(preview.content.display?.displayCoordinateSpace ===
-        "legacy-media-frame"
+        ...screenLayoutContentFrameStyle(content.display),
+        ...(content.display?.displayCoordinateSpace === "legacy-media-frame"
           ? { zIndex: 1 }
           : {})
       }}
     >
       <div
         className="screen-layout-content-inner"
-        style={screenLayoutContentInnerStyle(preview.content.display)}
+        style={screenLayoutContentInnerStyle(content.display)}
       >
-        {preview.content.src === null ? (
+        {content.src === null ? (
           <span className="screen-layout-content-label">primary content</span>
         ) : (
           <img
-            alt={preview.content.alt}
+            alt={content.alt}
             className="screen-layout-content-image"
             draggable={false}
-            src={preview.content.src}
-            style={{ objectFit: preview.content.display?.fit ?? "cover" }}
+            src={content.src}
+            style={{ objectFit: content.display?.fit ?? "cover" }}
           />
         )}
       </div>
+      <AnnotationLayer annotations={content.display?.annotations ?? []} />
     </div>
   );
 }
@@ -305,6 +325,7 @@ export function ScreenLayoutFrame({
   readonly ariaLabel?: string;
 }): ReactNode {
   const resolvedPreview = previewOrDefault(preview);
+  const contentPreviewsForLayout = contentPreviews(resolvedPreview);
   const classes = ["screen-layout-frame", className]
     .filter((value): value is string => value !== undefined)
     .join(" ");
@@ -324,10 +345,14 @@ export function ScreenLayoutFrame({
       {template.elements.map((element) =>
         renderScreenTemplateElement(element, resolvedPreview)
       )}
-      {resolvedPreview.content.display?.displayCoordinateSpace ===
-      "legacy-media-frame"
-        ? renderScreenLayoutContent(resolvedPreview)
-        : null}
+      {contentPreviewsForLayout
+        .filter(
+          (content) =>
+            content.display?.displayCoordinateSpace === "legacy-media-frame"
+        )
+        .map((content, index) =>
+          renderScreenLayoutContent(content, `legacy-content-${index}`)
+        )}
     </div>
   );
 }

@@ -12,10 +12,11 @@ import type {
 } from "../../src/schema/index.js";
 import { createDefaultScriptLine } from "../../src/web/script-editor.js";
 import {
-  findVisualAssignmentForLine,
+  findVisualAssignmentsForLine,
   resolveCharacterPreviewForSlot,
   resolveCharacterPreviews,
   resolveContentPreview,
+  screenPreviewAssetKey,
   resolveScriptLineScreenPreview,
   resolveScriptScreenTemplate,
   screenTemplateIdsForScript
@@ -63,7 +64,7 @@ function createAssignment(
     endLineId,
     assetId: "asset-scan",
     assetChecksum: CHECKSUM,
-    projectMediaPath: "projects/preview-project/media/visuals/scan.pdf",
+    projectMediaPath: "media/visuals/asset-scan/v3.pdf",
     display: {
       kind: "document_scan",
       fit: "contain",
@@ -230,27 +231,30 @@ describe("script ScreenTemplate preview resolution", () => {
     ).toBe("loading");
   });
 
-  it("selects the first visual assignment covering the current line", () => {
+  it("returns every visual assignment covering the current line in source order", () => {
     const section = createSection("screen-template-standard", [
       createLine("line-one"),
       createLine("line-two"),
       createLine("line-three")
     ]);
-    const first = createAssignment("assignment-first", "line-one", "line-two");
+    const first = createAssignment(
+      "assignment-first",
+      "line-one",
+      "line-three"
+    );
     const second = createAssignment(
       "assignment-second",
-      "line-three",
-      "line-three"
+      "line-two",
+      "line-two"
     );
 
     expect(
-      findVisualAssignmentForLine(section, "line-two", [first, second])?.id
-    ).toBe("assignment-first");
-    expect(
-      findVisualAssignmentForLine(section, "line-three", [first, second])?.id
-    ).toBe("assignment-second");
-    expect(findVisualAssignmentForLine(section, "missing", [first])).toBe(
-      undefined
+      findVisualAssignmentsForLine(section, "line-two", [first, second]).map(
+        (assignment) => assignment.id
+      )
+    ).toEqual(["assignment-first", "assignment-second"]);
+    expect(findVisualAssignmentsForLine(section, "missing", [first])).toEqual(
+      []
     );
   });
 
@@ -300,14 +304,17 @@ describe("script ScreenTemplate preview resolution", () => {
     };
     const line = { ...createLine("line-one"), subtitleText: "現在の字幕" };
     const assignment = createAssignment("assignment", "line-one", "line-one");
+    const assets = new Map([
+      [screenPreviewAssetKey(assignment), createAsset()]
+    ]);
     const preview = resolveScriptLineScreenPreview({
       projectId: project.metadata.id,
       project,
       section,
       line,
       catalog: characterCatalog,
-      assignment,
-      asset: createAsset()
+      assignments: [assignment],
+      assets
     });
 
     expect(preview.dialogueText).toBe("現在の字幕");
@@ -323,13 +330,34 @@ describe("script ScreenTemplate preview resolution", () => {
     });
   });
 
-  it("does not resolve inactive generic assets to a thumbnail", () => {
+  it("keeps a matching snapshot thumbnail when the live asset is inactive", () => {
     const inactiveAsset = { ...createAsset(), status: "inactive" as const };
     expect(
       resolveContentPreview(createAssignment("a", "a", "a"), inactiveAsset)
     ).toEqual({
       alt: "申請書サンプル",
       display: createAssignment("a", "a", "a").display,
+      src: "/api/assets/asset-scan/thumbnails/1?version=3"
+    });
+  });
+
+  it("does not show a live thumbnail when the snapshot checksum or version differs", () => {
+    const assignment = createAssignment("a", "a", "a");
+    expect(
+      resolveContentPreview(assignment, {
+        ...createAsset(),
+        checksum: "1".repeat(64)
+      })
+    ).toMatchObject({
+      alt: "snapshot preview を解決できません",
+      display: assignment.display,
+      src: null
+    });
+    expect(
+      resolveContentPreview(assignment, { ...createAsset(), version: 2 })
+    ).toMatchObject({
+      alt: "snapshot preview を解決できません",
+      display: assignment.display,
       src: null
     });
   });

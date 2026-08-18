@@ -1,3 +1,5 @@
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
 import { createStandardScreenTemplate } from "../../src/app/screen-templates/screen-template-seed.js";
@@ -14,9 +16,11 @@ import {
   updateScreenTemplateElementNumericField
 } from "../../src/web/screen-template-editor.js";
 import {
+  ScreenLayoutFrame,
   screenLayoutContentFrameStyle,
   screenLayoutContentInnerStyle,
-  screenTemplateElementStyle
+  screenTemplateElementStyle,
+  type ScreenLayoutPreview
 } from "../../src/remotion/screen-template-layout.js";
 
 const TIMESTAMP = "2026-08-18T00:00:00.000Z";
@@ -52,6 +56,7 @@ describe("ScreenTemplate editor geometry", () => {
       scale: 1.1,
       position: { x: 0.6, y: 0.4 },
       prioritizeVisual: false,
+      annotations: [],
       displayCoordinateSpace: "legacy-media-frame"
     } as const;
     const relativeDisplay = {
@@ -60,6 +65,7 @@ describe("ScreenTemplate editor geometry", () => {
       scale: 1,
       position: { x: 0.5, y: 0.5 },
       prioritizeVisual: false,
+      annotations: [],
       displayCoordinateSpace: "content-slot-relative"
     } as const;
     const legacy = screenLayoutContentFrameStyle(legacyDisplay);
@@ -89,6 +95,44 @@ describe("ScreenTemplate editor geometry", () => {
       top: "-12.5%",
       width: "200%"
     });
+  });
+
+  it("renders content annotations through the shared screen layout frame", () => {
+    const template = createStandardScreenTemplate(TIMESTAMP);
+    const preview: ScreenLayoutPreview = {
+      characters: {},
+      content: {
+        alt: "snapshot",
+        src: "/snapshot.png",
+        display: {
+          annotations: [
+            {
+              id: "annotation-label",
+              kind: "label",
+              text: "重要な箇所",
+              x: 0.2,
+              y: 0.3,
+              width: null,
+              height: null,
+              colorToken: "warning"
+            }
+          ],
+          crop: { x: 0, y: 0, width: 1, height: 1 },
+          fit: "contain",
+          position: { x: 0.5, y: 0.5 },
+          prioritizeVisual: false,
+          scale: 1
+        }
+      },
+      dialogueText: "",
+      sectionTitleText: ""
+    };
+
+    const markup = renderToStaticMarkup(
+      createElement(ScreenLayoutFrame, { preview, template })
+    );
+
+    expect(markup).toContain("重要な箇所");
   });
 
   it("resizes a rotated element using the element-local axes", () => {
