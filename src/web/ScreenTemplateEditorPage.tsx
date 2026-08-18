@@ -55,7 +55,6 @@ import {
   screenTemplateElementLabel,
   screenTemplateElementValidationMessages,
   screenTemplateElementValidationWarningMessages,
-  screenTemplateResizeHandlePosition,
   screenTemplateValidationMessages,
   screenTemplateValidationWarningMessages,
   type NumericElementField,
@@ -760,28 +759,11 @@ export function ScreenTemplateEditorPage() {
       return;
     }
 
-    const delta =
-      interaction.mode === "resize"
-        ? (() => {
-            const handlePosition = screenTemplateResizeHandlePosition(
-              interaction.startElement,
-              interaction.handle as ResizeHandle
-            );
-            const startHandlePointer = {
-              x: canvasRect.left + handlePosition.x * canvasRect.width,
-              y: canvasRect.top + handlePosition.y * canvasRect.height
-            };
-            return normalizedPointerDelta(
-              startHandlePointer,
-              currentPointer,
-              canvasRect
-            );
-          })()
-        : normalizedPointerDelta(
-            interaction.startPointer,
-            currentPointer,
-            canvasRect
-          );
+    const delta = normalizedPointerDelta(
+      interaction.startPointer,
+      currentPointer,
+      canvasRect
+    );
     const nextElement =
       interaction.mode === "move"
         ? moveScreenTemplateElement(interaction.startElement, delta.x, delta.y)

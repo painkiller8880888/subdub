@@ -120,6 +120,52 @@ describe("ScreenTemplate editor geometry", () => {
     expect(endHandle.x).toBeCloseTo(1);
   });
 
+  it("does not shrink width when only the south edge exceeds the canvas", () => {
+    const template = createStandardScreenTemplate(TIMESTAMP);
+    const content = findScreenTemplateElement(
+      template,
+      "screen-template-standard-content-slot"
+    );
+    if (content === undefined) {
+      throw new Error("content slot is missing");
+    }
+
+    const startAnchor = screenTemplateResizeHandlePosition(
+      content,
+      "north-west"
+    );
+    const resized = resizeScreenTemplateElement(content, "south-east", 0, 0.4);
+    const endAnchor = screenTemplateResizeHandlePosition(resized, "north-west");
+
+    expect(resized.transform.rect.width).toBeCloseTo(0.82);
+    expect(resized.transform.rect.height).toBeCloseTo(0.81);
+    expect(endAnchor.x).toBeCloseTo(startAnchor.x);
+    expect(endAnchor.y).toBeCloseTo(startAnchor.y);
+  });
+
+  it("clamps both requested axes together without collapsing either axis", () => {
+    const template = createStandardScreenTemplate(TIMESTAMP);
+    const content = findScreenTemplateElement(
+      template,
+      "screen-template-standard-content-slot"
+    );
+    if (content === undefined) {
+      throw new Error("content slot is missing");
+    }
+
+    const resized = resizeScreenTemplateElement(
+      content,
+      "south-east",
+      0.2,
+      0.4
+    );
+
+    expect(resized.transform.rect.width).toBeCloseTo(0.91);
+    expect(resized.transform.rect.height).toBeCloseTo(0.8);
+    expect(resized.transform.rect.x).toBeCloseTo(0.09);
+    expect(resized.transform.rect.y).toBeCloseTo(0.19);
+  });
+
   it("derives rotation from the pointer angle around the rect center", () => {
     const template = createStandardScreenTemplate(TIMESTAMP);
     const title = findScreenTemplateElement(

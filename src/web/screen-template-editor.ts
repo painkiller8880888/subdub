@@ -185,21 +185,25 @@ function isRectInsideCanvas(rect: ScreenRect): boolean {
   );
 }
 
-function clampResizeDimension(
-  dimension: "width" | "height",
-  proposed: number,
-  otherDimension: number,
-  minimum: number,
+function clampResizeDimensions(
+  startWidthPx: number,
+  startHeightPx: number,
+  requestedWidthPx: number,
+  requestedHeightPx: number,
+  minimumWidthPx: number,
+  minimumHeightPx: number,
   anchor: PixelPoint,
   signs: ResizeCornerSigns,
   rotationDeg: number,
   canvasWidth: number,
   canvasHeight: number
-): number {
-  const isInside = (value: number): boolean => {
-    const widthPx = dimension === "width" ? value : otherDimension;
-    const heightPx = dimension === "height" ? value : otherDimension;
-    return isRectInsideCanvas(
+): { readonly widthPx: number; readonly heightPx: number } {
+  const requested = {
+    heightPx: Math.max(minimumHeightPx, requestedHeightPx),
+    widthPx: Math.max(minimumWidthPx, requestedWidthPx)
+  };
+  const isInside = (widthPx: number, heightPx: number): boolean =>
+    isRectInsideCanvas(
       rectFromFixedCorner(
         anchor,
         signs,
@@ -210,27 +214,38 @@ function clampResizeDimension(
         canvasHeight
       )
     );
+
+  if (isInside(requested.widthPx, requested.heightPx)) {
+    return requested;
+  }
+
+  const start = {
+    heightPx: Math.max(minimumHeightPx, startHeightPx),
+    widthPx: Math.max(minimumWidthPx, startWidthPx)
   };
-
-  if (isInside(proposed)) {
-    return proposed;
+  if (!isInside(start.widthPx, start.heightPx)) {
+    return start;
   }
 
-  if (!isInside(minimum)) {
-    return minimum;
-  }
-
-  let lower = minimum;
-  let upper = proposed;
+  let lower = 0;
+  let upper = 1;
   for (let index = 0; index < 32; index += 1) {
     const middle = (lower + upper) / 2;
-    if (isInside(middle)) {
+    const widthPx =
+      start.widthPx + (requested.widthPx - start.widthPx) * middle;
+    const heightPx =
+      start.heightPx + (requested.heightPx - start.heightPx) * middle;
+    if (isInside(widthPx, heightPx)) {
       lower = middle;
     } else {
       upper = middle;
     }
   }
-  return lower;
+
+  return {
+    heightPx: start.heightPx + (requested.heightPx - start.heightPx) * lower,
+    widthPx: start.widthPx + (requested.widthPx - start.widthPx) * lower
+  };
 }
 
 export function clampScreenRect(
@@ -386,24 +401,12 @@ export function resizeScreenTemplateElement(
   );
   const minimumWidthPx = SCREEN_TEMPLATE_MIN_ELEMENT_SIZE * canvasWidth;
   const minimumHeightPx = SCREEN_TEMPLATE_MIN_ELEMENT_SIZE * canvasHeight;
-  let widthPx = Math.max(minimumWidthPx, signs.x * localHandleVector.x);
-  let heightPx = Math.max(minimumHeightPx, signs.y * localHandleVector.y);
-
-  widthPx = clampResizeDimension(
-    "width",
-    widthPx,
-    heightPx,
+  const { widthPx, heightPx } = clampResizeDimensions(
+    element.transform.rect.width * canvasWidth,
+    element.transform.rect.height * canvasHeight,
+    signs.x * localHandleVector.x,
+    signs.y * localHandleVector.y,
     minimumWidthPx,
-    anchor,
-    signs,
-    element.transform.rotationDeg,
-    canvasWidth,
-    canvasHeight
-  );
-  heightPx = clampResizeDimension(
-    "height",
-    heightPx,
-    widthPx,
     minimumHeightPx,
     anchor,
     signs,
