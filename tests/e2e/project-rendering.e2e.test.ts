@@ -26,6 +26,7 @@ import { CharacterVisualCatalogService } from "../../src/app/character-visuals/c
 import { OutlineGenerationService } from "../../src/app/projects/outline-generation-service.js";
 import { ProjectRepository } from "../../src/app/projects/project-repository.js";
 import { computeOutlineHash } from "../../src/app/projects/script-domain.js";
+import { createStandardScreenTemplate } from "../../src/app/screen-templates/screen-template-seed.js";
 import {
   browserExecutable,
   stagePublicDirectory
@@ -1822,7 +1823,8 @@ describe("MVP final verification E2E", () => {
           workspaceRoot,
           projectRepository,
           screenTemplateCatalog: {
-            findById: () => ({ status: "active" as const })
+            findById: () =>
+              createStandardScreenTemplate("2026-08-10T00:00:00.000Z")
           },
           assetRepository: new AssetRepository(server.database.database),
           characterVisualCatalogService: new CharacterVisualCatalogService({

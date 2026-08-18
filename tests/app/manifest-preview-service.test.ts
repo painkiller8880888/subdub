@@ -9,7 +9,8 @@ import { computeSourceProjectHash } from "../../src/app/rendering/render-manifes
 import { ManifestPreviewService } from "../../src/app/rendering/manifest-preview-service.js";
 import { RenderManifestStore } from "../../src/app/rendering/render-manifest-store.js";
 import { computeOutlineHash } from "../../src/app/projects/script-domain.js";
-import type { ScreenTemplateCatalogPort } from "../../src/app/projects/screen-template-selection.js";
+import { createStandardScreenTemplate } from "../../src/app/screen-templates/screen-template-seed.js";
+import type { ScreenTemplateSnapshotPort } from "../../src/app/projects/screen-template-selection.js";
 import type { VoicevoxAudioIndex } from "../../src/app/voicevox/audio-index.js";
 import type { VoiceGenerationStatusData } from "../../src/schema/api.js";
 import type { RenderManifest, VideoProject } from "../../src/schema/index.js";
@@ -79,7 +80,7 @@ async function createService(
     voiceGenerationService?: {
       getStatus: (projectId: unknown) => Promise<VoiceGenerationStatusData>;
     };
-    screenTemplateCatalog?: ScreenTemplateCatalogPort;
+    screenTemplateCatalog?: ScreenTemplateSnapshotPort;
   } = {}
 ): Promise<ManifestPreviewService> {
   const manifestStore = new RenderManifestStore({ workspaceRoot: root });
@@ -89,7 +90,12 @@ async function createService(
   return new ManifestPreviewService({
     workspaceRoot: root,
     projectRepository: { read: async () => project },
-    screenTemplateCatalog: options.screenTemplateCatalog,
+    screenTemplateCatalog: options.screenTemplateCatalog ?? {
+      findById: (templateId) =>
+        templateId === "screen-template-standard"
+          ? createStandardScreenTemplate("2026-08-10T00:00:00.000Z")
+          : undefined
+    },
     manifestStore,
     audioStore: audioStore(
       options.audioIndex ?? createRenderManifestAudioIndex(project)
@@ -149,12 +155,19 @@ describe("ManifestPreviewService", () => {
     const service = await createService(root, project, {
       manifest,
       screenTemplateCatalog: {
-        findById: (templateId) =>
-          templateId === "inactive-template"
-            ? { status: "inactive" }
-            : templateId === "screen-template-standard"
-              ? { status: "active" }
-              : undefined
+        findById: (templateId) => {
+          if (templateId === "inactive-template") {
+            const template = createStandardScreenTemplate(
+              "2026-08-10T00:00:00.000Z"
+            );
+            template.templateId = templateId;
+            template.status = "inactive";
+            return template;
+          }
+          return templateId === "screen-template-standard"
+            ? createStandardScreenTemplate("2026-08-10T00:00:00.000Z")
+            : undefined;
+        }
       }
     });
 
@@ -189,6 +202,40 @@ describe("ManifestPreviewService", () => {
       "MANIFEST_PROJECT_STALE"
     );
   });
+
+  it.each(["revision", "content hash"])(
+    "reports a stale manifest when the referenced screen template changes by %s",
+    async (change) => {
+      const root = await createRoot();
+      const project = createProject();
+      const manifest = createManifest(project);
+      const currentTemplate = createStandardScreenTemplate(
+        "2026-08-10T00:00:00.000Z"
+      );
+      const service = await createService(root, project, {
+        manifest,
+        screenTemplateCatalog: {
+          findById: (templateId) =>
+            templateId === currentTemplate.templateId
+              ? currentTemplate
+              : undefined
+        }
+      });
+
+      if (change === "revision") {
+        currentTemplate.revision += 1;
+      } else {
+        currentTemplate.elements[0]!.transform.rect.x += 0.01;
+      }
+
+      const result = await service.get(projectId);
+      expect(result.state).toBe("stale");
+      expect(result.canPlay).toBe(false);
+      expect(result.blockers.map((blocker) => blocker.code)).toContain(
+        "MANIFEST_SCREEN_TEMPLATE_STALE"
+      );
+    }
+  );
 
   it("uses the voice current-status result instead of audio integrity alone", async () => {
     const root = await createRoot();

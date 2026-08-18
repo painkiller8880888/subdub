@@ -120,6 +120,44 @@ describe("compileRenderManifest", () => {
     expect(diagnosticCodes(result)).toContain("CHARACTER_CATALOG_INVALID");
   });
 
+  it("returns a structured failure when the screen-template snapshot is missing", () => {
+    const input = validInput();
+    Reflect.deleteProperty(input, "screenTemplateCatalogSnapshot");
+
+    expect(() => compileRenderManifest(input)).not.toThrow();
+    const result = compileRenderManifest(input);
+
+    expect(result.success).toBe(false);
+    expect(diagnosticCodes(result)).toContain("SCREEN_TEMPLATE_MISSING");
+  });
+
+  it("returns a structured failure before layout resolution for invalid templates", () => {
+    const invalidTemplate = createStandardScreenTemplate(
+      "2026-08-10T00:00:00.000Z"
+    );
+    invalidTemplate.elements = invalidTemplate.elements.filter(
+      (element) => element.type !== "content-slot"
+    );
+
+    expect(() =>
+      compileRenderManifest(
+        validInput(undefined, {
+          screenTemplateCatalogSnapshot: [invalidTemplate]
+        })
+      )
+    ).not.toThrow();
+    const result = compileRenderManifest(
+      validInput(undefined, {
+        screenTemplateCatalogSnapshot: [invalidTemplate]
+      })
+    );
+
+    expect(result.success).toBe(false);
+    expect(diagnosticCodes(result)).toContain(
+      "SCREEN_TEMPLATE_CARDINALITY_INVALID"
+    );
+  });
+
   it("resolves explicit character selections and compiles all timeline inputs", () => {
     const result = compileRenderManifest(validInput());
 

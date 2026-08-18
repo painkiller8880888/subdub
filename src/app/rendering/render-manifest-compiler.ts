@@ -22,7 +22,7 @@ import {
   renderManifestSchema,
   sha256Schema,
   characterVisualCatalogSnapshotSchema,
-  screenTemplateCatalogSnapshotSchema,
+  screenTemplateSchema,
   type RenderSectionLayout,
   type RenderResolvedVisualDisplay,
   type ResolvedScreenLayout,
@@ -374,6 +374,18 @@ function recordInputScreenTemplates(
   );
 }
 
+function screenTemplateDiagnosticCode(
+  message: string
+): RenderManifestDiagnosticCode {
+  if (/exactly|speaker|unique/.test(message)) {
+    return RENDER_MANIFEST_ERROR_CODE.screenTemplateCardinalityInvalid;
+  }
+  if (/rect|canvas|rotation|x \+|y \+|width|height/.test(message)) {
+    return RENDER_MANIFEST_ERROR_CODE.screenTemplateGeometryInvalid;
+  }
+  return RENDER_MANIFEST_ERROR_CODE.screenTemplateSchema;
+}
+
 function normalizeScreenTemplates(
   rawTemplates: unknown,
   diagnostics: RenderManifestDiagnostic[]
@@ -381,19 +393,32 @@ function normalizeScreenTemplates(
   if (rawTemplates === null || rawTemplates === undefined) {
     return new Map();
   }
-  const result = screenTemplateCatalogSnapshotSchema.safeParse(rawTemplates);
-  if (!result.success) {
-    addZodDiagnostics(
+
+  if (!Array.isArray(rawTemplates)) {
+    addDiagnostic(
       diagnostics,
       RENDER_MANIFEST_ERROR_CODE.screenTemplateSchema,
-      result.error,
-      ["screenTemplateCatalogSnapshot"]
+      ["screenTemplateCatalogSnapshot"],
+      "screen template snapshot must be an array"
     );
     return new Map();
   }
 
   const templates = new Map<string, ResolvedScreenTemplate>();
-  for (const [index, template] of result.data.entries()) {
+  for (const [index, rawTemplate] of rawTemplates.entries()) {
+    const templateResult = screenTemplateSchema.safeParse(rawTemplate);
+    if (!templateResult.success) {
+      for (const issue of templateResult.error.issues) {
+        addDiagnostic(
+          diagnostics,
+          screenTemplateDiagnosticCode(issue.message),
+          ["screenTemplateCatalogSnapshot", index, ...zodPath(issue.path)],
+          issue.message
+        );
+      }
+      continue;
+    }
+    const template = templateResult.data;
     if (templates.has(template.templateId)) {
       addDiagnostic(
         diagnostics,
@@ -416,6 +441,9 @@ function normalizeScreenTemplates(
         issue.message,
         { sectionId: template.templateId }
       );
+    }
+    if (report.errors.length > 0) {
+      continue;
     }
     templates.set(template.templateId, {
       template,
@@ -1831,6 +1859,7 @@ export function compileRenderManifest(
       )
     );
   }
+
   const sourceAssets = new Map<string, string>();
   const lineAudio = new Map<string, VoicevoxAudioIndexEntry>();
   for (const entry of lineEntries) {
@@ -2349,6 +2378,10 @@ export function compileRenderManifest(
     }
   }
 
+  // Do not assemble resolved layouts or visual segments after semantic
+  // validation has failed. In particular, invalid templates are intentionally
+  // absent from the normalized map so resolution cannot throw on partial
+  // geometry.
   if (
     diagnostics.length > 0 ||
     lineRanges === undefined ||

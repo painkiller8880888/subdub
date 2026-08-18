@@ -16,7 +16,7 @@ import { processAudioMedia } from "../assets/processing/video-audio.js";
 import type { ProjectRepository } from "../projects/project-repository.js";
 import {
   validateVideoProjectScreenTemplateReferences,
-  type ScreenTemplateCatalogPort
+  type ScreenTemplateSnapshotPort
 } from "../projects/screen-template-selection.js";
 import {
   type RenderManifestAssetMetadata,
@@ -49,7 +49,7 @@ type AssetMetadataByPath = Map<string, RenderManifestAssetMetadata>;
 export type RenderManifestInputBuilderOptions = {
   readonly workspaceRoot: string;
   readonly projectRepository: ProjectReader;
-  readonly screenTemplateCatalog: ScreenTemplateCatalogPort;
+  readonly screenTemplateCatalog: ScreenTemplateSnapshotPort;
   readonly assetRepository: AssetDetailReader;
   readonly characterVisualCatalogService: CharacterVisualCatalogVerifier;
   readonly audioStore: AudioIndexReader;
@@ -57,7 +57,7 @@ export type RenderManifestInputBuilderOptions = {
 
 function assertScreenTemplateReferences(
   project: VideoProject,
-  screenTemplateCatalog: ScreenTemplateCatalogPort
+  screenTemplateCatalog: ScreenTemplateSnapshotPort
 ): void {
   if (
     validateVideoProjectScreenTemplateReferences(project, screenTemplateCatalog)
@@ -75,7 +75,7 @@ function assertScreenTemplateReferences(
 
 function screenTemplateSnapshotForProject(
   project: VideoProject,
-  screenTemplateCatalog: ScreenTemplateCatalogPort
+  screenTemplateCatalog: ScreenTemplateSnapshotPort
 ): ScreenTemplate[] | undefined {
   const ids = new Set<string>();
   for (const section of project.script.sections) {
@@ -90,10 +90,7 @@ function screenTemplateSnapshotForProject(
   const snapshot: ScreenTemplate[] = [];
   for (const templateId of [...ids].sort()) {
     const candidate = screenTemplateCatalog.findById(templateId);
-    if (candidate === undefined || !("elements" in candidate)) {
-      // Older lightweight ports only expose status. The production service
-      // exposes the complete validated row; leaving the field absent lets the
-      // compiler report the missing snapshot instead of inventing geometry.
+    if (candidate === undefined) {
       return undefined;
     }
     const parsed = screenTemplateSchema.safeParse(candidate);
@@ -381,7 +378,7 @@ async function assetMetadataForProject(
 export class RenderManifestInputBuilder {
   private readonly workspaceRoot: string;
   private readonly projectRepository: ProjectReader;
-  private readonly screenTemplateCatalog: ScreenTemplateCatalogPort;
+  private readonly screenTemplateCatalog: ScreenTemplateSnapshotPort;
   private readonly assetRepository: AssetDetailReader;
   private readonly characterVisualCatalogService: CharacterVisualCatalogVerifier;
   private readonly audioStore: AudioIndexReader;

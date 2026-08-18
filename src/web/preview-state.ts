@@ -125,7 +125,9 @@ const blockerMessages: Readonly<Record<string, string>> = {
   MANIFEST_UNREADABLE:
     "保存済みプレビューを読み込めません。プレビューを再生成してください。",
   MANIFEST_PROJECT_STALE:
-    "保存済みプレビューが現在のプロジェクトと一致しません。再生成してください。"
+    "保存済みプレビューが現在のプロジェクトと一致しません。再生成してください。",
+  MANIFEST_SCREEN_TEMPLATE_STALE:
+    "保存済みプレビューの画面テンプレートが更新されています。再生成してください。"
 };
 
 const blockerOrder: readonly string[] = [
@@ -133,6 +135,7 @@ const blockerOrder: readonly string[] = [
   "MANIFEST_INVALID",
   "MANIFEST_UNREADABLE",
   "MANIFEST_PROJECT_STALE",
+  "MANIFEST_SCREEN_TEMPLATE_STALE",
   "OUTLINE_NOT_APPROVED",
   "OUTLINE_SOURCE_HASH_MISMATCH",
   "SCRIPT_NOT_APPROVED",
