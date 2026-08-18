@@ -3,6 +3,7 @@ import {
   type Character,
   type Script,
   type ScriptLine,
+  type ScriptSection,
   type VideoProject
 } from "../schema/index.js";
 
@@ -375,6 +376,19 @@ export function updateScriptLine(
   const line = next.sections[sectionIndex]?.lines[lineIndex];
   if (line !== undefined) {
     Object.assign(line, update);
+  }
+  return next;
+}
+
+export function updateScriptSection(
+  script: Script,
+  sectionIndex: number,
+  update: Partial<Pick<ScriptSection, "screenTemplateId">>
+): Script {
+  const next = cloneScript(script);
+  const section = next.sections[sectionIndex];
+  if (section !== undefined) {
+    Object.assign(section, update);
   }
   return next;
 }

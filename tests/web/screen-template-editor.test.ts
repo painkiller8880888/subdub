@@ -13,7 +13,11 @@ import {
   screenTemplateResizeHandlePosition,
   updateScreenTemplateElementNumericField
 } from "../../src/web/screen-template-editor.js";
-import { screenTemplateElementStyle } from "../../src/remotion/screen-template-layout.js";
+import {
+  screenLayoutContentFrameStyle,
+  screenLayoutContentInnerStyle,
+  screenTemplateElementStyle
+} from "../../src/remotion/screen-template-layout.js";
 
 const TIMESTAMP = "2026-08-18T00:00:00.000Z";
 
@@ -39,6 +43,52 @@ describe("ScreenTemplate editor geometry", () => {
       )
     ).toEqual({ x: 0.1, y: 0.05 });
     expect(screenTemplateElementStyle(moved).left).toBe("18%");
+  });
+
+  it("keeps legacy media transforms canvas-relative while content-slot transforms stay inner", () => {
+    const legacyDisplay = {
+      fit: "cover",
+      crop: { x: 0.25, y: 0.1, width: 0.5, height: 0.8 },
+      scale: 1.1,
+      position: { x: 0.6, y: 0.4 },
+      prioritizeVisual: false,
+      displayCoordinateSpace: "legacy-media-frame"
+    } as const;
+    const relativeDisplay = {
+      fit: "contain",
+      crop: { x: 0, y: 0, width: 1, height: 1 },
+      scale: 1,
+      position: { x: 0.5, y: 0.5 },
+      prioritizeVisual: false,
+      displayCoordinateSpace: "content-slot-relative"
+    } as const;
+    const legacy = screenLayoutContentFrameStyle(legacyDisplay);
+    const relative = screenLayoutContentFrameStyle(relativeDisplay);
+
+    expect(legacy).toMatchObject({
+      height: "62%",
+      left: "60%",
+      top: "40%",
+      width: "82%"
+    });
+    expect(relative).toMatchObject({
+      height: "100%",
+      left: "50%",
+      top: "50%",
+      width: "100%"
+    });
+    expect(screenLayoutContentInnerStyle(relativeDisplay)).toMatchObject({
+      height: "100%",
+      left: "0%",
+      top: "0%",
+      width: "100%"
+    });
+    expect(screenLayoutContentInnerStyle(legacyDisplay)).toMatchObject({
+      height: "125%",
+      left: "-50%",
+      top: "-12.5%",
+      width: "200%"
+    });
   });
 
   it("resizes a rotated element using the element-local axes", () => {

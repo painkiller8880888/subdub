@@ -1,4 +1,9 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  useMutation,
+  useQueries,
+  useQuery,
+  useQueryClient
+} from "@tanstack/react-query";
 import {
   type ChangeEvent,
   type FormEvent,
@@ -12,22 +17,28 @@ import { ZodError } from "zod";
 
 import type {
   ProjectSummary,
+  ScreenTemplateSummary,
   VoiceLineGenerationStatus
 } from "../schema/api.js";
 import type {
+  AssetDetail,
   CharacterVariant,
   CharacterVisualCatalogSnapshot,
   CharacterVisualSet,
   Script,
   ScriptLine,
+  ScreenTemplate,
   VideoProject
 } from "../schema/index.js";
 import {
   ApiClientError,
   ApiClientProtocolError,
   fetchCharacterVisualCatalog,
+  fetchAsset,
   fetchProject,
   fetchProjectVoiceStatus,
+  fetchScreenTemplate,
+  fetchScreenTemplates,
   generateAllProjectVoice,
   generateProjectVoice,
   initializeProjectScript,
@@ -52,6 +63,7 @@ import {
   reconcileScriptLineIdsWithMap,
   resolveScriptLineId,
   scriptStatusAfterEdit,
+  updateScriptSection,
   updateScriptLine,
   validateScriptDraft,
   type BulkPasteError,
@@ -62,6 +74,14 @@ import { characterVisualFileUrl } from "./character-visual-picker";
 import { VoiceAdjustmentEditor } from "./VoiceAdjustmentEditor";
 import { visualAssignmentsPath } from "./VisualAssignmentsPage";
 import { WorkflowIndicator } from "./WorkflowIndicator";
+import { ScreenLayoutFrame } from "../remotion/screen-template-layout";
+import {
+  findVisualAssignmentForLine,
+  resolveScriptLineScreenPreview,
+  resolveScriptScreenTemplate,
+  screenTemplateIdsForScript,
+  type ResolvedScriptScreenTemplate
+} from "./screen-template-preview";
 
 function charactersPath(projectId: string): string {
   return `/projects/${encodeURIComponent(projectId)}/characters`;
@@ -149,6 +169,40 @@ function lineIssueText(
       prefix.every((segment, index) => issue.path[index] === segment)
     )
     .map((issue) => issue.message);
+}
+
+function screenTemplateReferenceMessage(
+  resolved: ResolvedScriptScreenTemplate
+): string | null {
+  switch (resolved.status) {
+    case "missing":
+      return `未解決: ${resolved.templateId}`;
+    case "inactive":
+      return `非アクティブ: ${resolved.templateId}`;
+    case "loading":
+      return "テンプレートを読み込み中…";
+    default:
+      return null;
+  }
+}
+
+function screenTemplateName(
+  resolved: ResolvedScriptScreenTemplate,
+  activeTemplates: readonly ScreenTemplateSummary[]
+): string {
+  return (
+    resolved.template?.name ??
+    activeTemplates.find(
+      (template) => template.templateId === resolved.templateId
+    )?.name ??
+    resolved.templateId
+  );
+}
+
+function screenTemplateStatusIsSelectable(
+  resolved: ResolvedScriptScreenTemplate
+): boolean {
+  return resolved.status === "ready";
 }
 
 function variantFileSlots(variant: CharacterVariant): readonly {
@@ -241,6 +295,9 @@ function ScriptLineCard({
   project,
   catalog,
   catalogUnavailable,
+  activeTemplates,
+  resolvedTemplate,
+  linePreview,
   issues,
   voiceStatus,
   voiceGenerationDisabled,
@@ -251,7 +308,8 @@ function ScriptLineCard({
   onDuplicate,
   onDelete,
   onGenerateVoice,
-  onOpenPicker
+  onOpenPicker,
+  onTemplateChange
 }: {
   readonly line: ScriptLine;
   readonly sectionIndex: number;
@@ -259,6 +317,9 @@ function ScriptLineCard({
   readonly project: VideoProject;
   readonly catalog: CharacterVisualCatalogSnapshot | undefined;
   readonly catalogUnavailable: boolean;
+  readonly activeTemplates: readonly ScreenTemplateSummary[];
+  readonly resolvedTemplate: ResolvedScriptScreenTemplate;
+  readonly linePreview: ReturnType<typeof resolveScriptLineScreenPreview>;
   readonly issues: readonly ScriptDraftIssue[];
   readonly voiceStatus: VoiceLineGenerationStatus | undefined;
   readonly voiceGenerationDisabled: boolean;
@@ -270,7 +331,9 @@ function ScriptLineCard({
   readonly onDelete: () => void;
   readonly onGenerateVoice: () => void;
   readonly onOpenPicker: () => void;
+  readonly onTemplateChange: (templateId: string | null) => void;
 }) {
+  const [templatePickerOpen, setTemplatePickerOpen] = useState(false);
   const lineIssues = lineIssueText(issues, sectionIndex, lineIndex);
   const { character, visual, variant } = visualForLine(project, catalog, line);
   const numberValue = (value: number): string =>
@@ -292,226 +355,351 @@ function ScriptLineCard({
               : variant.status === "active" && visual.status === "active"
                 ? "選択中"
                 : "非アクティブな参照です";
+  const effectiveTemplateName = screenTemplateName(
+    resolvedTemplate,
+    activeTemplates
+  );
+  const templateReferenceError =
+    screenTemplateReferenceMessage(resolvedTemplate);
+  const lineTemplateIsOverride = line.screenTemplateId !== null;
+  const activeTemplateIds = new Set(
+    activeTemplates.map((template) => template.templateId)
+  );
 
   return (
     <article className="script-line-card" aria-label={`セリフ ${line.id}`}>
-      <header className="script-line-card-header">
-        <div>
-          <p className="eyebrow">セリフ識別子</p>
-          <code>{line.id}</code>
-        </div>
-        <div className="script-line-actions">
-          <button
-            className="button"
-            type="button"
-            onClick={() => onMove("up")}
-            disabled={lineIndex === 0}
-          >
-            上へ移動
-          </button>
-          <button
-            className="button"
-            type="button"
-            onClick={() => onMove("down")}
-            disabled={
-              lineIndex ===
-              (project.script.sections[sectionIndex]?.lines.length ?? 1) - 1
-            }
-          >
-            下へ移動
-          </button>
-          <button className="button" type="button" onClick={onDuplicate}>
-            複製
-          </button>
-          <button className="button" type="button" onClick={onDelete}>
-            削除
-          </button>
-        </div>
-      </header>
-
-      <div className="script-line-fields">
-        <div className="form-field">
-          <label htmlFor={`${line.id}-speaker`}>話者</label>
-          <select
-            id={`${line.id}-speaker`}
-            value={line.speakerId}
-            onChange={(event) =>
-              onChange({
-                speakerId: event.target.value,
-                characterVariantId: null
-              })
-            }
-          >
-            {project.characters.map((candidate) => (
-              <option key={candidate.id} value={candidate.id}>
-                {candidate.name}（{candidate.role}）
-              </option>
-            ))}
-          </select>
-        </div>
-        <div className="form-field">
-          <label htmlFor={`${line.id}-expression`}>
-            表情（表示選択には影響しません）
-          </label>
-          <select
-            id={`${line.id}-expression`}
-            value={line.expression}
-            onChange={(event) =>
-              onChange({
-                expression: event.target.value as ScriptLine["expression"]
-              })
-            }
-          >
-            <option value="neutral">通常</option>
-            <option value="smile">喜び</option>
-            <option value="explain">説明</option>
-            <option value="caution">注意</option>
-          </select>
-        </div>
-        <div className="form-field script-line-wide-field">
-          <label htmlFor={`${line.id}-spoken`}>
-            読み上げる文章（VOICEVOX）
-          </label>
-          <textarea
-            id={`${line.id}-spoken`}
-            rows={3}
-            value={line.spokenText}
-            onChange={(event) => onChange({ spokenText: event.target.value })}
-          />
-        </div>
-        <div className="form-field script-line-wide-field">
-          <label htmlFor={`${line.id}-subtitle`}>字幕に表示する文章</label>
-          <textarea
-            id={`${line.id}-subtitle`}
-            rows={3}
-            value={line.subtitleText}
-            onChange={(event) => onChange({ subtitleText: event.target.value })}
-          />
-        </div>
-        <div className="form-field">
-          <label htmlFor={`${line.id}-pause-before`}>
-            発話前の間（ミリ秒）
-          </label>
-          <input
-            id={`${line.id}-pause-before`}
-            type="number"
-            min={0}
-            step={1}
-            value={numberValue(line.pauseBeforeMs)}
-            onChange={(event) =>
-              onChange({
-                pauseBeforeMs:
-                  event.target.value.length === 0
-                    ? Number.NaN
-                    : Number(event.target.value)
-              })
-            }
-          />
-        </div>
-        <div className="form-field">
-          <label htmlFor={`${line.id}-pause-after`}>発話後の間（ミリ秒）</label>
-          <input
-            id={`${line.id}-pause-after`}
-            type="number"
-            min={0}
-            step={1}
-            value={numberValue(line.pauseAfterMs)}
-            onChange={(event) =>
-              onChange({
-                pauseAfterMs:
-                  event.target.value.length === 0
-                    ? Number.NaN
-                    : Number(event.target.value)
-              })
-            }
-          />
-        </div>
-      </div>
-
-      <section
-        aria-label={`${line.id}のキャラクタービジュアル設定`}
-        className="script-line-character-visual"
-      >
-        <div className="script-line-character-visual-content">
-          <div>
-            <p className="eyebrow">キャラクタービジュアル</p>
-            <strong>{visual?.name ?? "プロジェクト binding 未設定"}</strong>
-            <span className="status-message">{visualSummary}</span>
-          </div>
-          {visual !== undefined && variant !== undefined ? (
-            <CharacterVariantPreview
-              visual={visual}
-              variant={variant}
-              characterName={character?.name ?? line.speakerId}
+      <div className="script-line-card-layout">
+        <aside
+          aria-label={`${line.id}の画面プレビュー`}
+          className="script-line-card-preview"
+        >
+          {resolvedTemplate.status === "ready" &&
+          resolvedTemplate.template !== undefined ? (
+            <ScreenLayoutFrame
+              ariaLabel={`${line.id}の16対9画面プレビュー`}
+              className="script-line-card-screen-preview"
+              preview={linePreview}
+              template={resolvedTemplate.template}
             />
           ) : (
-            <div className="script-line-character-visual-empty">未選択</div>
+            <div
+              aria-label={
+                templateReferenceError ?? "画面テンプレートを読み込み中"
+              }
+              className="script-line-card-preview-state"
+              role="img"
+            >
+              <strong>
+                {templateReferenceError ?? "テンプレートを読み込み中…"}
+              </strong>
+              {templateReferenceError !== null ? (
+                <span>activeなテンプレートを選び直してください。</span>
+              ) : null}
+            </div>
           )}
-          {variant !== undefined ? (
-            <dl className="script-line-variant-details">
-              <div>
-                <dt>ラベル</dt>
-                <dd>{variant.label}</dd>
+        </aside>
+
+        <div className="script-line-card-editor">
+          <header className="script-line-card-header">
+            <div>
+              <p className="eyebrow">セリフ識別子</p>
+              <code>{line.id}</code>
+            </div>
+            <div className="script-line-actions">
+              <button
+                className="button"
+                type="button"
+                onClick={() => onMove("up")}
+                disabled={lineIndex === 0}
+              >
+                上へ移動
+              </button>
+              <button
+                className="button"
+                type="button"
+                onClick={() => onMove("down")}
+                disabled={
+                  lineIndex ===
+                  (project.script.sections[sectionIndex]?.lines.length ?? 1) - 1
+                }
+              >
+                下へ移動
+              </button>
+              <button className="button" type="button" onClick={onDuplicate}>
+                複製
+              </button>
+              <button className="button" type="button" onClick={onDelete}>
+                削除
+              </button>
+            </div>
+          </header>
+
+          <section
+            aria-label={`${line.id}の画面テンプレート設定`}
+            className="script-line-template-controls"
+          >
+            <div>
+              <p className="eyebrow">画面テンプレート</p>
+              <strong>
+                {lineTemplateIsOverride
+                  ? "個別設定: "
+                  : "セクション設定を使用: "}
+                {effectiveTemplateName}
+              </strong>
+              {templateReferenceError !== null ? (
+                <span className="script-template-reference-error" role="alert">
+                  {templateReferenceError}
+                </span>
+              ) : null}
+            </div>
+            <div className="script-line-template-actions">
+              <button
+                className="button button-small"
+                disabled={activeTemplates.length === 0}
+                type="button"
+                onClick={() => setTemplatePickerOpen((current) => !current)}
+              >
+                {lineTemplateIsOverride ? "変更" : "個別に変更"}
+              </button>
+              {lineTemplateIsOverride ? (
+                <button
+                  className="button button-small"
+                  type="button"
+                  onClick={() => {
+                    setTemplatePickerOpen(false);
+                    onTemplateChange(null);
+                  }}
+                >
+                  セクション設定に戻す
+                </button>
+              ) : null}
+            </div>
+            {templatePickerOpen ? (
+              <div className="form-field script-line-template-picker">
+                <label htmlFor={`${line.id}-screen-template`}>個別設定</label>
+                <select
+                  id={`${line.id}-screen-template`}
+                  value={line.screenTemplateId ?? ""}
+                  onChange={(event) => {
+                    onTemplateChange(event.target.value);
+                    setTemplatePickerOpen(false);
+                  }}
+                >
+                  <option disabled value="">
+                    activeなテンプレートを選択
+                  </option>
+                  {line.screenTemplateId !== null &&
+                  !activeTemplateIds.has(line.screenTemplateId) ? (
+                    <option value={line.screenTemplateId}>
+                      未解決: {line.screenTemplateId}
+                    </option>
+                  ) : null}
+                  {activeTemplates.map((template) => (
+                    <option
+                      key={template.templateId}
+                      value={template.templateId}
+                    >
+                      {template.name}
+                    </option>
+                  ))}
+                </select>
               </div>
+            ) : null}
+          </section>
+
+          <div className="script-line-fields">
+            <div className="form-field">
+              <label htmlFor={`${line.id}-speaker`}>話者</label>
+              <select
+                id={`${line.id}-speaker`}
+                value={line.speakerId}
+                onChange={(event) =>
+                  onChange({
+                    speakerId: event.target.value,
+                    characterVariantId: null
+                  })
+                }
+              >
+                {project.characters.map((candidate) => (
+                  <option key={candidate.id} value={candidate.id}>
+                    {candidate.name}（{candidate.role}）
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="form-field">
+              <label htmlFor={`${line.id}-expression`}>
+                表情（表示選択には影響しません）
+              </label>
+              <select
+                id={`${line.id}-expression`}
+                value={line.expression}
+                onChange={(event) =>
+                  onChange({
+                    expression: event.target.value as ScriptLine["expression"]
+                  })
+                }
+              >
+                <option value="neutral">通常</option>
+                <option value="smile">喜び</option>
+                <option value="explain">説明</option>
+                <option value="caution">注意</option>
+              </select>
+            </div>
+            <div className="form-field script-line-wide-field">
+              <label htmlFor={`${line.id}-spoken`}>
+                読み上げる文章（VOICEVOX）
+              </label>
+              <textarea
+                id={`${line.id}-spoken`}
+                rows={3}
+                value={line.spokenText}
+                onChange={(event) =>
+                  onChange({ spokenText: event.target.value })
+                }
+              />
+            </div>
+            <div className="form-field script-line-wide-field">
+              <label htmlFor={`${line.id}-subtitle`}>字幕に表示する文章</label>
+              <textarea
+                id={`${line.id}-subtitle`}
+                rows={3}
+                value={line.subtitleText}
+                onChange={(event) =>
+                  onChange({ subtitleText: event.target.value })
+                }
+              />
+            </div>
+            <div className="form-field">
+              <label htmlFor={`${line.id}-pause-before`}>
+                発話前の間（ミリ秒）
+              </label>
+              <input
+                id={`${line.id}-pause-before`}
+                type="number"
+                min={0}
+                step={1}
+                value={numberValue(line.pauseBeforeMs)}
+                onChange={(event) =>
+                  onChange({
+                    pauseBeforeMs:
+                      event.target.value.length === 0
+                        ? Number.NaN
+                        : Number(event.target.value)
+                  })
+                }
+              />
+            </div>
+            <div className="form-field">
+              <label htmlFor={`${line.id}-pause-after`}>
+                発話後の間（ミリ秒）
+              </label>
+              <input
+                id={`${line.id}-pause-after`}
+                type="number"
+                min={0}
+                step={1}
+                value={numberValue(line.pauseAfterMs)}
+                onChange={(event) =>
+                  onChange({
+                    pauseAfterMs:
+                      event.target.value.length === 0
+                        ? Number.NaN
+                        : Number(event.target.value)
+                  })
+                }
+              />
+            </div>
+          </div>
+
+          <section
+            aria-label={`${line.id}のキャラクタービジュアル設定`}
+            className="script-line-character-visual"
+          >
+            <div className="script-line-character-visual-content">
               <div>
-                <dt>renderType</dt>
-                <dd>{variant.renderType}</dd>
+                <p className="eyebrow">キャラクタービジュアル</p>
+                <strong>{visual?.name ?? "プロジェクト binding 未設定"}</strong>
+                <span className="status-message">{visualSummary}</span>
               </div>
-            </dl>
+              {visual !== undefined && variant !== undefined ? (
+                <CharacterVariantPreview
+                  visual={visual}
+                  variant={variant}
+                  characterName={character?.name ?? line.speakerId}
+                />
+              ) : (
+                <div className="script-line-character-visual-empty">未選択</div>
+              )}
+              {variant !== undefined ? (
+                <dl className="script-line-variant-details">
+                  <div>
+                    <dt>ラベル</dt>
+                    <dd>{variant.label}</dd>
+                  </div>
+                  <div>
+                    <dt>renderType</dt>
+                    <dd>{variant.renderType}</dd>
+                  </div>
+                </dl>
+              ) : null}
+            </div>
+            <button
+              className="button button-small"
+              type="button"
+              disabled={visualButtonDisabled}
+              onClick={onOpenPicker}
+            >
+              {variant === undefined ? "ビジュアルを選択" : "ビジュアルを変更"}
+            </button>
+          </section>
+
+          <div className="script-line-voice-status" aria-label="音声状態">
+            <span className="eyebrow">音声状態</span>
+            {voiceStatus === undefined ? (
+              <span className="status-message">確認中…</span>
+            ) : (
+              <span
+                className={`voice-status voice-status-${voiceStatus.status}`}
+              >
+                {voiceStatusLabel(voiceStatus.status)}
+              </span>
+            )}
+            {voiceStatus?.status === "failed" &&
+            voiceStatus.errorCode !== undefined ? (
+              <code>{voiceStatus.errorCode}</code>
+            ) : null}
+            <button
+              className="button button-small"
+              type="button"
+              disabled={
+                voiceGenerationDisabled ||
+                lineIssues.length > 0 ||
+                voiceStatus?.status === "current" ||
+                voiceStatus?.status === "generating" ||
+                voiceStatus?.status === "needs_review"
+              }
+              onClick={onGenerateVoice}
+            >
+              {voiceStatus?.status === "generating"
+                ? "生成中…"
+                : "このセリフを生成"}
+            </button>
+          </div>
+          <VoiceAdjustmentEditor
+            projectId={projectId}
+            line={line}
+            voiceAvailable={voiceAvailable}
+          />
+          {lineIssues.length > 0 ? (
+            <ul className="form-error script-line-errors" role="alert">
+              {lineIssues.map((issue) => (
+                <li key={issue}>{issue}</li>
+              ))}
+            </ul>
           ) : null}
         </div>
-        <button
-          className="button button-small"
-          type="button"
-          disabled={visualButtonDisabled}
-          onClick={onOpenPicker}
-        >
-          {variant === undefined ? "ビジュアルを選択" : "ビジュアルを変更"}
-        </button>
-      </section>
-
-      <div className="script-line-voice-status" aria-label="音声状態">
-        <span className="eyebrow">音声状態</span>
-        {voiceStatus === undefined ? (
-          <span className="status-message">確認中…</span>
-        ) : (
-          <span className={`voice-status voice-status-${voiceStatus.status}`}>
-            {voiceStatusLabel(voiceStatus.status)}
-          </span>
-        )}
-        {voiceStatus?.status === "failed" &&
-        voiceStatus.errorCode !== undefined ? (
-          <code>{voiceStatus.errorCode}</code>
-        ) : null}
-        <button
-          className="button button-small"
-          type="button"
-          disabled={
-            voiceGenerationDisabled ||
-            lineIssues.length > 0 ||
-            voiceStatus?.status === "current" ||
-            voiceStatus?.status === "generating" ||
-            voiceStatus?.status === "needs_review"
-          }
-          onClick={onGenerateVoice}
-        >
-          {voiceStatus?.status === "generating"
-            ? "生成中…"
-            : "このセリフを生成"}
-        </button>
       </div>
-      <VoiceAdjustmentEditor
-        projectId={projectId}
-        line={line}
-        voiceAvailable={voiceAvailable}
-      />
-      {lineIssues.length > 0 ? (
-        <ul className="form-error script-line-errors" role="alert">
-          {lineIssues.map((issue) => (
-            <li key={issue}>{issue}</li>
-          ))}
-        </ul>
-      ) : null}
     </article>
   );
 }
@@ -592,6 +780,39 @@ export function ScriptPage() {
   const coordinatorRef = useRef<AutosaveCoordinator<Script> | null>(null);
   const [coordinator, setCoordinator] =
     useState<AutosaveCoordinator<Script> | null>(null);
+
+  const screenTemplateSource = draft ?? projectQuery.data?.script;
+  const selectedTemplateIds =
+    screenTemplateSource === undefined
+      ? []
+      : screenTemplateIdsForScript(screenTemplateSource);
+  const screenTemplatesQuery = useQuery({
+    queryKey: ["screen-templates", { status: "active" }],
+    queryFn: () => fetchScreenTemplates({ status: "active" }),
+    enabled: projectId !== undefined,
+    retry: false
+  });
+  const templateDetailQueries = useQueries({
+    queries: selectedTemplateIds.map((templateId) => ({
+      queryKey: ["screen-template", templateId],
+      queryFn: () => fetchScreenTemplate(templateId),
+      retry: false
+    }))
+  });
+  const assetIds = [
+    ...new Set(
+      (projectQuery.data?.visuals.assignments ?? []).map(
+        (assignment) => assignment.assetId
+      )
+    )
+  ];
+  const assetQueries = useQueries({
+    queries: assetIds.map((assetId) => ({
+      queryKey: ["assets", assetId],
+      queryFn: () => fetchAsset(assetId),
+      retry: false
+    }))
+  });
 
   const saveMutation = useMutation({
     mutationFn: ({
@@ -893,6 +1114,21 @@ export function ScriptPage() {
     }
   }
 
+  function updateSectionTemplate(
+    sectionIndex: number,
+    templateId: string
+  ): void {
+    const currentDraft = draftRef.current;
+    if (currentDraft === null) {
+      return;
+    }
+    updateDraft(
+      updateScriptSection(currentDraft, sectionIndex, {
+        screenTemplateId: templateId
+      })
+    );
+  }
+
   function addLine(sectionIndex: number): void {
     const currentDraft = draftRef.current;
     const speakerId = projectQuery.data?.characters[0]?.id;
@@ -1052,6 +1288,22 @@ export function ScriptPage() {
 
   const project = projectQuery.data;
   const catalog = catalogQuery.data;
+  const activeTemplates = screenTemplatesQuery.data ?? [];
+  const templateDetails = new Map<string, ScreenTemplate>();
+  const templateLoadingIds = new Set<string>();
+  selectedTemplateIds.forEach((templateId, index) => {
+    const query = templateDetailQueries[index];
+    if (query?.data !== undefined) {
+      templateDetails.set(templateId, query.data);
+    }
+    if (query?.isPending === true) {
+      templateLoadingIds.add(templateId);
+    }
+  });
+  const assets = new Map<string, AssetDetail | undefined>();
+  assetIds.forEach((assetId, index) => {
+    assets.set(assetId, assetQueries[index]?.data);
+  });
   const isInitializing = initializeMutation.isPending;
   const isReadyToInitialize =
     project !== undefined && isScriptInitializationAllowed(project);
@@ -1286,6 +1538,14 @@ export function ScriptPage() {
           </p>
         </section>
       ) : null}
+      {screenTemplatesQuery.isError ? (
+        <section className="message-panel message-panel-warning" role="status">
+          <h2>画面テンプレート候補を確認できません</h2>
+          <p>
+            既存の参照は保持したまま表示します。activeなテンプレートの選択には復旧が必要です。
+          </p>
+        </section>
+      ) : null}
       {pickerError !== null ? (
         <section className="message-panel message-panel-warning" role="alert">
           <p>{pickerError}</p>
@@ -1434,79 +1694,178 @@ export function ScriptPage() {
         </form>
 
         <section className="script-section-list" aria-label="台本セクション">
-          {draft.sections.map((section, sectionIndex) => (
-            <section className="script-section-card" key={section.id}>
-              <header className="script-section-header">
-                <div>
-                  <p className="eyebrow">セクション</p>
-                  <h2>{section.name}</h2>
-                  <code>
-                    {section.id} / 構成案ID: {section.outlineSectionId}
-                  </code>
-                </div>
-                <button
-                  className="button"
-                  type="button"
-                  onClick={() => addLine(sectionIndex)}
-                >
-                  セリフを追加
-                </button>
-              </header>
-              {section.lines.length === 0 ? (
-                <p className="status-message">セリフはまだありません。</p>
-              ) : (
-                <div className="script-line-list">
-                  {section.lines.map((line, lineIndex) => (
-                    <ScriptLineCard
-                      key={line.id}
-                      line={line}
-                      sectionIndex={sectionIndex}
-                      lineIndex={lineIndex}
-                      project={project}
-                      catalog={catalog}
-                      catalogUnavailable={
-                        catalogQuery.isPending || catalogQuery.isError
-                      }
-                      issues={issues}
-                      voiceStatus={voiceStatusByLine.get(line.id)}
-                      voiceGenerationDisabled={
-                        voiceGenerationDisabled || issues.length > 0
-                      }
-                      voiceAvailable={voiceStatusQuery.data?.available === true}
-                      projectId={project.metadata.id}
-                      onChange={(update) =>
-                        updateLine(sectionIndex, lineIndex, update)
-                      }
-                      onMove={(direction) =>
-                        updateDraft(
-                          moveScriptLine(
-                            draft,
+          {draft.sections.map((section, sectionIndex) => {
+            const sectionTemplate = resolveScriptScreenTemplate(
+              section,
+              { screenTemplateId: null },
+              templateDetails,
+              templateLoadingIds
+            );
+            const sectionTemplateError =
+              screenTemplateReferenceMessage(sectionTemplate);
+            const sectionTemplateIsCandidate = activeTemplates.some(
+              (template) => template.templateId === section.screenTemplateId
+            );
+
+            return (
+              <section className="script-section-card" key={section.id}>
+                <header className="script-section-header">
+                  <div>
+                    <p className="eyebrow">セクション</p>
+                    <h2>{section.name}</h2>
+                    <code>
+                      {section.id} / 構成案ID: {section.outlineSectionId}
+                    </code>
+                    <div className="script-section-template-control">
+                      <label htmlFor={`${section.id}-screen-template`}>
+                        画面テンプレート
+                      </label>
+                      <select
+                        aria-invalid={
+                          !screenTemplateStatusIsSelectable(sectionTemplate)
+                        }
+                        disabled={
+                          screenTemplatesQuery.isError ||
+                          activeTemplates.length === 0
+                        }
+                        id={`${section.id}-screen-template`}
+                        value={section.screenTemplateId}
+                        onChange={(event) =>
+                          updateSectionTemplate(
                             sectionIndex,
-                            lineIndex,
-                            direction
+                            event.target.value
                           )
-                        )
-                      }
-                      onDuplicate={() =>
-                        updateDraft(
-                          duplicateScriptLine(draft, sectionIndex, lineIndex)
-                        )
-                      }
-                      onDelete={() =>
-                        updateDraft(
-                          deleteScriptLine(draft, sectionIndex, lineIndex)
-                        )
-                      }
-                      onGenerateVoice={() =>
-                        void generateVoiceLine(section.id, line.id)
-                      }
-                      onOpenPicker={() => openVisualPicker(line.id)}
-                    />
-                  ))}
-                </div>
-              )}
-            </section>
-          ))}
+                        }
+                      >
+                        {!sectionTemplateIsCandidate ? (
+                          <option value={section.screenTemplateId}>
+                            {sectionTemplateError ??
+                              `現在: ${screenTemplateName(sectionTemplate, activeTemplates)}`}
+                          </option>
+                        ) : null}
+                        {activeTemplates.map((template) => (
+                          <option
+                            key={template.templateId}
+                            value={template.templateId}
+                          >
+                            {template.name}
+                          </option>
+                        ))}
+                      </select>
+                      {sectionTemplateError !== null ? (
+                        <span
+                          className="script-template-reference-error"
+                          role="alert"
+                        >
+                          {sectionTemplateError}
+                        </span>
+                      ) : null}
+                    </div>
+                  </div>
+                  <button
+                    className="button"
+                    type="button"
+                    onClick={() => addLine(sectionIndex)}
+                  >
+                    セリフを追加
+                  </button>
+                </header>
+                {section.lines.length === 0 ? (
+                  <p className="status-message">セリフはまだありません。</p>
+                ) : (
+                  <div className="script-line-list">
+                    {section.lines.map((line, lineIndex) =>
+                      (() => {
+                        const resolvedTemplate = resolveScriptScreenTemplate(
+                          section,
+                          line,
+                          templateDetails,
+                          templateLoadingIds
+                        );
+                        const assignment = findVisualAssignmentForLine(
+                          section,
+                          line.id,
+                          project.visuals.assignments
+                        );
+                        return (
+                          <ScriptLineCard
+                            key={line.id}
+                            line={line}
+                            sectionIndex={sectionIndex}
+                            lineIndex={lineIndex}
+                            project={project}
+                            catalog={catalog}
+                            catalogUnavailable={
+                              catalogQuery.isPending || catalogQuery.isError
+                            }
+                            activeTemplates={activeTemplates}
+                            resolvedTemplate={resolvedTemplate}
+                            linePreview={resolveScriptLineScreenPreview({
+                              projectId: project.metadata.id,
+                              project,
+                              section,
+                              line,
+                              catalog,
+                              assignment,
+                              asset:
+                                assignment === undefined
+                                  ? undefined
+                                  : assets.get(assignment.assetId)
+                            })}
+                            issues={issues}
+                            voiceStatus={voiceStatusByLine.get(line.id)}
+                            voiceGenerationDisabled={
+                              voiceGenerationDisabled || issues.length > 0
+                            }
+                            voiceAvailable={
+                              voiceStatusQuery.data?.available === true
+                            }
+                            projectId={project.metadata.id}
+                            onChange={(update) =>
+                              updateLine(sectionIndex, lineIndex, update)
+                            }
+                            onTemplateChange={(templateId) =>
+                              updateLine(sectionIndex, lineIndex, {
+                                screenTemplateId: templateId
+                              })
+                            }
+                            onMove={(direction) =>
+                              updateDraft(
+                                moveScriptLine(
+                                  draft,
+                                  sectionIndex,
+                                  lineIndex,
+                                  direction
+                                )
+                              )
+                            }
+                            onDuplicate={() =>
+                              updateDraft(
+                                duplicateScriptLine(
+                                  draft,
+                                  sectionIndex,
+                                  lineIndex
+                                )
+                              )
+                            }
+                            onDelete={() =>
+                              updateDraft(
+                                deleteScriptLine(draft, sectionIndex, lineIndex)
+                              )
+                            }
+                            onGenerateVoice={() =>
+                              void generateVoiceLine(section.id, line.id)
+                            }
+                            onOpenPicker={() => openVisualPicker(line.id)}
+                          />
+                        );
+                      })()
+                    )}
+                  </div>
+                )}
+              </section>
+            );
+          })}
         </section>
       </section>
 
