@@ -30,6 +30,13 @@ import {
   projectMutationResponseSchema,
   projectSourceReadResponseSchema,
   projectSourceSaveRequestSchema,
+  screenTemplateCreateRequestSchema,
+  screenTemplateListQuerySchema,
+  screenTemplateListResponseSchema,
+  screenTemplateParamsSchema,
+  screenTemplateResponseSchema,
+  screenTemplateStatusChangeRequestSchema,
+  screenTemplateUpdateRequestSchema,
   scriptApproveRequestSchema,
   scriptInitializeRequestSchema,
   scriptSaveRequestSchema,
@@ -80,6 +87,11 @@ import {
   type ModelsResponse,
   type ProjectSourceContent,
   type ProjectSourceSaveRequest,
+  type ScreenTemplateCreateRequest,
+  type ScreenTemplateDetail,
+  type ScreenTemplateListQuery,
+  type ScreenTemplateSummary,
+  type ScreenTemplateUpdateRequest,
   type ScriptApproveRequest,
   type ScriptInitializeRequest,
   type ScriptSaveRequest,
@@ -993,6 +1005,102 @@ export async function approveProjectVisuals(
   const response = await fetchApi(
     `/api/projects/${encodeURIComponent(projectId)}/visuals/approve`,
     visualAssignmentResponseSchema,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(validatedInput)
+    }
+  );
+  return response.data;
+}
+
+export async function fetchScreenTemplates(
+  input: ScreenTemplateListQuery = {}
+): Promise<ScreenTemplateSummary[]> {
+  const query = screenTemplateListQuerySchema.parse(input);
+  const searchParams = new URLSearchParams();
+  if (query.status !== undefined) {
+    searchParams.set("status", query.status);
+  }
+  const queryString = searchParams.toString();
+  const response = await fetchApi(
+    `/api/screen-templates${queryString.length > 0 ? `?${queryString}` : ""}`,
+    screenTemplateListResponseSchema
+  );
+  return response.data;
+}
+
+export async function fetchScreenTemplate(
+  templateId: string
+): Promise<ScreenTemplateDetail> {
+  const params = screenTemplateParamsSchema.parse({ templateId });
+  const response = await fetchApi(
+    `/api/screen-templates/${encodeURIComponent(params.templateId)}`,
+    screenTemplateResponseSchema
+  );
+  return response.data;
+}
+
+export async function createScreenTemplate(
+  input: ScreenTemplateCreateRequest
+): Promise<ScreenTemplateDetail> {
+  const validatedInput = screenTemplateCreateRequestSchema.parse(input);
+  const response = await fetchApi(
+    "/api/screen-templates",
+    screenTemplateResponseSchema,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(validatedInput)
+    }
+  );
+  return response.data;
+}
+
+export async function updateScreenTemplate(
+  templateId: string,
+  input: ScreenTemplateUpdateRequest
+): Promise<ScreenTemplateDetail> {
+  const params = screenTemplateParamsSchema.parse({ templateId });
+  const validatedInput = screenTemplateUpdateRequestSchema.parse(input);
+  const response = await fetchApi(
+    `/api/screen-templates/${encodeURIComponent(params.templateId)}`,
+    screenTemplateResponseSchema,
+    {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(validatedInput)
+    }
+  );
+  return response.data;
+}
+
+export async function activateScreenTemplate(
+  templateId: string,
+  expectedRevision: number
+): Promise<ScreenTemplateDetail> {
+  return changeScreenTemplateStatus(templateId, "activate", expectedRevision);
+}
+
+export async function deactivateScreenTemplate(
+  templateId: string,
+  expectedRevision: number
+): Promise<ScreenTemplateDetail> {
+  return changeScreenTemplateStatus(templateId, "deactivate", expectedRevision);
+}
+
+async function changeScreenTemplateStatus(
+  templateId: string,
+  action: "activate" | "deactivate",
+  expectedRevision: number
+): Promise<ScreenTemplateDetail> {
+  const params = screenTemplateParamsSchema.parse({ templateId });
+  const validatedInput = screenTemplateStatusChangeRequestSchema.parse({
+    expectedRevision
+  });
+  const response = await fetchApi(
+    `/api/screen-templates/${encodeURIComponent(params.templateId)}/${action}`,
+    screenTemplateResponseSchema,
     {
       method: "POST",
       headers: { "content-type": "application/json" },

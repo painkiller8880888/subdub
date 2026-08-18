@@ -47,6 +47,8 @@ import { AssetsPage } from "./AssetsPage";
 import { CharacterVisualsPage } from "./CharacterVisualsPage";
 import { EditPage } from "./EditPage";
 import { OutlinePage } from "./OutlinePage";
+import { ScreenTemplateEditorPage } from "./ScreenTemplateEditorPage";
+import { ScreenTemplatesPage } from "./ScreenTemplatesPage";
 import { ScriptPage } from "./ScriptPage";
 import { TerminologyPage } from "./TerminologyPage";
 import { PreviewPage } from "./PreviewPage";
@@ -1043,6 +1045,11 @@ export function App() {
           path="/projects/:projectId/characters"
         />
         <Route element={<CharacterVisualsPage />} path="/character-visuals" />
+        <Route element={<ScreenTemplatesPage />} path="/screen-templates" />
+        <Route
+          element={<ScreenTemplateEditorPage />}
+          path="/screen-templates/:templateId"
+        />
         <Route element={<AssetsPage />} path="/assets" />
         <Route element={<TerminologyPage />} path="/terminology" />
         <Route element={<AiRunsPage />} path="/ai-runs" />
