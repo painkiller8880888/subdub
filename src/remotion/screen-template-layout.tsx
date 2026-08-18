@@ -1,9 +1,15 @@
 import type { CSSProperties, ReactNode } from "react";
 
 import type {
+  CommonDisplay,
+  DisplayCoordinateSpace,
+  StaticAnnotation
+} from "../schema/common";
+import type {
   ScreenTemplate,
   ScreenTemplateElement
 } from "../schema/screen-template";
+import { AnnotationLayer } from "./layout";
 
 export type ScreenCharacterSlot = "speaker-1" | "speaker-2";
 
@@ -12,16 +18,36 @@ export type ScreenLayoutCharacterPreview = Readonly<{
   alt: string;
 }>;
 
+export type ScreenLayoutContentDisplay = Readonly<
+  Pick<
+    CommonDisplay,
+    "fit" | "crop" | "scale" | "position" | "prioritizeVisual"
+  > & {
+    annotations: readonly StaticAnnotation[];
+    displayCoordinateSpace?: DisplayCoordinateSpace;
+  }
+>;
+
+export type ScreenLayoutContentPreview = Readonly<{
+  src: string | null;
+  alt: string;
+  display?: ScreenLayoutContentDisplay;
+}>;
+
+export type ScreenLayoutBackground = Readonly<{
+  src: string | null;
+  fit: "contain" | "cover";
+}>;
+
 export type ScreenLayoutPreview = Readonly<{
   dialogueText: string;
   sectionTitleText: string;
   characters: Readonly<
     Partial<Record<ScreenCharacterSlot, ScreenLayoutCharacterPreview>>
   >;
-  content: Readonly<{
-    src: string | null;
-    alt: string;
-  }>;
+  content: ScreenLayoutContentPreview;
+  contents?: readonly ScreenLayoutContentPreview[];
+  background?: ScreenLayoutBackground;
 }>;
 
 export const DEFAULT_SCREEN_LAYOUT_PREVIEW: ScreenLayoutPreview = {
@@ -54,10 +80,62 @@ export function screenTemplateElementStyle(
   };
 }
 
+export function screenLayoutContentFrameStyle(
+  display: ScreenLayoutContentDisplay | undefined
+): CSSProperties {
+  const coordinateSpace =
+    display?.displayCoordinateSpace ?? "content-slot-relative";
+  const position = display?.position ?? { x: 0.5, y: 0.5 };
+  const scale = display?.scale ?? 1;
+  const width = coordinateSpace === "legacy-media-frame" ? 0.82 : 1;
+  const height = coordinateSpace === "legacy-media-frame" ? 0.62 : 1;
+
+  return {
+    backgroundColor: "#fff",
+    boxSizing: "border-box",
+    height: percentage(height),
+    left: percentage(position.x),
+    overflow: "hidden",
+    position: "absolute",
+    top: percentage(position.y),
+    transform: `translate(-50%, -50%) scale(${scale})`,
+    transformOrigin: "center center",
+    width: percentage(width)
+  };
+}
+
+export function screenLayoutContentInnerStyle(
+  display: ScreenLayoutContentDisplay | undefined
+): CSSProperties {
+  if (display === undefined) {
+    return {
+      height: "100%",
+      width: "100%"
+    };
+  }
+
+  const { crop } = display;
+  return {
+    height: `${(1 / crop.height) * 100}%`,
+    left: `${(-crop.x / crop.width) * 100}%`,
+    position: "absolute",
+    top: `${(-crop.y / crop.height) * 100}%`,
+    width: `${(1 / crop.width) * 100}%`
+  };
+}
+
 function previewOrDefault(
   preview: ScreenLayoutPreview | undefined
 ): ScreenLayoutPreview {
   return preview ?? DEFAULT_SCREEN_LAYOUT_PREVIEW;
+}
+
+function contentPreviews(
+  preview: ScreenLayoutPreview
+): readonly ScreenLayoutContentPreview[] {
+  return preview.contents === undefined || preview.contents.length === 0
+    ? [preview.content]
+    : preview.contents;
 }
 
 function renderCharacterPreview(
@@ -88,8 +166,19 @@ function renderScreenTemplateElement(
   element: ScreenTemplateElement,
   preview: ScreenLayoutPreview
 ): ReactNode {
+  const contentPreviewsForLayout = contentPreviews(preview);
+  const prioritizeVisual =
+    element.type === "character-visual" &&
+    contentPreviewsForLayout.some(
+      (content) => content.display?.prioritizeVisual === true
+    );
   const baseStyle = {
     ...screenTemplateElementStyle(element),
+    ...(prioritizeVisual
+      ? {
+          transform: `${screenTemplateElementStyle(element).transform} scale(0.72)`
+        }
+      : {}),
     zIndex:
       element.type === "content-slot"
         ? 1
@@ -147,24 +236,121 @@ function renderScreenTemplateElement(
     );
   }
 
+  const hasContentSlotRelativePreview = contentPreviewsForLayout.some(
+    (content) =>
+      content.display?.displayCoordinateSpace !== "legacy-media-frame"
+  );
+  if (hasContentSlotRelativePreview) {
+    return null;
+  }
+
   return (
     <div
       aria-hidden="true"
       className="screen-layout-element screen-layout-content"
       key={element.elementId}
       style={baseStyle}
+    />
+  );
+}
+
+function renderScreenLayoutContent(
+  content: ScreenLayoutContentPreview,
+  key: string
+): ReactNode {
+  return (
+    <div
+      className="screen-layout-content-frame"
+      key={key}
+      style={{
+        ...screenLayoutContentFrameStyle(content.display),
+        ...(content.display?.displayCoordinateSpace === "legacy-media-frame"
+          ? { zIndex: 1 }
+          : {})
+      }}
     >
-      {preview.content.src === null ? (
-        <span className="screen-layout-content-label">primary content</span>
-      ) : (
-        <img
-          alt={preview.content.alt}
-          className="screen-layout-content-image"
-          draggable={false}
-          src={preview.content.src}
-        />
-      )}
+      <div
+        className="screen-layout-content-inner"
+        style={screenLayoutContentInnerStyle(content.display)}
+      >
+        {content.src === null ? (
+          <span className="screen-layout-content-label">primary content</span>
+        ) : (
+          <img
+            alt={content.alt}
+            className="screen-layout-content-image"
+            draggable={false}
+            src={content.src}
+            style={{ objectFit: content.display?.fit ?? "cover" }}
+          />
+        )}
+      </div>
+      <AnnotationLayer
+        annotations={content.display?.annotations ?? []}
+        responsive
+      />
     </div>
+  );
+}
+
+function renderScreenLayoutContents(
+  elements: readonly ScreenTemplateElement[],
+  contents: readonly ScreenLayoutContentPreview[]
+): ReactNode {
+  const contentSlot = elements.find(
+    (
+      element
+    ): element is Extract<ScreenTemplateElement, { type: "content-slot" }> =>
+      element.type === "content-slot"
+  );
+  let relativeContentIndex = 0;
+
+  return contents.map((content, index) => {
+    if (content.display?.displayCoordinateSpace === "legacy-media-frame") {
+      return renderScreenLayoutContent(content, `content-${index}`);
+    }
+    if (contentSlot === undefined) {
+      return null;
+    }
+
+    const showContentSlotSurface = relativeContentIndex === 0;
+    relativeContentIndex += 1;
+    return (
+      <div
+        aria-hidden="true"
+        className={
+          showContentSlotSurface
+            ? "screen-layout-element screen-layout-content"
+            : "screen-layout-element"
+        }
+        key={`content-slot-${index}`}
+        style={{
+          ...screenTemplateElementStyle(contentSlot),
+          zIndex: 1
+        }}
+      >
+        {renderScreenLayoutContent(content, `content-${index}`)}
+      </div>
+    );
+  });
+}
+
+function renderScreenLayoutBackground(
+  background: ScreenLayoutBackground | undefined
+): ReactNode {
+  if (background?.src === undefined || background.src === null) {
+    return null;
+  }
+
+  return (
+    <img
+      alt=""
+      aria-hidden="true"
+      className="screen-layout-background-image"
+      draggable={false}
+      src={background.src}
+      style={{ objectFit: background.fit }}
+    />
   );
 }
 
@@ -183,6 +369,7 @@ export function ScreenLayoutFrame({
   readonly ariaLabel?: string;
 }): ReactNode {
   const resolvedPreview = previewOrDefault(preview);
+  const contentPreviewsForLayout = contentPreviews(resolvedPreview);
   const classes = ["screen-layout-frame", className]
     .filter((value): value is string => value !== undefined)
     .join(" ");
@@ -194,12 +381,15 @@ export function ScreenLayoutFrame({
       role="img"
       style={{
         aspectRatio: `${template.canvasWidth} / ${template.canvasHeight}`,
-        containerType: "inline-size"
+        containerType: "inline-size",
+        isolation: "isolate"
       }}
     >
+      {renderScreenLayoutBackground(resolvedPreview.background)}
       {template.elements.map((element) =>
         renderScreenTemplateElement(element, resolvedPreview)
       )}
+      {renderScreenLayoutContents(template.elements, contentPreviewsForLayout)}
     </div>
   );
 }
