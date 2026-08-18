@@ -231,7 +231,7 @@ describe("script ScreenTemplate preview resolution", () => {
     ).toBe("loading");
   });
 
-  it("returns every visual assignment covering the current line in source order", () => {
+  it("returns every visual assignment in compiler start-line order", () => {
     const section = createSection("screen-template-standard", [
       createLine("line-one"),
       createLine("line-two"),
@@ -249,7 +249,7 @@ describe("script ScreenTemplate preview resolution", () => {
     );
 
     expect(
-      findVisualAssignmentsForLine(section, "line-two", [first, second]).map(
+      findVisualAssignmentsForLine(section, "line-two", [second, first]).map(
         (assignment) => assignment.id
       )
     ).toEqual(["assignment-first", "assignment-second"]);

@@ -14,6 +14,7 @@ import type {
   ScreenLayoutPreview
 } from "../remotion/screen-template-layout";
 import { resolveScreenTemplateId } from "../app/projects/screen-template-selection.js";
+import { sortByStartThenInputIndex } from "../timeline/visual-ranges.js";
 import { characterVisualFileUrl } from "./character-visual-picker";
 import { createProjectManifestAssetUrlResolver } from "./preview-asset-url";
 
@@ -87,20 +88,23 @@ export function findVisualAssignmentsForLine(
     return [];
   }
 
-  return assignments.filter((assignment) => {
-    const startIndex = section.lines.findIndex(
-      (line) => line.id === assignment.startLineId
-    );
-    const endIndex = section.lines.findIndex(
-      (line) => line.id === assignment.endLineId
-    );
-    return (
-      startIndex >= 0 &&
-      endIndex >= startIndex &&
-      startIndex <= lineIndex &&
-      lineIndex <= endIndex
-    );
-  });
+  return sortByStartThenInputIndex(
+    assignments.flatMap((assignment) => {
+      const startIndex = section.lines.findIndex(
+        (line) => line.id === assignment.startLineId
+      );
+      const endIndex = section.lines.findIndex(
+        (line) => line.id === assignment.endLineId
+      );
+      return startIndex >= 0 &&
+        endIndex >= startIndex &&
+        startIndex <= lineIndex &&
+        lineIndex <= endIndex
+        ? [{ assignment, startIndex }]
+        : [];
+    }),
+    ({ startIndex }) => startIndex
+  ).map(({ assignment }) => assignment);
 }
 
 function characterSlot(index: number): ScreenCharacterSlot {

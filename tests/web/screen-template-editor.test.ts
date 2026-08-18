@@ -133,6 +133,7 @@ describe("ScreenTemplate editor geometry", () => {
     );
 
     expect(markup).toContain("重要な箇所");
+    expect(markup).toContain("font-size:1.25cqw");
   });
 
   it("resizes a rotated element using the element-local axes", () => {

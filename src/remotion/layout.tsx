@@ -6,6 +6,7 @@ import { DESIGN_COLORS } from "./layout-helpers";
 
 export { DESIGN_COLORS } from "./layout-helpers";
 
+const ANNOTATION_CANVAS_WIDTH = 1920;
 const visualWidth = "82%";
 const visualHeight = "62%";
 
@@ -30,10 +31,16 @@ function annotationStyle(annotation: StaticAnnotation): CSSProperties {
   };
 }
 
+function annotationLength(value: number, responsive: boolean): number | string {
+  return responsive ? `${(value / ANNOTATION_CANVAS_WIDTH) * 100}cqw` : value;
+}
+
 export function AnnotationLayer({
-  annotations
+  annotations,
+  responsive = false
 }: {
   annotations: readonly StaticAnnotation[];
+  responsive?: boolean;
 }): ReactNode {
   return annotations.map((annotation) => {
     const baseStyle = annotationStyle(annotation);
@@ -45,8 +52,8 @@ export function AnnotationLayer({
             ...baseStyle,
             width: `${(annotation.width ?? 0.2) * 100}%`,
             height: `${(annotation.height ?? 0.2) * 100}%`,
-            border: `4px solid ${annotationColor(annotation)}`,
-            borderRadius: 8,
+            border: `${annotationLength(4, responsive)} solid ${annotationColor(annotation)}`,
+            borderRadius: annotationLength(8, responsive),
             boxSizing: "border-box"
           }}
         />
@@ -64,7 +71,7 @@ export function AnnotationLayer({
           style={{
             ...baseStyle,
             width: `${Math.hypot(width, height) * 100}%`,
-            height: 22,
+            height: annotationLength(22, responsive),
             transformOrigin: "left center",
             transform: `translateY(-50%) rotate(${angle}deg)`
           }}
@@ -73,9 +80,9 @@ export function AnnotationLayer({
             style={{
               position: "absolute",
               left: 0,
-              right: 14,
+              right: annotationLength(14, responsive),
               top: "50%",
-              height: 5,
+              height: annotationLength(5, responsive),
               transform: "translateY(-50%)",
               backgroundColor: color
             }}
@@ -85,8 +92,8 @@ export function AnnotationLayer({
               position: "absolute",
               right: 0,
               top: "50%",
-              width: 24,
-              height: 24,
+              width: annotationLength(24, responsive),
+              height: annotationLength(24, responsive),
               transform: "translateY(-50%)",
               backgroundColor: color,
               clipPath: "polygon(0 0, 100% 50%, 0 100%)"
@@ -102,11 +109,11 @@ export function AnnotationLayer({
         style={{
           ...baseStyle,
           transform: "translate(-50%, -50%)",
-          padding: "8px 14px",
-          borderRadius: 8,
+          padding: `${annotationLength(8, responsive)} ${annotationLength(14, responsive)}`,
+          borderRadius: annotationLength(8, responsive),
           backgroundColor: "rgba(10, 18, 31, 0.86)",
           color: DESIGN_COLORS.card,
-          fontSize: 24,
+          fontSize: annotationLength(24, responsive),
           fontWeight: 700,
           whiteSpace: "nowrap"
         }}

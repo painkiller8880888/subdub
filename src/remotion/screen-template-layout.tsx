@@ -286,7 +286,10 @@ function renderScreenLayoutContent(
           />
         )}
       </div>
-      <AnnotationLayer annotations={content.display?.annotations ?? []} />
+      <AnnotationLayer
+        annotations={content.display?.annotations ?? []}
+        responsive
+      />
     </div>
   );
 }

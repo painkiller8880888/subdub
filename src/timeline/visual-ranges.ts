@@ -11,6 +11,25 @@ export type TimelineVisualRange = FrameRange & {
   readonly id: VisualAssignment["id"];
 };
 
+export function sortByStartThenInputIndex<T>(
+  items: readonly T[],
+  getStart: (item: T) => number
+): T[] {
+  return items
+    .map((item, inputIndex) => ({
+      item,
+      inputIndex,
+      start: getStart(item)
+    }))
+    .sort((left, right) => {
+      const startDifference = left.start - right.start;
+      return startDifference === 0
+        ? left.inputIndex - right.inputIndex
+        : startDifference;
+    })
+    .map(({ item }) => item);
+}
+
 function findLineRange(
   lines: readonly TimelineLineRange[],
   lineId: string,
@@ -59,16 +78,11 @@ export function calculateVisualRanges(
   assignments: readonly TimelineVisualAssignment[],
   lines: readonly TimelineLineRange[]
 ): TimelineVisualRange[] {
-  return assignments
-    .map((assignment, inputIndex) => ({
-      inputIndex,
+  return sortByStartThenInputIndex(
+    assignments.map((assignment) => ({
+      assignment,
       range: resolveVisualRange(assignment, lines)
-    }))
-    .sort((left, right) => {
-      const fromDifference = left.range.from - right.range.from;
-      return fromDifference === 0
-        ? left.inputIndex - right.inputIndex
-        : fromDifference;
-    })
-    .map(({ range }) => range);
+    })),
+    ({ range }) => range.from
+  ).map(({ range }) => range);
 }
