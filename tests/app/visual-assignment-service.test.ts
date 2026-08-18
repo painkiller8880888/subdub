@@ -1017,6 +1017,61 @@ describe("VisualAssignmentService", () => {
     expect(await fs.readFile(destination)).toEqual(beforeRemove);
   });
 
+  it("does not reinterpret a legacy assignment in a regular update", async () => {
+    const context = await setup();
+    const assigned = await context.service.assign(PROJECT_ID, {
+      expectedRevision: 0,
+      assignment: createAssignment()
+    });
+    const assignment = assigned.data.visuals.assignments[0];
+    if (assignment === undefined) {
+      throw new Error("assignment was not created");
+    }
+
+    const legacyProject = clone(assigned.data);
+    const legacyAssignment = legacyProject.visuals.assignments[0];
+    if (legacyAssignment === undefined) {
+      throw new Error("legacy assignment was not created");
+    }
+    legacyAssignment.display.displayCoordinateSpace = "legacy-media-frame";
+    const savedLegacyProject = await context.repository.save(
+      PROJECT_ID,
+      legacyProject,
+      assigned.revision
+    );
+    const before = await fs.readFile(context.projectFile);
+
+    const error = await expectError(
+      () =>
+        context.service.update(PROJECT_ID, assignment.id, {
+          expectedRevision: savedLegacyProject.revision,
+          assignment: {
+            id: assignment.id,
+            startLineId: assignment.startLineId,
+            endLineId: assignment.endLineId,
+            assetId: assignment.assetId,
+            display: {
+              ...legacyAssignment.display,
+              displayCoordinateSpace: "content-slot-relative"
+            }
+          }
+        }),
+      VISUAL_ASSIGNMENT_ERROR_CODE.candidateInvalid
+    );
+
+    expect((error as VisualAssignmentError).details).toEqual([
+      {
+        path: ["assignment", "display", "displayCoordinateSpace"],
+        message:
+          "display coordinate space cannot be changed by a regular update"
+      }
+    ]);
+    expect(await fs.readFile(context.projectFile)).toEqual(before);
+    expect((await readProject(context.projectFile)).revision).toBe(
+      savedLegacyProject.revision
+    );
+  });
+
   it("rejects stale, missing, and mismatched assignment updates", async () => {
     const context = await setup();
     const assigned = await context.service.assign(PROJECT_ID, {

@@ -149,8 +149,17 @@ export async function initializeServer(
   });
 
   try {
+    const resolvedScreenTemplateService =
+      suppliedScreenTemplateService ??
+      new ScreenTemplateCatalogService({
+        repository: new ScreenTemplateRepository(database.database)
+      });
     const resolvedProjectRepository =
-      projectRepository ?? new ProjectRepository({ workspaceRoot });
+      projectRepository ??
+      new ProjectRepository({
+        workspaceRoot,
+        screenTemplateCatalog: resolvedScreenTemplateService
+      });
     const resolvedImprovementLogRepository =
       improvementLogRepository ?? new ImprovementLogRepository(database.database);
     const resolvedAiRunSearchService =
@@ -165,11 +174,6 @@ export async function initializeServer(
     const resolvedChatAdapter = createOpenRouterChatAdapter();
     const resolvedAssetRepository =
       assetRepository ?? new AssetRepository(database.database);
-    const resolvedScreenTemplateService =
-      suppliedScreenTemplateService ??
-      new ScreenTemplateCatalogService({
-        repository: new ScreenTemplateRepository(database.database)
-      });
     let resolvedCharacterVisualCatalogService =
       appOptions.characterVisualCatalogService;
     if (resolvedCharacterVisualCatalogService === undefined) {
@@ -191,7 +195,8 @@ export async function initializeServer(
       suppliedProjectService ??
       new ProjectService({
         repository: resolvedProjectRepository,
-        improvementLogRepository: resolvedImprovementLogRepository
+        improvementLogRepository: resolvedImprovementLogRepository,
+        screenTemplateCatalog: resolvedScreenTemplateService
       });
     const resolvedProjectEditService =
       suppliedProjectEditService ??
@@ -278,6 +283,7 @@ export async function initializeServer(
       new ManifestPreviewService({
         workspaceRoot,
         projectRepository: resolvedProjectRepository,
+        screenTemplateCatalog: resolvedScreenTemplateService,
         manifestStore: renderManifestStore,
         audioStore,
         voiceGenerationService: resolvedVoiceGenerationService,
@@ -292,6 +298,7 @@ export async function initializeServer(
         : new RenderManifestCompileService({
             workspaceRoot,
             projectRepository: resolvedProjectRepository,
+            screenTemplateCatalog: resolvedScreenTemplateService,
             assetRepository: resolvedAssetRepository,
             characterVisualCatalogService: {
               verifyFiles: verifyCharacterVisualFiles.bind(

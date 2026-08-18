@@ -4,6 +4,7 @@ import {
   approvalStatusSchema,
   backgroundDefinitionSchema,
   displaySchema,
+  displayV13Schema,
   expressionSchema,
   legacyDisplaySchema,
   sectionRoleSchema,
@@ -162,7 +163,7 @@ export const pronunciationSchema = strictObject({
   excludedTermIds: z.array(idSchema)
 });
 
-export const scriptLineSchema = strictObject({
+const scriptLineV12Schema = strictObject({
   id: idSchema,
   speakerId: idSchema,
   spokenText: z.string().refine((value) => value.trim().length > 0, {
@@ -179,22 +180,38 @@ export const scriptLineSchema = strictObject({
   pronunciation: pronunciationSchema
 });
 
-export const scriptSectionSchema = strictObject({
+export const scriptLineSchema = strictObject({
+  ...scriptLineV12Schema.shape,
+  screenTemplateId: idSchema.nullable()
+});
+
+const scriptSectionV12Schema = strictObject({
   id: idSchema,
   outlineSectionId: idSchema,
   name: z.string(),
   background: backgroundDefinitionSchema,
+  lines: z.array(scriptLineV12Schema)
+});
+
+export const scriptSectionSchema = strictObject({
+  ...scriptSectionV12Schema.shape,
+  screenTemplateId: idSchema,
   lines: z.array(scriptLineSchema)
 });
 
-export const scriptSchema = strictObject({
+const scriptSchemaV12 = strictObject({
   status: approvalStatusSchema,
   origin: z.enum(["manual", "ai", "imported"]),
   outlineHash: sha256Schema,
+  sections: z.array(scriptSectionV12Schema)
+});
+
+export const scriptSchema = strictObject({
+  ...scriptSchemaV12.shape,
   sections: z.array(scriptSectionSchema)
 });
 
-export const visualAssignmentSchema = strictObject({
+const visualAssignmentV12Schema = strictObject({
   id: idSchema,
   startLineId: idSchema,
   endLineId: idSchema,
@@ -203,6 +220,18 @@ export const visualAssignmentSchema = strictObject({
   projectMediaPath: relativePosixPathSchema,
   display: displaySchema
 });
+
+export const visualAssignmentV13Schema = strictObject({
+  id: idSchema,
+  startLineId: idSchema,
+  endLineId: idSchema,
+  assetId: idSchema,
+  assetChecksum: sha256Schema,
+  projectMediaPath: relativePosixPathSchema,
+  display: displayV13Schema
+});
+
+export const visualAssignmentSchema = visualAssignmentV13Schema;
 
 const legacyVisualAssignmentSchema = strictObject({
   id: idSchema,
@@ -214,10 +243,15 @@ const legacyVisualAssignmentSchema = strictObject({
   display: legacyDisplaySchema
 });
 
-export const visualPlanSchema = strictObject({
+const visualPlanV12Schema = strictObject({
   status: approvalStatusSchema,
   suggestionRunIds: z.array(idSchema),
-  assignments: z.array(visualAssignmentSchema)
+  assignments: z.array(visualAssignmentV12Schema)
+});
+
+export const visualPlanSchema = strictObject({
+  ...visualPlanV12Schema.shape,
+  assignments: z.array(visualAssignmentV13Schema)
 });
 
 const legacyVisualPlanSchema = strictObject({
@@ -349,8 +383,24 @@ export const thumbnailPlanSchema = strictObject({
   layout: z.literal("standard")
 });
 
-const videoProjectBaseSchema = strictObject({
+const videoProjectV12BaseSchema = strictObject({
   schemaVersion: z.literal("1.2.0"),
+  revision: finiteNumberSchema.int().nonnegative(),
+  metadata: projectMetadataSchema,
+  source: projectSourceSchema,
+  brief: projectBriefSchema,
+  aiSettings: aiSettingsSchema,
+  characters: z.array(characterSchema).length(2),
+  outline: outlineSchema,
+  script: scriptSchemaV12,
+  visuals: visualPlanV12Schema,
+  audio: audioPlanSchema,
+  edit: editPlanSchema,
+  thumbnail: thumbnailPlanSchema
+});
+
+const videoProjectV13BaseSchema = strictObject({
+  schemaVersion: z.literal("1.3.0"),
   revision: finiteNumberSchema.int().nonnegative(),
   metadata: projectMetadataSchema,
   source: projectSourceSchema,
@@ -374,7 +424,7 @@ const legacyVideoProjectV11BaseSchema = strictObject({
   aiSettings: aiSettingsSchema,
   characters: z.array(characterSchema).length(2),
   outline: outlineSchema,
-  script: scriptSchema,
+  script: scriptSchemaV12,
   visuals: legacyVisualPlanSchema,
   audio: legacyAudioPlanSchema,
   inserts: insertPlanSchema,
@@ -391,13 +441,13 @@ export const legacyVideoProjectV11Schema = legacyVideoProjectV11BaseSchema;
 const legacyCharacterSchema = characterSchema.omit({
   characterVisual: true
 });
-const legacyScriptLineSchema = scriptLineSchema.omit({
+const legacyScriptLineSchema = scriptLineV12Schema.omit({
   characterVariantId: true
 });
-const legacyScriptSectionSchema = scriptSectionSchema.extend({
+const legacyScriptSectionSchema = scriptSectionV12Schema.extend({
   lines: z.array(legacyScriptLineSchema)
 });
-const legacyScriptSchema = scriptSchema.extend({
+const legacyScriptSchema = scriptSchemaV12.extend({
   sections: z.array(legacyScriptSectionSchema)
 });
 
@@ -437,8 +487,14 @@ function addReferenceIssue(
   ctx.addIssue({ code: "custom", path, message });
 }
 
-export const videoProjectSchema = videoProjectBaseSchema.superRefine(
-  (project, ctx) => {
+type VideoProjectDomainShape =
+  | z.infer<typeof videoProjectV12BaseSchema>
+  | z.infer<typeof videoProjectV13BaseSchema>;
+
+function refineVideoProject(
+  project: VideoProjectDomainShape,
+  ctx: z.RefinementCtx
+): void {
     const characterEntries = project.characters.map((character, index) => ({
       value: character.id,
       path: ["characters", index, "id"]
@@ -854,8 +910,12 @@ export const videoProjectSchema = videoProjectBaseSchema.superRefine(
         "thumbnail characterId must reference a character"
       );
     }
-  }
-);
+}
+
+export const videoProjectV12Schema =
+  videoProjectV12BaseSchema.superRefine(refineVideoProject);
+export const videoProjectSchema =
+  videoProjectV13BaseSchema.superRefine(refineVideoProject);
 
 export type AiTaskKind = z.infer<typeof aiTaskKindSchema>;
 export type OutputSettings = z.infer<typeof outputSettingsSchema>;
@@ -876,8 +936,13 @@ export type Pronunciation = z.infer<typeof pronunciationSchema>;
 export type ScriptLine = z.infer<typeof scriptLineSchema>;
 export type ScriptSection = z.infer<typeof scriptSectionSchema>;
 export type Script = z.infer<typeof scriptSchema>;
+export type ScriptLineV12 = z.infer<typeof scriptLineV12Schema>;
+export type ScriptSectionV12 = z.infer<typeof scriptSectionV12Schema>;
+export type ScriptV12 = z.infer<typeof scriptSchemaV12>;
+export type VisualAssignmentV12 = z.infer<typeof visualAssignmentV12Schema>;
 export type VisualAssignment = z.infer<typeof visualAssignmentSchema>;
 export type VisualPlan = z.infer<typeof visualPlanSchema>;
+export type VisualPlanV12 = z.infer<typeof visualPlanV12Schema>;
 export type ProjectAssetSnapshot = z.infer<typeof projectAssetSnapshotSchema>;
 export type EditVideoPlacement = z.infer<typeof editVideoPlacementSchema>;
 export type EditVideoElement = z.infer<typeof editVideoElementSchema>;
@@ -912,4 +977,5 @@ export type EndingPlaceholder = z.infer<typeof endingPlaceholderSchema>;
 export type EyeCatchPlaceholder = z.infer<typeof eyeCatchPlaceholderSchema>;
 export type InsertPlan = z.infer<typeof insertPlanSchema>;
 export type ThumbnailPlan = z.infer<typeof thumbnailPlanSchema>;
+export type VideoProjectV12 = z.infer<typeof videoProjectV12Schema>;
 export type VideoProject = z.infer<typeof videoProjectSchema>;

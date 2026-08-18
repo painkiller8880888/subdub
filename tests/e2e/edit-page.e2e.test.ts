@@ -31,6 +31,7 @@ const sections = [
     id: "section-first",
     outlineSectionId: "outline-first",
     name: "最初のセクション",
+    screenTemplateId: "screen-template-standard",
     background: { kind: "solid", colorToken: "background" },
     lines: []
   },
@@ -38,6 +39,7 @@ const sections = [
     id: "section-second",
     outlineSectionId: "outline-second",
     name: "二番目のセクション",
+    screenTemplateId: "screen-template-standard",
     background: { kind: "solid", colorToken: "background" },
     lines: []
   },
@@ -45,6 +47,7 @@ const sections = [
     id: "section-third",
     outlineSectionId: "outline-third",
     name: "三番目のセクション",
+    screenTemplateId: "screen-template-standard",
     background: { kind: "solid", colorToken: "background" },
     lines: []
   }

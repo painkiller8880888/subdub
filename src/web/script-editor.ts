@@ -90,6 +90,7 @@ export function createDefaultScriptLine(
     subtitleText: text,
     expression: "neutral",
     characterVariantId: null,
+    screenTemplateId: null,
     pauseBeforeMs: 0,
     pauseAfterMs: 250,
     voiceOverrides: {},

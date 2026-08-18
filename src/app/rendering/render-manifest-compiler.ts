@@ -30,7 +30,7 @@ import {
   type RenderInsert,
   type RenderSoundEffect,
   type RenderVisual,
-  type Display,
+  type DisplayV13,
   videoProjectSchema
 } from "../../schema/index.js";
 import {
@@ -960,9 +960,32 @@ function orderedVisualDisplay(
   };
 }
 
-function toRenderDisplayV23(display: Display): RenderVisual["display"] {
-  if (display.kind !== "video") {
-    return display;
+function toRenderDisplayV23(display: DisplayV13): RenderVisual["display"] {
+  if (display.kind === "video") {
+    return {
+      kind: display.kind,
+      fit: display.fit,
+      crop: display.crop,
+      scale: display.scale,
+      position: display.position,
+      prioritizeVisual: display.prioritizeVisual,
+      annotations: display.annotations,
+      startMs: display.startMs,
+      endMs: display.endMs,
+      playbackRate: display.playbackRate,
+      volume: display.volume
+    };
+  }
+  if (display.kind === "photo") {
+    return {
+      kind: display.kind,
+      fit: display.fit,
+      crop: display.crop,
+      scale: display.scale,
+      position: display.position,
+      prioritizeVisual: display.prioritizeVisual,
+      annotations: display.annotations
+    };
   }
   return {
     kind: display.kind,
@@ -972,10 +995,7 @@ function toRenderDisplayV23(display: Display): RenderVisual["display"] {
     position: display.position,
     prioritizeVisual: display.prioritizeVisual,
     annotations: display.annotations,
-    startMs: display.startMs,
-    endMs: display.endMs,
-    playbackRate: display.playbackRate,
-    volume: display.volume
+    page: display.page
   };
 }
 

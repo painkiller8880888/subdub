@@ -295,6 +295,8 @@ const projectRepositoryMessages: Partial<Record<
   PROJECT_JSON_PARSE_FAILED: "プロジェクトデータを読み込めませんでした。",
   PROJECT_CURRENT_VALIDATION_FAILED:
     "現在のプロジェクトデータが不正です。",
+  PROJECT_MIGRATION_PREREQUISITE_FAILED:
+    "プロジェクトの移行に必要な画面テンプレートがありません。",
   PROJECT_CANDIDATE_VALIDATION_FAILED:
     "保存するプロジェクトデータが不正です。",
   PROJECT_CURRENT_ID_MISMATCH:

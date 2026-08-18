@@ -140,6 +140,7 @@ function line(
   } as const;
   return {
     id,
+    screenTemplateId: null,
     speakerId,
     spokenText,
     subtitleText,
@@ -162,6 +163,7 @@ function section(
     id,
     outlineSectionId,
     name,
+    screenTemplateId: "screen-template-standard",
     background: { kind: "solid", colorToken: "background" },
     lines
   };

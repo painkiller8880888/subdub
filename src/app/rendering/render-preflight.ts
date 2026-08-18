@@ -48,6 +48,13 @@ export class RenderPreflightService implements RenderPreflightServicePort {
           "A required render asset is missing."
         );
       }
+      if (codes.has("SCREEN_TEMPLATE_REFERENCE_INVALID")) {
+        throw new RenderJobError(
+          RENDER_JOB_ERROR_CODE.screenTemplateReferenceInvalid,
+          422,
+          "A selected screen template is missing or inactive."
+        );
+      }
       if (codes.has("ASSET_CHECKSUM_MISMATCH")) {
         throw new RenderJobError(
           RENDER_JOB_ERROR_CODE.sourceAssetChecksumMismatch,

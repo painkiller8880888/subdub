@@ -175,6 +175,82 @@ export const displaySchema = z.discriminatedUnion("kind", [
   documentDisplaySchema
 ]);
 
+export const displayCoordinateSpaceSchema = z.enum([
+  "legacy-media-frame",
+  "content-slot-relative"
+]);
+
+const videoDisplayV13Schema = strictObject({
+  ...videoDisplayFields,
+  volume: unitIntervalSchema,
+  displayCoordinateSpace: displayCoordinateSpaceSchema
+}).superRefine(validateVideoDisplayRange);
+
+const imageDisplayV13Schema = strictObject({
+  kind: z.literal("photo"),
+  fit: fitSchema,
+  crop: cropSchema,
+  scale: positiveNumberSchema,
+  position: positionSchema,
+  prioritizeVisual: z.boolean(),
+  annotations: z.array(staticAnnotationSchema),
+  displayCoordinateSpace: displayCoordinateSpaceSchema
+});
+
+const documentDisplayV13Schema = strictObject({
+  kind: z.literal("document_scan"),
+  fit: fitSchema,
+  crop: cropSchema,
+  scale: positiveNumberSchema,
+  position: positionSchema,
+  prioritizeVisual: z.boolean(),
+  annotations: z.array(staticAnnotationSchema),
+  page: positiveIntegerSchema,
+  displayCoordinateSpace: displayCoordinateSpaceSchema
+});
+
+export const displayV13Schema = z.discriminatedUnion("kind", [
+  videoDisplayV13Schema,
+  imageDisplayV13Schema,
+  documentDisplayV13Schema
+]);
+
+const videoDisplayInputSchema = strictObject({
+  ...videoDisplayFields,
+  volume: unitIntervalSchema,
+  displayCoordinateSpace: displayCoordinateSpaceSchema.optional()
+}).superRefine(validateVideoDisplayRange);
+
+const imageDisplayInputSchema = strictObject({
+  kind: z.literal("photo"),
+  fit: fitSchema,
+  crop: cropSchema,
+  scale: positiveNumberSchema,
+  position: positionSchema,
+  prioritizeVisual: z.boolean(),
+  annotations: z.array(staticAnnotationSchema),
+  displayCoordinateSpace: displayCoordinateSpaceSchema.optional()
+});
+
+const documentDisplayInputSchema = strictObject({
+  kind: z.literal("document_scan"),
+  fit: fitSchema,
+  crop: cropSchema,
+  scale: positiveNumberSchema,
+  position: positionSchema,
+  prioritizeVisual: z.boolean(),
+  annotations: z.array(staticAnnotationSchema),
+  page: positiveIntegerSchema,
+  displayCoordinateSpace: displayCoordinateSpaceSchema.optional()
+});
+
+/** API input compatibility: new assignments default the coordinate space in the service. */
+export const displayInputSchema = z.discriminatedUnion("kind", [
+  videoDisplayInputSchema,
+  imageDisplayInputSchema,
+  documentDisplayInputSchema
+]);
+
 export const legacyDisplaySchema = z.discriminatedUnion("kind", [
   legacyVideoDisplaySchema,
   imageDisplaySchema,
@@ -206,4 +282,9 @@ export type ImageDisplay = z.infer<typeof imageDisplaySchema>;
 export type DocumentDisplay = z.infer<typeof documentDisplaySchema>;
 export type Display = z.infer<typeof displaySchema>;
 export type LegacyDisplay = z.infer<typeof legacyDisplaySchema>;
+export type DisplayCoordinateSpace = z.infer<
+  typeof displayCoordinateSpaceSchema
+>;
+export type DisplayV13 = z.infer<typeof displayV13Schema>;
+export type DisplayInput = z.infer<typeof displayInputSchema>;
 export type Voice = z.infer<typeof voiceSchema>;

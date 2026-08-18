@@ -23,6 +23,10 @@ import {
 } from "../projects/project-file-service.js";
 import type { ProjectRepository } from "../projects/project-repository.js";
 import { computeOutlineHash } from "../projects/script-domain.js";
+import {
+  validateVideoProjectScreenTemplateReferences,
+  type ScreenTemplateCatalogPort
+} from "../projects/screen-template-selection.js";
 import type { VoicevoxGenerationService } from "../voicevox/generation-service.js";
 import { VoicevoxAudioStore } from "../voicevox/audio-store.js";
 import type { VoicevoxAudioIndex } from "../voicevox/audio-index.js";
@@ -30,6 +34,7 @@ import type { VoicevoxAudioIndex } from "../voicevox/audio-index.js";
 export type ManifestPreviewServiceOptions = {
   readonly workspaceRoot: string;
   readonly projectRepository: Pick<ProjectRepository, "read">;
+  readonly screenTemplateCatalog?: ScreenTemplateCatalogPort;
   readonly manifestStore?: Pick<RenderManifestStore, "readDetailed">;
   readonly audioStore?: Pick<VoicevoxAudioStore, "readIndex">;
   readonly voiceGenerationService: Pick<VoicevoxGenerationService, "getStatus">;
@@ -44,6 +49,8 @@ const blockerMessages: Readonly<Record<string, string>> = {
   OUTLINE_NOT_APPROVED: "構成案を承認してからプレビューを生成してください。",
   OUTLINE_SOURCE_HASH_MISMATCH:
     "元資料が更新されているため、構成案を確認して再承認してください。",
+  SCREEN_TEMPLATE_REFERENCE_INVALID:
+    "選択された画面テンプレートが見つからないか無効です。台本のテンプレート設定を修正してください。",
   SCRIPT_NOT_APPROVED:
     "台本の内容を検証できません。入力と構成案との整合性を確認してください。",
   SCRIPT_OUTLINE_HASH_MISMATCH:
@@ -201,6 +208,7 @@ async function sha256File(filePath: string): Promise<string> {
 export class ManifestPreviewService {
   private readonly workspaceRoot: string;
   private readonly projectRepository: Pick<ProjectRepository, "read">;
+  private readonly screenTemplateCatalog: ScreenTemplateCatalogPort | undefined;
   private readonly manifestStore: Pick<RenderManifestStore, "readDetailed">;
   private readonly audioStore: Pick<VoicevoxAudioStore, "readIndex">;
   private readonly voiceGenerationService: Pick<
@@ -212,6 +220,7 @@ export class ManifestPreviewService {
   constructor(options: ManifestPreviewServiceOptions) {
     this.workspaceRoot = path.resolve(options.workspaceRoot);
     this.projectRepository = options.projectRepository;
+    this.screenTemplateCatalog = options.screenTemplateCatalog;
     this.manifestStore =
       options.manifestStore ??
       new RenderManifestStore({
@@ -321,6 +330,30 @@ export class ManifestPreviewService {
     }
     if (computeOutlineHash(project.outline) !== project.script.outlineHash) {
       addBlocker(blockers, "SCRIPT_OUTLINE_HASH_MISMATCH", toTarget("script"));
+    }
+    if (this.screenTemplateCatalog !== undefined) {
+      for (const issue of validateVideoProjectScreenTemplateReferences(
+        project,
+        this.screenTemplateCatalog
+      )) {
+        const sectionIndex = issue.path[2];
+        const section =
+          typeof sectionIndex === "number"
+            ? project.script.sections[sectionIndex]
+            : undefined;
+        const lineIndex = issue.path[4];
+        const line =
+          section !== undefined && typeof lineIndex === "number"
+            ? section.lines[lineIndex]
+            : undefined;
+        addBlocker(
+          blockers,
+          "SCREEN_TEMPLATE_REFERENCE_INVALID",
+          line !== undefined
+            ? toTarget("script", { lineId: line.id })
+            : toTarget("script", { sectionId: section?.id })
+        );
+      }
     }
   }
 

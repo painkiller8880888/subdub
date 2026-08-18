@@ -68,6 +68,7 @@ function legacyProject(
     assignments: Array<{ display: Record<string, unknown> }>;
   };
   for (const assignment of visuals.assignments) {
+    delete assignment.display.displayCoordinateSpace;
     if (assignment.display.kind !== "video") {
       continue;
     }
@@ -88,6 +89,19 @@ function legacyProject(
       for (const line of section.lines) {
         delete line.characterVariantId;
       }
+    }
+  }
+
+  const scriptWithTemplates = legacy.script as {
+    sections: Array<{
+      screenTemplateId?: unknown;
+      lines: Array<{ screenTemplateId?: unknown }>;
+    }>;
+  };
+  for (const section of scriptWithTemplates.sections) {
+    delete section.screenTemplateId;
+    for (const line of section.lines) {
+      delete line.screenTemplateId;
     }
   }
 
@@ -131,6 +145,7 @@ describe("video project schema migration", () => {
 
   it("migrates 1.1.0 EditPlan, binary video volume, and legacy BGM diagnostics", () => {
     const legacy = legacyProject("1.1.0");
+    legacy.revision = 7;
     expect(legacyVideoProjectV11Schema.safeParse(legacy).success).toBe(true);
 
     const result = migrateVideoProjectWithDiagnostics(legacy);
@@ -139,7 +154,7 @@ describe("video project schema migration", () => {
     expect(result.migrationId).toMatch(
       /^video-project-migration-[0-9a-f]{64}$/
     );
-    expect(result.logEntries).toHaveLength(2);
+    expect(result.logEntries).toHaveLength(3);
     expect(result.logEntries[0]).toMatchObject({
       fromSchemaVersion: "1.1.0",
       toSchemaVersion: "1.2.0",
@@ -148,16 +163,31 @@ describe("video project schema migration", () => {
       legacyPath: "media/bgm-intro.mp3",
       legacyVolume: 0.25
     });
+    expect(result.logEntries[2]).toMatchObject({
+      fromSchemaVersion: "1.2.0",
+      toSchemaVersion: "1.3.0",
+      kind: "screen_template_selection",
+      templateId: "screen-template-standard"
+    });
 
     const migrated = videoProjectSchema.parse(result.project);
-    expect(migrated.schemaVersion).toBe("1.2.0");
+    expect(migrated.schemaVersion).toBe("1.3.0");
+    expect(migrated.revision).toBe(8);
+    expect(
+      migrated.script.sections.every(
+        (section) =>
+          section.screenTemplateId === "screen-template-standard" &&
+          section.lines.every((line) => line.screenTemplateId === null)
+      )
+    ).toBe(true);
     expect(migrated.edit).toEqual({ videoElements: [], sectionBgms: [] });
     expect(migrated.audio).toEqual({
       soundEffects: (legacy.audio as { soundEffects: unknown[] }).soundEffects
     });
     expect(migrated.visuals.assignments[0]?.display).toMatchObject({
       kind: "video",
-      volume: 0
+      volume: 0,
+      displayCoordinateSpace: "legacy-media-frame"
     });
     expect(migrated.visuals.assignments[0]?.display).not.toHaveProperty(
       "muted"
@@ -186,7 +216,81 @@ describe("video project schema migration", () => {
     const migrated = migrateVideoProject(current);
 
     expect(migrated).toBe(current);
-    expect((migrated as typeof current).schemaVersion).toBe("1.2.0");
+    expect((migrated as typeof current).schemaVersion).toBe("1.3.0");
+  });
+
+  it("does not mutate a strict 1.2.0 project when the standard template is unavailable", () => {
+    const project = clone(videoProjectFixture) as unknown as Record<
+      string,
+      unknown
+    >;
+    project.schemaVersion = "1.2.0";
+    const script = project.script as {
+      sections: Array<{
+        screenTemplateId: unknown;
+        lines: Array<{ screenTemplateId: unknown }>;
+      }>;
+    };
+    for (const section of script.sections) {
+      delete section.screenTemplateId;
+      for (const line of section.lines) {
+        delete line.screenTemplateId;
+      }
+    }
+    const visuals = project.visuals as {
+      assignments: Array<{ display: Record<string, unknown> }>;
+    };
+    for (const assignment of visuals.assignments) {
+      delete assignment.display.displayCoordinateSpace;
+    }
+
+    const before = clone(project);
+    const result = migrateVideoProjectWithDiagnostics(project, {
+      standardTemplateAvailable: false
+    });
+
+    expect(result.migrated).toBe(false);
+    expect(result.blockedReason).toBe("standard_template_unavailable");
+    expect(result.project).toBe(project);
+    expect(project).toEqual(before);
+  });
+
+  it("does not migrate when the standard template is inactive", () => {
+    const project = clone(videoProjectFixture) as unknown as Record<
+      string,
+      unknown
+    >;
+    project.schemaVersion = "1.2.0";
+    const script = project.script as {
+      sections: Array<{
+        screenTemplateId: unknown;
+        lines: Array<{ screenTemplateId: unknown }>;
+      }>;
+    };
+    for (const section of script.sections) {
+      delete section.screenTemplateId;
+      for (const line of section.lines) {
+        delete line.screenTemplateId;
+      }
+    }
+    const visuals = project.visuals as {
+      assignments: Array<{ display: Record<string, unknown> }>;
+    };
+    for (const assignment of visuals.assignments) {
+      delete assignment.display.displayCoordinateSpace;
+    }
+
+    const before = clone(project);
+    const result = migrateVideoProjectWithDiagnostics(project, {
+      screenTemplateCatalog: {
+        findById: () => ({ status: "inactive" })
+      }
+    });
+
+    expect(result.migrated).toBe(false);
+    expect(result.blockedReason).toBe("standard_template_unavailable");
+    expect(result.project).toBe(project);
+    expect(project).toEqual(before);
   });
 
   it("rejects 1.1.0-only fields before migrating a 1.0.0 project", () => {

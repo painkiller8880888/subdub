@@ -433,10 +433,12 @@ describe("outline editing and approval APIs", () => {
               id: "script-main",
               outlineSectionId: saved.outline.sections[1]?.id ?? "",
               name: "main",
+              screenTemplateId: "screen-template-standard",
               background: { kind: "solid", colorToken: "background" },
               lines: [
                 {
                   id: "script-line",
+                  screenTemplateId: null,
                   speakerId: "character-mentor",
                   spokenText: "script",
                   subtitleText: "script",

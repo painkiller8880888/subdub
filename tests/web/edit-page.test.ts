@@ -30,6 +30,7 @@ const sections = [
     id: "section-intro",
     outlineSectionId: "outline-intro",
     name: "導入",
+    screenTemplateId: "screen-template-standard",
     background: { kind: "solid", colorToken: "background" },
     lines: []
   },
@@ -37,6 +38,7 @@ const sections = [
     id: "section-main",
     outlineSectionId: "outline-main",
     name: "操作手順",
+    screenTemplateId: "screen-template-standard",
     background: { kind: "solid", colorToken: "background" },
     lines: []
   }
@@ -316,6 +318,7 @@ describe("edit page read model", () => {
         id: "section-outro",
         outlineSectionId: "outline-outro",
         name: "まとめ",
+        screenTemplateId: "screen-template-standard",
         background: { kind: "solid", colorToken: "background" },
         lines: []
       },
@@ -323,6 +326,7 @@ describe("edit page read model", () => {
         id: "section-tail",
         outlineSectionId: "outline-tail",
         name: "補足",
+        screenTemplateId: "screen-template-standard",
         background: { kind: "solid", colorToken: "background" },
         lines: []
       }

@@ -96,7 +96,8 @@ function manifestFieldsChanged(
     current.subtitleText !== candidate.subtitleText ||
     current.expression !== candidate.expression ||
     current.pauseBeforeMs !== candidate.pauseBeforeMs ||
-    current.pauseAfterMs !== candidate.pauseAfterMs
+    current.pauseAfterMs !== candidate.pauseAfterMs ||
+    current.screenTemplateId !== candidate.screenTemplateId
   );
 }
 
@@ -108,7 +109,8 @@ function sectionBackgroundChanged(
     const candidateSection = candidate.sections[sectionIndex];
     return (
       candidateSection !== undefined &&
-      !deepEqual(section.background, candidateSection.background)
+      (!deepEqual(section.background, candidateSection.background) ||
+        section.screenTemplateId !== candidateSection.screenTemplateId)
     );
   });
 }

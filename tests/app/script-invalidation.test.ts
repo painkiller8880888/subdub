@@ -42,6 +42,7 @@ function addFirstLine(script: Script): Script {
               ...section.lines,
               {
                 id: "added-line",
+                screenTemplateId: null,
                 speakerId: "character-mentor",
                 spokenText: "追加されたセリフ",
                 subtitleText: "追加された字幕",
@@ -97,6 +98,40 @@ describe("classifyScriptChange", () => {
 
     expect(impact.structuralChanged).toBe(false);
     expect(impact.staleTargets).toEqual(["audio", "manifest"]);
+  });
+
+  it("marks the manifest stale when a section or line template changes", () => {
+    const current = projectFixture().script;
+    const sectionTemplateCandidate: Script = {
+      ...current,
+      sections: current.sections.map((section, index) =>
+        index === 0
+          ? { ...section, screenTemplateId: "screen-template-custom" }
+          : section
+      )
+    };
+    expect(
+      classifyScriptChange(current, sectionTemplateCandidate).staleTargets
+    ).toEqual(["manifest"]);
+
+    const lineTemplateCandidate: Script = {
+      ...current,
+      sections: current.sections.map((section, sectionIndex) =>
+        sectionIndex === 0
+          ? {
+              ...section,
+              lines: section.lines.map((line, lineIndex) =>
+                lineIndex === 0
+                  ? { ...line, screenTemplateId: "screen-template-custom" }
+                  : line
+              )
+            }
+          : section
+      )
+    };
+    expect(
+      classifyScriptChange(current, lineTemplateCandidate).staleTargets
+    ).toEqual(["manifest"]);
   });
 
   it("marks only manifest stale on subtitle, expression, or pause changes", () => {

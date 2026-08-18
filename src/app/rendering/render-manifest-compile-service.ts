@@ -15,6 +15,10 @@ import {
 import { processAudioMedia } from "../assets/processing/video-audio.js";
 import type { ProjectRepository } from "../projects/project-repository.js";
 import {
+  validateVideoProjectScreenTemplateReferences,
+  type ScreenTemplateCatalogPort
+} from "../projects/screen-template-selection.js";
+import {
   type RenderManifestAssetMetadata,
   type RenderManifestCompilerInput
 } from "./render-manifest-compiler.js";
@@ -28,6 +32,7 @@ import type {
 } from "../../schema/index.js";
 import type { VoicevoxAudioIndex } from "../voicevox/audio-index.js";
 import type { VoicevoxAudioStore } from "../voicevox/audio-store.js";
+import { RENDER_JOB_ERROR_CODE, RenderJobError } from "./render-job-errors.js";
 
 type ProjectReader = Pick<ProjectRepository, "read">;
 type AssetDetailReader = Pick<AssetRepository, "findAssetDetail">;
@@ -42,10 +47,29 @@ type AssetMetadataByPath = Map<string, RenderManifestAssetMetadata>;
 export type RenderManifestInputBuilderOptions = {
   readonly workspaceRoot: string;
   readonly projectRepository: ProjectReader;
+  readonly screenTemplateCatalog: ScreenTemplateCatalogPort;
   readonly assetRepository: AssetDetailReader;
   readonly characterVisualCatalogService: CharacterVisualCatalogVerifier;
   readonly audioStore: AudioIndexReader;
 };
+
+function assertScreenTemplateReferences(
+  project: VideoProject,
+  screenTemplateCatalog: ScreenTemplateCatalogPort
+): void {
+  if (
+    validateVideoProjectScreenTemplateReferences(project, screenTemplateCatalog)
+      .length === 0
+  ) {
+    return;
+  }
+
+  throw new RenderJobError(
+    RENDER_JOB_ERROR_CODE.screenTemplateReferenceInvalid,
+    422,
+    "A selected screen template is missing or inactive."
+  );
+}
 
 function isPathInside(rootPath: string, candidatePath: string): boolean {
   const relativePath = path.relative(rootPath, candidatePath);
@@ -323,6 +347,7 @@ async function assetMetadataForProject(
 export class RenderManifestInputBuilder {
   private readonly workspaceRoot: string;
   private readonly projectRepository: ProjectReader;
+  private readonly screenTemplateCatalog: ScreenTemplateCatalogPort;
   private readonly assetRepository: AssetDetailReader;
   private readonly characterVisualCatalogService: CharacterVisualCatalogVerifier;
   private readonly audioStore: AudioIndexReader;
@@ -330,6 +355,7 @@ export class RenderManifestInputBuilder {
   constructor(options: RenderManifestInputBuilderOptions) {
     this.workspaceRoot = path.resolve(options.workspaceRoot);
     this.projectRepository = options.projectRepository;
+    this.screenTemplateCatalog = options.screenTemplateCatalog;
     this.assetRepository = options.assetRepository;
     this.characterVisualCatalogService = options.characterVisualCatalogService;
     this.audioStore = options.audioStore;
@@ -337,6 +363,7 @@ export class RenderManifestInputBuilder {
 
   async build(projectId: unknown): Promise<RenderManifestCompilerInput> {
     const project = await this.projectRepository.read(projectId);
+    assertScreenTemplateReferences(project, this.screenTemplateCatalog);
     const audioIndex = await this.audioStore.readIndex(projectId);
     const characterVisualCatalog =
       await this.characterVisualCatalogService.verifyFiles();

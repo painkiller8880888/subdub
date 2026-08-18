@@ -1,7 +1,7 @@
 import type {
   AssetDetail,
   AssetListItem,
-  Display,
+  DisplayV13,
   StaticAnnotation,
   VisualAssignment
 } from "../schema/index.js";
@@ -12,7 +12,7 @@ export type VisualAsset = Pick<
 >;
 
 export type DefaultDisplayResult =
-  | { readonly display: Display; readonly reason?: undefined }
+  | { readonly display: DisplayV13; readonly reason?: undefined }
   | { readonly display: undefined; readonly reason: string };
 
 export function clampUnitInterval(value: number): number {
@@ -35,7 +35,8 @@ export function defaultDisplayForAsset(
     scale: 1,
     position: { x: 0.5, y: 0.5 },
     prioritizeVisual: false,
-    annotations: []
+    annotations: [],
+    displayCoordinateSpace: "content-slot-relative" as const
   };
 
   if (asset.kind === "video") {
