@@ -3,6 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
 import { createStandardScreenTemplate } from "../../src/app/screen-templates/screen-template-seed.js";
+import type { CommonDisplay } from "../../src/schema/common.js";
 import {
   findScreenTemplateElement,
   moveScreenTemplateElement,
@@ -15,6 +16,7 @@ import {
   screenTemplateResizeHandlePosition,
   updateScreenTemplateElementNumericField
 } from "../../src/web/screen-template-editor.js";
+import { MediaFrame } from "../../src/remotion/layout.js";
 import {
   ScreenLayoutFrame,
   screenLayoutContentFrameStyle,
@@ -134,6 +136,99 @@ describe("ScreenTemplate editor geometry", () => {
 
     expect(markup).toContain("重要な箇所");
     expect(markup).toContain("font-size:1.25cqw");
+  });
+
+  it("keeps production MediaFrame annotation lengths unitized", () => {
+    const display = {
+      annotations: [
+        {
+          id: "production-label",
+          kind: "label",
+          text: "本番",
+          x: 0.2,
+          y: 0.3,
+          width: null,
+          height: null,
+          colorToken: "warning"
+        },
+        {
+          id: "production-box",
+          kind: "box",
+          text: null,
+          x: 0.3,
+          y: 0.4,
+          width: 0.2,
+          height: 0.2,
+          colorToken: "accent"
+        }
+      ],
+      crop: { x: 0, y: 0, width: 1, height: 1 },
+      fit: "contain",
+      position: { x: 0.5, y: 0.5 },
+      prioritizeVisual: false,
+      scale: 1
+    } satisfies CommonDisplay;
+    const markup = renderToStaticMarkup(
+      createElement(MediaFrame, {
+        display,
+        children: createElement("span", null, "media")
+      })
+    );
+
+    expect(markup).toContain("border:4px solid");
+    expect(markup).toContain("padding:8px 14px");
+    expect(markup).toContain("font-size:24px");
+    expect(markup).not.toContain("border:4 solid");
+  });
+
+  it("keeps mixed coordinate-space contents in global preview order", () => {
+    const template = createStandardScreenTemplate(TIMESTAMP);
+    const baseDisplay = {
+      annotations: [],
+      crop: { x: 0, y: 0, width: 1, height: 1 },
+      fit: "contain" as const,
+      position: { x: 0.5, y: 0.5 },
+      prioritizeVisual: false,
+      scale: 1
+    };
+    const preview: ScreenLayoutPreview = {
+      characters: {},
+      content: {
+        alt: "legacy A",
+        display: {
+          ...baseDisplay,
+          displayCoordinateSpace: "legacy-media-frame" as const
+        },
+        src: "/legacy-a.png"
+      },
+      contents: [
+        {
+          alt: "legacy A",
+          display: {
+            ...baseDisplay,
+            displayCoordinateSpace: "legacy-media-frame" as const
+          },
+          src: "/legacy-a.png"
+        },
+        {
+          alt: "relative B",
+          display: {
+            ...baseDisplay,
+            displayCoordinateSpace: "content-slot-relative" as const
+          },
+          src: "/relative-b.png"
+        }
+      ],
+      dialogueText: "",
+      sectionTitleText: ""
+    };
+    const markup = renderToStaticMarkup(
+      createElement(ScreenLayoutFrame, { preview, template })
+    );
+
+    expect(markup.indexOf("/legacy-a.png")).toBeLessThan(
+      markup.indexOf("/relative-b.png")
+    );
   });
 
   it("resizes a rotated element using the element-local axes", () => {

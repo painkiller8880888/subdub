@@ -31,8 +31,10 @@ function annotationStyle(annotation: StaticAnnotation): CSSProperties {
   };
 }
 
-function annotationLength(value: number, responsive: boolean): number | string {
-  return responsive ? `${(value / ANNOTATION_CANVAS_WIDTH) * 100}cqw` : value;
+function annotationLength(value: number, responsive: boolean): string {
+  return responsive
+    ? `${(value / ANNOTATION_CANVAS_WIDTH) * 100}cqw`
+    : `${value}px`;
 }
 
 export function AnnotationLayer({

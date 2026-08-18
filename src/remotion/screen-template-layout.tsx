@@ -236,22 +236,21 @@ function renderScreenTemplateElement(
     );
   }
 
+  const hasContentSlotRelativePreview = contentPreviewsForLayout.some(
+    (content) =>
+      content.display?.displayCoordinateSpace !== "legacy-media-frame"
+  );
+  if (hasContentSlotRelativePreview) {
+    return null;
+  }
+
   return (
     <div
       aria-hidden="true"
       className="screen-layout-element screen-layout-content"
       key={element.elementId}
       style={baseStyle}
-    >
-      {contentPreviewsForLayout
-        .filter(
-          (content) =>
-            content.display?.displayCoordinateSpace !== "legacy-media-frame"
-        )
-        .map((content, index) =>
-          renderScreenLayoutContent(content, `${element.elementId}-${index}`)
-        )}
-    </div>
+    />
   );
 }
 
@@ -292,6 +291,48 @@ function renderScreenLayoutContent(
       />
     </div>
   );
+}
+
+function renderScreenLayoutContents(
+  elements: readonly ScreenTemplateElement[],
+  contents: readonly ScreenLayoutContentPreview[]
+): ReactNode {
+  const contentSlot = elements.find(
+    (
+      element
+    ): element is Extract<ScreenTemplateElement, { type: "content-slot" }> =>
+      element.type === "content-slot"
+  );
+  let relativeContentIndex = 0;
+
+  return contents.map((content, index) => {
+    if (content.display?.displayCoordinateSpace === "legacy-media-frame") {
+      return renderScreenLayoutContent(content, `content-${index}`);
+    }
+    if (contentSlot === undefined) {
+      return null;
+    }
+
+    const showContentSlotSurface = relativeContentIndex === 0;
+    relativeContentIndex += 1;
+    return (
+      <div
+        aria-hidden="true"
+        className={
+          showContentSlotSurface
+            ? "screen-layout-element screen-layout-content"
+            : "screen-layout-element"
+        }
+        key={`content-slot-${index}`}
+        style={{
+          ...screenTemplateElementStyle(contentSlot),
+          zIndex: 1
+        }}
+      >
+        {renderScreenLayoutContent(content, `content-${index}`)}
+      </div>
+    );
+  });
 }
 
 function renderScreenLayoutBackground(
@@ -348,14 +389,7 @@ export function ScreenLayoutFrame({
       {template.elements.map((element) =>
         renderScreenTemplateElement(element, resolvedPreview)
       )}
-      {contentPreviewsForLayout
-        .filter(
-          (content) =>
-            content.display?.displayCoordinateSpace === "legacy-media-frame"
-        )
-        .map((content, index) =>
-          renderScreenLayoutContent(content, `legacy-content-${index}`)
-        )}
+      {renderScreenLayoutContents(template.elements, contentPreviewsForLayout)}
     </div>
   );
 }
