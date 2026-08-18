@@ -17,8 +17,10 @@ import {
   selectActiveBackground,
   selectActiveInsert,
   selectActiveLines,
-  selectActiveVisuals
+  selectActiveVisuals,
+  selectActiveScreenLayout
 } from "./selection";
+import { SectionTitleLayer } from "./section-title";
 import { SubtitleLayer } from "./subtitle";
 import { VideoInsert } from "./video-insert";
 import { PhotoVisual, VideoVisual } from "./visuals";
@@ -112,9 +114,11 @@ export function RenderManifestComposition(
   const background = selectActiveBackground(manifest, frame);
   const activeVisuals = selectActiveVisuals(manifest, frame);
   const activeLines = selectActiveLines(manifest, frame);
-  const prioritizeVisual = activeVisuals.some(
-    (visual) => visual.display.prioritizeVisual
-  );
+  const activeLayout = selectActiveScreenLayout(manifest, frame, activeLines);
+  const activeSectionId = activeLines[0]?.sectionId ?? background?.sectionId;
+  const sectionTitle = manifest.sectionLayouts.find(
+    (layout) => layout.sectionId === activeSectionId
+  )?.sectionTitle;
 
   return (
     <AbsoluteFill
@@ -151,10 +155,15 @@ export function RenderManifestComposition(
       <CharacterLayer
         manifest={manifest}
         frame={frame}
-        prioritizeVisual={prioritizeVisual}
+        layout={activeLayout}
         assetUrlResolver={assetUrlResolver}
       />
-      <SubtitleLayer manifest={manifest} lines={activeLines} />
+      <SectionTitleLayer layout={activeLayout} title={sectionTitle} />
+      <SubtitleLayer
+        manifest={manifest}
+        lines={activeLines}
+        layout={activeLayout}
+      />
     </AbsoluteFill>
   );
 }

@@ -6,7 +6,10 @@ import {
   type RenderVisual,
   type RenderManifest
 } from "../../src/schema/index.js";
-import { renderManifestFixture } from "../fixtures/render-manifest.js";
+import {
+  renderManifestFixture,
+  renderManifestFixtureV23
+} from "../fixtures/render-manifest.js";
 
 function clone(value: typeof renderManifestFixture): RenderManifest;
 function clone<T>(value: T): T;
@@ -37,7 +40,7 @@ function getVisualDisplayMetric(visual: RenderVisual): number {
     case "video":
       return visual.display.playbackRate;
     case "photo":
-      return visual.display.scale;
+      return visual.display.outerFrame.rect.width;
     case "document_scan":
       return visual.display.page;
   }
@@ -51,7 +54,7 @@ describe("renderManifestSchema", () => {
   });
 
   it("keeps the 2.2.0 muted parser separate from the 2.3.0 volume contract", () => {
-    const legacy = structuredClone(renderManifestFixture) as unknown as {
+    const legacy = structuredClone(renderManifestFixtureV23) as unknown as {
       manifestVersion: string;
       visuals: Array<{ display: Record<string, unknown> }>;
       audioTracks: Array<Record<string, unknown>>;
@@ -92,14 +95,17 @@ describe("renderManifestSchema", () => {
     expect(legacyRenderManifestV22Schema.safeParse(legacy).success).toBe(true);
     expect(renderManifestSchema.safeParse(legacy).success).toBe(false);
 
-    const projectDisplay = clone(renderManifestFixture).visuals[0]?.display;
+    const projectDisplay = structuredClone(
+      renderManifestFixtureV23
+    ).visuals[0]?.display;
     if (projectDisplay?.kind !== "video") {
       throw new Error("fixture must contain a video display");
     }
     Reflect.deleteProperty(projectDisplay, "volume");
     (projectDisplay as unknown as Record<string, unknown>).muted = true;
     const projectShape = clone(renderManifestFixture);
-    projectShape.visuals[0]!.display = projectDisplay;
+    (projectShape.visuals[0] as unknown as { display: unknown }).display =
+      projectDisplay;
     expectInvalid(projectShape, ["visuals", 0, "display"]);
   });
 
@@ -199,8 +205,16 @@ describe("renderManifestSchema", () => {
     expectInvalid(invalidVolume, ["audioTracks", 0, "volume"]);
 
     const invalidFinite = clone(renderManifestFixture);
-    invalidFinite.visuals[0].display.scale = Number.POSITIVE_INFINITY;
-    expectInvalid(invalidFinite, ["visuals", 0, "display", "scale"]);
+    invalidFinite.visuals[0].display.outerFrame.rect.width =
+      Number.POSITIVE_INFINITY;
+    expectInvalid(invalidFinite, [
+      "visuals",
+      0,
+      "display",
+      "outerFrame",
+      "rect",
+      "width"
+    ]);
 
     const invalidPlaybackRate = clone(renderManifestFixture);
     const display = invalidPlaybackRate.visuals[0].display;

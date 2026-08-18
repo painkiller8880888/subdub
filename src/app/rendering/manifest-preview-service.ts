@@ -134,7 +134,10 @@ function sourceAssetTarget(
     (candidate) => candidate.src === assetPath
   );
   if (visual !== undefined) {
-    return toTarget("visuals", { assignmentId: visual.id, path: assetPath });
+    return toTarget("visuals", {
+      assignmentId: visual.sourceAssignmentId,
+      path: assetPath
+    });
   }
 
   const insert = manifest.inserts.find(

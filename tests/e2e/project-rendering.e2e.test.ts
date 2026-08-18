@@ -1757,7 +1757,7 @@ describe("MVP final verification E2E", () => {
         );
         expect(
           manifest.visuals.find(
-            (visual) => visual.id === "visual-fixture-document"
+            (visual) => visual.sourceAssignmentId === "visual-fixture-document"
           )?.display
         ).toMatchObject({ page: 2 });
         expect(manifest.audioTracks).toHaveLength(1);
@@ -1855,13 +1855,13 @@ describe("MVP final verification E2E", () => {
         expect(manifestFileChecksum).toBe(manifestOutput?.checksum);
 
         const videoVisual = manifest.visuals.find(
-          (visual) => visual.id === "visual-fixture-video"
+          (visual) => visual.sourceAssignmentId === "visual-fixture-video"
         );
         const photoVisual = manifest.visuals.find(
-          (visual) => visual.id === "visual-fixture-photo"
+          (visual) => visual.sourceAssignmentId === "visual-fixture-photo"
         );
         const documentVisual = manifest.visuals.find(
-          (visual) => visual.id === "visual-fixture-document"
+          (visual) => visual.sourceAssignmentId === "visual-fixture-document"
         );
         if (
           videoVisual === undefined ||
@@ -2399,7 +2399,7 @@ describe("MVP final verification E2E", () => {
         ]);
 
         const ed09SectionVisual = ed09Manifest.visuals.find(
-          (visual) => visual.id === "visual-fixture-photo"
+          (visual) => visual.sourceAssignmentId === "visual-fixture-photo"
         );
         const ed09IntroInsert = ed09Manifest.inserts[0];
         const ed09FirstCutin = ed09Manifest.inserts[1];

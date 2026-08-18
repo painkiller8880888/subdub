@@ -9,6 +9,8 @@ import type {
   ScreenTemplate,
   ScreenTemplateElement
 } from "../schema/screen-template";
+import type { ResolvedScreenElement } from "../schema/index";
+import { resolveScreenTemplateLayout } from "../screen-layout-resolver";
 import { AnnotationLayer } from "./layout";
 
 export type ScreenCharacterSlot = "speaker-1" | "speaker-2";
@@ -65,7 +67,7 @@ function percentage(value: number): string {
 }
 
 export function screenTemplateElementStyle(
-  element: ScreenTemplateElement
+  element: Pick<ScreenTemplateElement, "transform">
 ): CSSProperties {
   const { rect, rotationDeg } = element.transform;
   return {
@@ -139,7 +141,7 @@ function contentPreviews(
 }
 
 function renderCharacterPreview(
-  element: Extract<ScreenTemplateElement, { type: "character-visual" }>,
+  element: Extract<ResolvedScreenElement, { type: "character-visual" }>,
   preview: ScreenLayoutPreview
 ): ReactNode {
   const character = preview.characters[element.slot];
@@ -163,22 +165,12 @@ function renderCharacterPreview(
 }
 
 function renderScreenTemplateElement(
-  element: ScreenTemplateElement,
+  element: ResolvedScreenElement,
   preview: ScreenLayoutPreview
 ): ReactNode {
   const contentPreviewsForLayout = contentPreviews(preview);
-  const prioritizeVisual =
-    element.type === "character-visual" &&
-    contentPreviewsForLayout.some(
-      (content) => content.display?.prioritizeVisual === true
-    );
   const baseStyle = {
     ...screenTemplateElementStyle(element),
-    ...(prioritizeVisual
-      ? {
-          transform: `${screenTemplateElementStyle(element).transform} scale(0.72)`
-        }
-      : {}),
     zIndex:
       element.type === "content-slot"
         ? 1
@@ -294,13 +286,13 @@ function renderScreenLayoutContent(
 }
 
 function renderScreenLayoutContents(
-  elements: readonly ScreenTemplateElement[],
+  elements: readonly ResolvedScreenElement[],
   contents: readonly ScreenLayoutContentPreview[]
 ): ReactNode {
   const contentSlot = elements.find(
     (
       element
-    ): element is Extract<ScreenTemplateElement, { type: "content-slot" }> =>
+    ): element is Extract<ResolvedScreenElement, { type: "content-slot" }> =>
       element.type === "content-slot"
   );
   let relativeContentIndex = 0;
@@ -370,6 +362,11 @@ export function ScreenLayoutFrame({
 }): ReactNode {
   const resolvedPreview = previewOrDefault(preview);
   const contentPreviewsForLayout = contentPreviews(resolvedPreview);
+  const resolvedLayout = resolveScreenTemplateLayout(template, {
+    prioritizeVisual: contentPreviewsForLayout.some(
+      (content) => content.display?.prioritizeVisual === true
+    )
+  });
   const classes = ["screen-layout-frame", className]
     .filter((value): value is string => value !== undefined)
     .join(" ");
@@ -386,10 +383,13 @@ export function ScreenLayoutFrame({
       }}
     >
       {renderScreenLayoutBackground(resolvedPreview.background)}
-      {template.elements.map((element) =>
+      {resolvedLayout.elements.map((element) =>
         renderScreenTemplateElement(element, resolvedPreview)
       )}
-      {renderScreenLayoutContents(template.elements, contentPreviewsForLayout)}
+      {renderScreenLayoutContents(
+        resolvedLayout.elements,
+        contentPreviewsForLayout
+      )}
     </div>
   );
 }

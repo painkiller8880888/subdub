@@ -1,6 +1,10 @@
 import type { CSSProperties, ReactNode } from "react";
 
-import type { CommonDisplay, StaticAnnotation } from "../schema/index";
+import type {
+  CommonDisplay,
+  RenderResolvedVisualDisplay,
+  StaticAnnotation
+} from "../schema/index";
 
 import { DESIGN_COLORS } from "./layout-helpers";
 
@@ -126,7 +130,7 @@ export function AnnotationLayer({
   });
 }
 
-function cropInnerStyle(display: CommonDisplay): CSSProperties {
+function cropInnerStyle(display: Pick<CommonDisplay, "crop">): CSSProperties {
   const { crop } = display;
   return {
     position: "absolute",
@@ -153,13 +157,89 @@ export function mediaFrameStyle(display: CommonDisplay): CSSProperties {
   };
 }
 
+export function resolvedMediaFrameStyle(
+  display: RenderResolvedVisualDisplay
+): CSSProperties {
+  const { rect } = display.outerFrame;
+  return {
+    position: "absolute",
+    left: `${rect.x * 100}%`,
+    top: `${rect.y * 100}%`,
+    width: `${rect.width * 100}%`,
+    height: `${rect.height * 100}%`,
+    transform: `rotate(${display.outerFrame.rotationDeg}deg)`,
+    transformOrigin: "center center",
+    overflow: "hidden",
+    borderRadius: 24,
+    backgroundColor: DESIGN_COLORS.card,
+    boxShadow: "0 18px 50px rgba(5, 12, 24, 0.32)"
+  };
+}
+
+function resolvedContentClipPath(display: RenderResolvedVisualDisplay): string {
+  const { rect, rotationDeg } = display.contentClip.transform;
+  const center = { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
+  const corners = [
+    { x: rect.x, y: rect.y },
+    { x: rect.x + rect.width, y: rect.y },
+    { x: rect.x + rect.width, y: rect.y + rect.height },
+    { x: rect.x, y: rect.y + rect.height }
+  ];
+  const radians = (rotationDeg * Math.PI) / 180;
+  return `polygon(${corners
+    .map((corner) => {
+      const dx = (corner.x - center.x) * 1920;
+      const dy = (corner.y - center.y) * 1080;
+      const x =
+        center.x + (dx * Math.cos(radians) - dy * Math.sin(radians)) / 1920;
+      const y =
+        center.y + (dx * Math.sin(radians) + dy * Math.cos(radians)) / 1080;
+      return `${x * 100}% ${y * 100}%`;
+    })
+    .join(", ")})`;
+}
+
+export function ResolvedMediaFrame({
+  display,
+  children
+}: {
+  display: RenderResolvedVisualDisplay;
+  children: ReactNode;
+}): ReactNode {
+  const frame = (
+    <div style={resolvedMediaFrameStyle(display)}>
+      <div style={cropInnerStyle(display)}>{children}</div>
+      <AnnotationLayer annotations={display.annotations} />
+    </div>
+  );
+  if (!display.contentClip.enabled) {
+    return frame;
+  }
+  return (
+    <div
+      style={{
+        position: "absolute",
+        inset: 0,
+        clipPath: resolvedContentClipPath(display)
+      }}
+    >
+      {frame}
+    </div>
+  );
+}
+
 export function MediaFrame({
   display,
   children
 }: {
-  display: CommonDisplay;
+  display: CommonDisplay | RenderResolvedVisualDisplay;
   children: ReactNode;
 }): ReactNode {
+  if ("outerFrame" in display) {
+    return (
+      <ResolvedMediaFrame display={display}>{children}</ResolvedMediaFrame>
+    );
+  }
   return (
     <div style={mediaFrameStyle(display)}>
       <div style={cropInnerStyle(display)}>{children}</div>

@@ -114,13 +114,29 @@ export function subtitleTypographyScale(
   displayName: string,
   subtitleText: string
 ): number {
+  return subtitleTypographyScaleForFontSize(
+    displayName,
+    subtitleText,
+    SUBTITLE_BODY_FONT_SIZE_PX
+  );
+}
+
+export function subtitleTypographyScaleForFontSize(
+  displayName: string,
+  subtitleText: string,
+  bodyFontSizePx: number
+): number {
+  const safeBodyFontSizePx = Math.max(1, bodyFontSizePx);
+  const labelFontSizePx =
+    safeBodyFontSizePx *
+    (SUBTITLE_LABEL_FONT_SIZE_PX / SUBTITLE_BODY_FONT_SIZE_PX);
   const estimatedLabelHeight =
-    estimateSubtitleLineCount(displayName, SUBTITLE_LABEL_FONT_SIZE_PX) *
-    SUBTITLE_LABEL_FONT_SIZE_PX *
+    estimateSubtitleLineCount(displayName, labelFontSizePx) *
+    labelFontSizePx *
     SUBTITLE_LABEL_LINE_HEIGHT;
   const estimatedBodyHeight =
-    estimateSubtitleLineCount(subtitleText, SUBTITLE_BODY_FONT_SIZE_PX) *
-    SUBTITLE_BODY_FONT_SIZE_PX *
+    estimateSubtitleLineCount(subtitleText, safeBodyFontSizePx) *
+    safeBodyFontSizePx *
     SUBTITLE_BODY_LINE_HEIGHT;
   const estimatedTextHeight =
     estimatedLabelHeight +

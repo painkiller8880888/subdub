@@ -5,7 +5,8 @@ import type {
   RenderInsert,
   RenderLine,
   RenderManifest,
-  RenderVisual
+  RenderVisual,
+  ResolvedScreenLayout
 } from "../schema/index";
 
 export type TimelineInterval = Readonly<{
@@ -59,6 +60,21 @@ export function selectActiveLines(
   frame: number
 ): RenderLine[] {
   return manifest.lines.filter((line) => isFrameInInterval(frame, line));
+}
+
+export function selectActiveScreenLayout(
+  manifest: RenderManifest,
+  frame: number,
+  lines: readonly RenderLine[]
+): ResolvedScreenLayout | undefined {
+  const line = lines[0];
+  if (line !== undefined) {
+    return line.resolvedLayout;
+  }
+  const background = selectActiveBackground(manifest, frame);
+  return manifest.sectionLayouts.find(
+    (layout) => layout.sectionId === background?.sectionId
+  )?.resolvedLayout;
 }
 
 export function selectActiveLineForSpeaker(

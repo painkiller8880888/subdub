@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { legacyCharacterVariantCatalog as characterVariantCatalog } from "../../src/app/character-visuals/character-visual-seed.js";
+import { createStandardScreenTemplate } from "../../src/app/screen-templates/screen-template-seed.js";
 import {
   characterVariantMapping,
   CHARACTER_VARIANT_CATALOG_VERSION,
@@ -13,7 +14,7 @@ import {
 } from "../../src/app/rendering/render-manifest-compiler.js";
 import { createRenderManifestInput } from "../fixtures/render-manifest-input.js";
 import { videoProjectFixture } from "../fixtures/video-project.js";
-import type { VideoProject } from "../../src/schema/index.js";
+import type { RenderVisual, VideoProject } from "../../src/schema/index.js";
 import type { VoicevoxAudioIndex } from "../../src/app/voicevox/audio-index.js";
 import { characterVisualCatalogSnapshotSchema } from "../../src/schema/character-visual.js";
 
@@ -127,7 +128,7 @@ describe("compileRenderManifest", () => {
       return;
     }
 
-    expect(result.manifest.manifestVersion).toBe("2.3.0");
+    expect(result.manifest.manifestVersion).toBe("2.4.0");
     expect(result.manifest.characterCatalogVersion).toBe(
       CHARACTER_VARIANT_CATALOG_VERSION
     );
@@ -278,7 +279,157 @@ describe("compileRenderManifest", () => {
     );
   });
 
-  it("preserves arbitrary project video volumes in the 2.3.0 manifest", () => {
+  it("partitions visual assignments at effective template boundaries and keeps video time continuous", () => {
+    const project = structuredClone(videoProjectFixture) as VideoProject;
+    const introSection = project.script.sections[0];
+    if (introSection === undefined || introSection.lines[1] === undefined) {
+      throw new Error("intro fixture lines are missing");
+    }
+    const thirdLine = {
+      ...introSection.lines[1],
+      id: "intro-learner-2",
+      screenTemplateId: null
+    };
+    introSection.lines = [...introSection.lines, thirdLine];
+
+    const alternateTemplate = createStandardScreenTemplate(
+      "2026-08-10T00:00:00.000Z"
+    );
+    alternateTemplate.templateId = "screen-template-alternate";
+    alternateTemplate.name = "Alternate";
+    alternateTemplate.elements[0]!.transform.rect.x = 0.06;
+    introSection.lines[1]!.screenTemplateId = alternateTemplate.templateId;
+
+    const assignment = project.visuals.assignments[0];
+    if (assignment === undefined) {
+      throw new Error("intro visual assignment is missing");
+    }
+    if (assignment.display.kind !== "video") {
+      throw new Error("intro visual assignment must be a video");
+    }
+    const sourcePlaybackRate = assignment.display.playbackRate;
+    assignment.endLineId = thirdLine.id;
+
+    const result = compileRenderManifest(
+      createRenderManifestInput(project, {
+        screenTemplateCatalogSnapshot: [
+          createStandardScreenTemplate("2026-08-10T00:00:00.000Z"),
+          alternateTemplate
+        ]
+      })
+    );
+
+    expect(result.success).toBe(true);
+    if (!result.success) {
+      return;
+    }
+    const segments = result.manifest.visuals.filter(
+      (visual) => visual.sourceAssignmentId === assignment.id
+    );
+    expect(segments.map((segment) => segment.segmentIndex)).toEqual([0, 1, 2]);
+    expect(segments.map((segment) => segment.segmentStartLineId)).toEqual([
+      introSection.lines[0]!.id,
+      introSection.lines[1]!.id,
+      introSection.lines[2]!.id
+    ]);
+    expect(segments.map((segment) => segment.screenTemplateId)).toEqual([
+      "screen-template-standard",
+      "screen-template-alternate",
+      "screen-template-standard"
+    ]);
+
+    const videoSegments: Extract<RenderVisual, { kind: "video" }>[] =
+      segments.map((segment) => {
+        if (segment.kind !== "video" || segment.display.kind !== "video") {
+          throw new Error("fixture visual must remain a video");
+        }
+        return segment;
+      });
+    for (let index = 1; index < videoSegments.length; index += 1) {
+      const previous = videoSegments[index - 1]!;
+      const current = videoSegments[index]!;
+      const expectedStart =
+        0 +
+        Math.round(
+          ((current.from - videoSegments[0]!.from) *
+            1000 *
+            sourcePlaybackRate) /
+            result.manifest.fps
+        );
+      expect(current.display.startMs).toBe(expectedStart);
+      expect(current.display.startMs).toBeGreaterThan(previous.display.startMs);
+    }
+    expect(videoSegments.at(-1)?.display.endMs).toBe(3_000);
+  });
+
+  it("bakes coordinate space, priority geometry, section titles, and freshness into 2.4.0", () => {
+    const legacy = compileRenderManifest(validInput());
+    expect(legacy.success).toBe(true);
+    if (!legacy.success) {
+      return;
+    }
+    const legacyVisual = legacy.manifest.visuals[0];
+    if (legacyVisual?.display.kind !== "video") {
+      throw new Error("fixture visual must be a video");
+    }
+    expect(legacyVisual.display.contentClip.enabled).toBe(false);
+    expect(legacyVisual.display.outerFrame.rect).toMatchObject({
+      x: expect.closeTo(0.09),
+      y: expect.closeTo(0.19),
+      width: expect.closeTo(0.82),
+      height: expect.closeTo(0.62)
+    });
+    expect(
+      legacy.manifest.lines[0]!.resolvedLayout.elements.find(
+        (element) =>
+          element.type === "character-visual" && element.slot === "speaker-1"
+      )?.transform.rect.width
+    ).toBeCloseTo(0.25 * 0.72);
+    expect(legacy.manifest.sectionLayouts[0]?.sectionTitle).toBe(
+      videoProjectFixture.script.sections[0]?.name
+    );
+
+    const relativeProject = structuredClone(
+      videoProjectFixture
+    ) as VideoProject;
+    const relativeDisplay = relativeProject.visuals.assignments[0]!.display;
+    relativeDisplay.displayCoordinateSpace = "content-slot-relative";
+    relativeDisplay.position = { x: 0.5, y: 0.5 };
+    relativeDisplay.scale = 0.5;
+    const relative = compileRenderManifest(validInput(relativeProject));
+    expect(relative.success).toBe(true);
+    if (!relative.success) {
+      return;
+    }
+    const relativeVisual = relative.manifest.visuals[0];
+    if (relativeVisual?.display.kind !== "video") {
+      throw new Error("fixture visual must be a video");
+    }
+    expect(relativeVisual.display.contentClip.enabled).toBe(true);
+    expect(relativeVisual.display.outerFrame.rect).toMatchObject({
+      x: expect.closeTo(0.295),
+      y: expect.closeTo(0.345),
+      width: expect.closeTo(0.41),
+      height: expect.closeTo(0.31)
+    });
+    expect(relative.manifest.compilerInputHash).not.toBe(
+      legacy.manifest.compilerInputHash
+    );
+
+    const renamedProject = structuredClone(videoProjectFixture) as VideoProject;
+    renamedProject.script.sections[0]!.name += " (更新)";
+    const renamed = compileRenderManifest(validInput(renamedProject));
+    expect(renamed.success).toBe(true);
+    if (!renamed.success) {
+      return;
+    }
+    expect(renamed.manifest.sectionLayouts[0]?.sectionTitle).toContain("更新");
+    expect(renamed.manifest.compilerInputHash).not.toBe(
+      legacy.manifest.compilerInputHash
+    );
+  });
+
+  it("preserves arbitrary project video volumes in the 2.4.0 manifest", () => {
     const input = validInput();
     const project = structuredClone(input.project) as VideoProject;
     const display = project.visuals.assignments[0]?.display;
@@ -296,7 +447,7 @@ describe("compileRenderManifest", () => {
     expect(result.manifest.visuals[0]?.display).toMatchObject({ volume: 0.25 });
   });
 
-  it("preserves project video volume 1 in the 2.3.0 manifest", () => {
+  it("preserves project video volume 1 in the 2.4.0 manifest", () => {
     const input = validInput();
     const project = structuredClone(input.project) as VideoProject;
     const display = project.visuals.assignments[0]?.display;

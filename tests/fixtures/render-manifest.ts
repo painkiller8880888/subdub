@@ -1,4 +1,14 @@
-import type { RenderManifest } from "../../src/schema/index.js";
+import {
+  resolveScreenTemplateLayout,
+  resolveVisualDisplay
+} from "../../src/screen-layout-resolver.js";
+import { screenTemplateContentHash } from "../../src/app/screen-templates/screen-template-hash.js";
+import { createStandardScreenTemplate } from "../../src/app/screen-templates/screen-template-seed.js";
+import type {
+  RenderManifest,
+  RenderManifestV23,
+  RenderVisualV23
+} from "../../src/schema/index.js";
 
 const SOURCE_HASH =
   "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
@@ -13,7 +23,7 @@ const CHARACTER_CHECKSUM =
 const COMPILER_INPUT_HASH =
   "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff";
 
-export const renderManifestFixture = {
+export const renderManifestFixtureV23 = {
   manifestVersion: "2.3.0",
   sourceProjectHash: SOURCE_HASH,
   compilerInputHash: COMPILER_INPUT_HASH,
@@ -383,4 +393,125 @@ export const renderManifestFixture = {
       volume: 1
     }
   ]
-} satisfies RenderManifest;
+} satisfies RenderManifestV23;
+
+const STANDARD_TEMPLATE = createStandardScreenTemplate(
+  "2026-08-10T00:00:00.000Z"
+);
+const STANDARD_TEMPLATE_HASH = screenTemplateContentHash(STANDARD_TEMPLATE);
+const CHARACTER_IDS = {
+  "speaker-1": "character-mentor",
+  "speaker-2": "character-learner"
+} as const;
+
+function lineHasPriority(line: RenderManifestV23["lines"][number]): boolean {
+  return renderManifestFixtureV23.visuals.some(
+    (visual) =>
+      visual.display.prioritizeVisual &&
+      visual.from <= line.from &&
+      line.from + line.durationInFrames <= visual.from + visual.durationInFrames
+  );
+}
+
+function resolvedLayoutForLine(line: RenderManifestV23["lines"][number]) {
+  return resolveScreenTemplateLayout(STANDARD_TEMPLATE, {
+    characterIds: CHARACTER_IDS,
+    prioritizeVisual: lineHasPriority(line)
+  });
+}
+
+function sectionTitle(sectionId: string): string {
+  return (
+    {
+      "section-intro": "導入",
+      "section-main": "申請手順",
+      "section-outro": "完了"
+    }[sectionId] ?? sectionId
+  );
+}
+
+function visualLineRange(visual: RenderVisualV23) {
+  const visualEnd = visual.from + visual.durationInFrames;
+  const lines = renderManifestFixtureV23.lines.filter((line) => {
+    const lineEnd = line.from + line.durationInFrames;
+    return line.from < visualEnd && lineEnd > visual.from;
+  });
+  const first = lines[0] ?? renderManifestFixtureV23.lines[0];
+  const last = lines[lines.length - 1] ?? first;
+  if (first === undefined || last === undefined) {
+    throw new Error("render manifest fixture requires at least one line");
+  }
+  return { startLineId: first.id, endLineId: last.id };
+}
+
+function resolvedFixtureVisual(
+  visual: RenderVisualV23
+): RenderManifest["visuals"][number] {
+  const lineRange = visualLineRange(visual);
+  const firstLine = renderManifestFixtureV23.lines.find(
+    (line) => line.id === lineRange.startLineId
+  );
+  const layout = resolvedLayoutForLine(
+    firstLine ?? renderManifestFixtureV23.lines[0]!
+  );
+  return {
+    id: visual.id,
+    sourceAssignmentId: visual.id,
+    segmentIndex: 0,
+    segmentStartLineId: lineRange.startLineId,
+    segmentEndLineId: lineRange.endLineId,
+    screenTemplateId: STANDARD_TEMPLATE.templateId,
+    templateRevision: STANDARD_TEMPLATE.revision,
+    templateHash: STANDARD_TEMPLATE_HASH,
+    from: visual.from,
+    durationInFrames: visual.durationInFrames,
+    src: visual.src,
+    kind: visual.kind,
+    display: resolveVisualDisplay(
+      {
+        ...visual.display,
+        displayCoordinateSpace: "legacy-media-frame"
+      } as Parameters<typeof resolveVisualDisplay>[0],
+      layout
+    )
+  } as RenderManifest["visuals"][number];
+}
+
+const {
+  lines: legacyLines,
+  visuals: legacyVisuals,
+  backgrounds: legacyBackgrounds,
+  audioTracks: legacyAudioTracks,
+  soundEffects: legacySoundEffects,
+  inserts: legacyInserts,
+  ...manifestHeader
+} = renderManifestFixtureV23;
+
+export const renderManifestFixture: RenderManifest = {
+  ...manifestHeader,
+  manifestVersion: "2.4.0",
+  sectionLayouts: [
+    ...new Set(renderManifestFixtureV23.lines.map((line) => line.sectionId))
+  ].map((sectionId) => ({
+    sectionId,
+    sectionTitle: sectionTitle(sectionId),
+    templateId: STANDARD_TEMPLATE.templateId,
+    templateRevision: STANDARD_TEMPLATE.revision,
+    templateHash: STANDARD_TEMPLATE_HASH,
+    resolvedLayout: resolveScreenTemplateLayout(STANDARD_TEMPLATE, {
+      characterIds: CHARACTER_IDS
+    })
+  })),
+  lines: legacyLines.map((line) => ({
+    ...line,
+    screenTemplateId: STANDARD_TEMPLATE.templateId,
+    templateRevision: STANDARD_TEMPLATE.revision,
+    templateHash: STANDARD_TEMPLATE_HASH,
+    resolvedLayout: resolvedLayoutForLine(line)
+  })),
+  visuals: legacyVisuals.map(resolvedFixtureVisual),
+  backgrounds: legacyBackgrounds,
+  audioTracks: legacyAudioTracks,
+  soundEffects: legacySoundEffects,
+  inserts: legacyInserts
+};
