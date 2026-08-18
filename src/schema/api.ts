@@ -22,7 +22,7 @@ import {
   aiTaskKindSchema,
   characterVisualBindingSchema
 } from "./video-project.js";
-import { displaySchema } from "./common.js";
+import { displayInputSchema } from "./common.js";
 import {
   normalizeTerminologySearchValue,
   terminologyCategoryInputSchema,
@@ -794,7 +794,7 @@ export const visualAssignmentInputSchema = strictObject({
   startLineId: idSchema,
   endLineId: idSchema,
   assetId: idSchema,
-  display: displaySchema
+  display: displayInputSchema
 });
 
 export const visualAssignmentCreateInputSchema = strictObject({
@@ -802,7 +802,7 @@ export const visualAssignmentCreateInputSchema = strictObject({
   startLineId: idSchema,
   endLineId: idSchema,
   assetId: idSchema,
-  display: displaySchema.optional()
+  display: displayInputSchema.optional()
 });
 
 export const visualAssignmentRequestSchema = strictObject({

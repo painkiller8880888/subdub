@@ -102,4 +102,25 @@ describe("RenderPreflightService", () => {
       status: 422
     });
   });
+
+  it("rejects invalid screen template references before rendering", async () => {
+    const preflight = new RenderPreflightService({
+      projectRepository: { read: async () => project },
+      manifestPreviewService: {
+        get: async () =>
+          preview("stale", manifest, [
+            {
+              code: "SCREEN_TEMPLATE_REFERENCE_INVALID",
+              message: "invalid template",
+              target: { kind: "script", sectionId: "section-intro" }
+            }
+          ])
+      }
+    });
+
+    await expect(preflight.validate(projectId)).rejects.toMatchObject({
+      code: RENDER_JOB_ERROR_CODE.screenTemplateReferenceInvalid,
+      status: 422
+    });
+  });
 });

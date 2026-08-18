@@ -9,6 +9,7 @@ export const RENDER_JOB_ERROR_CODE = {
   sourceAssetUnreadable: "RENDER_SOURCE_ASSET_UNREADABLE",
   sourceAssetPathInvalid: "RENDER_SOURCE_ASSET_PATH_INVALID",
   sourceAssetChecksumMismatch: "RENDER_SOURCE_ASSET_CHECKSUM_MISMATCH",
+  screenTemplateReferenceInvalid: "RENDER_SCREEN_TEMPLATE_REFERENCE_INVALID",
   bundleFailed: "RENDER_BUNDLE_FAILED",
   compositionSelectionFailed: "RENDER_COMPOSITION_SELECTION_FAILED",
   mp4RenderFailed: "MP4_RENDER_FAILED",

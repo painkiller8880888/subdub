@@ -9,6 +9,7 @@ import { computeSourceProjectHash } from "../../src/app/rendering/render-manifes
 import { ManifestPreviewService } from "../../src/app/rendering/manifest-preview-service.js";
 import { RenderManifestStore } from "../../src/app/rendering/render-manifest-store.js";
 import { computeOutlineHash } from "../../src/app/projects/script-domain.js";
+import type { ScreenTemplateCatalogPort } from "../../src/app/projects/screen-template-selection.js";
 import type { VoicevoxAudioIndex } from "../../src/app/voicevox/audio-index.js";
 import type { VoiceGenerationStatusData } from "../../src/schema/api.js";
 import type { RenderManifest, VideoProject } from "../../src/schema/index.js";
@@ -78,6 +79,7 @@ async function createService(
     voiceGenerationService?: {
       getStatus: (projectId: unknown) => Promise<VoiceGenerationStatusData>;
     };
+    screenTemplateCatalog?: ScreenTemplateCatalogPort;
   } = {}
 ): Promise<ManifestPreviewService> {
   const manifestStore = new RenderManifestStore({ workspaceRoot: root });
@@ -87,6 +89,7 @@ async function createService(
   return new ManifestPreviewService({
     workspaceRoot: root,
     projectRepository: { read: async () => project },
+    screenTemplateCatalog: options.screenTemplateCatalog,
     manifestStore,
     audioStore: audioStore(
       options.audioIndex ?? createRenderManifestAudioIndex(project)
@@ -134,6 +137,41 @@ describe("ManifestPreviewService", () => {
     expect(result.blockers.map((blocker) => blocker.code)).toContain(
       "MANIFEST_NOT_FOUND"
     );
+  });
+
+  it("blocks output preparation for missing or inactive template references", async () => {
+    const root = await createRoot();
+    const project = createProject();
+    project.script.sections[0]!.screenTemplateId = "missing-template";
+    project.script.sections[0]!.lines[0]!.screenTemplateId =
+      "inactive-template";
+    const manifest = createManifest(project);
+    const service = await createService(root, project, {
+      manifest,
+      screenTemplateCatalog: {
+        findById: (templateId) =>
+          templateId === "inactive-template"
+            ? { status: "inactive" }
+            : templateId === "screen-template-standard"
+              ? { status: "active" }
+              : undefined
+      }
+    });
+
+    const result = await service.get(projectId);
+    expect(result.blockers).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: "SCREEN_TEMPLATE_REFERENCE_INVALID",
+          target: { kind: "script", sectionId: "section-intro" }
+        }),
+        expect.objectContaining({
+          code: "SCREEN_TEMPLATE_REFERENCE_INVALID",
+          target: { kind: "script", lineId: "intro-mentor-1" }
+        })
+      ])
+    );
+    expect(result.canPlay).toBe(false);
   });
 
   it("keeps the previous manifest and reports project staleness", async () => {

@@ -53,6 +53,10 @@ import {
   ScriptApprovalError,
   ScriptValidationError
 } from "./script-errors.js";
+import {
+  validateVideoProjectScreenTemplateReferences,
+  type ScreenTemplateCatalogPort
+} from "./screen-template-selection.js";
 
 function scriptValidationIssues(
   issues: readonly { path: readonly PropertyKey[]; message: string }[]
@@ -72,6 +76,7 @@ export type ProjectServiceOptions = {
   createId?: () => string;
   maxCreateAttempts?: number;
   improvementLogRepository?: ImprovementLogRepositoryPort;
+  screenTemplateCatalog?: ScreenTemplateCatalogPort;
 };
 
 function projectSummary(project: VideoProject): ProjectSummary {
@@ -164,6 +169,7 @@ export class ProjectService {
   private readonly improvementLogRepository:
     | ImprovementLogRepositoryPort
     | undefined;
+  private readonly screenTemplateCatalog: ScreenTemplateCatalogPort | undefined;
 
   constructor(options: ProjectServiceOptions) {
     this.repository = options.repository;
@@ -174,6 +180,20 @@ export class ProjectService {
       Math.floor(options.maxCreateAttempts ?? 5)
     );
     this.improvementLogRepository = options.improvementLogRepository;
+    this.screenTemplateCatalog = options.screenTemplateCatalog;
+  }
+
+  private assertScreenTemplateReferences(project: VideoProject): void {
+    if (this.screenTemplateCatalog === undefined) {
+      return;
+    }
+    const issues = validateVideoProjectScreenTemplateReferences(
+      project,
+      this.screenTemplateCatalog
+    );
+    if (issues.length > 0) {
+      throw new ScriptValidationError(scriptValidationIssues(issues));
+    }
   }
 
   async list(): Promise<ProjectSummary[]> {
@@ -502,6 +522,7 @@ export class ProjectService {
         scriptValidationIssues(updatedProjectResult.error.issues)
       );
     }
+    this.assertScreenTemplateReferences(updatedProjectResult.data);
 
     return this.repository.save(
       projectId,
@@ -536,6 +557,7 @@ export class ProjectService {
         scriptValidationIssues(updatedProjectResult.error.issues)
       );
     }
+    this.assertScreenTemplateReferences(updatedProjectResult.data);
     const candidate = await this.findOutlineCandidate(
       snapshot.project.metadata.id,
       snapshot.project.outline

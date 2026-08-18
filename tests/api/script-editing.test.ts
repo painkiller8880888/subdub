@@ -186,6 +186,7 @@ describe("script editing API", () => {
     }
     const firstLine: Script["sections"][number]["lines"][number] = {
       id: "client-temp-line",
+      screenTemplateId: null,
       speakerId: "character-mentor",
       spokenText: "案内します。",
       subtitleText: "案内します。",
@@ -253,6 +254,7 @@ describe("script editing API", () => {
     const initialized = await initialize(server, project);
     const line = {
       id: "invalid-line",
+      screenTemplateId: null,
       speakerId: "missing-character",
       spokenText: " ",
       subtitleText: "字幕",
@@ -362,6 +364,7 @@ describe("script editing API", () => {
               lines: [
                 {
                   id: "draft-line-1",
+                  screenTemplateId: null,
                   speakerId: "character-mentor",
                   spokenText: "first saved text",
                   subtitleText: "first saved text",

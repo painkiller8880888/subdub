@@ -10,13 +10,14 @@ import {
   type VisualAssignmentRequest
 } from "../../schema/api.js";
 import {
-  displaySchema,
+  displayV13Schema,
   idSchema,
   relativePosixPathSchema,
   sha256Schema,
   visualSuggestionCandidateSchema,
   videoProjectSchema,
-  type Display,
+  type DisplayInput,
+  type DisplayV13,
   type AssetDetail,
   type VisualAssignment,
   type VideoProject
@@ -189,7 +190,7 @@ type DisplayDomainIssue = {
 
 function displayDomainIssues(
   asset: AssetDetail,
-  display: Display
+  display: DisplayV13
 ): DisplayDomainIssue[] {
   if (display.kind === "video") {
     if (
@@ -465,8 +466,10 @@ export class VisualAssignmentService {
       );
     }
 
-    const display =
-      request.assignment.display ?? this.createDefaultDisplay(asset);
+    const display = this.normalizeDisplay(
+      request.assignment.display ?? this.createDefaultDisplay(asset),
+      "content-slot-relative"
+    );
     if (
       aiCandidate !== undefined &&
       (aiCandidate.candidatePayload.asset.status !== "active" ||
@@ -639,7 +642,7 @@ export class VisualAssignmentService {
     return { ...candidate, candidatePayload: payload.data };
   }
 
-  private createDefaultDisplay(asset: AssetDetail): Display {
+  private createDefaultDisplay(asset: AssetDetail): DisplayInput {
     const common = {
       fit: "contain" as const,
       crop: { x: 0, y: 0, width: 1, height: 1 },
@@ -699,11 +702,22 @@ export class VisualAssignmentService {
     );
   }
 
+  private normalizeDisplay(
+    display: DisplayInput,
+    fallbackCoordinateSpace: DisplayV13["displayCoordinateSpace"]
+  ): DisplayV13 {
+    return displayV13Schema.parse({
+      ...display,
+      displayCoordinateSpace:
+        display.displayCoordinateSpace ?? fallbackCoordinateSpace
+    });
+  }
+
   private assertDisplayWithinAsset(
     asset: AssetDetail,
-    display: Display
+    display: DisplayV13
   ): void {
-    const displayResult = displaySchema.safeParse(display);
+    const displayResult = displayV13Schema.safeParse(display);
     if (!displayResult.success) {
       throw visualAssignmentError(
         VISUAL_ASSIGNMENT_ERROR_CODE.candidateInvalid,
@@ -787,8 +801,12 @@ export class VisualAssignmentService {
         [{ path: ["assignment", "assetId"], message: "asset not found" }]
       );
     }
-    this.assertAssetUsable(asset, request.assignment.display.kind);
-    this.assertDisplayWithinAsset(asset, request.assignment.display);
+    const display = this.normalizeDisplay(
+      request.assignment.display,
+      currentAssignment.display.displayCoordinateSpace
+    );
+    this.assertAssetUsable(asset, display.kind);
+    this.assertDisplayWithinAsset(asset, display);
     const confirmedChecksum = this.assertChecksum(asset.checksum);
     if (
       normalizeChecksum(confirmedChecksum) !==
@@ -806,7 +824,7 @@ export class VisualAssignmentService {
       ...currentAssignment,
       startLineId: request.assignment.startLineId,
       endLineId: request.assignment.endLineId,
-      display: request.assignment.display
+      display
     };
     const assignments = currentProject.visuals.assignments.map((assignment) =>
       assignment.id === assignmentId ? updatedAssignment : assignment
@@ -1001,7 +1019,7 @@ export class VisualAssignmentService {
         );
       }
 
-      const displayResult = displaySchema.safeParse(assignment.display);
+      const displayResult = displayV13Schema.safeParse(assignment.display);
       if (!displayResult.success) {
         for (const issue of validationDetails(displayResult.error.issues)) {
           validationIssuesForApproval.push(
@@ -1150,7 +1168,7 @@ export class VisualAssignmentService {
 
   private assertAssetUsable(
     asset: AssetDetail,
-    displayKind: Display["kind"]
+    displayKind: DisplayV13["kind"]
   ): void {
     if (asset.status !== "active") {
       throw visualAssignmentError(

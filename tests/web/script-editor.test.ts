@@ -38,6 +38,7 @@ const script = {
       id: "script-section-main",
       outlineSectionId: "outline-main",
       name: "操作",
+      screenTemplateId: "screen-template-standard",
       background: { kind: "solid" as const, colorToken: "background" as const },
       lines: [
         createDefaultScriptLine("character-mentor", "line-one", "一つ目"),

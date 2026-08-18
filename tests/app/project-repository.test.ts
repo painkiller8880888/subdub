@@ -69,11 +69,24 @@ function legacyVideoProjectV11(): Record<string, unknown> {
     assignments: Array<{ display: Record<string, unknown> }>;
   };
   for (const assignment of visuals.assignments) {
+    delete assignment.display.displayCoordinateSpace;
     if (assignment.display.kind !== "video") {
       continue;
     }
     assignment.display.muted = assignment.display.volume === 0;
     delete assignment.display.volume;
+  }
+  const script = legacy.script as {
+    sections: Array<{
+      screenTemplateId?: unknown;
+      lines: Array<{ screenTemplateId?: unknown }>;
+    }>;
+  };
+  for (const section of script.sections) {
+    delete section.screenTemplateId;
+    for (const line of section.lines) {
+      delete line.screenTemplateId;
+    }
   }
   return legacy;
 }
@@ -454,6 +467,25 @@ describe("ProjectRepository", () => {
     expectSafeExternalError(saveError);
   });
 
+  it("keeps a legacy project untouched when the standard template is unavailable", async () => {
+    await writeRawProject(legacyVideoProjectV11());
+    const before = await readProjectBytes();
+    const repository = new ProjectRepository({
+      workspaceRoot,
+      screenTemplateCatalog: { findById: () => undefined }
+    });
+
+    const error = await expectRepositoryError(
+      () => repository.read(projectId),
+      "PROJECT_MIGRATION_PREREQUISITE_FAILED",
+      503
+    );
+
+    expect(await readProjectBytes()).toEqual(before);
+    expect(await listTemporaryFiles()).toEqual([]);
+    expectSafeExternalError(error);
+  });
+
   it("persists migration diagnostics before replacing a legacy project", async () => {
     const legacy = legacyVideoProjectV11();
     legacy.revision = 7;
@@ -462,7 +494,7 @@ describe("ProjectRepository", () => {
     const repository = new ProjectRepository(workspaceRoot);
 
     const migrated = await repository.read(projectId);
-    expect(migrated.schemaVersion).toBe("1.2.0");
+    expect(migrated.schemaVersion).toBe("1.3.0");
     expect(migrated.revision).toBe(7);
     expect(migrated.edit).toEqual({ videoElements: [], sectionBgms: [] });
     expect(migrated.audio).not.toHaveProperty("sectionBgms");
@@ -477,7 +509,7 @@ describe("ProjectRepository", () => {
       .trimEnd()
       .split("\n")
       .map((line) => JSON.parse(line) as Record<string, unknown>);
-    expect(entries).toHaveLength(2);
+    expect(entries).toHaveLength(3);
     expect(entries[0]).toMatchObject({
       fromSchemaVersion: "1.1.0",
       toSchemaVersion: "1.2.0",
@@ -486,11 +518,17 @@ describe("ProjectRepository", () => {
       legacyPath: "media/bgm-intro.mp3",
       legacyVolume: 0.25
     });
+    expect(entries[2]).toMatchObject({
+      fromSchemaVersion: "1.2.0",
+      toSchemaVersion: "1.3.0",
+      kind: "screen_template_selection",
+      templateId: "screen-template-standard"
+    });
 
     const migratedBytes = await readProjectBytes();
     expect(migratedBytes).not.toEqual(before);
     expect(JSON.parse(migratedBytes.toString("utf8")).schemaVersion).toBe(
-      "1.2.0"
+      "1.3.0"
     );
 
     await repository.read(projectId);

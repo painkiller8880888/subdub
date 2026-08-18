@@ -14,7 +14,7 @@ const BGM_CHECKSUM =
   "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff";
 
 export const videoProjectFixture = {
-  schemaVersion: "1.2.0",
+  schemaVersion: "1.3.0",
   revision: 0,
   metadata: {
     id: "manual-video-project",
@@ -227,10 +227,12 @@ export const videoProjectFixture = {
         id: "section-intro",
         outlineSectionId: "outline-intro",
         name: "はじめに",
+        screenTemplateId: "screen-template-standard",
         background: { kind: "solid", colorToken: "background" },
         lines: [
           {
             id: "intro-mentor-1",
+            screenTemplateId: null,
             speakerId: "character-mentor",
             spokenText: "今回は社内申請システムで申請を登録する手順を説明します。",
             subtitleText: "社内申請の登録手順を説明します。",
@@ -243,6 +245,7 @@ export const videoProjectFixture = {
           },
           {
             id: "intro-learner-1",
+            screenTemplateId: null,
             speakerId: "character-learner",
             spokenText: "まず、申請前に確認することから始めるのだ。",
             subtitleText: "まず、申請前の確認から始めます。",
@@ -259,6 +262,7 @@ export const videoProjectFixture = {
         id: "section-main",
         outlineSectionId: "outline-main",
         name: "申請を登録する",
+        screenTemplateId: "screen-template-standard",
         background: {
           kind: "image",
           src: "backgrounds/application-system.png",
@@ -267,6 +271,7 @@ export const videoProjectFixture = {
         lines: [
           {
             id: "main-mentor-1",
+            screenTemplateId: null,
             speakerId: "character-mentor",
             spokenText: "申請メニューから新規申請を選びます。",
             subtitleText: "申請メニューから「新規申請」を選びます。",
@@ -279,6 +284,7 @@ export const videoProjectFixture = {
           },
           {
             id: "main-learner-1",
+            screenTemplateId: null,
             speakerId: "character-learner",
             spokenText: "入力した内容を確認してから登録するのだ。",
             subtitleText: "内容を確認してから登録します。",
@@ -295,10 +301,12 @@ export const videoProjectFixture = {
         id: "section-outro",
         outlineSectionId: "outline-outro",
         name: "完了を確認する",
+        screenTemplateId: "screen-template-standard",
         background: { kind: "solid", colorToken: "background" },
         lines: [
           {
             id: "outro-mentor-1",
+            screenTemplateId: null,
             speakerId: "character-mentor",
             spokenText: "完了画面が表示されたら、登録は終了です。",
             subtitleText: "完了画面が表示されたら登録終了です。",
@@ -326,6 +334,7 @@ export const videoProjectFixture = {
         projectMediaPath: "media/application-demo.mp4",
         display: {
           kind: "video",
+          displayCoordinateSpace: "legacy-media-frame",
           fit: "cover",
           crop: { x: 0, y: 0, width: 1, height: 1 },
           scale: 1,
@@ -358,6 +367,7 @@ export const videoProjectFixture = {
         projectMediaPath: "media/application-form.png",
         display: {
           kind: "photo",
+          displayCoordinateSpace: "legacy-media-frame",
           fit: "contain",
           crop: { x: 0, y: 0, width: 1, height: 1 },
           scale: 1,
@@ -375,6 +385,7 @@ export const videoProjectFixture = {
         projectMediaPath: "media/completion-report.pdf",
         display: {
           kind: "document_scan",
+          displayCoordinateSpace: "legacy-media-frame",
           fit: "contain",
           crop: { x: 0, y: 0, width: 0.95, height: 0.95 },
           scale: 1,

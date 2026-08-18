@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 
 import type { ApiErrorDetail } from "../../schema/api.js";
 import { idSchema, type Outline, type Script, type VideoProject } from "../../schema/index.js";
+import { STANDARD_SCREEN_TEMPLATE_ID } from "../screen-templates/screen-template-seed.js";
 import {
   ScriptApprovalError,
   ScriptInitializationError,
@@ -82,6 +83,7 @@ export function createScriptFromApprovedOutline(
       outlineSectionId: outlineSection.id,
       name: outlineSection.title,
       background: { kind: "solid", colorToken: "background" },
+      screenTemplateId: STANDARD_SCREEN_TEMPLATE_ID,
       lines: []
     }))
   };

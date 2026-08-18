@@ -19,8 +19,12 @@ import {
 import { invalidateForUpstreamChange } from "./project-invalidation.js";
 import {
   migrateVideoProjectWithDiagnostics,
-  type LegacyBgmMigrationLogEntry
+  type ProjectMigrationLogEntry
 } from "./video-project-migration.js";
+import {
+  validateVideoProjectScreenTemplateReferences,
+  type ScreenTemplateCatalogPort
+} from "./screen-template-selection.js";
 
 export type ProjectRepositoryErrorCode =
   | "PROJECT_ID_INVALID"
@@ -29,6 +33,7 @@ export type ProjectRepositoryErrorCode =
   | "PROJECT_READ_FAILED"
   | "PROJECT_JSON_PARSE_FAILED"
   | "PROJECT_CURRENT_VALIDATION_FAILED"
+  | "PROJECT_MIGRATION_PREREQUISITE_FAILED"
   | "PROJECT_CANDIDATE_VALIDATION_FAILED"
   | "PROJECT_CURRENT_ID_MISMATCH"
   | "PROJECT_CANDIDATE_ID_MISMATCH"
@@ -113,6 +118,7 @@ export type ProjectRepositoryOptions = {
   fileSystem?: Partial<ProjectRepositoryFileSystem>;
   now?: () => Date;
   runLogStore?: RunLogStorePort;
+  screenTemplateCatalog?: ScreenTemplateCatalogPort;
 };
 
 export type ProjectRepositoryLockedOperations = {
@@ -257,6 +263,20 @@ function currentValidationFailedError(
   );
 }
 
+function migrationPrerequisiteFailedError(): ProjectRepositoryError {
+  return new ProjectRepositoryError(
+    "PROJECT_MIGRATION_PREREQUISITE_FAILED",
+    503,
+    "The project migration prerequisite is unavailable.",
+    [
+      {
+        path: ["schemaVersion"],
+        message: "screen-template-standard must exist and be active"
+      }
+    ]
+  );
+}
+
 function candidateValidationFailedError(
   issues: readonly ProjectValidationIssue[]
 ): ProjectRepositoryError {
@@ -341,6 +361,22 @@ function migrationLogWriteFailedError(): ProjectRepositoryError {
     500,
     "The project migration diagnostics could not be written."
   );
+}
+
+function migrationLogEntryKey(
+  entry: ProjectMigrationLogEntry | Record<string, unknown>
+): string {
+  const record = entry as Record<string, unknown>;
+  return JSON.stringify([
+    record.migrationId ?? null,
+    record.kind ?? null,
+    record.fromSchemaVersion ?? null,
+    record.toSchemaVersion ?? null,
+    record.sectionId ?? null,
+    record.legacyPath ?? null,
+    record.legacyVolume ?? null,
+    record.templateId ?? null
+  ]);
 }
 
 function sourceNotFoundError(): ProjectRepositoryError {
@@ -432,6 +468,7 @@ export class ProjectRepository {
   private readonly fileSystem: ProjectRepositoryFileSystem;
   private readonly now: () => Date;
   private readonly runLogStore: RunLogStorePort;
+  private readonly screenTemplateCatalog: ScreenTemplateCatalogPort | undefined;
 
   constructor(options: ProjectRepositoryOptions | string) {
     if (typeof options === "string") {
@@ -442,6 +479,7 @@ export class ProjectRepository {
         workspaceRoot: this.workspaceRoot,
         fileSystem: this.fileSystem
       });
+      this.screenTemplateCatalog = undefined;
       return;
     }
 
@@ -457,6 +495,22 @@ export class ProjectRepository {
         workspaceRoot: this.workspaceRoot,
         fileSystem: this.fileSystem
       });
+    this.screenTemplateCatalog = options.screenTemplateCatalog;
+  }
+
+  private assertScreenTemplateReferences(project: VideoProject): void {
+    if (this.screenTemplateCatalog === undefined) {
+      return;
+    }
+    const issues = validateVideoProjectScreenTemplateReferences(
+      project,
+      this.screenTemplateCatalog
+    );
+    if (issues.length > 0) {
+      throw candidateValidationFailedError(
+        issues.map((issue) => ({ path: issue.path, message: issue.message }))
+      );
+    }
   }
 
   private async readUnlocked(projectId: string): Promise<VideoProject> {
@@ -638,6 +692,8 @@ export class ProjectRepository {
         }
       ]);
     }
+
+    this.assertScreenTemplateReferences(candidateResult.data);
 
     const projectId = this.validateProjectId(candidateResult.data.metadata.id);
     return this.withSaveLock(projectId, () =>
@@ -851,6 +907,8 @@ export class ProjectRepository {
         validationIssues(updatedProjectResult.error)
       );
     }
+
+    this.assertScreenTemplateReferences(updatedProjectResult.data);
 
     return this.writeProjectCandidate(paths, updatedProjectResult.data);
   }
@@ -1069,6 +1127,8 @@ export class ProjectRepository {
         validationIssues(updatedProjectResult.error)
       );
     }
+
+    this.assertScreenTemplateReferences(updatedProjectResult.data);
 
     const serializedProject = `${JSON.stringify(
       updatedProjectResult.data,
@@ -1547,7 +1607,7 @@ export class ProjectRepository {
 
   private async persistMigrationLog(
     paths: ResolvedProjectPaths,
-    entries: readonly LegacyBgmMigrationLogEntry[]
+    entries: readonly ProjectMigrationLogEntry[]
   ): Promise<void> {
     if (entries.length === 0) {
       return;
@@ -1596,24 +1656,12 @@ export class ProjectRepository {
       if (!isRecord(parsed)) {
         throw migrationLogWriteFailedError();
       }
-      const key = [
-        parsed.migrationId,
-        parsed.kind,
-        parsed.sectionId,
-        parsed.legacyPath,
-        parsed.legacyVolume
-      ].join("\u0000");
+      const key = migrationLogEntryKey(parsed);
       existingKeys.add(key);
     }
 
     const newEntries = entries.filter((entry) => {
-      const key = [
-        entry.migrationId,
-        entry.kind,
-        entry.sectionId,
-        entry.legacyPath,
-        entry.legacyVolume
-      ].join("\u0000");
+      const key = migrationLogEntryKey(entry);
       if (existingKeys.has(key)) {
         return false;
       }
@@ -1668,7 +1716,12 @@ export class ProjectRepository {
       throw parseFailedError();
     }
 
-    const migration = migrateVideoProjectWithDiagnostics(parsedJson);
+    const migration = migrateVideoProjectWithDiagnostics(parsedJson, {
+      screenTemplateCatalog: this.screenTemplateCatalog
+    });
+    if (migration.blockedReason !== undefined) {
+      throw migrationPrerequisiteFailedError();
+    }
     const projectResult = videoProjectSchema.safeParse(migration.project);
     if (!projectResult.success) {
       throw currentValidationFailedError(validationIssues(projectResult.error));

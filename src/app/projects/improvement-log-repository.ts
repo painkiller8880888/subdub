@@ -29,7 +29,7 @@ import {
 } from "../../schema/improvement-log.js";
 import {
   outlineSchema,
-  visualAssignmentSchema
+  visualAssignmentV13Schema
 } from "../../schema/video-project.js";
 import { visualSuggestionCandidateSchema } from "../../schema/visual-search-intent.js";
 import {
@@ -256,7 +256,7 @@ function validateDecisionAfter(
   const result =
     taskKind === "outline_generation"
       ? outlineSchema.safeParse(after)
-      : visualAssignmentSchema.safeParse(after);
+      : visualAssignmentV13Schema.safeParse(after);
   if (!result.success) {
     throw payloadError(result.error.issues);
   }
