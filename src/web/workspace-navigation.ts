@@ -17,6 +17,13 @@ export const WORKSPACE_NAVIGATION = [
     icon: "characters"
   },
   {
+    id: "screen-templates",
+    label: "画面テンプレート",
+    section: "ライブラリ",
+    path: "/screen-templates",
+    icon: "screen-templates"
+  },
+  {
     id: "assets",
     label: "素材",
     section: "ライブラリ",

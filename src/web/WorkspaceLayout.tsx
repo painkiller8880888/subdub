@@ -23,7 +23,9 @@ function WorkspaceNavIcon({
           ? "M4 5h16v14H4z M4 15l4-4 3 3 3-4 6 6 M8 9h.01"
           : icon === "terminology"
             ? "M5 4h14v16H5z M8 8h8 M8 12h8 M8 16h5"
-            : "M12 7v5l3 2 M12 3a9 9 0 1 0 9 9";
+            : icon === "screen-templates"
+              ? "M4 5h16v14H4z M8 9h8 M8 13h5 M8 17h8"
+              : "M12 7v5l3 2 M12 3a9 9 0 1 0 9 9";
 
   return (
     <svg
