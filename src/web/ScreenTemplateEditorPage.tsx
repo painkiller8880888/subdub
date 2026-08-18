@@ -24,6 +24,10 @@ import type {
   ScreenTemplateElement
 } from "../schema/screen-template.js";
 import {
+  SCREEN_TEMPLATE_CANVAS_HEIGHT,
+  SCREEN_TEMPLATE_CANVAS_WIDTH
+} from "../schema/screen-template.js";
+import {
   ApiClientError,
   ApiClientProtocolError,
   activateScreenTemplate,
@@ -50,7 +54,10 @@ import {
   screenTemplateElementDescription,
   screenTemplateElementLabel,
   screenTemplateElementValidationMessages,
+  screenTemplateElementValidationWarningMessages,
+  screenTemplateResizeHandlePosition,
   screenTemplateValidationMessages,
+  screenTemplateValidationWarningMessages,
   type NumericElementField,
   type ResizeHandle,
   updateScreenTemplateElementNumericField,
@@ -108,6 +115,25 @@ const EMPTY_CHARACTER_SELECTIONS: CharacterPreviewSelections = {
 };
 
 const GENERIC_ASSET_KINDS = new Set(["photo", "video", "document_scan"]);
+
+async function fetchAllActivePreviewAssets(): Promise<AssetListItem[]> {
+  const pageSize = 100;
+  const items: AssetListItem[] = [];
+  let page = 1;
+
+  while (true) {
+    const result = await searchAssets({
+      page,
+      pageSize,
+      status: "active"
+    });
+    items.push(...result.items);
+    if (!result.hasNextPage || result.items.length === 0) {
+      return items;
+    }
+    page += 1;
+  }
+}
 
 function errorMessage(error: unknown, fallback: string): string {
   if (error instanceof ApiClientError) {
@@ -356,15 +382,27 @@ function NumericPropertyField({
 function PreviewAssetControls({
   catalog,
   assets,
+  catalogError,
+  catalogLoading,
+  assetsError,
+  assetsLoading,
   selections,
   assetId,
+  onRetryCatalog,
+  onRetryAssets,
   onCharacterSelection,
   onAssetSelection
 }: {
   readonly catalog: CharacterVisualCatalogSnapshot | undefined;
   readonly assets: AssetListItem[] | undefined;
+  readonly catalogError: unknown;
+  readonly catalogLoading: boolean;
+  readonly assetsError: unknown;
+  readonly assetsLoading: boolean;
   readonly selections: CharacterPreviewSelections;
   readonly assetId: string | null;
+  readonly onRetryCatalog: () => void;
+  readonly onRetryAssets: () => void;
   readonly onCharacterSelection: (
     slot: ScreenCharacterSlot,
     selection: CharacterPreviewSelection
@@ -508,16 +546,41 @@ function PreviewAssetControls({
           </div>
         </fieldset>
       </div>
-      {catalog === undefined ? (
+      {catalogLoading ? (
         <p className="status-message" role="status">
           CharacterVisualを読み込んでいます…
         </p>
       ) : null}
-      {assets === undefined ? (
+      {catalogLoading ||
+      catalogError === null ||
+      catalogError === undefined ? null : (
+        <div className="screen-template-preview-query-error" role="alert">
+          <p>
+            {errorMessage(
+              catalogError,
+              "CharacterVisualを読み込めませんでした。"
+            )}
+          </p>
+          <button className="button" type="button" onClick={onRetryCatalog}>
+            CharacterVisualを再読み込み
+          </button>
+        </div>
+      )}
+      {assetsLoading ? (
         <p className="status-message" role="status">
           Assetを読み込んでいます…
         </p>
       ) : null}
+      {assetsLoading ||
+      assetsError === null ||
+      assetsError === undefined ? null : (
+        <div className="screen-template-preview-query-error" role="alert">
+          <p>{errorMessage(assetsError, "Assetを読み込めませんでした。")}</p>
+          <button className="button" type="button" onClick={onRetryAssets}>
+            Assetを再読み込み
+          </button>
+        </div>
+      )}
     </section>
   );
 }
@@ -561,7 +624,7 @@ export function ScreenTemplateEditorPage() {
   });
   const assetsQuery = useQuery({
     queryKey: ["screen-template-preview-assets"],
-    queryFn: () => searchAssets({ status: "active", page: 1, pageSize: 50 }),
+    queryFn: fetchAllActivePreviewAssets,
     retry: false
   });
 
@@ -656,6 +719,10 @@ export function ScreenTemplateEditorPage() {
     interaction: EditorInteraction,
     event: ReactPointerEvent<HTMLDivElement>
   ): void {
+    if (saveState === "saving") {
+      interactionRef.current = null;
+      return;
+    }
     const currentDraft = draft;
     const canvasRect =
       canvasRef.current === null
@@ -693,11 +760,28 @@ export function ScreenTemplateEditorPage() {
       return;
     }
 
-    const delta = normalizedPointerDelta(
-      interaction.startPointer,
-      currentPointer,
-      canvasRect
-    );
+    const delta =
+      interaction.mode === "resize"
+        ? (() => {
+            const handlePosition = screenTemplateResizeHandlePosition(
+              interaction.startElement,
+              interaction.handle as ResizeHandle
+            );
+            const startHandlePointer = {
+              x: canvasRect.left + handlePosition.x * canvasRect.width,
+              y: canvasRect.top + handlePosition.y * canvasRect.height
+            };
+            return normalizedPointerDelta(
+              startHandlePointer,
+              currentPointer,
+              canvasRect
+            );
+          })()
+        : normalizedPointerDelta(
+            interaction.startPointer,
+            currentPointer,
+            canvasRect
+          );
     const nextElement =
       interaction.mode === "move"
         ? moveScreenTemplateElement(interaction.startElement, delta.x, delta.y)
@@ -730,10 +814,10 @@ export function ScreenTemplateEditorPage() {
   ): void {
     event.preventDefault();
     event.stopPropagation();
-    setSelectedElementId(element.elementId);
-    if (draft?.status === "inactive") {
+    if (saveState === "saving" || draft?.status === "inactive") {
       return;
     }
+    setSelectedElementId(element.elementId);
     interactionRef.current = {
       elementId: element.elementId,
       handle,
@@ -819,7 +903,11 @@ export function ScreenTemplateEditorPage() {
       return;
     }
     event.preventDefault();
-    const step = (event.shiftKey ? 10 : 1) / 1920;
+    const canvasSize =
+      direction.x === 0
+        ? SCREEN_TEMPLATE_CANVAS_HEIGHT
+        : SCREEN_TEMPLATE_CANVAS_WIDTH;
+    const step = (event.shiftKey ? 10 : 1) / canvasSize;
     const nextElement = moveScreenTemplateElement(
       element,
       direction.x * step,
@@ -893,6 +981,7 @@ export function ScreenTemplateEditorPage() {
     if (messages.length > 0 || draft.status === "inactive") {
       return;
     }
+    interactionRef.current = null;
     setSaveState("saving");
     updateMutation.mutate({
       input: {
@@ -991,9 +1080,11 @@ export function ScreenTemplateEditorPage() {
     : null;
   const active = draft.status === "active";
   const structuralErrors = screenTemplateValidationMessages(draft);
+  const structuralWarnings = screenTemplateValidationWarningMessages(draft);
   const allValidationErrors = [
     ...new Set([...structuralErrors, ...validationErrors])
   ];
+  const allValidationWarnings = [...new Set(structuralWarnings)];
   const preview: ScreenLayoutPreview = {
     characters: {
       "speaker-1": selectedCharacterPreview(
@@ -1007,7 +1098,7 @@ export function ScreenTemplateEditorPage() {
         "speaker-2"
       )
     },
-    content: selectedAssetPreview(assetId, assetsQuery.data?.items),
+    content: selectedAssetPreview(assetId, assetsQuery.data),
     dialogueText,
     sectionTitleText
   };
@@ -1115,6 +1206,19 @@ export function ScreenTemplateEditorPage() {
             </ul>
           </section>
         ) : null}
+        {allValidationWarnings.length > 0 ? (
+          <section
+            className="message-panel message-panel-warning screen-template-validation-panel"
+            role="status"
+          >
+            <h2>表示上の注意</h2>
+            <ul>
+              {allValidationWarnings.map((message) => (
+                <li key={message}>{message}</li>
+              ))}
+            </ul>
+          </section>
+        ) : null}
         {detailError !== null ? (
           <section className="message-panel message-panel-error" role="alert">
             <h2>
@@ -1155,6 +1259,11 @@ export function ScreenTemplateEditorPage() {
                   draft,
                   element.elementId
                 );
+                const elementWarnings =
+                  screenTemplateElementValidationWarningMessages(
+                    draft,
+                    element.elementId
+                  );
                 return (
                   <button
                     aria-selected={selectedElementId === element.elementId}
@@ -1168,6 +1277,10 @@ export function ScreenTemplateEditorPage() {
                     <small>{screenTemplateElementDescription(element)}</small>
                     {elementErrors.length > 0 ? (
                       <em>{elementErrors[0]}</em>
+                    ) : elementWarnings.length > 0 ? (
+                      <em className="screen-template-element-warning">
+                        {elementWarnings[0]}
+                      </em>
                     ) : null}
                   </button>
                 );
@@ -1422,9 +1535,15 @@ export function ScreenTemplateEditorPage() {
 
         <PreviewAssetControls
           assetId={assetId}
-          assets={assetsQuery.data?.items}
+          assets={assetsQuery.data}
+          assetsError={assetsQuery.error}
+          assetsLoading={assetsQuery.isPending}
           catalog={characterCatalogQuery.data}
+          catalogError={characterCatalogQuery.error}
+          catalogLoading={characterCatalogQuery.isPending}
           selections={characterSelections}
+          onRetryAssets={() => void assetsQuery.refetch()}
+          onRetryCatalog={() => void characterCatalogQuery.refetch()}
           onAssetSelection={setAssetId}
           onCharacterSelection={(slot, selection) => {
             setCharacterSelections((current) => ({

@@ -8,6 +8,9 @@ import {
   resizeScreenTemplateElement,
   rotationDeltaForPointer,
   screenTemplateValidationMessages,
+  screenTemplateValidationWarningMessages,
+  screenTemplateElementValidationWarningMessages,
+  screenTemplateResizeHandlePosition,
   updateScreenTemplateElementNumericField
 } from "../../src/web/screen-template-editor.js";
 import { screenTemplateElementStyle } from "../../src/remotion/screen-template-layout.js";
@@ -60,8 +63,61 @@ describe("ScreenTemplate editor geometry", () => {
       1920,
       1080
     );
+    const startHandle = screenTemplateResizeHandlePosition(
+      rotated,
+      "south-east",
+      1920,
+      1080
+    );
+    const startAnchor = screenTemplateResizeHandlePosition(
+      rotated,
+      "north-west",
+      1920,
+      1080
+    );
+    const endHandle = screenTemplateResizeHandlePosition(
+      resized,
+      "south-east",
+      1920,
+      1080
+    );
+    const endAnchor = screenTemplateResizeHandlePosition(
+      resized,
+      "north-west",
+      1920,
+      1080
+    );
     expect(resized.transform.rect.height).toBeCloseTo(0.62);
     expect(resized.transform.rect.width).toBeCloseTo(0.848125);
+    expect(endHandle.x).toBeCloseTo(startHandle.x);
+    expect(endHandle.y).toBeCloseTo(startHandle.y + 0.05);
+    expect(endAnchor.x).toBeCloseTo(startAnchor.x);
+    expect(endAnchor.y).toBeCloseTo(startAnchor.y);
+  });
+
+  it("keeps the opposite anchor fixed when a resize hits the canvas edge", () => {
+    const template = createStandardScreenTemplate(TIMESTAMP);
+    const content = findScreenTemplateElement(
+      template,
+      "screen-template-standard-content-slot"
+    );
+    if (content === undefined) {
+      throw new Error("content slot is missing");
+    }
+
+    const startAnchor = screenTemplateResizeHandlePosition(
+      content,
+      "north-west"
+    );
+    const resized = resizeScreenTemplateElement(content, "south-east", 0.2, 0);
+    const endAnchor = screenTemplateResizeHandlePosition(resized, "north-west");
+    const endHandle = screenTemplateResizeHandlePosition(resized, "south-east");
+
+    expect(resized.transform.rect.x).toBeCloseTo(0.09);
+    expect(resized.transform.rect.width).toBeCloseTo(0.91);
+    expect(endAnchor.x).toBeCloseTo(startAnchor.x);
+    expect(endAnchor.y).toBeCloseTo(startAnchor.y);
+    expect(endHandle.x).toBeCloseTo(1);
   });
 
   it("derives rotation from the pointer angle around the rect center", () => {
@@ -104,6 +160,44 @@ describe("ScreenTemplate editor geometry", () => {
       expect.arrayContaining([
         expect.stringContaining("rotation around the rect center")
       ])
+    );
+  });
+
+  it("exposes validator overlap warnings without turning them into errors", () => {
+    const template = createStandardScreenTemplate(TIMESTAMP);
+    const content = findScreenTemplateElement(
+      template,
+      "screen-template-standard-content-slot"
+    );
+    if (content === undefined) {
+      throw new Error("content slot is missing");
+    }
+    const covering = {
+      ...template,
+      elements: template.elements.map((element) =>
+        element.elementId === content.elementId
+          ? {
+              ...element,
+              transform: {
+                ...element.transform,
+                rect: { x: 0, y: 0, width: 1, height: 1 }
+              }
+            }
+          : element
+      )
+    };
+
+    expect(screenTemplateValidationMessages(covering)).toEqual([]);
+    expect(screenTemplateValidationWarningMessages(covering)).toEqual(
+      expect.arrayContaining([expect.stringContaining("fully covers earlier")])
+    );
+    expect(
+      screenTemplateElementValidationWarningMessages(
+        covering,
+        content.elementId
+      )
+    ).toEqual(
+      expect.arrayContaining([expect.stringContaining("fully covers earlier")])
     );
   });
 });

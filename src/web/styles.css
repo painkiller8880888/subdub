@@ -3256,6 +3256,10 @@ textarea[aria-invalid="true"] {
   overflow-wrap: anywhere;
 }
 
+.screen-template-element-list-item em.screen-template-element-warning {
+  color: #9a6500;
+}
+
 .screen-template-keyboard-help {
   background: #f8faff;
   border: 1px solid #e1e6ef;
@@ -3317,15 +3321,30 @@ textarea[aria-invalid="true"] {
 
 .screen-layout-dialogue {
   align-items: end;
+  box-sizing: border-box;
+  justify-content: start;
+  padding: 0;
+}
+
+.screen-layout-dialogue-card {
   background: rgb(10 18 31 / 84%);
   border: 1px solid rgb(255 255 255 / 22%);
+  border-radius: 0.8%;
   box-shadow: 0 0.4rem 1rem rgb(0 0 0 / 18%);
   box-sizing: border-box;
   color: #fff;
-  justify-content: start;
-  padding: 1.5%;
+  display: block;
+  font-weight: 700;
+  line-height: 1.4;
+  max-height: 100%;
+  max-width: 100%;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  overflow: hidden;
+  padding: 0.8% 1.5%;
   text-align: left;
   white-space: pre-wrap;
+  width: fit-content;
 }
 
 .screen-layout-section-title {
@@ -3485,6 +3504,23 @@ textarea[aria-invalid="true"] {
 
 .screen-template-preview-controls {
   gap: 0.9rem;
+}
+
+.screen-template-preview-query-error {
+  align-items: center;
+  background: #fff8ed;
+  border: 1px solid #d79a45;
+  border-radius: 0.55rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.7rem;
+  justify-content: space-between;
+  padding: 0.8rem;
+}
+
+.screen-template-preview-query-error p {
+  color: #7c5516;
+  margin: 0;
 }
 
 .screen-template-preview-control-grid {

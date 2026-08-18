@@ -106,12 +106,14 @@ function renderScreenTemplateElement(
         aria-hidden="true"
         className="screen-layout-element screen-layout-dialogue"
         key={element.elementId}
-        style={{
-          ...baseStyle,
-          fontSize: `${(element.fontSize / 1920) * 100}cqw`
-        }}
+        style={baseStyle}
       >
-        <span>{preview.dialogueText}</span>
+        <span
+          className="screen-layout-dialogue-card"
+          style={{ fontSize: `${(element.fontSize / 1920) * 100}cqw` }}
+        >
+          {preview.dialogueText}
+        </span>
       </div>
     );
   }

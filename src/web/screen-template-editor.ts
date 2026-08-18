@@ -52,6 +52,187 @@ function clamp(value: number, minimum: number, maximum: number): number {
   return Math.min(maximum, Math.max(minimum, value));
 }
 
+type ResizeCornerSigns = Readonly<{
+  x: -1 | 1;
+  y: -1 | 1;
+}>;
+
+type PixelPoint = Readonly<{
+  x: number;
+  y: number;
+}>;
+
+function resizeCornerSigns(handle: ResizeHandle): ResizeCornerSigns {
+  return {
+    x: handle.includes("west") ? -1 : 1,
+    y: handle.includes("north") ? -1 : 1
+  };
+}
+
+function oppositeResizeHandle(handle: ResizeHandle): ResizeHandle {
+  switch (handle) {
+    case "north-west":
+      return "south-east";
+    case "north-east":
+      return "south-west";
+    case "south-east":
+      return "north-west";
+    case "south-west":
+      return "north-east";
+  }
+}
+
+function rotatePixelVector(point: PixelPoint, rotationDeg: number): PixelPoint {
+  const radians = (rotationDeg * Math.PI) / 180;
+  const cosine = Math.cos(radians);
+  const sine = Math.sin(radians);
+  return {
+    x: point.x * cosine - point.y * sine,
+    y: point.x * sine + point.y * cosine
+  };
+}
+
+function addPixelPoints(left: PixelPoint, right: PixelPoint): PixelPoint {
+  return { x: left.x + right.x, y: left.y + right.y };
+}
+
+function subtractPixelPoints(left: PixelPoint, right: PixelPoint): PixelPoint {
+  return { x: left.x - right.x, y: left.y - right.y };
+}
+
+function rectCenterInPixels(
+  element: ScreenTemplateElement,
+  canvasWidth: number,
+  canvasHeight: number
+): PixelPoint {
+  const { rect } = element.transform;
+  return {
+    x: (rect.x + rect.width / 2) * canvasWidth,
+    y: (rect.y + rect.height / 2) * canvasHeight
+  };
+}
+
+function resizeCornerPositionInPixels(
+  element: ScreenTemplateElement,
+  handle: ResizeHandle,
+  canvasWidth: number,
+  canvasHeight: number
+): PixelPoint {
+  const { rect, rotationDeg } = element.transform;
+  const signs = resizeCornerSigns(handle);
+  const localHalfSize = {
+    x: (signs.x * (rect.width * canvasWidth)) / 2,
+    y: (signs.y * (rect.height * canvasHeight)) / 2
+  };
+  return addPixelPoints(
+    rectCenterInPixels(element, canvasWidth, canvasHeight),
+    rotatePixelVector(localHalfSize, rotationDeg)
+  );
+}
+
+export function screenTemplateResizeHandlePosition(
+  element: ScreenTemplateElement,
+  handle: ResizeHandle,
+  canvasWidth = SCREEN_TEMPLATE_CANVAS_WIDTH,
+  canvasHeight = SCREEN_TEMPLATE_CANVAS_HEIGHT
+): PixelPoint {
+  const position = resizeCornerPositionInPixels(
+    element,
+    handle,
+    canvasWidth,
+    canvasHeight
+  );
+  return {
+    x: position.x / canvasWidth,
+    y: position.y / canvasHeight
+  };
+}
+
+function rectFromFixedCorner(
+  anchor: PixelPoint,
+  signs: ResizeCornerSigns,
+  widthPx: number,
+  heightPx: number,
+  rotationDeg: number,
+  canvasWidth: number,
+  canvasHeight: number
+): ScreenRect {
+  const center = addPixelPoints(
+    anchor,
+    rotatePixelVector(
+      {
+        x: (signs.x * widthPx) / 2,
+        y: (signs.y * heightPx) / 2
+      },
+      rotationDeg
+    )
+  );
+  return {
+    height: heightPx / canvasHeight,
+    width: widthPx / canvasWidth,
+    x: (center.x - widthPx / 2) / canvasWidth,
+    y: (center.y - heightPx / 2) / canvasHeight
+  };
+}
+
+function isRectInsideCanvas(rect: ScreenRect): boolean {
+  const epsilon = 1e-8;
+  return !(
+    rect.x < -epsilon ||
+    rect.y < -epsilon ||
+    rect.x + rect.width > 1 + epsilon ||
+    rect.y + rect.height > 1 + epsilon
+  );
+}
+
+function clampResizeDimension(
+  dimension: "width" | "height",
+  proposed: number,
+  otherDimension: number,
+  minimum: number,
+  anchor: PixelPoint,
+  signs: ResizeCornerSigns,
+  rotationDeg: number,
+  canvasWidth: number,
+  canvasHeight: number
+): number {
+  const isInside = (value: number): boolean => {
+    const widthPx = dimension === "width" ? value : otherDimension;
+    const heightPx = dimension === "height" ? value : otherDimension;
+    return isRectInsideCanvas(
+      rectFromFixedCorner(
+        anchor,
+        signs,
+        widthPx,
+        heightPx,
+        rotationDeg,
+        canvasWidth,
+        canvasHeight
+      )
+    );
+  };
+
+  if (isInside(proposed)) {
+    return proposed;
+  }
+
+  if (!isInside(minimum)) {
+    return minimum;
+  }
+
+  let lower = minimum;
+  let upper = proposed;
+  for (let index = 0; index < 32; index += 1) {
+    const middle = (lower + upper) / 2;
+    if (isInside(middle)) {
+      lower = middle;
+    } else {
+      upper = middle;
+    }
+  }
+  return lower;
+}
+
 export function clampScreenRect(
   rect: ScreenRect,
   minimumSize = SCREEN_TEMPLATE_MIN_ELEMENT_SIZE
@@ -174,26 +355,6 @@ export function moveScreenTemplateElement(
   };
 }
 
-function rotateVectorToLocal(
-  deltaX: number,
-  deltaY: number,
-  rotationDeg: number,
-  canvasWidth: number,
-  canvasHeight: number
-): { readonly x: number; readonly y: number } {
-  const radians = (-rotationDeg * Math.PI) / 180;
-  const pixelX = deltaX * canvasWidth;
-  const pixelY = deltaY * canvasHeight;
-  const cosine = Math.cos(radians);
-  const sine = Math.sin(radians);
-  const localPixelX = pixelX * cosine - pixelY * sine;
-  const localPixelY = pixelX * sine + pixelY * cosine;
-  return {
-    x: localPixelX / canvasWidth,
-    y: localPixelY / canvasHeight
-  };
-}
-
 export function resizeScreenTemplateElement(
   element: ScreenTemplateElement,
   handle: ResizeHandle,
@@ -202,41 +363,74 @@ export function resizeScreenTemplateElement(
   canvasWidth = SCREEN_TEMPLATE_CANVAS_WIDTH,
   canvasHeight = SCREEN_TEMPLATE_CANVAS_HEIGHT
 ): ScreenTemplateElement {
-  const rect = element.transform.rect;
-  const localDelta = rotateVectorToLocal(
-    deltaX,
-    deltaY,
+  const signs = resizeCornerSigns(handle);
+  const anchor = resizeCornerPositionInPixels(
+    element,
+    oppositeResizeHandle(handle),
+    canvasWidth,
+    canvasHeight
+  );
+  const startHandle = resizeCornerPositionInPixels(
+    element,
+    handle,
+    canvasWidth,
+    canvasHeight
+  );
+  const nextHandle = {
+    x: startHandle.x + deltaX * canvasWidth,
+    y: startHandle.y + deltaY * canvasHeight
+  };
+  const localHandleVector = rotatePixelVector(
+    subtractPixelPoints(nextHandle, anchor),
+    -element.transform.rotationDeg
+  );
+  const minimumWidthPx = SCREEN_TEMPLATE_MIN_ELEMENT_SIZE * canvasWidth;
+  const minimumHeightPx = SCREEN_TEMPLATE_MIN_ELEMENT_SIZE * canvasHeight;
+  let widthPx = Math.max(minimumWidthPx, signs.x * localHandleVector.x);
+  let heightPx = Math.max(minimumHeightPx, signs.y * localHandleVector.y);
+
+  widthPx = clampResizeDimension(
+    "width",
+    widthPx,
+    heightPx,
+    minimumWidthPx,
+    anchor,
+    signs,
     element.transform.rotationDeg,
     canvasWidth,
     canvasHeight
   );
-  let nextRect = { ...rect };
+  heightPx = clampResizeDimension(
+    "height",
+    heightPx,
+    widthPx,
+    minimumHeightPx,
+    anchor,
+    signs,
+    element.transform.rotationDeg,
+    canvasWidth,
+    canvasHeight
+  );
 
-  if (handle.includes("west")) {
-    nextRect = {
-      ...nextRect,
-      x: rect.x + localDelta.x,
-      width: rect.width - localDelta.x
-    };
-  } else if (handle.includes("east")) {
-    nextRect = { ...nextRect, width: rect.width + localDelta.x };
-  }
-
-  if (handle.includes("north")) {
-    nextRect = {
-      ...nextRect,
-      y: rect.y + localDelta.y,
-      height: rect.height - localDelta.y
-    };
-  } else if (handle.includes("south")) {
-    nextRect = { ...nextRect, height: rect.height + localDelta.y };
-  }
+  const nextRect = rectFromFixedCorner(
+    anchor,
+    signs,
+    widthPx,
+    heightPx,
+    element.transform.rotationDeg,
+    canvasWidth,
+    canvasHeight
+  );
 
   return {
     ...element,
     transform: {
       ...element.transform,
-      rect: clampScreenRect(nextRect)
+      rect: {
+        ...nextRect,
+        x: Math.abs(nextRect.x) < 1e-10 ? 0 : nextRect.x,
+        y: Math.abs(nextRect.y) < 1e-10 ? 0 : nextRect.y
+      }
     }
   };
 }
@@ -304,12 +498,37 @@ export function screenTemplateValidationMessages(
   );
 }
 
+export function screenTemplateValidationWarningMessages(
+  template: ScreenTemplate
+): string[] {
+  return screenTemplateValidationReport(template).warnings.map(
+    (issue) => `${issue.path.join(".")}: ${issue.message}`
+  );
+}
+
 export function screenTemplateElementValidationMessages(
   template: ScreenTemplate,
   elementId: string
 ): string[] {
   return screenTemplateValidationReport(template)
     .errors.filter((issue) => issue.path.includes("elements"))
+    .filter((issue) => {
+      const elementIndex = issue.path.indexOf("elements");
+      const index = issue.path[elementIndex + 1];
+      return (
+        typeof index === "number" &&
+        template.elements[index]?.elementId === elementId
+      );
+    })
+    .map((issue) => issue.message);
+}
+
+export function screenTemplateElementValidationWarningMessages(
+  template: ScreenTemplate,
+  elementId: string
+): string[] {
+  return screenTemplateValidationReport(template)
+    .warnings.filter((issue) => issue.path.includes("elements"))
     .filter((issue) => {
       const elementIndex = issue.path.indexOf("elements");
       const index = issue.path[elementIndex + 1];
