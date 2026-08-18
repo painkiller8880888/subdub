@@ -145,6 +145,7 @@ describe("video project schema migration", () => {
 
   it("migrates 1.1.0 EditPlan, binary video volume, and legacy BGM diagnostics", () => {
     const legacy = legacyProject("1.1.0");
+    legacy.revision = 7;
     expect(legacyVideoProjectV11Schema.safeParse(legacy).success).toBe(true);
 
     const result = migrateVideoProjectWithDiagnostics(legacy);
@@ -171,6 +172,7 @@ describe("video project schema migration", () => {
 
     const migrated = videoProjectSchema.parse(result.project);
     expect(migrated.schemaVersion).toBe("1.3.0");
+    expect(migrated.revision).toBe(8);
     expect(
       migrated.script.sections.every(
         (section) =>

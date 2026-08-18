@@ -298,6 +298,7 @@ export async function initializeServer(
         : new RenderManifestCompileService({
             workspaceRoot,
             projectRepository: resolvedProjectRepository,
+            screenTemplateCatalog: resolvedScreenTemplateService,
             assetRepository: resolvedAssetRepository,
             characterVisualCatalogService: {
               verifyFiles: verifyCharacterVisualFiles.bind(

@@ -1821,6 +1821,9 @@ describe("MVP final verification E2E", () => {
         const compilerInput = await new RenderManifestInputBuilder({
           workspaceRoot,
           projectRepository,
+          screenTemplateCatalog: {
+            findById: () => ({ status: "active" as const })
+          },
           assetRepository: new AssetRepository(server.database.database),
           characterVisualCatalogService: new CharacterVisualCatalogService({
             repository: new CharacterVisualRepository(server.database.database),

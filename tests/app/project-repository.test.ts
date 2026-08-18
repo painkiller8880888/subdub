@@ -342,7 +342,7 @@ describe("ProjectRepository", () => {
     candidate.metadata.title = "migration と同時の保存";
     let saveCompleted = false;
     const savePromise = repository
-      .save(projectId, candidate, 7)
+      .save(projectId, candidate, 8)
       .then((saved) => {
         saveCompleted = true;
         return saved;
@@ -353,14 +353,14 @@ describe("ProjectRepository", () => {
 
     releaseMigrationRename();
     const [migrated, saved] = await Promise.all([readPromise, savePromise]);
-    expect(migrated.revision).toBe(7);
-    expect(saved.revision).toBe(8);
+    expect(migrated.revision).toBe(8);
+    expect(saved.revision).toBe(9);
     expect(saved.metadata.title).toBe("migration と同時の保存");
 
     const finalProject = JSON.parse(
       await fs.readFile(projectFile, "utf8")
     ) as VideoProject;
-    expect(finalProject.revision).toBe(8);
+    expect(finalProject.revision).toBe(9);
     expect(finalProject.metadata.title).toBe("migration と同時の保存");
   });
 
@@ -495,7 +495,7 @@ describe("ProjectRepository", () => {
 
     const migrated = await repository.read(projectId);
     expect(migrated.schemaVersion).toBe("1.3.0");
-    expect(migrated.revision).toBe(7);
+    expect(migrated.revision).toBe(8);
     expect(migrated.edit).toEqual({ videoElements: [], sectionBgms: [] });
     expect(migrated.audio).not.toHaveProperty("sectionBgms");
 

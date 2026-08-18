@@ -353,6 +353,7 @@ function migrateScreenTemplateProject(
   if (!isRecord(migrated) || !isRecord(migrated.script)) {
     return undefined;
   }
+  migrated.revision = v12Result.data.revision + 1;
   const sections = migrated.script.sections;
   if (!Array.isArray(sections)) {
     return undefined;

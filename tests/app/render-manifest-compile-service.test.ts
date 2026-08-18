@@ -57,6 +57,10 @@ const snapshot = characterVisualCatalogSnapshotSchema.parse([
   }
 ]);
 
+const activeScreenTemplateCatalog = {
+  findById: () => ({ status: "active" as const })
+};
+
 function createLegacySnapshot() {
   const visualIds = [
     ...new Set(
@@ -107,6 +111,7 @@ describe("RenderManifestInputBuilder", () => {
     const builder = new RenderManifestInputBuilder({
       workspaceRoot: "C:\\workspace",
       projectRepository: { read: async () => project },
+      screenTemplateCatalog: activeScreenTemplateCatalog,
       assetRepository: { findAssetDetail: () => undefined },
       characterVisualCatalogService: { verifyFiles },
       audioStore: { readIndex: async () => audioIndex }
@@ -162,6 +167,7 @@ describe("RenderManifestInputBuilder", () => {
       const builder = new RenderManifestInputBuilder({
         workspaceRoot,
         projectRepository: { read: async () => project },
+        screenTemplateCatalog: activeScreenTemplateCatalog,
         assetRepository: { findAssetDetail: () => undefined },
         characterVisualCatalogService: {
           verifyFiles: async () => createLegacySnapshot()
@@ -273,6 +279,7 @@ describe("RenderManifestInputBuilder", () => {
       const builder = new RenderManifestInputBuilder({
         workspaceRoot,
         projectRepository: { read: async () => project },
+        screenTemplateCatalog: activeScreenTemplateCatalog,
         assetRepository: { findAssetDetail },
         characterVisualCatalogService: {
           verifyFiles: async () => createLegacySnapshot()
@@ -359,6 +366,7 @@ describe("RenderManifestInputBuilder", () => {
       const builder = new RenderManifestInputBuilder({
         workspaceRoot,
         projectRepository: { read: async () => project },
+        screenTemplateCatalog: activeScreenTemplateCatalog,
         assetRepository: { findAssetDetail },
         characterVisualCatalogService: {
           verifyFiles: async () => createLegacySnapshot()
@@ -485,6 +493,7 @@ describe("RenderManifestInputBuilder", () => {
         const builder = new RenderManifestInputBuilder({
           workspaceRoot,
           projectRepository: { read: async () => project },
+          screenTemplateCatalog: activeScreenTemplateCatalog,
           assetRepository: { findAssetDetail },
           characterVisualCatalogService: {
             verifyFiles: async () => createLegacySnapshot()
@@ -597,6 +606,7 @@ describe("RenderManifestInputBuilder", () => {
         const builder = new RenderManifestInputBuilder({
           workspaceRoot,
           projectRepository: { read: async () => project },
+          screenTemplateCatalog: activeScreenTemplateCatalog,
           assetRepository: { findAssetDetail },
           characterVisualCatalogService: {
             verifyFiles: async () => createLegacySnapshot()

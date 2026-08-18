@@ -805,6 +805,23 @@ export class VisualAssignmentService {
       request.assignment.display,
       currentAssignment.display.displayCoordinateSpace
     );
+    if (
+      display.displayCoordinateSpace !==
+      currentAssignment.display.displayCoordinateSpace
+    ) {
+      throw visualAssignmentError(
+        VISUAL_ASSIGNMENT_ERROR_CODE.candidateInvalid,
+        422,
+        "Changing display coordinate space requires an explicit conversion operation.",
+        [
+          {
+            path: ["assignment", "display", "displayCoordinateSpace"],
+            message:
+              "display coordinate space cannot be changed by a regular update"
+          }
+        ]
+      );
+    }
     this.assertAssetUsable(asset, display.kind);
     this.assertDisplayWithinAsset(asset, display);
     const confirmedChecksum = this.assertChecksum(asset.checksum);
