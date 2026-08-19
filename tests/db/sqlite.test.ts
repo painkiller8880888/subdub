@@ -660,6 +660,103 @@ describe("workspace SQLite", () => {
           )
       ).toThrow();
     }
+
+    const insertElement = after.connection.prepare(
+      `INSERT INTO screen_template_elements
+        (element_id, template_id, element_type, x, y, width, height,
+         rotation_deg, order_index, config_json, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    );
+    const infiniteGeometryRows = [
+      {
+        elementId: "migrated-infinite-x",
+        elementType: "character-visual",
+        x: Number.POSITIVE_INFINITY,
+        y: 0.5,
+        width: 0.2,
+        height: 0.2,
+        rotationDeg: 0,
+        configJson: JSON.stringify({ slot: "speaker-1", flipX: false })
+      },
+      {
+        elementId: "migrated-negative-infinite-x",
+        elementType: "character-visual",
+        x: Number.NEGATIVE_INFINITY,
+        y: 0.5,
+        width: 0.2,
+        height: 0.2,
+        rotationDeg: 0,
+        configJson: JSON.stringify({ slot: "speaker-1", flipX: false })
+      },
+      {
+        elementId: "migrated-infinite-y",
+        elementType: "character-visual",
+        x: 0.1,
+        y: Number.POSITIVE_INFINITY,
+        width: 0.2,
+        height: 0.2,
+        rotationDeg: 0,
+        configJson: JSON.stringify({ slot: "speaker-1", flipX: false })
+      },
+      {
+        elementId: "migrated-infinite-width",
+        elementType: "character-visual",
+        x: 0.1,
+        y: 0.5,
+        width: Number.POSITIVE_INFINITY,
+        height: 0.2,
+        rotationDeg: 0,
+        configJson: JSON.stringify({ slot: "speaker-1", flipX: false })
+      },
+      {
+        elementId: "migrated-infinite-height",
+        elementType: "character-visual",
+        x: 0.1,
+        y: 0.5,
+        width: 0.2,
+        height: Number.POSITIVE_INFINITY,
+        rotationDeg: 0,
+        configJson: JSON.stringify({ slot: "speaker-1", flipX: false })
+      },
+      {
+        elementId: "migrated-infinite-character-rotation",
+        elementType: "character-visual",
+        x: 0.1,
+        y: 0.5,
+        width: 0.2,
+        height: 0.2,
+        rotationDeg: Number.POSITIVE_INFINITY,
+        configJson: JSON.stringify({ slot: "speaker-1", flipX: false })
+      },
+      {
+        elementId: "migrated-infinite-contained-rotation",
+        elementType: "dialogue-window",
+        x: 0.1,
+        y: 0.1,
+        width: 0.2,
+        height: 0.2,
+        rotationDeg: Number.POSITIVE_INFINITY,
+        configJson: JSON.stringify({ fontSize: 38 })
+      }
+    ] as const;
+    for (const [index, row] of infiniteGeometryRows.entries()) {
+      expect(() =>
+        insertElement.run(
+          row.elementId,
+          STANDARD_SCREEN_TEMPLATE_ID,
+          row.elementType,
+          row.x,
+          row.y,
+          row.width,
+          row.height,
+          row.rotationDeg,
+          20 + index,
+          row.configJson,
+          now,
+          now
+        )
+      ).toThrow();
+    }
     after.close();
   });
 

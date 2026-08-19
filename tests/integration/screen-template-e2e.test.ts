@@ -26,6 +26,7 @@ import {
 import { screenTemplateSchema } from "../../src/schema/screen-template.js";
 import {
   assertValidScreenTemplate,
+  resolvedScreenLayoutValidationIssues,
   screenTemplateTextValidationIssues,
   screenTemplateValidationReport
 } from "../../src/validation/screen-templates.js";
@@ -577,6 +578,57 @@ describe("ScreenTemplate cross-layer acceptance fixture", () => {
       expect.arrayContaining([
         expect.stringContaining("must intersect the canvas")
       ])
+    );
+
+    const barelyIntersectingTemplate = assertValidScreenTemplate({
+      ...alternate,
+      elements: alternate.elements.map((element) =>
+        element.type === "character-visual" && element.slot === "speaker-1"
+          ? {
+              ...element,
+              transform: {
+                rect: { x: -1, y: 0.58, width: 1.1, height: 0.35 },
+                rotationDeg: -4
+              }
+            }
+          : element
+      )
+    });
+    expect(
+      screenTemplateValidationReport(barelyIntersectingTemplate).errors
+    ).toEqual([]);
+    const barelyPrioritizedLayout = resolveScreenTemplateLayout(
+      barelyIntersectingTemplate,
+      {
+        characterIds: {
+          "speaker-1": "character-mentor",
+          "speaker-2": "character-learner"
+        },
+        prioritizeVisual: true
+      }
+    );
+    expect(
+      barelyPrioritizedLayout.elements.find(
+        (element) =>
+          element.type === "character-visual" && element.slot === "speaker-1"
+      )?.transform.rect.x
+    ).toBeCloseTo(-0.846);
+    expect(
+      resolvedScreenLayoutValidationIssues(barelyPrioritizedLayout)
+    ).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          message: "character visual bounds must intersect the canvas"
+        })
+      ])
+    );
+    const prioritizedResult = compileRepresentativeProject(project, [
+      standard,
+      barelyIntersectingTemplate
+    ]);
+    expect(prioritizedResult.success).toBe(false);
+    expect(diagnosticCodes(prioritizedResult)).toContain(
+      "RESOLVED_SCREEN_LAYOUT_CHARACTER_MISSING"
     );
   });
 

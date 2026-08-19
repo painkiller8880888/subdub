@@ -13,6 +13,7 @@ import {
   SUBTITLE_CARD_HORIZONTAL_PADDING_PX,
   SUBTITLE_CARD_VERTICAL_PADDING_PX
 } from "../screen-template-typography.js";
+import type { ResolvedScreenLayout } from "../schema/render-manifest.js";
 
 export type ScreenTemplateValidationPath = readonly (string | number)[];
 
@@ -55,6 +56,18 @@ export type RotatedScreenRectBounds = Readonly<{
   bottom: number;
 }>;
 
+type ScreenElementWithTransform = Readonly<{
+  readonly transform: Readonly<{
+    readonly rect: Readonly<{
+      readonly x: number;
+      readonly y: number;
+      readonly width: number;
+      readonly height: number;
+    }>;
+    readonly rotationDeg: number;
+  }>;
+}>;
+
 const TRIGONOMETRY_EPSILON = 1e-12;
 const CANVAS_BOUNDS_EPSILON = 1e-9;
 
@@ -64,7 +77,7 @@ const CANVAS_BOUNDS_EPSILON = 1e-9;
  * square. This mirrors CSS transform-origin: 50% 50% on a 1920x1080 canvas.
  */
 export function rotatedScreenRectBounds(
-  element: ScreenTemplateElement,
+  element: ScreenElementWithTransform,
   canvasWidth = SCREEN_TEMPLATE_CANVAS_WIDTH,
   canvasHeight = SCREEN_TEMPLATE_CANVAS_HEIGHT
 ): RotatedScreenRectBounds {
@@ -232,6 +245,38 @@ export function screenTemplateTextValidationIssues(
       return textIssuesForElement(element, index, textContent);
     }
     return [];
+  });
+}
+
+/**
+ * Validate geometry after a layout policy has been applied. Template
+ * validation covers the source geometry, but policies such as
+ * `prioritizeVisual` can change a character rect without changing the
+ * template itself.
+ */
+export function resolvedScreenLayoutValidationIssues(
+  layout: ResolvedScreenLayout
+): readonly ScreenTemplateValidationIssue[] {
+  return layout.elements.flatMap((element, index) => {
+    if (
+      element.type !== "character-visual" ||
+      intersectsCanvas(
+        rotatedScreenRectBounds(
+          element,
+          layout.canvasWidth,
+          layout.canvasHeight
+        )
+      )
+    ) {
+      return [];
+    }
+
+    return [
+      {
+        path: ["elements", index, "transform", "rotationDeg"],
+        message: "character visual bounds must intersect the canvas"
+      }
+    ];
   });
 }
 
