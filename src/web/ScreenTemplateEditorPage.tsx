@@ -55,6 +55,7 @@ import {
   screenTemplateElementLabel,
   screenTemplateElementValidationMessages,
   screenTemplateElementValidationWarningMessages,
+  screenTemplateTextValidationMessages,
   screenTemplateValidationMessages,
   screenTemplateValidationWarningMessages,
   type NumericElementField,
@@ -1063,10 +1064,17 @@ export function ScreenTemplateEditorPage() {
   const active = draft.status === "active";
   const structuralErrors = screenTemplateValidationMessages(draft);
   const structuralWarnings = screenTemplateValidationWarningMessages(draft);
+  const previewTextWarnings = screenTemplateTextValidationMessages(draft, {
+    dialogueText,
+    sectionTitleText,
+    speakerNameText: "話者名"
+  });
   const allValidationErrors = [
     ...new Set([...structuralErrors, ...validationErrors])
   ];
-  const allValidationWarnings = [...new Set(structuralWarnings)];
+  const allValidationWarnings = [
+    ...new Set([...structuralWarnings, ...previewTextWarnings])
+  ];
   const preview: ScreenLayoutPreview = {
     characters: {
       "speaker-1": selectedCharacterPreview(
@@ -1082,6 +1090,7 @@ export function ScreenTemplateEditorPage() {
     },
     content: selectedAssetPreview(assetId, assetsQuery.data),
     dialogueText,
+    speakerNameText: "話者名",
     sectionTitleText
   };
 

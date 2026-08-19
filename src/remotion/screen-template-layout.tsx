@@ -5,13 +5,24 @@ import type {
   DisplayCoordinateSpace,
   StaticAnnotation
 } from "../schema/common";
-import type {
-  ScreenTemplate,
-  ScreenTemplateElement
+import {
+  SCREEN_TEMPLATE_CANVAS_WIDTH,
+  type ScreenTemplate,
+  type ScreenTemplateElement
 } from "../schema/screen-template";
 import type { ResolvedScreenElement } from "../schema/index";
 import { resolveScreenTemplateLayout } from "../screen-layout-resolver";
 import { AnnotationLayer } from "./layout";
+import {
+  SECTION_TITLE_HORIZONTAL_PADDING_PER_SIDE_PX,
+  SECTION_TITLE_LINE_HEIGHT,
+  SUBTITLE_BODY_LINE_HEIGHT,
+  SUBTITLE_CARD_HORIZONTAL_PADDING_PER_SIDE_PX,
+  SUBTITLE_CARD_VERTICAL_PADDING_PER_SIDE_PX,
+  SUBTITLE_LABEL_FONT_SIZE_RATIO,
+  SUBTITLE_LABEL_LINE_HEIGHT,
+  SUBTITLE_LABEL_MARGIN_BOTTOM_PX
+} from "../screen-template-typography";
 
 export type ScreenCharacterSlot = "speaker-1" | "speaker-2";
 
@@ -43,6 +54,7 @@ export type ScreenLayoutBackground = Readonly<{
 
 export type ScreenLayoutPreview = Readonly<{
   dialogueText: string;
+  speakerNameText?: string;
   sectionTitleText: string;
   characters: Readonly<
     Partial<Record<ScreenCharacterSlot, ScreenLayoutCharacterPreview>>
@@ -54,6 +66,7 @@ export type ScreenLayoutPreview = Readonly<{
 
 export const DEFAULT_SCREEN_LAYOUT_PREVIEW: ScreenLayoutPreview = {
   dialogueText: "ここにサンプルセリフが表示されます。",
+  speakerNameText: "話者名",
   sectionTitleText: "セクション名",
   characters: {},
   content: {
@@ -182,6 +195,7 @@ function renderScreenTemplateElement(
   };
 
   if (element.type === "dialogue-window") {
+    const speakerNameText = preview.speakerNameText ?? "";
     return (
       <div
         aria-hidden="true"
@@ -191,9 +205,29 @@ function renderScreenTemplateElement(
       >
         <span
           className="screen-layout-dialogue-card"
-          style={{ fontSize: `${(element.fontSize / 1920) * 100}cqw` }}
+          style={{
+            fontSize: `${(element.fontSize / SCREEN_TEMPLATE_CANVAS_WIDTH) * 100}cqw`,
+            lineHeight: SUBTITLE_BODY_LINE_HEIGHT,
+            padding: `${(SUBTITLE_CARD_VERTICAL_PADDING_PER_SIDE_PX / SCREEN_TEMPLATE_CANVAS_WIDTH) * 100}cqw ${(SUBTITLE_CARD_HORIZONTAL_PADDING_PER_SIDE_PX / SCREEN_TEMPLATE_CANVAS_WIDTH) * 100}cqw`
+          }}
         >
-          {preview.dialogueText}
+          {speakerNameText.length > 0 ? (
+            <span
+              className="screen-layout-dialogue-speaker"
+              style={{
+                fontSize: `${
+                  ((element.fontSize * SUBTITLE_LABEL_FONT_SIZE_RATIO) /
+                    SCREEN_TEMPLATE_CANVAS_WIDTH) *
+                  100
+                }cqw`,
+                lineHeight: SUBTITLE_LABEL_LINE_HEIGHT,
+                marginBottom: `${(SUBTITLE_LABEL_MARGIN_BOTTOM_PX / SCREEN_TEMPLATE_CANVAS_WIDTH) * 100}cqw`
+              }}
+            >
+              {speakerNameText}
+            </span>
+          ) : null}
+          <span>{preview.dialogueText}</span>
         </span>
       </div>
     );
@@ -207,7 +241,9 @@ function renderScreenTemplateElement(
         key={element.elementId}
         style={{
           ...baseStyle,
-          fontSize: `${(element.fontSize / 1920) * 100}cqw`
+          fontSize: `${(element.fontSize / SCREEN_TEMPLATE_CANVAS_WIDTH) * 100}cqw`,
+          lineHeight: SECTION_TITLE_LINE_HEIGHT,
+          padding: `0 ${(SECTION_TITLE_HORIZONTAL_PADDING_PER_SIDE_PX / SCREEN_TEMPLATE_CANVAS_WIDTH) * 100}cqw`
         }}
       >
         {preview.sectionTitleText}

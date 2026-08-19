@@ -46,7 +46,10 @@ import {
   resolveVisualDisplay
 } from "../screen-templates/screen-layout-resolver.js";
 import { screenTemplateContentHash } from "../screen-templates/screen-template-hash.js";
-import { screenTemplateValidationReport } from "../../validation/screen-templates.js";
+import {
+  screenTemplateTextValidationIssues,
+  screenTemplateValidationReport
+} from "../../validation/screen-templates.js";
 import {
   mediaMillisecondsToFrames,
   presentationFramesToMediaPosition
@@ -122,6 +125,7 @@ export const RENDER_MANIFEST_ERROR_CODE = {
   screenTemplateInactive: "SCREEN_TEMPLATE_INACTIVE",
   screenTemplateGeometryInvalid: "SCREEN_TEMPLATE_GEOMETRY_INVALID",
   screenTemplateCardinalityInvalid: "SCREEN_TEMPLATE_CARDINALITY_INVALID",
+  screenTemplateTextOverflow: "SCREEN_TEMPLATE_TEXT_OVERFLOW",
   screenLayoutMissing: "RESOLVED_SCREEN_LAYOUT_MISSING",
   screenLayoutCharacterMissing: "RESOLVED_SCREEN_LAYOUT_CHARACTER_MISSING",
   visualSegmentRangeInvalid: "VISUAL_SEGMENT_RANGE_INVALID",
@@ -381,6 +385,9 @@ function recordInputScreenTemplates(
 function screenTemplateDiagnosticCode(
   message: string
 ): RenderManifestDiagnosticCode {
+  if (/text|line height|overflows/.test(message)) {
+    return RENDER_MANIFEST_ERROR_CODE.screenTemplateTextOverflow;
+  }
   if (/exactly|speaker|unique/.test(message)) {
     return RENDER_MANIFEST_ERROR_CODE.screenTemplateCardinalityInvalid;
   }
@@ -436,11 +443,7 @@ function normalizeScreenTemplates(
     for (const issue of report.errors) {
       addDiagnostic(
         diagnostics,
-        issue.message.includes("cardinality") ||
-          issue.message.includes("exactly") ||
-          issue.message.includes("speaker")
-          ? RENDER_MANIFEST_ERROR_CODE.screenTemplateCardinalityInvalid
-          : RENDER_MANIFEST_ERROR_CODE.screenTemplateGeometryInvalid,
+        screenTemplateDiagnosticCode(issue.message),
         ["screenTemplateCatalogSnapshot", index, ...issue.path],
         issue.message,
         { sectionId: template.templateId }
@@ -1813,7 +1816,11 @@ export function compileRenderManifest(
   const charactersForLayout = project.characters.map((character) => ({
     id: character.id
   }));
+  const characterNameById = new Map(
+    project.characters.map((character) => [character.id, character.name])
+  );
   const resolvedLayoutByLineId = new Map<string, ResolvedScreenLayout>();
+  const validatedSectionTitleTemplateKeys = new Set<string>();
 
   for (const [sectionIndex, section] of project.script.sections.entries()) {
     const binding = screenTemplates.get(section.screenTemplateId);
@@ -1837,6 +1844,20 @@ export function compileRenderManifest(
       );
       continue;
     }
+    for (const issue of screenTemplateTextValidationIssues(binding.template, {
+      sectionTitleText: section.name
+    })) {
+      addDiagnostic(
+        diagnostics,
+        RENDER_MANIFEST_ERROR_CODE.screenTemplateTextOverflow,
+        ["script", "sections", sectionIndex, "name"],
+        issue.message,
+        { sectionId: section.id }
+      );
+    }
+    validatedSectionTitleTemplateKeys.add(
+      `${section.id}\u0000${binding.templateId}`
+    );
     sectionTemplateBindingById.set(section.id, binding);
   }
 
@@ -1881,6 +1902,40 @@ export function compileRenderManifest(
         { lineId: entry.line.id, sectionId: entry.sectionId }
       );
       continue;
+    }
+    for (const issue of screenTemplateTextValidationIssues(binding.template, {
+      dialogueText: entry.line.subtitleText,
+      speakerNameText: characterNameById.get(entry.line.speakerId)
+    })) {
+      addDiagnostic(
+        diagnostics,
+        RENDER_MANIFEST_ERROR_CODE.screenTemplateTextOverflow,
+        [
+          "script",
+          "sections",
+          entry.sectionIndex,
+          "lines",
+          entry.lineIndex,
+          "subtitleText"
+        ],
+        issue.message,
+        { lineId: entry.line.id, sectionId: entry.sectionId }
+      );
+    }
+    const sectionTitleTemplateKey = `${entry.sectionId}\u0000${binding.templateId}`;
+    if (!validatedSectionTitleTemplateKeys.has(sectionTitleTemplateKey)) {
+      for (const issue of screenTemplateTextValidationIssues(binding.template, {
+        sectionTitleText: section?.name
+      })) {
+        addDiagnostic(
+          diagnostics,
+          RENDER_MANIFEST_ERROR_CODE.screenTemplateTextOverflow,
+          ["script", "sections", entry.sectionIndex, "name"],
+          issue.message,
+          { lineId: entry.line.id, sectionId: entry.sectionId }
+        );
+      }
+      validatedSectionTitleTemplateKeys.add(sectionTitleTemplateKey);
     }
     templateBindingByLineId.set(entry.line.id, binding);
     resolvedLayoutByLineId.set(

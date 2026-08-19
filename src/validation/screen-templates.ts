@@ -5,12 +5,26 @@ import {
   type ScreenTemplate,
   type ScreenTemplateElement
 } from "../schema/screen-template.js";
+import {
+  estimateWrappedTextLineCount,
+  SECTION_TITLE_HORIZONTAL_PADDING_PX,
+  SECTION_TITLE_LINE_HEIGHT,
+  subtitleTypographyMetricsForFontSize,
+  SUBTITLE_CARD_HORIZONTAL_PADDING_PX,
+  SUBTITLE_CARD_VERTICAL_PADDING_PX
+} from "../screen-template-typography.js";
 
 export type ScreenTemplateValidationPath = readonly (string | number)[];
 
 export type ScreenTemplateValidationIssue = Readonly<{
   path: ScreenTemplateValidationPath;
   message: string;
+}>;
+
+export type ScreenTemplateTextContent = Readonly<{
+  dialogueText?: string;
+  speakerNameText?: string;
+  sectionTitleText?: string;
 }>;
 
 export type ScreenTemplateValidationReport = Readonly<{
@@ -107,8 +121,114 @@ function zodIssues(error: {
   }));
 }
 
+function textIssuesForElement(
+  element: Extract<
+    ScreenTemplateElement,
+    { type: "dialogue-window" | "section-title" }
+  >,
+  index: number,
+  textContent: ScreenTemplateTextContent
+): ScreenTemplateValidationIssue[] {
+  const widthPx = element.transform.rect.width * SCREEN_TEMPLATE_CANVAS_WIDTH;
+  const heightPx =
+    element.transform.rect.height * SCREEN_TEMPLATE_CANVAS_HEIGHT;
+  const path = ["elements", index, "transform", "rect"] as const;
+
+  if (element.type === "dialogue-window") {
+    if (
+      textContent.dialogueText === undefined &&
+      textContent.speakerNameText === undefined
+    ) {
+      return [];
+    }
+
+    const metrics = subtitleTypographyMetricsForFontSize(
+      textContent.speakerNameText ?? "",
+      textContent.dialogueText ?? "",
+      element.fontSize,
+      { widthPx, heightPx }
+    );
+    if (widthPx <= SUBTITLE_CARD_HORIZONTAL_PADDING_PX) {
+      return [
+        {
+          path,
+          message:
+            "dialogue text and speaker label do not fit inside the production subtitle card padding"
+        }
+      ];
+    }
+    if (heightPx <= SUBTITLE_CARD_VERTICAL_PADDING_PX) {
+      return [
+        {
+          path,
+          message:
+            "dialogue text and speaker label do not fit inside the production subtitle card padding"
+        }
+      ];
+    }
+    if (metrics.estimatedTextHeightPx > metrics.availableTextHeightPx) {
+      return [
+        {
+          path,
+          message: `dialogue text and speaker label overflow the element bounds (${metrics.estimatedTextHeightPx.toFixed(1)}px exceeds ${metrics.availableTextHeightPx.toFixed(1)}px at the template font size)`
+        }
+      ];
+    }
+    return [];
+  }
+
+  const text = textContent.sectionTitleText;
+  if (text === undefined || text.length === 0) {
+    return [];
+  }
+
+  const availableWidth = widthPx - SECTION_TITLE_HORIZONTAL_PADDING_PX;
+  if (availableWidth <= 0) {
+    return [
+      {
+        path,
+        message: "section title text overflows the production title padding"
+      }
+    ];
+  }
+
+  const lineCount = estimateWrappedTextLineCount(
+    text,
+    availableWidth,
+    element.fontSize
+  );
+  const estimatedTextHeight =
+    lineCount * element.fontSize * SECTION_TITLE_LINE_HEIGHT;
+  if (estimatedTextHeight <= heightPx) {
+    return [];
+  }
+
+  return [
+    {
+      path,
+      message: `section title text overflows the element bounds (${lineCount} wrapped lines exceed ${heightPx.toFixed(1)}px)`
+    }
+  ];
+}
+
+export function screenTemplateTextValidationIssues(
+  template: ScreenTemplate,
+  textContent: ScreenTemplateTextContent = {}
+): readonly ScreenTemplateValidationIssue[] {
+  return template.elements.flatMap((element, index) => {
+    if (element.type === "dialogue-window") {
+      return textIssuesForElement(element, index, textContent);
+    }
+    if (element.type === "section-title") {
+      return textIssuesForElement(element, index, textContent);
+    }
+    return [];
+  });
+}
+
 export function screenTemplateValidationReport(
-  input: unknown
+  input: unknown,
+  textContent: ScreenTemplateTextContent = {}
 ): ScreenTemplateValidationReport {
   const parsed = screenTemplateSchema.safeParse(input);
   if (!parsed.success) {
@@ -118,6 +238,8 @@ export function screenTemplateValidationReport(
   const errors: ScreenTemplateValidationIssue[] = [];
   const warnings: ScreenTemplateValidationIssue[] = [];
   const elements = parsed.data.elements;
+
+  errors.push(...screenTemplateTextValidationIssues(parsed.data, textContent));
 
   for (const [index, element] of elements.entries()) {
     const bounds = elementBounds(element);

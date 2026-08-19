@@ -1229,7 +1229,7 @@ describe("compileRenderManifest", () => {
     );
   });
 
-  it("keeps source-valid long subtitles renderable in the derived manifest", () => {
+  it("rejects source-valid long subtitles that overflow the ScreenTemplate bounds", () => {
     const project = structuredClone(videoProjectFixture) as VideoProject;
     const sourceLine = project.script.sections[0]?.lines[0];
     if (sourceLine === undefined) {
@@ -1242,12 +1242,19 @@ describe("compileRenderManifest", () => {
 
     const result = compileRenderManifest(validInput(project));
 
-    expect(result.success).toBe(true);
-    if (result.success) {
-      expect(result.manifest.lines[0]?.subtitleText).toBe(
-        sourceLine.subtitleText
-      );
-    }
+    const diagnostic = result.success
+      ? undefined
+      : result.diagnostics.find(
+          (candidate) =>
+            candidate.code === "SCREEN_TEMPLATE_TEXT_OVERFLOW" &&
+            candidate.lineId === sourceLine.id
+        );
+    expect(result.success).toBe(false);
+    expect(diagnostic).toMatchObject({
+      path: ["script", "sections", 0, "lines", 0, "subtitleText"],
+      lineId: sourceLine.id,
+      sectionId: "section-intro"
+    });
   });
 
   it("collects outline, stale, audio, and material diagnostics without stage approvals", () => {

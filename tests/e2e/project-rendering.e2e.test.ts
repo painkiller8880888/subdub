@@ -26,6 +26,7 @@ import { CharacterVisualCatalogService } from "../../src/app/character-visuals/c
 import { OutlineGenerationService } from "../../src/app/projects/outline-generation-service.js";
 import { ProjectRepository } from "../../src/app/projects/project-repository.js";
 import { computeOutlineHash } from "../../src/app/projects/script-domain.js";
+import { ScreenTemplateRepository } from "../../src/app/screen-templates/screen-template-repository.js";
 import { createStandardScreenTemplate } from "../../src/app/screen-templates/screen-template-seed.js";
 import {
   browserExecutable,
@@ -82,6 +83,10 @@ import {
   representativeFrameMarkdown
 } from "../fixtures/e2e/representative-frame-project.js";
 import { compareRepresentativeImages } from "../helpers/image-comparison.js";
+import {
+  ALTERNATE_SCREEN_TEMPLATE_ID,
+  createAlternateScreenTemplate
+} from "../fixtures/e2e/screen-template-project.js";
 
 // Mediabunny's FFmpeg-backed metadata reader must be registered before Input
 // instances are created. This is the same production adapter used by asset
@@ -184,7 +189,9 @@ const goldenRoot = path.join(
 );
 const E2E_TIMEOUT_MS = 420_000;
 const ASSET_PROCESSING_TIMEOUT_MS = 30_000;
-const RENDER_TIMEOUT_MS = 180_000;
+// The final ED-09 MP4 render is CPU-bound on GitHub-hosted runners and can
+// exceed three minutes even though the surrounding E2E remains bounded.
+const RENDER_TIMEOUT_MS = 300_000;
 
 type InitializedServer = Awaited<ReturnType<typeof initializeServer>>;
 
@@ -2222,6 +2229,12 @@ describe("MVP final verification E2E", () => {
             "The restarted server is required for the ED-09 fixture."
           );
         }
+        const ed09AlternateTemplate = createAlternateScreenTemplate(
+          "2026-08-19T00:00:00.000Z"
+        );
+        new ScreenTemplateRepository(restartedServer.database.database).insert(
+          ed09AlternateTemplate
+        );
         const ed09BaseProject = await projectRepository.read(projectId);
         const ed09IntroSectionId = ed09BaseProject.script.sections[0]?.id;
         const ed09MainSectionId = ed09BaseProject.script.sections[1]?.id;
@@ -2254,6 +2267,26 @@ describe("MVP final verification E2E", () => {
           projectId,
           {
             ...ed09BaseProject,
+            script: {
+              ...ed09BaseProject.script,
+              sections: ed09BaseProject.script.sections.map(
+                (section, sectionIndex) =>
+                  sectionIndex !== 1
+                    ? section
+                    : {
+                        ...section,
+                        screenTemplateId: ALTERNATE_SCREEN_TEMPLATE_ID,
+                        lines: section.lines.map((line, lineIndex) =>
+                          lineIndex === 1
+                            ? {
+                                ...line,
+                                screenTemplateId: "screen-template-standard"
+                              }
+                            : line
+                        )
+                      }
+              )
+            },
             edit: {
               ...ed09BaseProject.edit,
               videoElements: [
