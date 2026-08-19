@@ -17,6 +17,11 @@ import { videoProjectFixture } from "../fixtures/video-project.js";
 import type { RenderVisual, VideoProject } from "../../src/schema/index.js";
 import type { VoicevoxAudioIndex } from "../../src/app/voicevox/audio-index.js";
 import { characterVisualCatalogSnapshotSchema } from "../../src/schema/character-visual.js";
+import {
+  mediaFramesToMilliseconds,
+  mediaMillisecondsToFrames,
+  presentationFramesToMediaFrames
+} from "../../src/media-frame.js";
 
 const validInput = createRenderManifestInput;
 
@@ -84,6 +89,83 @@ function snapshotCatalogInput(input: ReturnType<typeof validInput>): {
     return libraryPath === undefined ? asset : { ...asset, path: libraryPath };
   });
   return { catalog, assetMetadata };
+}
+
+function compileTemplateBoundaryVideoSegments(playbackRate: number) {
+  const project = structuredClone(videoProjectFixture) as VideoProject;
+  const introSection = project.script.sections[0];
+  if (introSection === undefined || introSection.lines[0] === undefined) {
+    throw new Error("intro fixture lines are missing");
+  }
+  const secondLine = introSection.lines[1];
+  if (secondLine === undefined) {
+    throw new Error("intro fixture second line is missing");
+  }
+  const thirdLine = {
+    ...secondLine,
+    id: "intro-learner-2",
+    screenTemplateId: null
+  };
+  introSection.lines = [...introSection.lines, thirdLine];
+
+  // 66 ms rounds up to two 30 fps timeline frames. Removing the fixture's
+  // pauses makes the next template boundaries land at frames 2 and 32.
+  introSection.lines[0]!.pauseAfterMs = 0;
+  introSection.lines[1]!.pauseBeforeMs = 0;
+  introSection.lines[1]!.pauseAfterMs = 0;
+
+  const alternateTemplate = createStandardScreenTemplate(
+    "2026-08-10T00:00:00.000Z"
+  );
+  alternateTemplate.templateId = "screen-template-alternate";
+  alternateTemplate.name = "Alternate";
+  alternateTemplate.elements[0]!.transform.rect.x = 0.06;
+  introSection.lines[1]!.screenTemplateId = alternateTemplate.templateId;
+
+  const assignment = project.visuals.assignments[0];
+  if (assignment === undefined || assignment.display.kind !== "video") {
+    throw new Error("intro visual assignment must be a video");
+  }
+  assignment.endLineId = thirdLine.id;
+  assignment.display.playbackRate = playbackRate;
+
+  const baseInput = createRenderManifestInput(project);
+  const firstAudio = (baseInput.audioIndex as VoicevoxAudioIndex)[
+    introSection.lines[0]!.id
+  ];
+  if (firstAudio === undefined) {
+    throw new Error("first line audio is missing");
+  }
+  const audioIndex = {
+    ...(baseInput.audioIndex as VoicevoxAudioIndex),
+    [firstAudio.lineId]: { ...firstAudio, durationMs: 66 }
+  } satisfies VoicevoxAudioIndex;
+  const assetMetadata = (
+    baseInput.assetMetadata as readonly RenderManifestAssetMetadata[]
+  ).map((asset) =>
+    asset.path === firstAudio.audioPath ? { ...asset, durationMs: 66 } : asset
+  );
+  const result = compileRenderManifest(
+    createRenderManifestInput(project, {
+      audioIndex,
+      assetMetadata,
+      screenTemplateCatalogSnapshot: [
+        createStandardScreenTemplate("2026-08-10T00:00:00.000Z"),
+        alternateTemplate
+      ]
+    })
+  );
+  if (!result.success) {
+    throw new Error(
+      result.diagnostics.map((diagnostic) => diagnostic.message).join("; ")
+    );
+  }
+
+  const videoSegments = result.manifest.visuals.filter(
+    (visual): visual is Extract<RenderVisual, { kind: "video" }> =>
+      visual.sourceAssignmentId === assignment.id && visual.kind === "video"
+  );
+  return { manifest: result.manifest, videoSegments };
 }
 
 describe("compileRenderManifest", () => {
@@ -383,21 +465,82 @@ describe("compileRenderManifest", () => {
         }
         return segment;
       });
+    const sourceStartFrame = mediaMillisecondsToFrames(
+      videoSegments[0]!.display.startMs,
+      result.manifest.fps
+    );
     for (let index = 1; index < videoSegments.length; index += 1) {
       const previous = videoSegments[index - 1]!;
       const current = videoSegments[index]!;
-      const expectedStart =
-        0 +
-        Math.round(
-          ((current.from - videoSegments[0]!.from) *
-            1000 *
-            sourcePlaybackRate) /
-            result.manifest.fps
+      const expectedSourceFrame =
+        sourceStartFrame +
+        presentationFramesToMediaFrames(
+          current.from - videoSegments[0]!.from,
+          sourcePlaybackRate
         );
-      expect(current.display.startMs).toBe(expectedStart);
+      expect(
+        mediaMillisecondsToFrames(current.display.startMs, result.manifest.fps)
+      ).toBe(expectedSourceFrame);
+      expect(current.display.startMs).toBe(
+        mediaFramesToMilliseconds(expectedSourceFrame, result.manifest.fps)
+      );
       expect(current.display.startMs).toBeGreaterThan(previous.display.startMs);
     }
     expect(videoSegments.at(-1)?.display.endMs).toBe(3_000);
+  });
+
+  it("keeps a 3n+2 frame template boundary on the same renderer source frame", () => {
+    const { manifest, videoSegments } = compileTemplateBoundaryVideoSegments(1);
+    expect(videoSegments.map((segment) => segment.from)).toEqual([0, 2, 32]);
+
+    const sourceStartFrame = mediaMillisecondsToFrames(
+      videoSegments[0]!.display.startMs,
+      manifest.fps
+    );
+    expect(
+      videoSegments.map((segment) =>
+        mediaMillisecondsToFrames(segment.display.startMs, manifest.fps)
+      )
+    ).toEqual(
+      videoSegments.map(
+        (segment) =>
+          sourceStartFrame +
+          presentationFramesToMediaFrames(
+            segment.from - videoSegments[0]!.from,
+            videoSegments[0]!.display.playbackRate
+          )
+      )
+    );
+    expect(videoSegments[1]!.display.startMs).toBe(
+      mediaFramesToMilliseconds(2, manifest.fps)
+    );
+  });
+
+  it("uses the same source-frame boundary after applying a non-1 playback rate", () => {
+    const { manifest, videoSegments } =
+      compileTemplateBoundaryVideoSegments(1.25);
+    const sourceStartFrame = mediaMillisecondsToFrames(
+      videoSegments[0]!.display.startMs,
+      manifest.fps
+    );
+
+    expect(
+      videoSegments.map((segment) =>
+        mediaMillisecondsToFrames(segment.display.startMs, manifest.fps)
+      )
+    ).toEqual(
+      videoSegments.map(
+        (segment) =>
+          sourceStartFrame +
+          presentationFramesToMediaFrames(
+            segment.from - videoSegments[0]!.from,
+            videoSegments[0]!.display.playbackRate
+          )
+      )
+    );
+    expect(videoSegments[1]!.display.startMs).toBe(
+      mediaFramesToMilliseconds(3, manifest.fps)
+    );
   });
 
   it("bakes coordinate space, priority geometry, section titles, and freshness into 2.4.0", () => {

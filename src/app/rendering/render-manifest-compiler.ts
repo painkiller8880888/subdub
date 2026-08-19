@@ -47,6 +47,11 @@ import {
 } from "../screen-templates/screen-layout-resolver.js";
 import { screenTemplateContentHash } from "../screen-templates/screen-template-hash.js";
 import { screenTemplateValidationReport } from "../../validation/screen-templates.js";
+import {
+  mediaFramesToMilliseconds,
+  mediaMillisecondsToFrames,
+  presentationFramesToMediaFrames
+} from "../../media-frame.js";
 
 export const RENDER_MANIFEST_VERSION = "2.4.0" as const;
 
@@ -1115,14 +1120,6 @@ function visualSegmentId(
   })}`;
 }
 
-function elapsedMediaMs(
-  frames: number,
-  fps: number,
-  playbackRate: number
-): number {
-  return Math.round((frames * 1000 * playbackRate) / fps);
-}
-
 type VisualSegmentBuildInput = Readonly<{
   readonly project: z.infer<typeof videoProjectSchema>;
   readonly lineEntries: readonly LineEntry[];
@@ -1248,22 +1245,26 @@ function buildVisualSegments({
       let display = resolveVisualDisplay(sourceDisplay, templateLayout);
 
       if (sourceDisplay.kind === "video" && display.kind === "video") {
-        const startMs =
-          sourceDisplay.startMs +
-          elapsedMediaMs(
-            from - assignmentFrom,
-            fps,
-            sourceDisplay.playbackRate
-          );
-        const endMs = Math.min(
-          sourceDisplay.endMs,
-          sourceDisplay.startMs +
-            elapsedMediaMs(
+        const sourceStartFrame = mediaMillisecondsToFrames(
+          sourceDisplay.startMs,
+          fps
+        );
+        const sourceEndFrame = Math.min(
+          mediaMillisecondsToFrames(sourceDisplay.endMs, fps),
+          sourceStartFrame +
+            presentationFramesToMediaFrames(
               from + durationInFrames - assignmentFrom,
-              fps,
               sourceDisplay.playbackRate
             )
         );
+        const startFrame =
+          sourceStartFrame +
+          presentationFramesToMediaFrames(
+            from - assignmentFrom,
+            sourceDisplay.playbackRate
+          );
+        const startMs = mediaFramesToMilliseconds(startFrame, fps);
+        const endMs = mediaFramesToMilliseconds(sourceEndFrame, fps);
         if (endMs <= startMs) {
           addDiagnostic(
             diagnostics,

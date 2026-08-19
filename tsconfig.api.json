@@ -16,6 +16,7 @@
     "src/voicevox/**/*.ts",
     "src/schema/**/*.ts",
     "src/screen-layout-resolver.ts",
+    "src/media-frame.ts",
     "src/assets/**/*.ts",
     "src/validation/**/*.ts",
     "src/timeline/**/*.ts"
