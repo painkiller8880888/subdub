@@ -489,6 +489,33 @@ describe("compileRenderManifest", () => {
     expect(videoSegments.at(-1)?.display.endMs).toBe(3_000);
   });
 
+  it("preserves arbitrary millisecond trim points for an unsplit video", () => {
+    const project = structuredClone(videoProjectFixture) as VideoProject;
+    const assignment = project.visuals.assignments[0];
+    if (assignment === undefined || assignment.display.kind !== "video") {
+      throw new Error("intro visual assignment must be a video");
+    }
+    assignment.display.startMs = 110;
+    assignment.display.endMs = 1_101;
+
+    const result = compileRenderManifest(createRenderManifestInput(project));
+    expect(result.success).toBe(true);
+    if (!result.success) {
+      return;
+    }
+    const visual = result.manifest.visuals.find(
+      (candidate) => candidate.sourceAssignmentId === assignment.id
+    );
+    if (visual?.display.kind !== "video") {
+      throw new Error("compiled visual must be a video");
+    }
+
+    expect(visual.display.startMs).toBe(110);
+    expect(visual.display.endMs).toBe(1_101);
+    expect(mediaMillisecondsToFrames(visual.display.startMs, 30)).toBe(4);
+    expect(mediaMillisecondsToFrames(visual.display.endMs, 30)).toBe(34);
+  });
+
   it("keeps a 3n+2 frame template boundary on the same renderer source frame", () => {
     const { manifest, videoSegments } = compileTemplateBoundaryVideoSegments(1);
     expect(videoSegments.map((segment) => segment.from)).toEqual([0, 2, 32]);
@@ -514,6 +541,12 @@ describe("compileRenderManifest", () => {
     expect(videoSegments[1]!.display.startMs).toBe(
       mediaFramesToMilliseconds(2, manifest.fps)
     );
+    expect(videoSegments[0]!.display.endMs).toBe(
+      mediaFramesToMilliseconds(2, manifest.fps)
+    );
+    expect(
+      mediaMillisecondsToFrames(videoSegments[0]!.display.endMs, manifest.fps)
+    ).toBe(2);
   });
 
   it("uses the same source-frame boundary after applying a non-1 playback rate", () => {
@@ -541,6 +574,12 @@ describe("compileRenderManifest", () => {
     expect(videoSegments[1]!.display.startMs).toBe(
       mediaFramesToMilliseconds(3, manifest.fps)
     );
+    expect(videoSegments[0]!.display.endMs).toBe(
+      mediaFramesToMilliseconds(3, manifest.fps)
+    );
+    expect(
+      mediaMillisecondsToFrames(videoSegments[0]!.display.endMs, manifest.fps)
+    ).toBe(3);
   });
 
   it("bakes coordinate space, priority geometry, section titles, and freshness into 2.4.0", () => {

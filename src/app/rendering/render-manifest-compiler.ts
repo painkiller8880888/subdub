@@ -1120,6 +1120,14 @@ function visualSegmentId(
   })}`;
 }
 
+function elapsedMediaMs(
+  frames: number,
+  fps: number,
+  playbackRate: number
+): number {
+  return Math.round((frames * 1000 * playbackRate) / fps);
+}
+
 type VisualSegmentBuildInput = Readonly<{
   readonly project: z.infer<typeof videoProjectSchema>;
   readonly lineEntries: readonly LineEntry[];
@@ -1249,22 +1257,35 @@ function buildVisualSegments({
           sourceDisplay.startMs,
           fps
         );
-        const sourceEndFrame = Math.min(
-          mediaMillisecondsToFrames(sourceDisplay.endMs, fps),
-          sourceStartFrame +
-            presentationFramesToMediaFrames(
-              from + durationInFrames - assignmentFrom,
-              sourceDisplay.playbackRate
-            )
-        );
+        const elapsedStartFrames = from - assignmentFrom;
+        const elapsedEndFrames = from + durationInFrames - assignmentFrom;
         const startFrame =
           sourceStartFrame +
           presentationFramesToMediaFrames(
-            from - assignmentFrom,
+            elapsedStartFrames,
             sourceDisplay.playbackRate
           );
-        const startMs = mediaFramesToMilliseconds(startFrame, fps);
-        const endMs = mediaFramesToMilliseconds(sourceEndFrame, fps);
+        const legacyEndMs = Math.min(
+          sourceDisplay.endMs,
+          sourceDisplay.startMs +
+            elapsedMediaMs(elapsedEndFrames, fps, sourceDisplay.playbackRate)
+        );
+        const isFinalSegment = groupEnd === assignmentLines.length - 1;
+        const startMs =
+          elapsedStartFrames === 0
+            ? sourceDisplay.startMs
+            : mediaFramesToMilliseconds(startFrame, fps);
+        const endMs =
+          !isFinalSegment && legacyEndMs < sourceDisplay.endMs
+            ? mediaFramesToMilliseconds(
+                sourceStartFrame +
+                  presentationFramesToMediaFrames(
+                    elapsedEndFrames,
+                    sourceDisplay.playbackRate
+                  ),
+                fps
+              )
+            : legacyEndMs;
         if (endMs <= startMs) {
           addDiagnostic(
             diagnostics,
