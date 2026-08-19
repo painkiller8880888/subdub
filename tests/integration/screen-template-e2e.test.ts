@@ -268,8 +268,8 @@ describe("ScreenTemplate cross-layer acceptance fixture", () => {
       screenTemplateTextValidationIssues(alternate, {
         dialogueText: "字幕".repeat(200),
         speakerNameText: "ずんだもん"
-      })
-    ).toEqual([]);
+      }).map((issue) => issue.message)
+    ).toEqual(expect.arrayContaining([expect.stringContaining("overflow")]));
 
     const tinyDialogue = screenTemplateSchema.parse({
       ...alternate,
@@ -563,9 +563,10 @@ describe("ScreenTemplate cross-layer acceptance fixture", () => {
     expect(markup).toContain("scaleX(-1)");
     expect(markup).toContain("rotate(-5deg)");
     expect(markup).toContain("rotate(7deg)");
+    expect(markup).toContain("padding:0 1.25%");
   });
 
-  it("uses the production subtitle scaler during manifest compilation", () => {
+  it("rejects ScreenTemplate subtitles that overflow at the template font size", () => {
     const project = createScreenTemplateProjectFixture();
     project.script.sections[1]!.lines[0]!.subtitleText = "字幕".repeat(200);
     const input: RenderManifestCompilerInput = createRenderManifestInput(
@@ -576,6 +577,18 @@ describe("ScreenTemplate cross-layer acceptance fixture", () => {
       }
     );
     const result = compileRenderManifest(input);
-    expect(result.success).toBe(true);
+    const diagnostic = result.success
+      ? undefined
+      : result.diagnostics.find(
+          (candidate) =>
+            candidate.code === "SCREEN_TEMPLATE_TEXT_OVERFLOW" &&
+            candidate.lineId === "main-mentor-1"
+        );
+    expect(result.success).toBe(false);
+    expect(diagnostic).toMatchObject({
+      path: ["script", "sections", 1, "lines", 0, "subtitleText"],
+      sectionId: "section-main",
+      lineId: "main-mentor-1"
+    });
   });
 });

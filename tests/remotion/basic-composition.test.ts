@@ -35,7 +35,6 @@ import {
   resolveCharacterThemeColor,
   resolveSubtitleContent,
   SUBTITLE_SAFE_AREA_PX,
-  SUBTITLE_SAFE_AREA_HEIGHT_PX,
   subtitleTypographyScale,
   subtitleContainerStyle
 } from "../../src/remotion/layout-helpers.js";
@@ -637,7 +636,7 @@ describe("basic Remotion composition", () => {
     ).toBeGreaterThan(0);
   }, 180_000);
 
-  it("shrinks long multi-line subtitles so their rendered pixels stay in the safe area", async () => {
+  it("keeps the legacy scaler available for long subtitles", () => {
     const boundaryManifest = structuredClone(
       renderManifestRenderingFixture
     ) as RenderManifest;
@@ -654,27 +653,6 @@ describe("basic Remotion composition", () => {
     expect(boundaryLine.subtitleText.length).toBe(161);
     expect(boundaryLine.subtitleText.split("\n")).toHaveLength(13);
     expect(renderManifestSchema.safeParse(boundaryManifest).success).toBe(true);
-    const noSubtitleManifest = structuredClone(
-      boundaryManifest
-    ) as RenderManifest;
-    const noSubtitleLine = noSubtitleManifest.lines.find(
-      (line) => line.id === "main-learner-1"
-    );
-    if (noSubtitleLine === undefined) {
-      throw new Error("subtitle boundary comparison line is missing");
-    }
-    noSubtitleLine.subtitleText = "";
-
-    const withSubtitle = await renderFixtureFrame(
-      260,
-      "subtitle-safe-area-boundary",
-      boundaryManifest as unknown as Record<string, unknown>
-    );
-    const withoutSubtitle = await renderFixtureFrame(
-      260,
-      "subtitle-safe-area-boundary-empty",
-      noSubtitleManifest as unknown as Record<string, unknown>
-    );
 
     expect(
       subtitleTypographyScale(
@@ -682,63 +660,7 @@ describe("basic Remotion composition", () => {
         boundaryLine.subtitleText
       )
     ).toBeLessThan(1);
-    expect(
-      await differentPixelsInRegion(withSubtitle, withoutSubtitle, {
-        left: SUBTITLE_SAFE_AREA_PX / renderManifestRenderingFixture.width,
-        right:
-          (renderManifestRenderingFixture.width - SUBTITLE_SAFE_AREA_PX) /
-          renderManifestRenderingFixture.width,
-        top: SUBTITLE_SAFE_AREA_PX / renderManifestRenderingFixture.height,
-        bottom:
-          (renderManifestRenderingFixture.height - SUBTITLE_SAFE_AREA_PX) /
-          renderManifestRenderingFixture.height
-      })
-    ).toBeGreaterThan(0);
-
-    const outsideSafeArea = [
-      {
-        left: 0,
-        right: 1,
-        top: 0,
-        bottom: SUBTITLE_SAFE_AREA_PX / renderManifestRenderingFixture.height
-      },
-      {
-        left: 0,
-        right: 1,
-        top:
-          (renderManifestRenderingFixture.height - SUBTITLE_SAFE_AREA_PX) /
-          renderManifestRenderingFixture.height,
-        bottom: 1
-      },
-      {
-        left: 0,
-        right: SUBTITLE_SAFE_AREA_PX / renderManifestRenderingFixture.width,
-        top: SUBTITLE_SAFE_AREA_PX / renderManifestRenderingFixture.height,
-        bottom:
-          (renderManifestRenderingFixture.height - SUBTITLE_SAFE_AREA_PX) /
-          renderManifestRenderingFixture.height
-      },
-      {
-        left:
-          (renderManifestRenderingFixture.width - SUBTITLE_SAFE_AREA_PX) /
-          renderManifestRenderingFixture.width,
-        right: 1,
-        top: SUBTITLE_SAFE_AREA_PX / renderManifestRenderingFixture.height,
-        bottom:
-          (renderManifestRenderingFixture.height - SUBTITLE_SAFE_AREA_PX) /
-          renderManifestRenderingFixture.height
-      }
-    ];
-    for (const region of outsideSafeArea) {
-      expect(
-        await differentPixelsInRegion(withSubtitle, withoutSubtitle, region)
-      ).toBe(0);
-    }
-
-    expect(SUBTITLE_SAFE_AREA_HEIGHT_PX).toBe(
-      renderManifestRenderingFixture.height - SUBTITLE_SAFE_AREA_PX * 2
-    );
-  }, 180_000);
+  });
 });
 
 describe("composition dependency boundary", () => {

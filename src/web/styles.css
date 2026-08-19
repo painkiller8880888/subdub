@@ -3457,13 +3457,11 @@ textarea[aria-invalid="true"] {
   color: #fff;
   display: block;
   font-weight: 700;
-  line-height: 1.4;
   max-height: 100%;
   max-width: 100%;
   min-width: 0;
   overflow-wrap: anywhere;
   overflow: hidden;
-  padding: 0.833333% 1.5625%;
   text-align: left;
   white-space: pre-wrap;
   width: fit-content;
@@ -3473,17 +3471,13 @@ textarea[aria-invalid="true"] {
   color: #fff;
   font-weight: 800;
   justify-content: center;
-  line-height: 1.2;
   overflow-wrap: anywhere;
-  padding: 0 1.25%;
   text-shadow: 0 0.1rem 0.25rem rgb(0 0 0 / 50%);
   white-space: normal;
 }
 
 .screen-layout-dialogue-speaker {
   display: block;
-  line-height: 1.2;
-  margin-bottom: 4px;
 }
 
 .screen-layout-character {

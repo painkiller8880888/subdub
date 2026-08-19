@@ -5,6 +5,35 @@ import type {
   RenderLine,
   RenderManifest
 } from "../schema/index.js";
+import {
+  SUBTITLE_BODY_FONT_SIZE_PX,
+  SUBTITLE_SAFE_AREA_PX,
+  subtitleTypographyMetricsForFontSize
+} from "../screen-template-typography";
+export {
+  estimateWrappedTextLineCount,
+  SECTION_TITLE_HORIZONTAL_PADDING_PER_SIDE_PX,
+  SECTION_TITLE_HORIZONTAL_PADDING_PX,
+  SECTION_TITLE_LINE_HEIGHT,
+  SUBTITLE_BODY_FONT_SIZE_PX,
+  SUBTITLE_BODY_LINE_HEIGHT,
+  SUBTITLE_CARD_HORIZONTAL_PADDING_PER_SIDE_PX,
+  SUBTITLE_CARD_HORIZONTAL_PADDING_PX,
+  SUBTITLE_CARD_VERTICAL_PADDING_PER_SIDE_PX,
+  SUBTITLE_CARD_VERTICAL_PADDING_PX,
+  SUBTITLE_LABEL_FONT_SIZE_PX,
+  SUBTITLE_LABEL_FONT_SIZE_RATIO,
+  SUBTITLE_LABEL_LINE_HEIGHT,
+  SUBTITLE_LABEL_MARGIN_BOTTOM_PX,
+  SUBTITLE_SAFE_AREA_HEIGHT_PX,
+  SUBTITLE_SAFE_AREA_PX,
+  SUBTITLE_SAFE_AREA_WIDTH_PX,
+  subtitleTypographyMetricsForFontSize
+} from "../screen-template-typography";
+export type {
+  SubtitleTypographyBounds,
+  SubtitleTypographyMetrics
+} from "../screen-template-typography";
 
 export const DESIGN_COLORS = {
   background: "#17243a",
@@ -17,36 +46,6 @@ export const DESIGN_COLORS = {
   "character.metan": "#e78ac3",
   "character.zundamon": "#75c97a"
 } as const;
-
-export const SUBTITLE_SAFE_AREA_PX = 60 as const;
-export const SUBTITLE_SAFE_AREA_WIDTH_PX = 1800 as const;
-export const SUBTITLE_SAFE_AREA_HEIGHT_PX = 960 as const;
-
-export const SUBTITLE_CARD_HORIZONTAL_PADDING_PX = 60 as const;
-export const SUBTITLE_CARD_VERTICAL_PADDING_PX = 32 as const;
-const SUBTITLE_ESTIMATED_GLYPH_WIDTH_EM = 2 as const;
-const SUBTITLE_BODY_FONT_SIZE_PX = 38 as const;
-export const SUBTITLE_BODY_LINE_HEIGHT = 1.4 as const;
-const SUBTITLE_LABEL_FONT_SIZE_PX = 26 as const;
-export const SUBTITLE_LABEL_LINE_HEIGHT = 1.2 as const;
-export const SUBTITLE_LABEL_MARGIN_BOTTOM_PX = 4 as const;
-
-export const SECTION_TITLE_HORIZONTAL_PADDING_PX = 48 as const;
-export const SECTION_TITLE_LINE_HEIGHT = 1.2 as const;
-
-export type SubtitleTypographyBounds = Readonly<{
-  widthPx: number;
-  heightPx: number;
-}>;
-
-export type SubtitleTypographyMetrics = Readonly<{
-  scale: number;
-  contentWidthPx: number;
-  availableTextHeightPx: number;
-  labelLineCount: number;
-  bodyLineCount: number;
-  estimatedTextHeightPx: number;
-}>;
 
 export type CharacterSide = "left" | "right";
 
@@ -109,83 +108,6 @@ export function subtitleContainerStyle(side: CharacterSide): CSSProperties {
   };
 }
 
-export function estimateWrappedTextLineCount(
-  text: string,
-  maxWidthPx: number,
-  fontSizePx: number,
-  glyphWidthEm = 1
-): number {
-  const charactersPerLine = Math.max(
-    1,
-    Math.floor(maxWidthPx / (fontSizePx * glyphWidthEm))
-  );
-
-  return text.split(/\r\n|\r|\n/).reduce((lineCount, line) => {
-    const characterCount = Array.from(line).length;
-    return (
-      lineCount + Math.max(1, Math.ceil(characterCount / charactersPerLine))
-    );
-  }, 0);
-}
-
-function subtitleTypographyBounds(
-  bounds: SubtitleTypographyBounds | undefined
-): SubtitleTypographyBounds {
-  return (
-    bounds ?? {
-      widthPx: SUBTITLE_SAFE_AREA_WIDTH_PX,
-      heightPx: SUBTITLE_SAFE_AREA_HEIGHT_PX
-    }
-  );
-}
-
-export function subtitleTypographyMetricsForFontSize(
-  displayName: string,
-  subtitleText: string,
-  bodyFontSizePx: number,
-  bounds?: SubtitleTypographyBounds
-): SubtitleTypographyMetrics {
-  const safeBodyFontSizePx = Math.max(1, bodyFontSizePx);
-  const safeBounds = subtitleTypographyBounds(bounds);
-  const contentWidthPx = Math.max(
-    0,
-    safeBounds.widthPx - SUBTITLE_CARD_HORIZONTAL_PADDING_PX
-  );
-  const labelFontSizePx =
-    safeBodyFontSizePx *
-    (SUBTITLE_LABEL_FONT_SIZE_PX / SUBTITLE_BODY_FONT_SIZE_PX);
-  const labelLineCount = estimateWrappedTextLineCount(
-    displayName,
-    contentWidthPx,
-    labelFontSizePx,
-    SUBTITLE_ESTIMATED_GLYPH_WIDTH_EM
-  );
-  const bodyLineCount = estimateWrappedTextLineCount(
-    subtitleText,
-    contentWidthPx,
-    safeBodyFontSizePx,
-    SUBTITLE_ESTIMATED_GLYPH_WIDTH_EM
-  );
-  const estimatedTextHeightPx =
-    labelLineCount * labelFontSizePx * SUBTITLE_LABEL_LINE_HEIGHT +
-    SUBTITLE_LABEL_MARGIN_BOTTOM_PX +
-    bodyLineCount * safeBodyFontSizePx * SUBTITLE_BODY_LINE_HEIGHT;
-  const availableTextHeightPx =
-    safeBounds.heightPx - SUBTITLE_CARD_VERTICAL_PADDING_PX;
-
-  return {
-    scale: Math.min(
-      1,
-      Math.max(0, availableTextHeightPx / estimatedTextHeightPx)
-    ),
-    contentWidthPx,
-    availableTextHeightPx,
-    labelLineCount,
-    bodyLineCount,
-    estimatedTextHeightPx
-  };
-}
-
 export function subtitleTypographyScale(
   displayName: string,
   subtitleText: string
@@ -200,14 +122,12 @@ export function subtitleTypographyScale(
 export function subtitleTypographyScaleForFontSize(
   displayName: string,
   subtitleText: string,
-  bodyFontSizePx: number,
-  bounds?: SubtitleTypographyBounds
+  bodyFontSizePx: number
 ): number {
   return subtitleTypographyMetricsForFontSize(
     displayName,
     subtitleText,
-    bodyFontSizePx,
-    bounds
+    bodyFontSizePx
   ).scale;
 }
 

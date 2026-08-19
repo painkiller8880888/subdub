@@ -12,7 +12,7 @@ import {
   subtitleTypographyMetricsForFontSize,
   SUBTITLE_CARD_HORIZONTAL_PADDING_PX,
   SUBTITLE_CARD_VERTICAL_PADDING_PX
-} from "../remotion/layout-helpers.js";
+} from "../screen-template-typography.js";
 
 export type ScreenTemplateValidationPath = readonly (string | number)[];
 
@@ -148,16 +148,29 @@ function textIssuesForElement(
       element.fontSize,
       { widthPx, heightPx }
     );
-    if (
-      widthPx <= SUBTITLE_CARD_HORIZONTAL_PADDING_PX ||
-      heightPx <= SUBTITLE_CARD_VERTICAL_PADDING_PX ||
-      metrics.scale <= 0
-    ) {
+    if (widthPx <= SUBTITLE_CARD_HORIZONTAL_PADDING_PX) {
       return [
         {
           path,
           message:
-            "dialogue text and speaker label overflow the production subtitle card padding"
+            "dialogue text and speaker label do not fit inside the production subtitle card padding"
+        }
+      ];
+    }
+    if (heightPx <= SUBTITLE_CARD_VERTICAL_PADDING_PX) {
+      return [
+        {
+          path,
+          message:
+            "dialogue text and speaker label do not fit inside the production subtitle card padding"
+        }
+      ];
+    }
+    if (metrics.estimatedTextHeightPx > metrics.availableTextHeightPx) {
+      return [
+        {
+          path,
+          message: `dialogue text and speaker label overflow the element bounds (${metrics.estimatedTextHeightPx.toFixed(1)}px exceeds ${metrics.availableTextHeightPx.toFixed(1)}px at the template font size)`
         }
       ];
     }

@@ -6,7 +6,6 @@ import type {
   StaticAnnotation
 } from "../schema/common";
 import {
-  SCREEN_TEMPLATE_CANVAS_HEIGHT,
   SCREEN_TEMPLATE_CANVAS_WIDTH,
   type ScreenTemplate,
   type ScreenTemplateElement
@@ -14,7 +13,16 @@ import {
 import type { ResolvedScreenElement } from "../schema/index";
 import { resolveScreenTemplateLayout } from "../screen-layout-resolver";
 import { AnnotationLayer } from "./layout";
-import { subtitleTypographyScaleForFontSize } from "./layout-helpers";
+import {
+  SECTION_TITLE_HORIZONTAL_PADDING_PER_SIDE_PX,
+  SECTION_TITLE_LINE_HEIGHT,
+  SUBTITLE_BODY_LINE_HEIGHT,
+  SUBTITLE_CARD_HORIZONTAL_PADDING_PER_SIDE_PX,
+  SUBTITLE_CARD_VERTICAL_PADDING_PER_SIDE_PX,
+  SUBTITLE_LABEL_FONT_SIZE_RATIO,
+  SUBTITLE_LABEL_LINE_HEIGHT,
+  SUBTITLE_LABEL_MARGIN_BOTTOM_PX
+} from "../screen-template-typography";
 
 export type ScreenCharacterSlot = "speaker-1" | "speaker-2";
 
@@ -188,15 +196,6 @@ function renderScreenTemplateElement(
 
   if (element.type === "dialogue-window") {
     const speakerNameText = preview.speakerNameText ?? "";
-    const typographyScale = subtitleTypographyScaleForFontSize(
-      speakerNameText,
-      preview.dialogueText,
-      element.fontSize,
-      {
-        widthPx: element.transform.rect.width * SCREEN_TEMPLATE_CANVAS_WIDTH,
-        heightPx: element.transform.rect.height * SCREEN_TEMPLATE_CANVAS_HEIGHT
-      }
-    );
     return (
       <div
         aria-hidden="true"
@@ -207,7 +206,9 @@ function renderScreenTemplateElement(
         <span
           className="screen-layout-dialogue-card"
           style={{
-            fontSize: `${((element.fontSize * typographyScale) / SCREEN_TEMPLATE_CANVAS_WIDTH) * 100}cqw`
+            fontSize: `${(element.fontSize / SCREEN_TEMPLATE_CANVAS_WIDTH) * 100}cqw`,
+            lineHeight: SUBTITLE_BODY_LINE_HEIGHT,
+            padding: `${(SUBTITLE_CARD_VERTICAL_PADDING_PER_SIDE_PX / SCREEN_TEMPLATE_CANVAS_WIDTH) * 100}% ${(SUBTITLE_CARD_HORIZONTAL_PADDING_PER_SIDE_PX / SCREEN_TEMPLATE_CANVAS_WIDTH) * 100}%`
           }}
         >
           {speakerNameText.length > 0 ? (
@@ -215,10 +216,12 @@ function renderScreenTemplateElement(
               className="screen-layout-dialogue-speaker"
               style={{
                 fontSize: `${
-                  ((element.fontSize * (26 / 38) * typographyScale) /
+                  ((element.fontSize * SUBTITLE_LABEL_FONT_SIZE_RATIO) /
                     SCREEN_TEMPLATE_CANVAS_WIDTH) *
                   100
-                }cqw`
+                }cqw`,
+                lineHeight: SUBTITLE_LABEL_LINE_HEIGHT,
+                marginBottom: SUBTITLE_LABEL_MARGIN_BOTTOM_PX
               }}
             >
               {speakerNameText}
@@ -238,7 +241,9 @@ function renderScreenTemplateElement(
         key={element.elementId}
         style={{
           ...baseStyle,
-          fontSize: `${(element.fontSize / 1920) * 100}cqw`
+          fontSize: `${(element.fontSize / SCREEN_TEMPLATE_CANVAS_WIDTH) * 100}cqw`,
+          lineHeight: SECTION_TITLE_LINE_HEIGHT,
+          padding: `0 ${(SECTION_TITLE_HORIZONTAL_PADDING_PER_SIDE_PX / SCREEN_TEMPLATE_CANVAS_WIDTH) * 100}%`
         }}
       >
         {preview.sectionTitleText}
