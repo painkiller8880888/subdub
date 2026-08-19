@@ -189,7 +189,9 @@ const goldenRoot = path.join(
 );
 const E2E_TIMEOUT_MS = 420_000;
 const ASSET_PROCESSING_TIMEOUT_MS = 30_000;
-const RENDER_TIMEOUT_MS = 180_000;
+// The final ED-09 MP4 render is CPU-bound on GitHub-hosted runners and can
+// exceed three minutes even though the surrounding E2E remains bounded.
+const RENDER_TIMEOUT_MS = 300_000;
 
 type InitializedServer = Awaited<ReturnType<typeof initializeServer>>;
 

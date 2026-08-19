@@ -591,6 +591,17 @@ describe("ScreenTemplate workflow browser E2E", () => {
           .click();
         await page.locator("#screen-template-property-rotation").fill("9");
         await page.getByLabel("flipX（左右反転）").check();
+        await page
+          .locator("#screen-template-sample-dialogue")
+          .fill("字幕".repeat(200));
+        await page
+          .locator("#screen-template-sample-section-title")
+          .fill("長いセクションタイトル".repeat(30));
+        expect(
+          await page
+            .getByRole("button", { name: "保存", exact: true })
+            .isEnabled()
+        ).toBe(true);
 
         const saveResponse = page.waitForResponse(
           (response) =>

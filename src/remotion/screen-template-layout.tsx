@@ -5,13 +5,16 @@ import type {
   DisplayCoordinateSpace,
   StaticAnnotation
 } from "../schema/common";
-import type {
-  ScreenTemplate,
-  ScreenTemplateElement
+import {
+  SCREEN_TEMPLATE_CANVAS_HEIGHT,
+  SCREEN_TEMPLATE_CANVAS_WIDTH,
+  type ScreenTemplate,
+  type ScreenTemplateElement
 } from "../schema/screen-template";
 import type { ResolvedScreenElement } from "../schema/index";
 import { resolveScreenTemplateLayout } from "../screen-layout-resolver";
 import { AnnotationLayer } from "./layout";
+import { subtitleTypographyScaleForFontSize } from "./layout-helpers";
 
 export type ScreenCharacterSlot = "speaker-1" | "speaker-2";
 
@@ -43,6 +46,7 @@ export type ScreenLayoutBackground = Readonly<{
 
 export type ScreenLayoutPreview = Readonly<{
   dialogueText: string;
+  speakerNameText?: string;
   sectionTitleText: string;
   characters: Readonly<
     Partial<Record<ScreenCharacterSlot, ScreenLayoutCharacterPreview>>
@@ -54,6 +58,7 @@ export type ScreenLayoutPreview = Readonly<{
 
 export const DEFAULT_SCREEN_LAYOUT_PREVIEW: ScreenLayoutPreview = {
   dialogueText: "ここにサンプルセリフが表示されます。",
+  speakerNameText: "話者名",
   sectionTitleText: "セクション名",
   characters: {},
   content: {
@@ -182,6 +187,16 @@ function renderScreenTemplateElement(
   };
 
   if (element.type === "dialogue-window") {
+    const speakerNameText = preview.speakerNameText ?? "";
+    const typographyScale = subtitleTypographyScaleForFontSize(
+      speakerNameText,
+      preview.dialogueText,
+      element.fontSize,
+      {
+        widthPx: element.transform.rect.width * SCREEN_TEMPLATE_CANVAS_WIDTH,
+        heightPx: element.transform.rect.height * SCREEN_TEMPLATE_CANVAS_HEIGHT
+      }
+    );
     return (
       <div
         aria-hidden="true"
@@ -191,9 +206,25 @@ function renderScreenTemplateElement(
       >
         <span
           className="screen-layout-dialogue-card"
-          style={{ fontSize: `${(element.fontSize / 1920) * 100}cqw` }}
+          style={{
+            fontSize: `${((element.fontSize * typographyScale) / SCREEN_TEMPLATE_CANVAS_WIDTH) * 100}cqw`
+          }}
         >
-          {preview.dialogueText}
+          {speakerNameText.length > 0 ? (
+            <span
+              className="screen-layout-dialogue-speaker"
+              style={{
+                fontSize: `${
+                  ((element.fontSize * (26 / 38) * typographyScale) /
+                    SCREEN_TEMPLATE_CANVAS_WIDTH) *
+                  100
+                }cqw`
+              }}
+            >
+              {speakerNameText}
+            </span>
+          ) : null}
+          <span>{preview.dialogueText}</span>
         </span>
       </div>
     );

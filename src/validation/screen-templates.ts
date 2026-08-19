@@ -5,6 +5,14 @@ import {
   type ScreenTemplate,
   type ScreenTemplateElement
 } from "../schema/screen-template.js";
+import {
+  estimateWrappedTextLineCount,
+  SECTION_TITLE_HORIZONTAL_PADDING_PX,
+  SECTION_TITLE_LINE_HEIGHT,
+  subtitleTypographyMetricsForFontSize,
+  SUBTITLE_CARD_HORIZONTAL_PADDING_PX,
+  SUBTITLE_CARD_VERTICAL_PADDING_PX
+} from "../remotion/layout-helpers.js";
 
 export type ScreenTemplateValidationPath = readonly (string | number)[];
 
@@ -15,6 +23,7 @@ export type ScreenTemplateValidationIssue = Readonly<{
 
 export type ScreenTemplateTextContent = Readonly<{
   dialogueText?: string;
+  speakerNameText?: string;
   sectionTitleText?: string;
 }>;
 
@@ -112,97 +121,79 @@ function zodIssues(error: {
   }));
 }
 
-const TEXT_LINE_HEIGHT = 1.4;
-const TEXT_HORIZONTAL_PADDING = 0.03;
-
-function estimatedTextWidth(text: string, fontSize: number): number {
-  return Array.from(text).reduce((width, character) => {
-    if (/\s/u.test(character)) {
-      return width + fontSize * 0.35;
-    }
-    if ((character.codePointAt(0) ?? Number.POSITIVE_INFINITY) <= 0xff) {
-      return width + fontSize * 0.55;
-    }
-    return width + fontSize;
-  }, 0);
-}
-
-function wrappedLineCount(
-  text: string,
-  maxWidth: number,
-  fontSize: number
-): number {
-  return text.split("\n").reduce((count, line) => {
-    if (line.length === 0) {
-      return count + 1;
-    }
-    let lineWidth = 0;
-    let wrappedLines = 1;
-    for (const character of Array.from(line)) {
-      const characterWidth = estimatedTextWidth(character, fontSize);
-      if (lineWidth > 0 && lineWidth + characterWidth > maxWidth) {
-        wrappedLines += 1;
-        lineWidth = characterWidth;
-      } else {
-        lineWidth += characterWidth;
-      }
-    }
-    return count + wrappedLines;
-  }, 0);
-}
-
 function textIssuesForElement(
   element: Extract<
     ScreenTemplateElement,
     { type: "dialogue-window" | "section-title" }
   >,
   index: number,
-  text: string | undefined
+  textContent: ScreenTemplateTextContent
 ): ScreenTemplateValidationIssue[] {
   const widthPx = element.transform.rect.width * SCREEN_TEMPLATE_CANVAS_WIDTH;
   const heightPx =
     element.transform.rect.height * SCREEN_TEMPLATE_CANVAS_HEIGHT;
-  const lineHeightPx = element.fontSize * TEXT_LINE_HEIGHT;
-  const path = ["elements", index, "fontSize"] as const;
-  const label =
-    element.type === "dialogue-window" ? "dialogue" : "section title";
+  const path = ["elements", index, "transform", "rect"] as const;
 
-  if (lineHeightPx > heightPx) {
-    return [
-      {
-        path,
-        message: `${label} text line height must fit inside the element bounds`
-      }
-    ];
+  if (element.type === "dialogue-window") {
+    if (
+      textContent.dialogueText === undefined &&
+      textContent.speakerNameText === undefined
+    ) {
+      return [];
+    }
+
+    const metrics = subtitleTypographyMetricsForFontSize(
+      textContent.speakerNameText ?? "",
+      textContent.dialogueText ?? "",
+      element.fontSize,
+      { widthPx, heightPx }
+    );
+    if (
+      widthPx <= SUBTITLE_CARD_HORIZONTAL_PADDING_PX ||
+      heightPx <= SUBTITLE_CARD_VERTICAL_PADDING_PX ||
+      metrics.scale <= 0
+    ) {
+      return [
+        {
+          path,
+          message:
+            "dialogue text and speaker label overflow the production subtitle card padding"
+        }
+      ];
+    }
+    return [];
   }
 
+  const text = textContent.sectionTitleText;
   if (text === undefined || text.length === 0) {
     return [];
   }
 
-  const availableWidth = widthPx * (1 - TEXT_HORIZONTAL_PADDING);
-  if (
-    element.type === "section-title" &&
-    estimatedTextWidth(text, element.fontSize) > availableWidth
-  ) {
+  const availableWidth = widthPx - SECTION_TITLE_HORIZONTAL_PADDING_PX;
+  if (availableWidth <= 0) {
     return [
       {
-        path: ["elements", index, "transform", "rect"],
-        message: `${label} text overflows the element bounds`
+        path,
+        message: "section title text overflows the production title padding"
       }
     ];
   }
 
-  const lineCount = wrappedLineCount(text, availableWidth, element.fontSize);
-  const maxLines = Math.max(1, Math.floor(heightPx / lineHeightPx));
-  if (lineCount <= maxLines) {
+  const lineCount = estimateWrappedTextLineCount(
+    text,
+    availableWidth,
+    element.fontSize
+  );
+  const estimatedTextHeight =
+    lineCount * element.fontSize * SECTION_TITLE_LINE_HEIGHT;
+  if (estimatedTextHeight <= heightPx) {
     return [];
   }
 
   return [
     {
-      path: ["elements", index, "transform", "rect"],
-      message: `${label} text overflows the element bounds (${lineCount} lines, ${maxLines} fit)`
+      path,
+      message: `section title text overflows the element bounds (${lineCount} wrapped lines exceed ${heightPx.toFixed(1)}px)`
     }
   ];
 }
@@ -213,10 +204,10 @@ export function screenTemplateTextValidationIssues(
 ): readonly ScreenTemplateValidationIssue[] {
   return template.elements.flatMap((element, index) => {
     if (element.type === "dialogue-window") {
-      return textIssuesForElement(element, index, textContent.dialogueText);
+      return textIssuesForElement(element, index, textContent);
     }
     if (element.type === "section-title") {
-      return textIssuesForElement(element, index, textContent.sectionTitleText);
+      return textIssuesForElement(element, index, textContent);
     }
     return [];
   });

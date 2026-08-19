@@ -3,7 +3,11 @@ import type { ReactNode } from "react";
 import type { ResolvedScreenLayout } from "../schema/index";
 import { screenTransformStyle } from "../screen-layout-resolver";
 import { REMOTION_FONT_FAMILY } from "./font";
-import { DESIGN_COLORS } from "./layout";
+import {
+  DESIGN_COLORS,
+  SECTION_TITLE_HORIZONTAL_PADDING_PX,
+  SECTION_TITLE_LINE_HEIGHT
+} from "./layout-helpers";
 
 export function SectionTitleLayer({
   layout,
@@ -38,10 +42,12 @@ export function SectionTitleLayer({
         fontSize: element.fontSize,
         fontWeight: 800,
         justifyContent: "center",
-        lineHeight: 1.2,
+        lineHeight: SECTION_TITLE_LINE_HEIGHT,
         overflow: "hidden",
-        padding: "0 24px",
+        overflowWrap: "anywhere",
+        padding: `0 ${SECTION_TITLE_HORIZONTAL_PADDING_PX}px`,
         textAlign: "center",
+        whiteSpace: "normal",
         zIndex: 6
       }}
     >

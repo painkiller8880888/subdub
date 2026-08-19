@@ -3463,7 +3463,7 @@ textarea[aria-invalid="true"] {
   min-width: 0;
   overflow-wrap: anywhere;
   overflow: hidden;
-  padding: 0.8% 1.5%;
+  padding: 0.833333% 1.5625%;
   text-align: left;
   white-space: pre-wrap;
   width: fit-content;
@@ -3472,10 +3472,18 @@ textarea[aria-invalid="true"] {
 .screen-layout-section-title {
   color: #fff;
   font-weight: 800;
-  justify-content: start;
-  padding: 1%;
+  justify-content: center;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+  padding: 0 1.25%;
   text-shadow: 0 0.1rem 0.25rem rgb(0 0 0 / 50%);
-  white-space: nowrap;
+  white-space: normal;
+}
+
+.screen-layout-dialogue-speaker {
+  display: block;
+  line-height: 1.2;
+  margin-bottom: 4px;
 }
 
 .screen-layout-character {

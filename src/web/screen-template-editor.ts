@@ -8,6 +8,7 @@ import {
   SCREEN_TEMPLATE_CANVAS_WIDTH
 } from "../schema/screen-template.js";
 import {
+  screenTemplateTextValidationIssues,
   screenTemplateValidationReport,
   type ScreenTemplateTextContent
 } from "../validation/screen-templates.js";
@@ -501,6 +502,15 @@ export function screenTemplateValidationMessages(
   textContent: ScreenTemplateTextContent = {}
 ): string[] {
   return screenTemplateValidationReport(template, textContent).errors.map(
+    (issue) => `${issue.path.join(".")}: ${issue.message}`
+  );
+}
+
+export function screenTemplateTextValidationMessages(
+  template: ScreenTemplate,
+  textContent: ScreenTemplateTextContent
+): string[] {
+  return screenTemplateTextValidationIssues(template, textContent).map(
     (issue) => `${issue.path.join(".")}: ${issue.message}`
   );
 }

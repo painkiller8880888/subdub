@@ -55,6 +55,7 @@ import {
   screenTemplateElementLabel,
   screenTemplateElementValidationMessages,
   screenTemplateElementValidationWarningMessages,
+  screenTemplateTextValidationMessages,
   screenTemplateValidationMessages,
   screenTemplateValidationWarningMessages,
   type NumericElementField,
@@ -953,10 +954,7 @@ export function ScreenTemplateEditorPage() {
       return;
     }
     const messages = [
-      ...screenTemplateValidationMessages(draft, {
-        dialogueText,
-        sectionTitleText
-      }),
+      ...screenTemplateValidationMessages(draft),
       ...(name.trim().length === 0
         ? ["テンプレート名を入力してください。"]
         : []),
@@ -1064,15 +1062,19 @@ export function ScreenTemplateEditorPage() {
     ? errorMessage(updateMutation.error, "保存に失敗しました。")
     : null;
   const active = draft.status === "active";
-  const structuralErrors = screenTemplateValidationMessages(draft, {
-    dialogueText,
-    sectionTitleText
-  });
+  const structuralErrors = screenTemplateValidationMessages(draft);
   const structuralWarnings = screenTemplateValidationWarningMessages(draft);
+  const previewTextWarnings = screenTemplateTextValidationMessages(draft, {
+    dialogueText,
+    sectionTitleText,
+    speakerNameText: "話者名"
+  });
   const allValidationErrors = [
     ...new Set([...structuralErrors, ...validationErrors])
   ];
-  const allValidationWarnings = [...new Set(structuralWarnings)];
+  const allValidationWarnings = [
+    ...new Set([...structuralWarnings, ...previewTextWarnings])
+  ];
   const preview: ScreenLayoutPreview = {
     characters: {
       "speaker-1": selectedCharacterPreview(
@@ -1088,6 +1090,7 @@ export function ScreenTemplateEditorPage() {
     },
     content: selectedAssetPreview(assetId, assetsQuery.data),
     dialogueText,
+    speakerNameText: "話者名",
     sectionTitleText
   };
 

@@ -291,6 +291,9 @@ export function resolveScriptLineScreenPreview({
     content: contents[0] ?? unresolvedContentPreview(undefined),
     contents,
     dialogueText: line.subtitleText,
+    speakerNameText:
+      project.characters.find((character) => character.id === line.speakerId)
+        ?.name ?? "",
     sectionTitleText: section.name
   };
 }

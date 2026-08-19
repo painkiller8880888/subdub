@@ -46,7 +46,13 @@ export function SubtitleLayer({
   const typographyScale = subtitleTypographyScaleForFontSize(
     displayName,
     subtitleText,
-    dialogueFontSize
+    dialogueFontSize,
+    dialogueElement === undefined || layout === undefined
+      ? undefined
+      : {
+          widthPx: dialogueElement.transform.rect.width * layout.canvasWidth,
+          heightPx: dialogueElement.transform.rect.height * layout.canvasHeight
+        }
   );
   const containerStyle: CSSProperties =
     dialogueElement === undefined

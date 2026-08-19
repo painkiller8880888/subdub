@@ -259,7 +259,15 @@ describe("ScreenTemplate cross-layer acceptance fixture", () => {
     expect(
       screenTemplateTextValidationIssues(alternate, {
         dialogueText: "内容を確認してから登録します。",
+        speakerNameText: "ずんだもん",
         sectionTitleText: "申請を登録する"
+      })
+    ).toEqual([]);
+
+    expect(
+      screenTemplateTextValidationIssues(alternate, {
+        dialogueText: "字幕".repeat(200),
+        speakerNameText: "ずんだもん"
       })
     ).toEqual([]);
 
@@ -271,7 +279,7 @@ describe("ScreenTemplate cross-layer acceptance fixture", () => {
               ...element,
               transform: {
                 ...element.transform,
-                rect: { ...element.transform.rect, height: 0.03 }
+                rect: { ...element.transform.rect, height: 0.02 }
               }
             }
           : element
@@ -279,11 +287,10 @@ describe("ScreenTemplate cross-layer acceptance fixture", () => {
     });
     expect(
       screenTemplateTextValidationIssues(tinyDialogue, {
-        dialogueText: "短い字幕"
+        dialogueText: "短い字幕",
+        speakerNameText: "話者"
       }).map((issue) => issue.message)
-    ).toEqual(
-      expect.arrayContaining([expect.stringContaining("line height must fit")])
-    );
+    ).toEqual(expect.arrayContaining([expect.stringContaining("padding")]));
 
     const longTitle = "長いタイトル".repeat(30);
     expect(
@@ -291,6 +298,51 @@ describe("ScreenTemplate cross-layer acceptance fixture", () => {
         sectionTitleText: longTitle
       }).map((issue) => issue.message)
     ).toEqual(expect.arrayContaining([expect.stringContaining("overflows")]));
+  });
+
+  it("validates section titles for line override templates and points to the section name", () => {
+    const project = createScreenTemplateProjectFixture();
+    const alternate = createAlternateScreenTemplate();
+    project.script.sections[1]!.screenTemplateId = STANDARD_SCREEN_TEMPLATE_ID;
+    project.script.sections[2]!.screenTemplateId = STANDARD_SCREEN_TEMPLATE_ID;
+    const narrowTitle = screenTemplateSchema.parse({
+      ...alternate,
+      templateId: "screen-template-line-title",
+      elements: alternate.elements.map((element) =>
+        element.type === "section-title"
+          ? {
+              ...element,
+              transform: {
+                ...element.transform,
+                rect: { ...element.transform.rect, height: 0.005 }
+              }
+            }
+          : element
+      )
+    });
+    project.script.sections[1]!.lines[1]!.screenTemplateId =
+      narrowTitle.templateId;
+    const input = createRenderManifestInput(project, {
+      screenTemplateCatalogSnapshot: [
+        createStandardAndAlternateTemplateSnapshot()[0]!,
+        narrowTitle
+      ]
+    });
+
+    const result = compileRenderManifest(input);
+    const titleDiagnostic = result.success
+      ? undefined
+      : result.diagnostics.find(
+          (diagnostic) =>
+            diagnostic.code === "SCREEN_TEMPLATE_TEXT_OVERFLOW" &&
+            diagnostic.lineId === "main-learner-1"
+        );
+    expect(result.success).toBe(false);
+    expect(titleDiagnostic).toMatchObject({
+      path: ["script", "sections", 1, "name"],
+      sectionId: "section-main",
+      lineId: "main-learner-1"
+    });
   });
 
   it("uses one effective template resolver for preview and preserves actual assets", () => {
@@ -500,6 +552,7 @@ describe("ScreenTemplate cross-layer acceptance fixture", () => {
         }
       },
       dialogueText: "字幕",
+      speakerNameText: "話者",
       sectionTitleText: "タイトル"
     };
     const markup = renderToStaticMarkup(
@@ -512,7 +565,7 @@ describe("ScreenTemplate cross-layer acceptance fixture", () => {
     expect(markup).toContain("rotate(7deg)");
   });
 
-  it("returns a structured text-overflow diagnostic from manifest compilation", () => {
+  it("uses the production subtitle scaler during manifest compilation", () => {
     const project = createScreenTemplateProjectFixture();
     project.script.sections[1]!.lines[0]!.subtitleText = "字幕".repeat(200);
     const input: RenderManifestCompilerInput = createRenderManifestInput(
@@ -523,7 +576,6 @@ describe("ScreenTemplate cross-layer acceptance fixture", () => {
       }
     );
     const result = compileRenderManifest(input);
-    expect(result.success).toBe(false);
-    expect(diagnosticCodes(result)).toContain("SCREEN_TEMPLATE_TEXT_OVERFLOW");
+    expect(result.success).toBe(true);
   });
 });

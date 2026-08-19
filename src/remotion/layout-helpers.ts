@@ -4,7 +4,7 @@ import type {
   RenderCharacter,
   RenderLine,
   RenderManifest
-} from "../schema/index";
+} from "../schema/index.js";
 
 export const DESIGN_COLORS = {
   background: "#17243a",
@@ -19,18 +19,34 @@ export const DESIGN_COLORS = {
 } as const;
 
 export const SUBTITLE_SAFE_AREA_PX = 60 as const;
+export const SUBTITLE_SAFE_AREA_WIDTH_PX = 1800 as const;
 export const SUBTITLE_SAFE_AREA_HEIGHT_PX = 960 as const;
 
-const SUBTITLE_CARD_HORIZONTAL_PADDING_PX = 60 as const;
-const SUBTITLE_CARD_VERTICAL_PADDING_PX = 32 as const;
-const SUBTITLE_CONTENT_WIDTH_PX =
-  1920 - SUBTITLE_SAFE_AREA_PX * 2 - SUBTITLE_CARD_HORIZONTAL_PADDING_PX;
+export const SUBTITLE_CARD_HORIZONTAL_PADDING_PX = 60 as const;
+export const SUBTITLE_CARD_VERTICAL_PADDING_PX = 32 as const;
 const SUBTITLE_ESTIMATED_GLYPH_WIDTH_EM = 2 as const;
 const SUBTITLE_BODY_FONT_SIZE_PX = 38 as const;
-const SUBTITLE_BODY_LINE_HEIGHT = 1.4 as const;
+export const SUBTITLE_BODY_LINE_HEIGHT = 1.4 as const;
 const SUBTITLE_LABEL_FONT_SIZE_PX = 26 as const;
-const SUBTITLE_LABEL_LINE_HEIGHT = 1.2 as const;
-const SUBTITLE_LABEL_MARGIN_BOTTOM_PX = 4 as const;
+export const SUBTITLE_LABEL_LINE_HEIGHT = 1.2 as const;
+export const SUBTITLE_LABEL_MARGIN_BOTTOM_PX = 4 as const;
+
+export const SECTION_TITLE_HORIZONTAL_PADDING_PX = 48 as const;
+export const SECTION_TITLE_LINE_HEIGHT = 1.2 as const;
+
+export type SubtitleTypographyBounds = Readonly<{
+  widthPx: number;
+  heightPx: number;
+}>;
+
+export type SubtitleTypographyMetrics = Readonly<{
+  scale: number;
+  contentWidthPx: number;
+  availableTextHeightPx: number;
+  labelLineCount: number;
+  bodyLineCount: number;
+  estimatedTextHeightPx: number;
+}>;
 
 export type CharacterSide = "left" | "right";
 
@@ -93,13 +109,15 @@ export function subtitleContainerStyle(side: CharacterSide): CSSProperties {
   };
 }
 
-function estimateSubtitleLineCount(text: string, fontSizePx: number): number {
+export function estimateWrappedTextLineCount(
+  text: string,
+  maxWidthPx: number,
+  fontSizePx: number,
+  glyphWidthEm = 1
+): number {
   const charactersPerLine = Math.max(
     1,
-    Math.floor(
-      SUBTITLE_CONTENT_WIDTH_PX /
-        (fontSizePx * SUBTITLE_ESTIMATED_GLYPH_WIDTH_EM)
-    )
+    Math.floor(maxWidthPx / (fontSizePx * glyphWidthEm))
   );
 
   return text.split(/\r\n|\r|\n/).reduce((lineCount, line) => {
@@ -108,6 +126,64 @@ function estimateSubtitleLineCount(text: string, fontSizePx: number): number {
       lineCount + Math.max(1, Math.ceil(characterCount / charactersPerLine))
     );
   }, 0);
+}
+
+function subtitleTypographyBounds(
+  bounds: SubtitleTypographyBounds | undefined
+): SubtitleTypographyBounds {
+  return (
+    bounds ?? {
+      widthPx: SUBTITLE_SAFE_AREA_WIDTH_PX,
+      heightPx: SUBTITLE_SAFE_AREA_HEIGHT_PX
+    }
+  );
+}
+
+export function subtitleTypographyMetricsForFontSize(
+  displayName: string,
+  subtitleText: string,
+  bodyFontSizePx: number,
+  bounds?: SubtitleTypographyBounds
+): SubtitleTypographyMetrics {
+  const safeBodyFontSizePx = Math.max(1, bodyFontSizePx);
+  const safeBounds = subtitleTypographyBounds(bounds);
+  const contentWidthPx = Math.max(
+    0,
+    safeBounds.widthPx - SUBTITLE_CARD_HORIZONTAL_PADDING_PX
+  );
+  const labelFontSizePx =
+    safeBodyFontSizePx *
+    (SUBTITLE_LABEL_FONT_SIZE_PX / SUBTITLE_BODY_FONT_SIZE_PX);
+  const labelLineCount = estimateWrappedTextLineCount(
+    displayName,
+    contentWidthPx,
+    labelFontSizePx,
+    SUBTITLE_ESTIMATED_GLYPH_WIDTH_EM
+  );
+  const bodyLineCount = estimateWrappedTextLineCount(
+    subtitleText,
+    contentWidthPx,
+    safeBodyFontSizePx,
+    SUBTITLE_ESTIMATED_GLYPH_WIDTH_EM
+  );
+  const estimatedTextHeightPx =
+    labelLineCount * labelFontSizePx * SUBTITLE_LABEL_LINE_HEIGHT +
+    SUBTITLE_LABEL_MARGIN_BOTTOM_PX +
+    bodyLineCount * safeBodyFontSizePx * SUBTITLE_BODY_LINE_HEIGHT;
+  const availableTextHeightPx =
+    safeBounds.heightPx - SUBTITLE_CARD_VERTICAL_PADDING_PX;
+
+  return {
+    scale: Math.min(
+      1,
+      Math.max(0, availableTextHeightPx / estimatedTextHeightPx)
+    ),
+    contentWidthPx,
+    availableTextHeightPx,
+    labelLineCount,
+    bodyLineCount,
+    estimatedTextHeightPx
+  };
 }
 
 export function subtitleTypographyScale(
@@ -124,28 +200,15 @@ export function subtitleTypographyScale(
 export function subtitleTypographyScaleForFontSize(
   displayName: string,
   subtitleText: string,
-  bodyFontSizePx: number
+  bodyFontSizePx: number,
+  bounds?: SubtitleTypographyBounds
 ): number {
-  const safeBodyFontSizePx = Math.max(1, bodyFontSizePx);
-  const labelFontSizePx =
-    safeBodyFontSizePx *
-    (SUBTITLE_LABEL_FONT_SIZE_PX / SUBTITLE_BODY_FONT_SIZE_PX);
-  const estimatedLabelHeight =
-    estimateSubtitleLineCount(displayName, labelFontSizePx) *
-    labelFontSizePx *
-    SUBTITLE_LABEL_LINE_HEIGHT;
-  const estimatedBodyHeight =
-    estimateSubtitleLineCount(subtitleText, safeBodyFontSizePx) *
-    safeBodyFontSizePx *
-    SUBTITLE_BODY_LINE_HEIGHT;
-  const estimatedTextHeight =
-    estimatedLabelHeight +
-    SUBTITLE_LABEL_MARGIN_BOTTOM_PX +
-    estimatedBodyHeight;
-  const availableTextHeight =
-    SUBTITLE_SAFE_AREA_HEIGHT_PX - SUBTITLE_CARD_VERTICAL_PADDING_PX;
-
-  return Math.min(1, availableTextHeight / estimatedTextHeight);
+  return subtitleTypographyMetricsForFontSize(
+    displayName,
+    subtitleText,
+    bodyFontSizePx,
+    bounds
+  ).scale;
 }
 
 export type ResolvedSubtitleContent = Readonly<{
