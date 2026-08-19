@@ -760,11 +760,12 @@ export const renderResolvedVideoDisplaySchema = strictObject({
   playbackRate: positiveNumberSchema,
   volume: unitIntervalSchema
 }).superRefine((display, ctx) => {
-  if (display.endMs <= display.startMs) {
+  if (display.sourceTrimAfterFrame <= display.sourceTrimBeforeFrame) {
     ctx.addIssue({
       code: "custom",
-      path: ["endMs"],
-      message: "endMs must be greater than startMs"
+      path: ["sourceTrimAfterFrame"],
+      message:
+        "sourceTrimAfterFrame must be greater than sourceTrimBeforeFrame"
     });
   }
 });
@@ -1216,8 +1217,16 @@ export const renderManifestV24Schema = renderManifestV24BaseSchema.superRefine(
         addIssue(ctx, ["visuals", index, "segmentIndex"], "segmentIndex must be unique within a source assignment");
       }
       visualSegmentKeys.add(segmentKey);
-      if (visual.display.kind === "video" && visual.display.endMs <= visual.display.startMs) {
-        addIssue(ctx, ["visuals", index, "display", "endMs"], "video segment source range must be positive");
+      if (
+        visual.display.kind === "video" &&
+        visual.display.sourceTrimAfterFrame <=
+          visual.display.sourceTrimBeforeFrame
+      ) {
+        addIssue(
+          ctx,
+          ["visuals", index, "display", "sourceTrimAfterFrame"],
+          "video segment source trim range must be positive"
+        );
       }
     }
 

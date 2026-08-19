@@ -18,7 +18,6 @@ import type { RenderVisual, VideoProject } from "../../src/schema/index.js";
 import type { VoicevoxAudioIndex } from "../../src/app/voicevox/audio-index.js";
 import { characterVisualCatalogSnapshotSchema } from "../../src/schema/character-visual.js";
 import {
-  mediaFramesToMilliseconds,
   mediaMillisecondsToFrames,
   presentationFramesToMediaPosition
 } from "../../src/media-frame.js";
@@ -476,7 +475,8 @@ describe("compileRenderManifest", () => {
           sourcePlaybackRate
         );
       expect(current.display.sourceTrimBeforeFrame).toBe(expectedSourceFrame);
-      expect(current.display.startMs).toBeGreaterThan(previous.display.startMs);
+      expect(current.display.startMs).toBe(previous.display.startMs);
+      expect(current.display.endMs).toBe(previous.display.endMs);
     }
     expect(videoSegments.at(-1)?.display.endMs).toBe(3_000);
   });
@@ -529,12 +529,10 @@ describe("compileRenderManifest", () => {
     );
     expect(videoSegments[1]!.display.sourceTrimBeforeFrame).toBe(2);
     expect(videoSegments[0]!.display.sourceTrimAfterFrame).toBe(2);
-    expect(videoSegments[1]!.display.startMs).toBe(
-      mediaFramesToMilliseconds(2, 30)
-    );
-    expect(videoSegments[0]!.display.endMs).toBe(
-      mediaFramesToMilliseconds(2, 30)
-    );
+    expect(videoSegments[1]!.display.startMs).toBe(0);
+    expect(videoSegments[1]!.display.endMs).toBe(3_000);
+    expect(videoSegments[0]!.display.startMs).toBe(0);
+    expect(videoSegments[0]!.display.endMs).toBe(3_000);
   });
 
   it("uses the same source-frame boundary after applying a non-1 playback rate", () => {
@@ -555,12 +553,20 @@ describe("compileRenderManifest", () => {
     );
     expect(videoSegments[0]!.display.sourceTrimAfterFrame).toBe(2.5);
     expect(videoSegments[1]!.display.sourceTrimBeforeFrame).toBe(2.5);
-    expect(videoSegments[1]!.display.startMs).toBe(
-      mediaFramesToMilliseconds(3, 30)
-    );
-    expect(videoSegments[0]!.display.endMs).toBe(
-      mediaFramesToMilliseconds(3, 30)
-    );
+    expect(videoSegments[1]!.display.startMs).toBe(0);
+    expect(videoSegments[1]!.display.endMs).toBe(3_000);
+    expect(videoSegments[0]!.display.startMs).toBe(0);
+    expect(videoSegments[0]!.display.endMs).toBe(3_000);
+  });
+
+  it("accepts a positive fractional source range below one frame", () => {
+    const { videoSegments } = compileTemplateBoundaryVideoSegments(0.2);
+
+    expect(videoSegments[0]!.display.sourceTrimBeforeFrame).toBe(0);
+    expect(videoSegments[0]!.display.sourceTrimAfterFrame).toBe(0.4);
+    expect(videoSegments[1]!.display.sourceTrimBeforeFrame).toBe(0.4);
+    expect(videoSegments[0]!.display.startMs).toBe(0);
+    expect(videoSegments[0]!.display.endMs).toBe(3_000);
   });
 
   it("bakes coordinate space, priority geometry, section titles, and freshness into 2.4.0", () => {

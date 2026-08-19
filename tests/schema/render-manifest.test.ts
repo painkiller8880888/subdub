@@ -225,6 +225,34 @@ describe("renderManifestSchema", () => {
     expectInvalid(invalidPlaybackRate, ["visuals", 0, "display", "playbackRate"]);
   });
 
+  it("validates resolved video trim ranges independently of legacy milliseconds", () => {
+    const validFractionalRange = clone(renderManifestFixture);
+    const validDisplay = validFractionalRange.visuals[0]?.display;
+    if (validDisplay?.kind !== "video") {
+      throw new Error("fixture must contain a video display");
+    }
+    validDisplay.endMs = validDisplay.startMs;
+    validDisplay.sourceTrimBeforeFrame = 0;
+    validDisplay.sourceTrimAfterFrame = 0.4;
+    expect(renderManifestSchema.safeParse(validFractionalRange).success).toBe(
+      true
+    );
+
+    const invalidSourceRange = clone(renderManifestFixture);
+    const invalidDisplay = invalidSourceRange.visuals[0]?.display;
+    if (invalidDisplay?.kind !== "video") {
+      throw new Error("fixture must contain a video display");
+    }
+    invalidDisplay.sourceTrimAfterFrame =
+      invalidDisplay.sourceTrimBeforeFrame;
+    expectInvalid(invalidSourceRange, [
+      "visuals",
+      0,
+      "display",
+      "sourceTrimAfterFrame"
+    ]);
+  });
+
   it("keeps relative speech intervals inside their line intervals", () => {
     const speechAfterLine = clone(renderManifestFixture);
     speechAfterLine.lines[0].speechFrom = 10;

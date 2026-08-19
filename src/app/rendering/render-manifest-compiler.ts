@@ -48,7 +48,6 @@ import {
 import { screenTemplateContentHash } from "../screen-templates/screen-template-hash.js";
 import { screenTemplateValidationReport } from "../../validation/screen-templates.js";
 import {
-  mediaFramesToMilliseconds,
   mediaMillisecondsToFrames,
   presentationFramesToMediaPosition
 } from "../../media-frame.js";
@@ -1252,8 +1251,6 @@ function buildVisualSegments({
       const sourceDisplay = assignment.display;
       let videoSegmentTrim:
         | {
-            readonly startMs: number;
-            readonly endMs: number;
             readonly sourceTrimBeforeFrame: number;
             readonly sourceTrimAfterFrame: number;
           }
@@ -1285,34 +1282,22 @@ function buildVisualSegments({
                 sourceDisplay.playbackRate
               )
             : mediaMillisecondsToFrames(legacyEndMs, fps);
-        // Keep the legacy millisecond provenance rounded; Remotion uses the
-        // fractional source-trim fields below for the actual video position.
-        const legacyStartFrame = Math.round(sourceTrimBeforeFrame);
-        const startMs =
-          elapsedStartFrames === 0
-            ? sourceDisplay.startMs
-            : mediaFramesToMilliseconds(legacyStartFrame, fps);
-        const endMs =
-          !isFinalSegment && legacyEndMs < sourceDisplay.endMs
-            ? mediaFramesToMilliseconds(Math.round(sourceTrimAfterFrame), fps)
-            : legacyEndMs;
         videoSegmentTrim = {
-          startMs,
-          endMs,
           sourceTrimBeforeFrame,
           sourceTrimAfterFrame
         };
       }
 
-      let display = resolveVisualDisplay(sourceDisplay, templateLayout, {
+      const display = resolveVisualDisplay(sourceDisplay, templateLayout, {
         fps,
         sourceTrimBeforeFrame: videoSegmentTrim?.sourceTrimBeforeFrame,
         sourceTrimAfterFrame: videoSegmentTrim?.sourceTrimAfterFrame
       });
 
       if (videoSegmentTrim && display.kind === "video") {
-        const { startMs, endMs } = videoSegmentTrim;
-        if (endMs <= startMs) {
+        const { sourceTrimBeforeFrame, sourceTrimAfterFrame } =
+          videoSegmentTrim;
+        if (sourceTrimAfterFrame <= sourceTrimBeforeFrame) {
           addDiagnostic(
             diagnostics,
             RENDER_MANIFEST_ERROR_CODE.visualSegmentRangeInvalid,
@@ -1324,7 +1309,6 @@ function buildVisualSegments({
             }
           );
         }
-        display = { ...display, startMs, endMs };
       }
 
       const segmentStartLineId = first.line.id;
