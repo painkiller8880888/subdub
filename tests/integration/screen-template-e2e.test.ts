@@ -563,7 +563,9 @@ describe("ScreenTemplate cross-layer acceptance fixture", () => {
     expect(markup).toContain("scaleX(-1)");
     expect(markup).toContain("rotate(-5deg)");
     expect(markup).toContain("rotate(7deg)");
-    expect(markup).toContain("padding:0 1.25%");
+    expect(markup).toContain("padding:0 1.25cqw");
+    expect(markup).toContain("padding:0.8333333333333334cqw 1.5625cqw");
+    expect(markup).toContain("margin-bottom:0.20833333333333334cqw");
   });
 
   it("rejects ScreenTemplate subtitles that overflow at the template font size", () => {

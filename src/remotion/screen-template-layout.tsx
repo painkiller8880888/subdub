@@ -208,7 +208,7 @@ function renderScreenTemplateElement(
           style={{
             fontSize: `${(element.fontSize / SCREEN_TEMPLATE_CANVAS_WIDTH) * 100}cqw`,
             lineHeight: SUBTITLE_BODY_LINE_HEIGHT,
-            padding: `${(SUBTITLE_CARD_VERTICAL_PADDING_PER_SIDE_PX / SCREEN_TEMPLATE_CANVAS_WIDTH) * 100}% ${(SUBTITLE_CARD_HORIZONTAL_PADDING_PER_SIDE_PX / SCREEN_TEMPLATE_CANVAS_WIDTH) * 100}%`
+            padding: `${(SUBTITLE_CARD_VERTICAL_PADDING_PER_SIDE_PX / SCREEN_TEMPLATE_CANVAS_WIDTH) * 100}cqw ${(SUBTITLE_CARD_HORIZONTAL_PADDING_PER_SIDE_PX / SCREEN_TEMPLATE_CANVAS_WIDTH) * 100}cqw`
           }}
         >
           {speakerNameText.length > 0 ? (
@@ -221,7 +221,7 @@ function renderScreenTemplateElement(
                   100
                 }cqw`,
                 lineHeight: SUBTITLE_LABEL_LINE_HEIGHT,
-                marginBottom: SUBTITLE_LABEL_MARGIN_BOTTOM_PX
+                marginBottom: `${(SUBTITLE_LABEL_MARGIN_BOTTOM_PX / SCREEN_TEMPLATE_CANVAS_WIDTH) * 100}cqw`
               }}
             >
               {speakerNameText}
@@ -243,7 +243,7 @@ function renderScreenTemplateElement(
           ...baseStyle,
           fontSize: `${(element.fontSize / SCREEN_TEMPLATE_CANVAS_WIDTH) * 100}cqw`,
           lineHeight: SECTION_TITLE_LINE_HEIGHT,
-          padding: `0 ${(SECTION_TITLE_HORIZONTAL_PADDING_PER_SIDE_PX / SCREEN_TEMPLATE_CANVAS_WIDTH) * 100}%`
+          padding: `0 ${(SECTION_TITLE_HORIZONTAL_PADDING_PER_SIDE_PX / SCREEN_TEMPLATE_CANVAS_WIDTH) * 100}cqw`
         }}
       >
         {preview.sectionTitleText}
