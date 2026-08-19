@@ -10,6 +10,7 @@ import {
   ScreenTemplateRevisionConflictError,
   STANDARD_SCREEN_TEMPLATE_ID,
   createStandardScreenTemplate,
+  resetScreenTemplateElementsToCanonicalDefaults,
   screenTemplateContentHash
 } from "../../src/app/screen-templates/index.js";
 import { initializeWorkspaceDatabase } from "../../src/db/initialize.js";
@@ -315,6 +316,201 @@ describe("screen template catalog", { timeout: 30_000 }, () => {
       unexpected: true
     });
     expect(unknownKey.success).toBe(false);
+  });
+
+  it("allows partial character overflow but rejects fully off-canvas visuals", () => {
+    const standard = createStandardScreenTemplate(FIXED_TIMESTAMP);
+    const withCharacterRect = (
+      rect: {
+        x: number;
+        y: number;
+        width: number;
+        height: number;
+      },
+      rotationDeg = 0
+    ) =>
+      screenTemplateSchema.parse({
+        ...standard,
+        elements: standard.elements.map((element) =>
+          element.type === "character-visual" && element.slot === "speaker-1"
+            ? {
+                ...element,
+                transform: { rect, rotationDeg }
+              }
+            : element
+        )
+      });
+
+    const rotatedPartial = withCharacterRect(
+      { x: -0.08, y: 0.48, width: 0.34, height: 0.6 },
+      18
+    );
+    expect(screenTemplateValidationReport(rotatedPartial).errors).toEqual([]);
+    expect(assertValidScreenTemplate(rotatedPartial)).toEqual(rotatedPartial);
+
+    const expandedPartial = withCharacterRect({
+      x: -0.2,
+      y: -0.15,
+      width: 1.2,
+      height: 1.3
+    });
+    expect(screenTemplateValidationReport(expandedPartial).errors).toEqual([]);
+
+    const rightEdgeRotation = withCharacterRect(
+      { x: 1.01, y: 0.45, width: 0.2, height: 0.4 },
+      45
+    );
+    expect(screenTemplateValidationReport(rightEdgeRotation).errors).toEqual(
+      []
+    );
+
+    const fullyOffCanvas = withCharacterRect({
+      x: -1.2,
+      y: 0.4,
+      width: 0.2,
+      height: 0.2
+    });
+    expect(screenTemplateValidationReport(fullyOffCanvas).errors).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          message: "character visual bounds must intersect the canvas"
+        })
+      ])
+    );
+    expect(() => assertValidScreenTemplate(fullyOffCanvas)).toThrow(
+      "character visual bounds must intersect the canvas"
+    );
+
+    const containedElementOverflow = screenTemplateSchema.safeParse({
+      ...standard,
+      elements: standard.elements.map((element) =>
+        element.type === "dialogue-window"
+          ? {
+              ...element,
+              transform: {
+                ...element.transform,
+                rect: { ...element.transform.rect, x: -0.01 }
+              }
+            }
+          : element
+      )
+    });
+    expect(containedElementOverflow.success).toBe(false);
+
+    for (const rect of [
+      { x: Number.NaN, y: 0, width: 0.2, height: 0.2 },
+      { x: Number.POSITIVE_INFINITY, y: 0, width: 0.2, height: 0.2 },
+      { x: 0, y: 0, width: 0, height: 0.2 },
+      { x: 0, y: 0, width: -0.2, height: 0.2 }
+    ]) {
+      expect(
+        screenTemplateSchema.safeParse({
+          ...standard,
+          elements: standard.elements.map((element) =>
+            element.type === "character-visual" && element.slot === "speaker-1"
+              ? { ...element, transform: { ...element.transform, rect } }
+              : element
+          )
+        }).success
+      ).toBe(false);
+    }
+  });
+
+  it("round-trips character overflow through numeric catalog columns", async () => {
+    const { repository, service } = await openDatabase();
+    const template = customTemplate("overflow-template");
+    const overflow = assertValidScreenTemplate({
+      ...template,
+      elements: template.elements.map((element) =>
+        element.type === "character-visual" && element.slot === "speaker-1"
+          ? {
+              ...element,
+              transform: {
+                rect: { x: -0.08, y: 0.5, width: 1.1, height: 0.5 },
+                rotationDeg: 12
+              }
+            }
+          : element
+      )
+    });
+    repository.insert(overflow);
+    expect(repository.findById(overflow.templateId)).toEqual(overflow);
+
+    const updated = service.update(
+      overflow.templateId,
+      {
+        name: overflow.name,
+        description: overflow.description,
+        elements: resetScreenTemplateElementsToCanonicalDefaults(
+          overflow.elements
+        )
+      },
+      overflow.revision
+    );
+    expect(updated.revision).toBe(overflow.revision + 1);
+    expect(updated.elements).toEqual(
+      createStandardScreenTemplate(FIXED_TIMESTAMP).elements.map(
+        (canonical, index) => ({
+          ...canonical,
+          elementId: overflow.elements[index]!.elementId
+        })
+      )
+    );
+  });
+
+  it("resets editable values from the canonical seed while preserving row identity", () => {
+    const standard = createStandardScreenTemplate(FIXED_TIMESTAMP);
+    const editedElements = standard.elements.map((element, index) => {
+      const editedTransform = {
+        rect: {
+          x: 0.01 * (index + 1),
+          y: 0.02 * (index + 1),
+          width: 0.2 + 0.01 * index,
+          height: 0.2 + 0.01 * index
+        },
+        rotationDeg: index + 3
+      };
+      if (element.type === "dialogue-window") {
+        return { ...element, transform: editedTransform, fontSize: 61 };
+      }
+      if (element.type === "section-title") {
+        return { ...element, transform: editedTransform, fontSize: 62 };
+      }
+      if (element.type === "character-visual") {
+        return { ...element, transform: editedTransform, flipX: true };
+      }
+      return { ...element, transform: editedTransform };
+    });
+    const reset =
+      resetScreenTemplateElementsToCanonicalDefaults(editedElements);
+
+    expect(reset).toEqual(
+      standard.elements.map((canonical, index) => ({
+        ...canonical,
+        elementId: editedElements[index]!.elementId
+      }))
+    );
+    expect(reset).not.toBe(editedElements);
+
+    const resetTemplate = {
+      ...standard,
+      templateId: "edited-template",
+      name: "Edited name",
+      description: "Edited description",
+      status: "inactive" as const,
+      revision: 7,
+      elements: reset
+    };
+    expect(resetTemplate).toMatchObject({
+      templateId: "edited-template",
+      name: "Edited name",
+      description: "Edited description",
+      status: "inactive",
+      revision: 7
+    });
+    expect(resetTemplate.elements.map((element) => element.elementId)).toEqual(
+      editedElements.map((element) => element.elementId)
+    );
   });
 
   it("rejects unknown config keys when reading SQLite rows", async () => {

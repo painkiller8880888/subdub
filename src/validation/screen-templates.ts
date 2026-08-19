@@ -13,6 +13,7 @@ import {
   SUBTITLE_CARD_HORIZONTAL_PADDING_PX,
   SUBTITLE_CARD_VERTICAL_PADDING_PX
 } from "../screen-template-typography.js";
+import type { ResolvedScreenLayout } from "../schema/render-manifest.js";
 
 export type ScreenTemplateValidationPath = readonly (string | number)[];
 
@@ -55,6 +56,18 @@ export type RotatedScreenRectBounds = Readonly<{
   bottom: number;
 }>;
 
+type ScreenElementWithTransform = Readonly<{
+  readonly transform: Readonly<{
+    readonly rect: Readonly<{
+      readonly x: number;
+      readonly y: number;
+      readonly width: number;
+      readonly height: number;
+    }>;
+    readonly rotationDeg: number;
+  }>;
+}>;
+
 const TRIGONOMETRY_EPSILON = 1e-12;
 const CANVAS_BOUNDS_EPSILON = 1e-9;
 
@@ -64,7 +77,7 @@ const CANVAS_BOUNDS_EPSILON = 1e-9;
  * square. This mirrors CSS transform-origin: 50% 50% on a 1920x1080 canvas.
  */
 export function rotatedScreenRectBounds(
-  element: ScreenTemplateElement,
+  element: ScreenElementWithTransform,
   canvasWidth = SCREEN_TEMPLATE_CANVAS_WIDTH,
   canvasHeight = SCREEN_TEMPLATE_CANVAS_HEIGHT
 ): RotatedScreenRectBounds {
@@ -107,6 +120,15 @@ function contains(
     outer.top <= inner.top &&
     outer.right >= inner.right &&
     outer.bottom >= inner.bottom
+  );
+}
+
+function intersectsCanvas(bounds: RotatedScreenRectBounds): boolean {
+  return !(
+    bounds.right <= CANVAS_BOUNDS_EPSILON ||
+    bounds.bottom <= CANVAS_BOUNDS_EPSILON ||
+    bounds.left >= 1 - CANVAS_BOUNDS_EPSILON ||
+    bounds.top >= 1 - CANVAS_BOUNDS_EPSILON
   );
 }
 
@@ -226,6 +248,38 @@ export function screenTemplateTextValidationIssues(
   });
 }
 
+/**
+ * Validate geometry after a layout policy has been applied. Template
+ * validation covers the source geometry, but policies such as
+ * `prioritizeVisual` can change a character rect without changing the
+ * template itself.
+ */
+export function resolvedScreenLayoutValidationIssues(
+  layout: ResolvedScreenLayout
+): readonly ScreenTemplateValidationIssue[] {
+  return layout.elements.flatMap((element, index) => {
+    if (
+      element.type !== "character-visual" ||
+      intersectsCanvas(
+        rotatedScreenRectBounds(
+          element,
+          layout.canvasWidth,
+          layout.canvasHeight
+        )
+      )
+    ) {
+      return [];
+    }
+
+    return [
+      {
+        path: ["elements", index, "transform", "rotationDeg"],
+        message: "character visual bounds must intersect the canvas"
+      }
+    ];
+  });
+}
+
 export function screenTemplateValidationReport(
   input: unknown,
   textContent: ScreenTemplateTextContent = {}
@@ -243,6 +297,15 @@ export function screenTemplateValidationReport(
 
   for (const [index, element] of elements.entries()) {
     const bounds = elementBounds(element);
+    if (element.type === "character-visual") {
+      if (!intersectsCanvas(bounds)) {
+        errors.push({
+          path: ["elements", index, "transform", "rotationDeg"],
+          message: "character visual bounds must intersect the canvas"
+        });
+      }
+      continue;
+    }
     if (
       bounds.left < -CANVAS_BOUNDS_EPSILON ||
       bounds.top < -CANVAS_BOUNDS_EPSILON ||

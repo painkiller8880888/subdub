@@ -9,6 +9,7 @@ import {
 } from "react";
 import { Link, useParams } from "react-router";
 
+import { resetScreenTemplateElementsToCanonicalDefaults } from "../app/screen-templates/screen-template-seed.js";
 import type { AssetListItem } from "../schema/asset.js";
 import type {
   ScreenTemplateDetail,
@@ -58,6 +59,7 @@ import {
   screenTemplateTextValidationMessages,
   screenTemplateValidationMessages,
   screenTemplateValidationWarningMessages,
+  SCREEN_TEMPLATE_MIN_ELEMENT_SIZE,
   type NumericElementField,
   type ResizeHandle,
   updateScreenTemplateElementNumericField,
@@ -913,7 +915,20 @@ export function ScreenTemplateEditorPage() {
     const key = `${element.elementId}:${field}`;
     const rectField =
       field === "x" || field === "y" || field === "width" || field === "height";
-    if (rectField && (value < 0 || value > 1)) {
+    const characterField = isCharacterElement(element);
+    const dimensionField = field === "width" || field === "height";
+    if (rectField && characterField && dimensionField && value <= 0) {
+      setFieldErrors((current) => ({
+        ...current,
+        [key]: "0より大きい有限値を入力してください。"
+      }));
+      return;
+    }
+    if (
+      rectField &&
+      !characterField &&
+      (dimensionField ? value <= 0 || value > 1 : value < 0 || value > 1)
+    ) {
       setFieldErrors((current) => ({
         ...current,
         [key]: "0〜1の範囲で入力してください。"
@@ -942,6 +957,47 @@ export function ScreenTemplateEditorPage() {
         )
       );
     }
+  }
+
+  function resetToCanonicalDefaults(): void {
+    if (
+      draft === null ||
+      expectedRevision === null ||
+      templateId === undefined ||
+      draft.status === "inactive" ||
+      saveState === "saving"
+    ) {
+      return;
+    }
+
+    const nextDraft: ScreenTemplate = {
+      ...draft,
+      elements: resetScreenTemplateElementsToCanonicalDefaults(draft.elements)
+    };
+    const messages = [
+      ...screenTemplateValidationMessages(nextDraft),
+      ...(name.trim().length === 0
+        ? ["テンプレート名を入力してください。"]
+        : [])
+    ];
+    setFieldErrors({});
+    setValidationErrors([...new Set(messages)]);
+    if (messages.length > 0) {
+      return;
+    }
+
+    interactionRef.current = null;
+    updateMutation.reset();
+    setDraft(nextDraft);
+    setSaveState("saving");
+    updateMutation.mutate({
+      input: {
+        description,
+        elements: nextDraft.elements,
+        expectedRevision,
+        name
+      }
+    });
   }
 
   function submitSave(event: FormEvent<HTMLFormElement>): void {
@@ -1181,6 +1237,14 @@ export function ScreenTemplateEditorPage() {
             >
               {saveState === "saving" ? "保存中…" : "保存"}
             </button>
+            <button
+              className="button"
+              disabled={!active || saveState === "saving"}
+              type="button"
+              onClick={resetToCanonicalDefaults}
+            >
+              デフォルトに戻す
+            </button>
           </div>
         </section>
 
@@ -1417,16 +1481,24 @@ export function ScreenTemplateEditorPage() {
                             ? "width"
                             : "height";
                     const key = `${selected.elementId}:${field}`;
+                    const isCharacter = isCharacterElement(selected);
+                    const isDimension = field === "width" || field === "height";
                     return (
                       <NumericPropertyField
                         disabled={!active || saveState === "saving"}
                         error={fieldErrors[key]}
-                        hint={`normalized 0〜1 / ${formatPixels(value, canvasSize)}`}
+                        hint={`${isCharacter ? "normalized finite" : "normalized 0〜1"} / ${formatPixels(value, canvasSize)}`}
                         id={`screen-template-property-${field}`}
                         key={field}
                         label={fieldLabel}
-                        max={1}
-                        min={0}
+                        max={isCharacter ? undefined : 1}
+                        min={
+                          isCharacter
+                            ? isDimension
+                              ? SCREEN_TEMPLATE_MIN_ELEMENT_SIZE
+                              : undefined
+                            : 0
+                        }
                         step={0.001}
                         value={value}
                         onChange={(next) =>

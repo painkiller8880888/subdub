@@ -3,6 +3,7 @@ import type {
   RenderResolvedVisualDisplay,
   ResolvedScreenLayout,
   ResolvedScreenElement,
+  AnyScreenTransform,
   ScreenTransform
 } from "./schema/index.js";
 import type {
@@ -258,7 +259,7 @@ export function findResolvedScreenElement(
 }
 
 export function screenTransformStyle(
-  transform: ScreenTransform
+  transform: AnyScreenTransform
 ): Record<string, string | number> {
   const { rect, rotationDeg } = transform;
   return {

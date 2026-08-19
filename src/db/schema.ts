@@ -402,7 +402,7 @@ export const screenTemplateElements = sqliteTable(
     ),
     check(
       "screen_template_elements_geometry_check",
-      sql`${table.x} = ${table.x} AND ${table.y} = ${table.y} AND ${table.width} = ${table.width} AND ${table.height} = ${table.height} AND ${table.rotationDeg} = ${table.rotationDeg} AND ${table.x} >= 0 AND ${table.y} >= 0 AND ${table.width} > 0 AND ${table.height} > 0 AND ${table.x} + ${table.width} <= 1 AND ${table.y} + ${table.height} <= 1`
+      sql`${table.x} BETWEEN -1.7976931348623157e308 AND 1.7976931348623157e308 AND ${table.y} BETWEEN -1.7976931348623157e308 AND 1.7976931348623157e308 AND ${table.width} BETWEEN -1.7976931348623157e308 AND 1.7976931348623157e308 AND ${table.height} BETWEEN -1.7976931348623157e308 AND 1.7976931348623157e308 AND ${table.rotationDeg} BETWEEN -1.7976931348623157e308 AND 1.7976931348623157e308 AND ${table.width} > 0 AND ${table.height} > 0 AND (${table.elementType} = 'character-visual' OR (${table.x} >= 0 AND ${table.y} >= 0 AND ${table.x} + ${table.width} <= 1 AND ${table.y} + ${table.height} <= 1))`
     )
   ]
 );

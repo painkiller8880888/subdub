@@ -71,15 +71,40 @@ ST-00 は `doc/doc.md` と本書だけを更新する docs-only Issue であり�
 
 `ScreenTemplate` は workspace 共通資産であり、構造データの正本は workspace SQLite とする。template の実在一覧を TypeScript の静的配列と SQLite に二重管理しない。project-specific な section / line の適用参照だけを `project.json` に保存し、SQLite に project ID、section ID、line ID の紐づけを追加しない。
 
-初期 element type は `dialogue-window`、`section-title`、`character-visual` × 2、`content-slot` に限定する。cardinality は dialogue window 1、section title 1、character visual 2（`speaker-1` / `speaker-2` を重複なく持つ）、content slot 1（slot `primary`）とする。geometry は 1920 × 1080 の 16:9 canvas に対する 0..1 の正規化 rect と rotation を正本とし、finite、canvas 内、回転後の外接範囲を validation する。
+初期 element type は `dialogue-window`、`section-title`、`character-visual` × 2、`content-slot` に限定する。cardinality は dialogue window 1、section title 1、character visual 2（`speaker-1` / `speaker-2` を重複なく持つ）、content slot 1（slot `primary`）とする。geometry は 1920 × 1080 の 16:9 canvas に対する element type 別の正規化 rect と rotation を正本とする。`dialogue-window` / `section-title` / `content-slot` は finite、0..1、canvas-contained、回転後の外接範囲も canvas-contained として validation し、`character-visual` は finite な x / y（負値・1 超を許可）、finite positive な width / height（1 超を許可）とし、回転後 bounds が canvas と交差することだけを要求する。
 
 `screen-template-standard` は既存 layer について現行 Remotion / CSS / layout constants から実値を調査して作る stable ID の standard template であり、workspace SQLite へ idempotent に seed / migration する。ただし現行 composition には section-title layer がないため、section-title だけは例外として、doc.md の「画面上端」という要件から ST-01 が新しい canonical geometry を確定する。ST-01 は section-title の rect、rotation、font size、決定理由、参照元を seed / migration と仕様へ記録し、これを現行実値の抽出結果や目測値として扱わない。既存 project の migration では section ごとにこの ID を明示保存し、mutable な workspace default だけへ依存しない。section は template を必ず持ち、line の `screenTemplateId: string | null` は null の場合だけ section template を継承する。明示参照が missing / inactive になっても自動代替せず、編集中は修正対象、出力時は validation error とする。
 
 template editor は `/screen-templates` と `/screen-templates/{templateId}` に置く。drag、resize、rotation、font size、character `flipX`、数値入力、keyboard 操作を提供する。active な CharacterVisualSet / variant と generic Asset は preview 素材として一時選択できるが、`visualId`、`variantId`、`assetId` を ScreenTemplate に保存しない。固定要素の追加・削除、任意 React component、custom CSS、animation / keyframe editor は対象外とする。
 
+ST-08 では character の drag、resize、keyboard 移動、数値入力に対して canvas edge による clamp を適用しない。character の selection outline、resize / rotation handle、pointer hit area は render preview の clip layer と分離し、部分 overflow 中も numeric properties または interaction layer から回収できるようにする。`dialogue-window`、`section-title`、`content-slot` は既存の contained clamp / validation を維持する。template-level の「デフォルトに戻す」は 1 個だけ提供し、個別 parameter / element reset は提供しない。
+
 line-card preview は line ごとの適用 template、section title（`ScriptSection.name`）、背景、実際の subtitle、speaker / character variant、generic visual assignment を解決し、card 左側へ静的代表 frame を表示する。preview と Remotion は同じ geometry resolver / layout component を使う。ScreenTemplate の outer geometry と generic `VisualAssignment.display` の crop / fit / scale / position である inner transform を分離し、`prioritizeVisual` は template 解決後の互換的な character 縮小 policy としてのみ適用する。初期版では character element の非表示を表現せず、将来導入する場合は `visible` などを持つ manifest 契約を別途追加する。template 結果を無視して別の固定座標へ戻してはならない。
+line-card preview は line ごとの適用 template、section title（`ScriptSection.name`）、背景、実際の subtitle、speaker / character variant、generic visual assignment を解決し、card 左側へ静的代表 frame を表示する。preview と Remotion は同じ geometry resolver / layout component を使う。ScreenTemplate の outer geometry と generic `VisualAssignment.display` の crop / fit / scale / position である inner transform を分離し、`prioritizeVisual` は template 解決後の互換的な character 縮小 policy としてのみ適用する。初期版では character element の非表示を表現せず、将来導入する場合は `visible` などを持つ manifest 契約を別途追加する。template 結果を無視して別の固定座標へ戻してはならない。valid な character overflow は preview と production の両方で composition 境界により clip し、resolver や compiler が 0..1 に clamp してはならない。
 
 `RenderManifest 2.4.0` は template ID だけでなく、template revision / deterministic hash、resolved geometry / transform、font size、`flipX`、content slot を section / line ごとに固定する。generic visual segment も `RenderVisualV24.display` へ override し、最終 canvas-relative `outerFrame`、content slot の `contentClip`、`fit`、`crop`、annotation を保存する。`section-title` の文字列は ScreenTemplate に保存せず、compiler が `ScriptSection.name` を `RenderSectionLayout.sectionTitle` として固定する。Remotion の section-title layer はこの `sectionTitle` と section layout の geometry を使用し、template catalog や project JSON を描画時に再検索しない。template revision / hash、section title、resolved input を `compilerInputHash` に含め、template または section name 更新後の古い manifest を current と誤認しない。Remotion は SQLite を直接参照せず、resolved manifest だけを描画入力とする。
+`RenderManifest 2.4.0` は template ID だけでなく、template revision / deterministic hash、resolved geometry / transform、font size、`flipX`、content slot を section / line ごとに固定する。generic visual segment も `RenderVisualV24.display` へ override し、最終 canvas-relative `outerFrame`、content slot の `contentClip`、`fit`、`crop`、annotation を保存する。`section-title` の文字列は ScreenTemplate に保存せず、compiler が `ScriptSection.name` を `RenderSectionLayout.sectionTitle` として固定する。Remotion の section-title layer はこの `sectionTitle` と section layout の geometry を使用し、template catalog や project JSON を描画時に再検索しない。template revision / hash、section title、resolved input を `compilerInputHash` に含め、template または section name 更新後の古い manifest を current と誤認しない。Remotion は SQLite を直接参照せず、resolved manifest だけを描画入力とする。character の valid overflow geometry は resolved layout と manifest にそのまま保持し、Remotion の 1920 × 1080 composition frame が最終 clipping boundary になる。
+
+### 1.5 Issue #145 / ST-08 の canonical default と bounds policy
+
+ST-08 は ST-00〜ST-07 の ScreenTemplate 契約を置き換えず、geometry validation と editor UX を拡張する。保存 payload、DB numeric columns、`VideoProject 1.3.0`、`RenderManifest 2.4.0` の version は変更しない。現行 SQLite の `REAL` columns は overflow を保持できるが、既存 `screen_template_elements_geometry_check` が全 element に canvas containment を要求するため、character-visual の保存にはこの constraint semantics を変更する database migration を ST-08 のスコープ内で追加する。
+
+実装順は、最初に本書と `doc/doc.md` へ SQLite constraint semantics、migration の既存データ扱い、非 character 要素の互換制約、version 非変更を反映し、その後に SQLite schema / migration、Zod / domain、editor、compiler、preview / render の順で進める。新しい serialized field や project / manifest の version boundary は追加しない。
+
+ScreenTemplate の rect validation は element type ごとに分離する。
+
+```text
+dialogue-window  -> canvas-contained
+section-title    -> canvas-contained
+content-slot     -> canvas-contained
+character-visual -> partial overflow allowed / fully off-canvas forbidden
+```
+
+`character-visual` は finite x / y、finite positive width / height、finite rotation を受け付ける。rect または中心回転後の AABB の一部が canvas 外へ出ても保存可能だが、回転後の AABB と `[0, 1] × [0, 1]` の交差が空なら validation error とする。その他 3 element の rect と回転後 AABB は従来どおり canvas 内を要求する。任意の最低表示率は設けない。
+
+SQLite の `screen_template_elements_geometry_check` は、全 element に対して finite な x / y / width / height / rotation と正の width / height を残し、`character-visual` の branch だけは x / y の負値・1 超と width / height の 1 超を許可する。`dialogue-window`、`section-title`、`content-slot` の branch には従来の `x >= 0`、`y >= 0`、`x + width <= 1`、`y + height <= 1` を残す。回転後 AABB の交差判定と完全 off-canvas 判定は DB constraint ではなく application validation の責務とする。既存 rows は numeric values、order、config、metadata を変更せずに新 constraint へ移行し、migration の標準 backup / atomicity 手順を使用する。targeted test では既存 DB の migration、character overflow の保存・再読込、非 character overflow の拒否を検証する。
+
+「デフォルトに戻す」は template-level に 1 個だけ実装する。reset は template を削除して seed し直す操作ではなく、immutable な `screen-template-seed.ts` の canonical default definition を使って既存の complete-template update mutation を呼び出す。対象は全 5 element の編集可能な rect、rotation、dialogue / section-title の font size、character の `flipX` であり、template metadata、status、ID、preview の一時 state、sample text は保持する。UI と backend に default 数値を複製せず、mutable な SQLite の `screen-template-standard` row を default source にしない。`expectedRevision`、revision、content hash、stale 判定、失敗時の atomicity は通常 update と同じ契約とする。
 
 ## 2. 今回確定した判断
 
@@ -1160,38 +1185,45 @@ type ScreenTemplate = {
   updatedAt: string;
 };
 
-type ScreenRect = {
+type CanvasContainedRect = {
   x: number;
   y: number;
   width: number;
   height: number;
 };
 
-type ScreenTransform = {
-  rect: ScreenRect;
+type CharacterOverflowRect = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+};
+
+type ScreenTransform<TRect> = {
+  rect: TRect;
   rotationDeg: number;
 };
 
-type ScreenTemplateElementBase = {
+type ScreenTemplateElementBase<TRect> = {
   elementId: string;
-  transform: ScreenTransform;
+  transform: ScreenTransform<TRect>;
 };
 
 type ScreenTemplateElement =
-  | (ScreenTemplateElementBase & {
+  | (ScreenTemplateElementBase<CanvasContainedRect> & {
       type: "dialogue-window";
       fontSize: number;
     })
-  | (ScreenTemplateElementBase & {
+  | (ScreenTemplateElementBase<CanvasContainedRect> & {
       type: "section-title";
       fontSize: number;
     })
-  | (ScreenTemplateElementBase & {
+  | (ScreenTemplateElementBase<CharacterOverflowRect> & {
       type: "character-visual";
       slot: "speaker-1" | "speaker-2";
       flipX: boolean;
     })
-  | (ScreenTemplateElementBase & {
+  | (ScreenTemplateElementBase<CanvasContainedRect> & {
       type: "content-slot";
       slot: "primary";
     });
@@ -1200,12 +1232,14 @@ type ScreenTemplateElement =
 保存時の必須条件は次のとおりとする。
 
 - `elements` は dialogue window 1、section title 1、character visual 2、content slot 1 でなければならない。character slot は `speaker-1` / `speaker-2` を重複なく持ち、content slot は `primary` であること。
-- `canvasWidth` / `canvasHeight` は 1920 / 1080 に固定する。`x`、`y`、`width`、`height`、`rotationDeg` は finite とし、font size は finite かつ `> 0` とする。rect は `0 <= x`, `0 <= y`, `0 < width`, `0 < height`, `x + width <= 1`, `y + height <= 1` を満たす。
-- rotation は rect の中心を回転中心とし、pixel canvas へ解決した後の `transform-origin: 50% 50%` と同じ結果に固定する。別の transform origin を element ごとに保存しない。回転後の rect の外接範囲が canvas 外へ出る場合は editor / API の validation error とする。要素の重なりが主要な要素を不可視にする場合も validation detail に含める。
+- `canvasWidth` / `canvasHeight` は 1920 / 1080 に固定する。contained element の rect は finite な 0..1 値、正の size、canvas containment を満たす。character rect は finite な x / y（負値・1 超を許可）、finite positive な size（1 超を許可）を満たす。すべての `rotationDeg` は finite、font size は finite かつ `> 0` とする。
+- rotation は rect の中心を回転中心とし、pixel canvas へ解決した後の `transform-origin: 50% 50%` と同じ結果に固定する。別の transform origin を element ごとに保存しない。contained element の回転後 AABB が canvas 外へ出る場合は editor / API の validation error とし、character は AABB と canvas が全く交差しない場合だけ error とする。要素の重なりが主要な要素を不可視にする場合も validation detail に含める。
 - template の element は固定型だけを許可し、arbitrary HTML / React component、custom CSS、animation、keyframe、element の追加・削除を受け付けない。
 - `revision` は更新ごとに増加し、project mutation と template mutation はそれぞれ expected revision を検証する。active / inactive の切替で row や element を削除しない。
 
 `screen-template-standard` は stable ID を持つ idempotent seed / migration である。既存 layer の geometry は現行 Remotion / CSS / layout constants の実値から作り、目測で再定義しない。現行 composition に存在しない section-title だけは、doc.md の「画面上端」という要件から ST-01 が新しい canonical geometry を確定し、rect / rotation / font size / 根拠 / 参照元を seed / migration と仕様へ記録する。seed は既存 row が同じ ID と内容を持つ場合は再作成せず、内容不一致を自動上書きしない。
+
+ST-08 の default reset はこの seed module の immutable default definition を唯一の source とする。mutable な SQLite の `screen-template-standard` row から default 値を読み取らず、UI と backend へ数値を複製しない。reset は既存の complete-template update mutation を `expectedRevision` 付きで呼び出し、revision、content hash、stale 判定、conflict、失敗時の atomicity を通常 update と同じ経路で扱う。
 
 ST-01 の standard seed 値は、dialogue-window を `x: 0.03125`、`y: 0.05555555555555555`、`width: 0.9375`、`height: 0.8888888888888888`、`rotationDeg: 0`、`fontSize: 38`（現行 SubtitleLayer の 60px safe area と本文 38px）、content-slot を `x: 0.09`、`y: 0.19`、`width: 0.82`、`height: 0.62`、`rotationDeg: 0`（現行 MediaFrame の 82% × 62%）とする。character-visual は `x: 0.04` / `0.71`、`y: 0.4051851851851852`、`width: 0.25`、`height: 0.48`、`rotationDeg: 0`、`flipX: false`（現行 characterLayerStyle の左右 4%、width 25%、height 48%、通常表示 bottom 124px）とする。
 
@@ -1653,7 +1687,7 @@ speaker mapping は resolver の固定規則とする。`speaker-1` は `project
 layout resolver の順序は次のとおりとする。
 
 1. `ScriptSection.name` を section title source として保持し、`line.screenTemplateId` が non-null なら line override、null なら `section.screenTemplateId` を選ぶ。
-2. ScreenTemplate snapshot の status、revision、element cardinality、normalized rect、font size `> 0`、rect center rotation、回転後の canvas 範囲を検証する。missing / inactive は自動代替せず error とする。
+2. ScreenTemplate snapshot の status、revision、element cardinality、element type 別 geometry policy、font size `> 0`、rect center rotation、回転後の canvas 範囲または character の canvas 交差を検証する。missing / inactive は自動代替せず error とする。
 3. template の outer geometry を 1920 × 1080 canvas へ解決する。
 4. `speaker-1` / `speaker-2` を project character の配列先頭2件へ解決し、`characterId` を resolved layout へ固定する。
 5. generic `VisualAssignment` がある場合、start / end line 範囲の effective template を解決し、template snapshot の ID / revision / hash が変わる line 境界で assignment を segment 化する。各 segment について `displayCoordinateSpace` に応じて legacy adapter または content-slot-relative の `fit`、`crop`、`scale`、`position`、annotation を解決し、`RenderVisualV24.display` の `outerFrame`、`contentClip`、`fit`、`crop`、annotation として保存する。legacy adapter は full-canvas の既存 MediaFrame semantics を `outerFrame` へ焼き込み、`contentClip.enabled: false` とする。content-slot-relative は segment ごとの content slot の内側へ inner transform を適用して `outerFrame` を確定し、`contentClip.enabled: true` とする。assignment の inner transform は template element の outer geometry を変更せず、raw `position` / `scale` / `displayCoordinateSpace` を Remotion 用 manifest に残さない。動画は元の `startMs` / `endMs` を provenance として保持し、segment 境界の authoritative source range を `sourceTrimBeforeFrame` / `sourceTrimAfterFrame` へ fractional frame のまま解決する。
@@ -2137,7 +2171,7 @@ ED-08 完了前の compile 経路では、既存 `RenderManifest 2.2.0` の gene
 3. 全セリフに有効な音声インデックスがあることを確認する。
 4. `CharacterVisualBinding.visualId` / `idleVariantId` と各 `ScriptLine.characterVariantId` を catalog snapshot と照合する。missing、inactive、cross-visual、speaker 不一致、必須 file slot 欠落、checksum 不一致は validation error とする。未選択 line に対して expression、tag、label、旧固定 mapping から代替しない。
 5. section の `screenTemplateId` と line の nullable `screenTemplateId` を、line override → section default の順で解決する。明示参照が missing / inactive の場合は自動代替せず validation error とする。
-6. ScreenTemplate snapshot の revision、element cardinality、0..1 normalized rect、finite 値、rect center rotation、`fontSize > 0`、rotation 後の canvas 外、`flipX` を検証する。`screen-template-standard` も SQLite から取得した snapshot として扱い、静的配列を参照しない。
+6. ScreenTemplate snapshot の revision、element cardinality、contained element の 0..1 canvas-contained rect、character の finite x / y・positive size・部分 overflow / 完全 off-canvas、rect center rotation、`fontSize > 0`、`flipX` を検証する。`screen-template-standard` も SQLite から取得した snapshot として扱い、静的配列を参照しない。
 7. valid な explicit reference から `RenderManifest.characters[].idleVariantId`、`RenderManifest.lines[].characterVariantId`、`RenderManifest.characterVariants[]` を解決する。compiler は SQLite を直接検索せず、渡された snapshot だけを使う。
 8. ST-05 の共有 resolver を使い、`ScriptSection.name` から `sectionTitle` を固定し、`speaker-1` / `speaker-2` を `project.characters[0]` / `[1]` へ解決する。valid な template snapshot から outer geometry を解決し、`ResolvedScreenLayout` を組み立てる。generic assignment がある場合は start / end line 範囲の effective template を解決し、template snapshot の ID / revision / hash が変わる line 境界で segment 化する。各 segment を `displayCoordinateSpace` に応じ、legacy mode は full-canvas compatibility adapter、content-slot-relative は segment ごとの content slot 内の inner transform として解決し、`RenderVisualV24.display` の最終 `outerFrame` / `contentClip` / `fit` / `crop` / annotation へ固定する。outer template geometry を変更せず、Remotion が raw display を再解釈する余地を残さない。
 9. `prioritizeVisual` が true の場合だけ既存互換の character 縮小 policy を resolved layout へ適用する。初期版では非表示にせず、新しい固定座標へ戻さず、適用後の geometry を manifest に固定する。
@@ -2306,7 +2340,7 @@ editor のサイドバーは active な CharacterVisualSet / variant と、必�
 - 相対パスの安全性
 - `CharacterVisualSet` の `visualId`、`variantId`、file slot、library path の重複
 - ScreenTemplate の `templateId`、element ID、slot、status、revision の重複・形式
-- ScreenTemplate の element cardinality、canvas 1920 × 1080、normalized rect の finite / 0..1 範囲、rotation、font size、`flipX`
+- ScreenTemplate の element cardinality、canvas 1920 × 1080、element type 別 rect policy（contained element は finite / 0..1 / canvas-contained、character は finite x / y と positive size）、rotation、font size、`flipX`
 - `screen-template-standard` の stable ID と idempotent seed / migration の内容
 - `library/character-visuals/{visualId}/{variantId}/` namespace と安全な相対パス
 - `single-image` の `single`、`mouth-pair` の `closed` / `open` スロット
@@ -2319,7 +2353,7 @@ editor のサイドバーは active な CharacterVisualSet / variant と、必�
 - 未登録 variant が set 全体のエラーになっていないこと
 - セクションとセリフの順序
 - `VideoProject 1.3.0` の section `screenTemplateId`、nullable line override、line override → section default の解決
-- missing / inactive template の明示参照を自動代替しないこと、rotation 後の element / content slot の canvas 外拒否
+- missing / inactive template の明示参照を自動代替しないこと、rotation 後の dialogue/title/content slot の canvas 外拒否、character の完全 off-canvas 拒否と部分 overflow 許可
 - `EditPlan` の video element の role / placement / order、cutin の最初のセクション直前配置拒否、intro / outro の最大 1 件制約、section BGM の 0/1 重複
 - 編集 Asset の `assetId`、`assetVersion`、`assetChecksum`、`projectMediaPath`、選択・差し替え時の active 状態、MP4 / MP3 の MIME・実ファイル形式。出力時に live な Asset `status` を要求しないこと
 - 動画要素と BGM の volume が 0〜1 であること。`muted`、loop、開始オフセット、トリム、fade を現行 `EditPlan` へ保存しないこと
@@ -2331,7 +2365,7 @@ editor のサイドバーは active な CharacterVisualSet / variant と、必�
 - 構成案の role 順序、未解決質問、承認状態、source hash の最新性
 - 台本の空セリフ、話者、`outlineHash`、section/line 参照
 - ビジュアルの割り当て範囲、素材状態、チェックサム、機密区分
-- ScreenTemplate snapshot の status、revision、element cardinality、normalized geometry、rect center rotation、`fontSize > 0`、`flipX`、template hash
+- ScreenTemplate snapshot の status、revision、element cardinality、element type 別 geometry policy、rect center rotation、`fontSize > 0`、`flipX`、template hash
 - section / line の template selection、resolved outer geometry、generic assignment inner transform、`prioritizeVisual` の適用順
 - section title、speaker mapping、`displayCoordinateSpace`、legacy adapter の overflow / conversion validation
 - 編集要素の境界、実尺、Asset snapshot、project 内ファイルの存在・`assetChecksum`、MP4 / MP3 validation、BGM の最終 section 範囲、動画要素中の BGM 停止。Asset Service の SQLite や snapshot 後の live な status を入力にしないこと
@@ -2417,7 +2451,7 @@ SQLite にはキー入力単位ではなく、保存、構成案の承認、レ�
 - duplicate `visualId`、duplicate `variantId`、duplicate file slot、duplicate library path
 - visual 単位のキャンバス基準、異なるサイズの追加拒否、variant 不足を許可する set 状態
 - ScreenTemplate の dialogue-window 1、section-title 1、character-visual 2、content-slot 1 の cardinality、`speaker-1` / `speaker-2` 重複拒否、`primary` slot 検証
-- ScreenRect の finite / normalized range、rect center rotation、rotation 後の canvas 外、`fontSize > 0`、`flipX`、template revision / hash
+- contained element の finite / normalized / canvas-contained rect、character の finite x / y・positive size・部分 overflow / 完全 off-canvas、rect center rotation、`fontSize > 0`、`flipX`、template revision / hash
 - `screen-template-standard` の idempotent seed、内容不一致の自動上書き拒否、inactive template の通常候補除外
 - `1.2.0 → 1.3.0` migration が既存 VisualAssignment の `position` / `scale` を再解釈せず、`legacy-media-frame` adapter と standard content slot で現行見た目を保つこと。`content-slot-relative` への変換は明示操作であること
 - `speaker-1` → `project.characters[0]`、`speaker-2` → `project.characters[1]`、`characterId` の resolved layout 固定
@@ -2425,7 +2459,8 @@ SQLite にはキー入力単位ではなく、保存、構成案の承認、レ�
 - `RenderVisualV24.display` の `outerFrame` / `contentClip` / `fit` / `crop` / annotation の固定、legacy mode の clipping 無効、content-slot-relative の clipping 有効、raw display の再解釈なし
 - line template override を跨ぐ VisualAssignment の segment 化、決定論的 ID / sourceAssignmentId / frame range、動画の authoritative source trim range 継続
 - `prioritizeVisual` の初期版が character element の縮小だけを行い、非表示を要求しないこと
-- template editor の drag / resize / rotation / numeric input / keyboard、実素材 preview の一時 state と template data 非保存
+- template editor の contained element の clamp、character の drag / resize / rotation / numeric input / keyboard による partial overflow、overflow 状態の interaction recovery、実素材 preview の一時 state と template data 非保存
+- template-level の「デフォルトに戻す」が 1 個だけ存在し、canonical seed default を使って全 element の rect / rotation / font size / `flipX` を一括復元すること、metadata / preview state を保持すること、個別 reset control を追加しないこと
 - `mentor` / `learner` や project ID を登録時の必須入力にしないこと
 - `CharacterVisualBinding` が `project.json` に保存され、SQLite の CharacterVisualSet に project binding が追加されないこと
 - `characterVariantId` の未選択初期値、speaker に binding された visual 以外の参照拒否、missing / inactive / cross-visual の自動代替なし
@@ -2465,6 +2500,8 @@ SQLite にはキー入力単位ではなく、保存、構成案の承認、レ�
 - `RenderVisualV24.display` の最終 geometry と raw display 値の非依存性、line-card preview / production render の generic visual parity
 - VisualAssignment segment の template 切替、line-card preview / production render の frame range と動画再生位置の parity
 - template outer geometry と generic VisualAssignment inner transform の分離、`prioritizeVisual` の適用順、line-card preview / Remotion の resolved layout parity
+- partial-overflow character の editor preview、line-card preview、Web preview、Remotion、MP4 の composition-boundary clipping parity と、resolved geometry / manifest の unclamped 保持
+- reset 後の canonical content hash、revision-aware update、stale 判定、revision conflict / save failure 時の既存 template 保持
 - レンダリングジョブの状態遷移
 
 外部 API は fixture またはローカル stub を使用し、通常のテスト実行で課金や実サービス依存を発生させない。
@@ -2486,8 +2523,10 @@ SQLite にはキー入力単位ではなく、保存、構成案の承認、レ�
 11. `/screen-templates` で `screen-template-standard` と active / inactive template を確認し、実素材を一時 preview として選択する
 12. template editor で geometry、rotation、font size、`flipX` を保存し、project section / line へ適用する
 13. 各 line card 左側の resolved preview と `RenderManifest 2.4.0` / Remotion の代表フレームを比較する
-14. 代表フレームの画像比較
-15. 短い MP4 とサムネイルの生成
+14. 片方の character を意図的に画面外へ配置し、editor、line-card preview、`RenderManifest 2.4.0`、Web Player、Remotion の代表フレームで同じ composition clipping を確認する
+15. 全 5 element の geometry、rotation、font size、`flipX` を変更してから template-level の「デフォルトに戻す」を実行し、canonical seed への復帰、metadata / preview state の保持、個別 reset control 不在を確認する
+16. 代表フレームの画像比較
+17. 短い MP4 とサムネイルの生成
 
 ## 20. MVP 開発時の実装順序（履歴）
 
@@ -2679,11 +2718,12 @@ ST-00 は本書と `doc.md` の仕様確定だけを行い、コード、Zod sch
 | Issue | 実装責務 |
 |---|---|
 | ST-01 | workspace SQLite の ScreenTemplate entity、repository、strict validation、`screen-template-standard` の idempotent catalog / seed / migration。既存 layer の standard geometry は現行 Remotion / CSS / layout constants から調査し、現行 composition にない section-title は画面上端の要件から新規 canonical geometry として確定し、数値・根拠・参照元を記録する。 |
-| ST-02 | ScreenTemplate CRUD API、active / inactive status、revision / expected revision、element cardinality、normalized geometry、rotation 後の canvas 外 validation。 |
+| ST-02 | ScreenTemplate CRUD API、active / inactive status、revision / expected revision、element cardinality、element type 別 geometry、rotation 後の canvas 外 validation。 |
 | ST-03 | `VideoProject 1.3.0`、section `screenTemplateId`、line nullable override、`1.2.0 → 1.3.0` migration。既存 project の各 section に `screen-template-standard` を明示保存し、既存 VisualAssignment を `legacy-media-frame` として扱う coordinate-space migration を行う。 |
 | ST-04 | `/screen-templates`、`/screen-templates/{templateId}`、canvas editor、drag / resize / rotation / numeric input / keyboard、font size、`flipX`、実素材 preview の一時 state。 |
 | ST-05 | pure な ScreenTemplate geometry resolver と preview / production 共通 layout component の確定、ScriptPage の section / line assignment UI、active 候補、inactive / missing validation、line card 左側の resolved screen preview。 |
 | ST-06 | ST-05 の resolver / layout component の出力を `RenderManifest 2.4.0` の `sectionTitle`、segment 化済み `RenderVisualV24[]`、resolved layout / revision / hash へ固定し、`prioritizeVisual` の縮小結果と共に Remotion へ統合する。VisualAssignment が line template override を跨ぐ場合の segment partition と動画の authoritative source trim range 継続も担当する。ST-05 と別の preview 専用 resolver は作らない。 |
 | ST-07 | layout validation、rotation / overflow / overlap、migration / API / editor / assignment の E2E、line-card preview と production render の parity。 |
+| ST-08 | `character-visual` だけの partial overflow / fully off-canvas validation、element type 別 editor interaction、composition-boundary clipping parity、immutable canonical seed を使う template-level 全体 default reset と revision / hash / stale の回帰。 |
 
-実装順序は `ST-01 → ST-02 → ST-03 → ST-04 → ST-05 → ST-06 → ST-07` とする。ST-05 が pure resolver と共通 layout component の提供元になり、ST-06 はそれを利用して Manifest の固定と Remotion 統合だけを行う。template の shared update は revision / hash を次回 compile input へ反映する。同じ template ID を参照する project の `project.json` を自動書き換えたり、過去 revision を埋め込んだりしない。3 人以上の話者、任意 element の追加・削除、custom CSS、animation / keyframe、template revision history / rollback UI は ST-00〜ST-07 の対象外とする。
+実装順序は `ST-01 → ST-02 → ST-03 → ST-04 → ST-05 → ST-06 → ST-07 → ST-08` とする。ST-05 が pure resolver と共通 layout component の提供元になり、ST-06 はそれを利用して Manifest の固定と Remotion 統合だけを行う。ST-08 は既存の version / payload を変更せず、element type 別の validation と editor / render clipping semantics、canonical seed を使う全体 reset を追加する。template の shared update は revision / hash を次回 compile input へ反映する。同じ template ID を参照する project の `project.json` を自動書き換えたり、過去 revision を埋め込んだりしない。3 人以上の話者、任意 element の追加・削除、custom CSS、animation / keyframe、template revision history / rollback UI は ST-00〜ST-08 の対象外とする。

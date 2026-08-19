@@ -26,6 +26,7 @@ import {
 import { screenTemplateSchema } from "../../src/schema/screen-template.js";
 import {
   assertValidScreenTemplate,
+  resolvedScreenLayoutValidationIssues,
   screenTemplateTextValidationIssues,
   screenTemplateValidationReport
 } from "../../src/validation/screen-templates.js";
@@ -472,6 +473,163 @@ describe("ScreenTemplate cross-layer acceptance fixture", () => {
       { fps: 30 }
     );
     expect(photoSegments[0]?.display).toMatchObject(resolvedPhoto);
+  });
+
+  it("preserves partial character overflow through validation, preview, and manifest compilation", () => {
+    const project = createScreenTemplateProjectFixture();
+    const standard = createStandardAndAlternateTemplateSnapshot()[0]!;
+    const alternate = createAlternateScreenTemplate();
+    const overflowTemplate = assertValidScreenTemplate({
+      ...alternate,
+      elements: alternate.elements.map((element) =>
+        element.type === "character-visual" && element.slot === "speaker-1"
+          ? {
+              ...element,
+              transform: {
+                rect: { x: -0.06, y: 0.5, width: 0.35, height: 0.5 },
+                rotationDeg: 12
+              }
+            }
+          : element
+      )
+    });
+    expect(screenTemplateValidationReport(overflowTemplate).errors).toEqual([]);
+
+    const result = compileRepresentativeProject(project, [
+      standard,
+      overflowTemplate
+    ]);
+    expect(result.success).toBe(true);
+    if (!result.success) {
+      return;
+    }
+
+    const main = project.script.sections[1];
+    if (main === undefined) {
+      throw new Error("main section is missing");
+    }
+    const mainLine = result.manifest.lines.find(
+      (line) =>
+        line.sectionId === main.id &&
+        line.screenTemplateId === ALTERNATE_SCREEN_TEMPLATE_ID
+    );
+    if (mainLine === undefined) {
+      throw new Error("overflow line is missing");
+    }
+    const expectedLayout = resolveScreenTemplateLayout(overflowTemplate, {
+      characterIds: {
+        "speaker-1": "character-mentor",
+        "speaker-2": "character-learner"
+      }
+    });
+    expect(mainLine.resolvedLayout).toEqual(expectedLayout);
+    expect(
+      mainLine.resolvedLayout.elements.find(
+        (element) =>
+          element.type === "character-visual" && element.slot === "speaker-1"
+      )
+    ).toMatchObject({
+      transform: { rect: { x: -0.06, width: 0.35 }, rotationDeg: 12 }
+    });
+    const prioritizedLayout = resolveScreenTemplateLayout(overflowTemplate, {
+      characterIds: {
+        "speaker-1": "character-mentor",
+        "speaker-2": "character-learner"
+      },
+      prioritizeVisual: true
+    });
+    const prioritizedCharacter = prioritizedLayout.elements.find(
+      (element) =>
+        element.type === "character-visual" && element.slot === "speaker-1"
+    );
+    expect(prioritizedCharacter?.transform.rect.x).toBeCloseTo(-0.011);
+
+    const markup = renderToStaticMarkup(
+      createElement(ScreenLayoutFrame, { template: overflowTemplate })
+    );
+    expect(markup).toContain("screen-layout-frame");
+    expect(markup).toContain("left:-6%");
+    expect(markup).toContain("rotate(12deg)");
+
+    const fullyOffCanvas = screenTemplateSchema.parse({
+      ...overflowTemplate,
+      elements: overflowTemplate.elements.map((element) =>
+        element.type === "character-visual" && element.slot === "speaker-1"
+          ? {
+              ...element,
+              transform: {
+                ...element.transform,
+                rect: { x: -1.2, y: 0.5, width: 0.2, height: 0.5 }
+              }
+            }
+          : element
+      )
+    });
+    const invalidResult = compileRepresentativeProject(project, [
+      standard,
+      fullyOffCanvas
+    ]);
+    expect(invalidResult.success).toBe(false);
+    expect(
+      invalidResult.success
+        ? []
+        : invalidResult.diagnostics.map((diagnostic) => diagnostic.message)
+    ).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining("must intersect the canvas")
+      ])
+    );
+
+    const barelyIntersectingTemplate = assertValidScreenTemplate({
+      ...alternate,
+      elements: alternate.elements.map((element) =>
+        element.type === "character-visual" && element.slot === "speaker-1"
+          ? {
+              ...element,
+              transform: {
+                rect: { x: -1, y: 0.58, width: 1.1, height: 0.35 },
+                rotationDeg: -4
+              }
+            }
+          : element
+      )
+    });
+    expect(
+      screenTemplateValidationReport(barelyIntersectingTemplate).errors
+    ).toEqual([]);
+    const barelyPrioritizedLayout = resolveScreenTemplateLayout(
+      barelyIntersectingTemplate,
+      {
+        characterIds: {
+          "speaker-1": "character-mentor",
+          "speaker-2": "character-learner"
+        },
+        prioritizeVisual: true
+      }
+    );
+    expect(
+      barelyPrioritizedLayout.elements.find(
+        (element) =>
+          element.type === "character-visual" && element.slot === "speaker-1"
+      )?.transform.rect.x
+    ).toBeCloseTo(-0.846);
+    expect(
+      resolvedScreenLayoutValidationIssues(barelyPrioritizedLayout)
+    ).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          message: "character visual bounds must intersect the canvas"
+        })
+      ])
+    );
+    const prioritizedResult = compileRepresentativeProject(project, [
+      standard,
+      barelyIntersectingTemplate
+    ]);
+    expect(prioritizedResult.success).toBe(false);
+    expect(diagnosticCodes(prioritizedResult)).toContain(
+      "RESOLVED_SCREEN_LAYOUT_CHARACTER_MISSING"
+    );
   });
 
   it("fails unresolved or inactive references without falling back to standard", () => {

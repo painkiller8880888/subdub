@@ -361,15 +361,22 @@ export function moveScreenTemplateElement(
   deltaY: number
 ): ScreenTemplateElement {
   const rect = element.transform.rect;
+  const requestedRect = {
+    ...rect,
+    x: rect.x + deltaX,
+    y: rect.y + deltaY
+  };
   return {
     ...element,
     transform: {
       ...element.transform,
-      rect: clampScreenRect({
-        ...rect,
-        x: rect.x + deltaX,
-        y: rect.y + deltaY
-      })
+      // Character visuals intentionally keep their overflow geometry. The
+      // contained element policy remains unchanged for dialogue, title, and
+      // content slot elements.
+      rect:
+        element.type === "character-visual"
+          ? requestedRect
+          : clampScreenRect(requestedRect)
     }
   };
 }
@@ -405,19 +412,27 @@ export function resizeScreenTemplateElement(
   );
   const minimumWidthPx = SCREEN_TEMPLATE_MIN_ELEMENT_SIZE * canvasWidth;
   const minimumHeightPx = SCREEN_TEMPLATE_MIN_ELEMENT_SIZE * canvasHeight;
-  const { widthPx, heightPx } = clampResizeDimensions(
-    element.transform.rect.width * canvasWidth,
-    element.transform.rect.height * canvasHeight,
-    signs.x * localHandleVector.x,
-    signs.y * localHandleVector.y,
-    minimumWidthPx,
-    minimumHeightPx,
-    anchor,
-    signs,
-    element.transform.rotationDeg,
-    canvasWidth,
-    canvasHeight
-  );
+  const requestedWidthPx = signs.x * localHandleVector.x;
+  const requestedHeightPx = signs.y * localHandleVector.y;
+  const { widthPx, heightPx } =
+    element.type === "character-visual"
+      ? {
+          widthPx: Math.max(minimumWidthPx, requestedWidthPx),
+          heightPx: Math.max(minimumHeightPx, requestedHeightPx)
+        }
+      : clampResizeDimensions(
+          element.transform.rect.width * canvasWidth,
+          element.transform.rect.height * canvasHeight,
+          requestedWidthPx,
+          requestedHeightPx,
+          minimumWidthPx,
+          minimumHeightPx,
+          anchor,
+          signs,
+          element.transform.rotationDeg,
+          canvasWidth,
+          canvasHeight
+        );
 
   const nextRect = rectFromFixedCorner(
     anchor,

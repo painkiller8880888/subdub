@@ -21,7 +21,10 @@ import {
   strictObject,
   unitIntervalSchema
 } from "./primitives.js";
-import { screenTransformSchema } from "./screen-template.js";
+import {
+  characterOverflowScreenTransformSchema,
+  screenTransformSchema
+} from "./screen-template.js";
 
 export const sourceAssetChecksumSchema = strictObject({
   path: relativePosixPathSchema,
@@ -713,7 +716,7 @@ const resolvedCharacterVisualSchema = strictObject({
   type: z.literal("character-visual"),
   slot: z.enum(["speaker-1", "speaker-2"]),
   characterId: idSchema,
-  transform: screenTransformSchema,
+  transform: characterOverflowScreenTransformSchema,
   flipX: z.boolean()
 });
 

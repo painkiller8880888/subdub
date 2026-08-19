@@ -51,6 +51,49 @@ describe("ScreenTemplate editor geometry", () => {
     expect(screenTemplateElementStyle(moved).left).toBe("18%");
   });
 
+  it("keeps character movement and resize geometry outside the canvas bounds", () => {
+    const template = createStandardScreenTemplate(TIMESTAMP);
+    const character = findScreenTemplateElement(
+      template,
+      "screen-template-standard-character-speaker-1"
+    );
+    if (character === undefined || character.type !== "character-visual") {
+      throw new Error("character visual is missing");
+    }
+
+    const moved = moveScreenTemplateElement(character, -0.1, 0);
+    expect(moved.transform.rect.x).toBeCloseTo(-0.06);
+    expect(screenTemplateElementStyle(moved).left).toBe("-6%");
+
+    const resized = resizeScreenTemplateElement(
+      character,
+      "south-east",
+      0.9,
+      0
+    );
+    expect(resized.transform.rect.x).toBeCloseTo(character.transform.rect.x);
+    expect(resized.transform.rect.width).toBeCloseTo(1.15);
+
+    let numericallyEdited = updateScreenTemplateElementNumericField(
+      template,
+      character.elementId,
+      "x",
+      -0.08
+    );
+    numericallyEdited = updateScreenTemplateElementNumericField(
+      numericallyEdited,
+      character.elementId,
+      "width",
+      1.2
+    );
+    expect(
+      numericallyEdited.elements.find(
+        (element) => element.elementId === character.elementId
+      )?.transform.rect
+    ).toMatchObject({ x: -0.08, width: 1.2 });
+    expect(screenTemplateValidationMessages(numericallyEdited)).toEqual([]);
+  });
+
   it("keeps legacy media transforms canvas-relative while content-slot transforms stay inner", () => {
     const legacyDisplay = {
       fit: "cover",

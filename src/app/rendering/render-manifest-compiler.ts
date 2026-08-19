@@ -47,6 +47,7 @@ import {
 } from "../screen-templates/screen-layout-resolver.js";
 import { screenTemplateContentHash } from "../screen-templates/screen-template-hash.js";
 import {
+  resolvedScreenLayoutValidationIssues,
   screenTemplateTextValidationIssues,
   screenTemplateValidationReport
 } from "../../validation/screen-templates.js";
@@ -1937,15 +1938,27 @@ export function compileRenderManifest(
       }
       validatedSectionTitleTemplateKeys.add(sectionTitleTemplateKey);
     }
-    templateBindingByLineId.set(entry.line.id, binding);
-    resolvedLayoutByLineId.set(
-      entry.line.id,
-      resolvedLayoutForTemplate(
-        binding,
-        charactersForLayout,
-        linePriority.has(entry.line.id)
-      )
+    const prioritizeVisual = linePriority.has(entry.line.id);
+    const resolvedLayout = resolvedLayoutForTemplate(
+      binding,
+      charactersForLayout,
+      prioritizeVisual
     );
+    if (prioritizeVisual) {
+      for (const issue of resolvedScreenLayoutValidationIssues(
+        resolvedLayout
+      )) {
+        addDiagnostic(
+          diagnostics,
+          RENDER_MANIFEST_ERROR_CODE.screenLayoutCharacterMissing,
+          [...path, "resolvedLayout", ...issue.path],
+          issue.message,
+          { lineId: entry.line.id, sectionId: entry.sectionId }
+        );
+      }
+    }
+    templateBindingByLineId.set(entry.line.id, binding);
+    resolvedLayoutByLineId.set(entry.line.id, resolvedLayout);
   }
 
   const sourceAssets = new Map<string, string>();

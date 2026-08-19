@@ -647,6 +647,82 @@ describe("ScreenTemplate workflow browser E2E", () => {
         expect(
           await page.locator("#screen-template-content-asset").inputValue()
         ).toBe("");
+        await page.locator("#screen-template-property-x").fill("-0.06");
+        await page.locator("#screen-template-property-width").fill("1.1");
+        expect(
+          await page.locator("#screen-template-property-x").inputValue()
+        ).toBe("-0.06");
+        expect(
+          await page.locator("#screen-template-property-width").inputValue()
+        ).toBe("1.1");
+
+        await page
+          .locator("#screen-template-editor-name")
+          .fill("保持するテンプレート名");
+        await page
+          .locator("#screen-template-editor-description")
+          .fill("保持するテンプレート説明");
+        await page
+          .locator("#screen-template-sample-dialogue")
+          .fill("リセット後も保持するサンプル");
+        await page
+          .locator("#screen-template-sample-section-title")
+          .fill("リセット後も保持するタイトル");
+        await page.locator("#screen-template-content-asset").selectOption({
+          value: "asset-application-form"
+        });
+        await page
+          .locator('img[src*="/api/assets/asset-application-form/"]')
+          .waitFor({ state: "visible" });
+
+        const resetResponse = page.waitForResponse(
+          (response) =>
+            response.request().method() === "PUT" &&
+            new URL(response.url()).pathname ===
+              `/api/screen-templates/${ALTERNATE_SCREEN_TEMPLATE_ID}`
+        );
+        await page
+          .getByRole("button", { name: "デフォルトに戻す", exact: true })
+          .click();
+        await resetResponse;
+        await page
+          .locator(".screen-template-save-state-saved")
+          .waitFor({ state: "visible" });
+
+        expect(state.templateSaves).toHaveLength(2);
+        const resetSave = state.templateSaves.at(-1) as {
+          name: string;
+          description: string;
+          elements: ScreenTemplate["elements"];
+        };
+        expect(resetSave).toMatchObject({
+          name: "保持するテンプレート名",
+          description: "保持するテンプレート説明"
+        });
+        const canonicalElements =
+          createStandardAndAlternateTemplateSnapshot()[0]!.elements;
+        const currentElementIds =
+          createStandardAndAlternateTemplateSnapshot()[1]!.elements;
+        expect(resetSave.elements).toEqual(
+          canonicalElements.map((element, index) => ({
+            ...element,
+            elementId: currentElementIds[index]!.elementId
+          }))
+        );
+        expect(
+          await page.locator("#screen-template-sample-dialogue").inputValue()
+        ).toBe("リセット後も保持するサンプル");
+        expect(
+          await page
+            .locator("#screen-template-sample-section-title")
+            .inputValue()
+        ).toBe("リセット後も保持するタイトル");
+        expect(
+          await page.locator("#screen-template-content-asset").inputValue()
+        ).toBe("asset-application-form");
+        expect(await page.getByLabel("flipX（左右反転）").isChecked()).toBe(
+          false
+        );
       } finally {
         await context.close();
       }
