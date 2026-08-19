@@ -110,6 +110,15 @@ function contains(
   );
 }
 
+function intersectsCanvas(bounds: RotatedScreenRectBounds): boolean {
+  return !(
+    bounds.right <= CANVAS_BOUNDS_EPSILON ||
+    bounds.bottom <= CANVAS_BOUNDS_EPSILON ||
+    bounds.left >= 1 - CANVAS_BOUNDS_EPSILON ||
+    bounds.top >= 1 - CANVAS_BOUNDS_EPSILON
+  );
+}
+
 function zodIssues(error: {
   issues: readonly { path: PropertyKey[]; message: string }[];
 }): ScreenTemplateValidationIssue[] {
@@ -243,6 +252,15 @@ export function screenTemplateValidationReport(
 
   for (const [index, element] of elements.entries()) {
     const bounds = elementBounds(element);
+    if (element.type === "character-visual") {
+      if (!intersectsCanvas(bounds)) {
+        errors.push({
+          path: ["elements", index, "transform", "rotationDeg"],
+          message: "character visual bounds must intersect the canvas"
+        });
+      }
+      continue;
+    }
     if (
       bounds.left < -CANVAS_BOUNDS_EPSILON ||
       bounds.top < -CANVAS_BOUNDS_EPSILON ||

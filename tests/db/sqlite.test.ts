@@ -5,6 +5,7 @@ import * as path from "node:path";
 import { sql } from "drizzle-orm";
 import { afterEach, describe, expect, it } from "vitest";
 
+import { STANDARD_SCREEN_TEMPLATE_ID } from "../../src/app/screen-templates/index.js";
 import type { BackupDatabase } from "../../src/db/backup.js";
 import {
   openNativeDatabase,
@@ -107,7 +108,7 @@ describe("workspace SQLite", () => {
     const first = await initializeWorkspaceDatabase({ workspaceRoot });
     const firstHistory = migrationHistory(first.connection);
     expect(first.migrationResult.applied).toBe(true);
-    expect(firstHistory).toHaveLength(11);
+    expect(firstHistory).toHaveLength(12);
     first.close();
 
     const second = await initializeWorkspaceDatabase({ workspaceRoot });
@@ -548,6 +549,118 @@ describe("workspace SQLite", () => {
     expect(second.migrationResult.applied).toBe(false);
     expect(migrationHistory(second.connection)).toEqual(history);
     second.close();
+  });
+
+  it("migrates screen template geometry while preserving rows and type-specific bounds", async () => {
+    const workspaceRoot = await makeWorkspace();
+    const migrationsRoot = path.join(process.cwd(), "src", "db", "migrations");
+    const definitions = (await readMigrationDefinitions(migrationsRoot)).slice(
+      0,
+      11
+    );
+    const beforeMigrations = await makeMigrationFolder(
+      workspaceRoot,
+      definitions
+    );
+    const before = await initializeWorkspaceDatabase({
+      migrationsFolder: beforeMigrations,
+      workspaceRoot
+    });
+    const existingRows = before.connection
+      .prepare(
+        `SELECT element_id, template_id, element_type, x, y, width, height,
+                rotation_deg, order_index, config_json, created_at, updated_at
+           FROM screen_template_elements
+          ORDER BY element_id`
+      )
+      .all();
+    before.close();
+
+    const after = await initializeWorkspaceDatabase({ workspaceRoot });
+    expect(after.migrationResult.applied).toBe(true);
+    expect(
+      after.connection
+        .prepare(
+          "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'screen_template_elements'"
+        )
+        .get()
+    ).toMatchObject({
+      sql: expect.stringContaining("element_type\" = 'character-visual'")
+    });
+    expect(
+      after.connection
+        .prepare(
+          `SELECT element_id, template_id, element_type, x, y, width, height,
+                  rotation_deg, order_index, config_json, created_at, updated_at
+             FROM screen_template_elements
+            ORDER BY element_id`
+        )
+        .all()
+    ).toEqual(existingRows);
+
+    const now = "2026-08-19T00:00:00.000Z";
+    after.connection
+      .prepare(
+        `INSERT INTO screen_template_elements
+          (element_id, template_id, element_type, x, y, width, height,
+           rotation_deg, order_index, config_json, created_at, updated_at)
+         VALUES (?, ?, 'character-visual', ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      )
+      .run(
+        "migrated-character-overflow",
+        STANDARD_SCREEN_TEMPLATE_ID,
+        -0.08,
+        0.5,
+        1.1,
+        0.5,
+        12,
+        10,
+        JSON.stringify({ slot: "speaker-1", flipX: false }),
+        now,
+        now
+      );
+    expect(
+      after.connection
+        .prepare(
+          "SELECT x, y, width, height, rotation_deg FROM screen_template_elements WHERE element_id = ?"
+        )
+        .get("migrated-character-overflow")
+    ).toEqual({ x: -0.08, y: 0.5, width: 1.1, height: 0.5, rotation_deg: 12 });
+
+    for (const [index, elementType] of [
+      "dialogue-window",
+      "section-title",
+      "content-slot"
+    ].entries()) {
+      expect(() =>
+        after.connection
+          .prepare(
+            `INSERT INTO screen_template_elements
+              (element_id, template_id, element_type, x, y, width, height,
+               rotation_deg, order_index, config_json, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          )
+          .run(
+            `migrated-${elementType}-overflow`,
+            STANDARD_SCREEN_TEMPLATE_ID,
+            elementType,
+            -0.01,
+            0.1,
+            0.2,
+            0.2,
+            0,
+            11 + index,
+            JSON.stringify(
+              elementType === "content-slot"
+                ? { slot: "primary" }
+                : { fontSize: 38 }
+            ),
+            now,
+            now
+          )
+      ).toThrow();
+    }
+    after.close();
   });
 
   it("applies the new migration to an already-baselined database only once", async () => {

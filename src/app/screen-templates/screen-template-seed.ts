@@ -82,6 +82,113 @@ const STANDARD_ELEMENTS: readonly ScreenTemplateElement[] = [
   }
 ];
 
+function cloneElement(element: ScreenTemplateElement): ScreenTemplateElement {
+  return {
+    ...element,
+    transform: {
+      ...element.transform,
+      rect: { ...element.transform.rect }
+    }
+  };
+}
+
+/**
+ * Returns the immutable canonical layout definition used by the standard
+ * seed. Callers receive fresh objects so a user-edited template can never
+ * mutate the reset source or the next startup seed.
+ */
+export function canonicalScreenTemplateDefaultElements(): ScreenTemplateElement[] {
+  return STANDARD_ELEMENTS.map(cloneElement);
+}
+
+function canonicalElementOfType<TType extends ScreenTemplateElement["type"]>(
+  elements: readonly ScreenTemplateElement[],
+  type: TType
+): Extract<ScreenTemplateElement, { type: TType }> | undefined {
+  return elements.find(
+    (element): element is Extract<ScreenTemplateElement, { type: TType }> =>
+      element.type === type
+  );
+}
+
+/**
+ * Applies only canonical layout-editable values while preserving the
+ * template's element IDs, order, and any metadata owned by the current row.
+ */
+export function resetScreenTemplateElementsToCanonicalDefaults(
+  elements: readonly ScreenTemplateElement[]
+): ScreenTemplateElement[] {
+  const defaults = canonicalScreenTemplateDefaultElements();
+  return elements.map((element) => {
+    if (element.type === "dialogue-window") {
+      const canonical = canonicalElementOfType(defaults, "dialogue-window");
+      if (canonical === undefined) {
+        return cloneElement(element);
+      }
+      return {
+        ...element,
+        transform: {
+          ...element.transform,
+          rect: { ...canonical.transform.rect },
+          rotationDeg: canonical.transform.rotationDeg
+        },
+        fontSize: canonical.fontSize
+      };
+    }
+    if (element.type === "section-title") {
+      const canonical = canonicalElementOfType(defaults, "section-title");
+      if (canonical === undefined) {
+        return cloneElement(element);
+      }
+      return {
+        ...element,
+        transform: {
+          ...element.transform,
+          rect: { ...canonical.transform.rect },
+          rotationDeg: canonical.transform.rotationDeg
+        },
+        fontSize: canonical.fontSize
+      };
+    }
+    if (element.type === "content-slot") {
+      const canonical = canonicalElementOfType(defaults, "content-slot");
+      if (canonical === undefined) {
+        return cloneElement(element);
+      }
+      return {
+        ...element,
+        transform: {
+          ...element.transform,
+          rect: { ...canonical.transform.rect },
+          rotationDeg: canonical.transform.rotationDeg
+        }
+      };
+    }
+
+    const canonical = defaults.find(
+      (
+        candidate
+      ): candidate is Extract<
+        ScreenTemplateElement,
+        { type: "character-visual" }
+      > =>
+        candidate.type === "character-visual" && candidate.slot === element.slot
+    );
+    if (canonical === undefined) {
+      return cloneElement(element);
+    }
+    return {
+      ...element,
+      transform: {
+        ...element.transform,
+        rect: { ...canonical.transform.rect },
+        rotationDeg: canonical.transform.rotationDeg
+      },
+      flipX: canonical.flipX
+    };
+  });
+}
+
 /**
  * The standard seed is an input fixture, not a runtime catalog. Existing
  * rows always win once the stable ID has been registered in SQLite.
@@ -108,7 +215,7 @@ export function createStandardScreenTemplate(
     canvasWidth: SCREEN_TEMPLATE_CANVAS_WIDTH,
     canvasHeight: SCREEN_TEMPLATE_CANVAS_HEIGHT,
     revision: 1,
-    elements: STANDARD_ELEMENTS,
+    elements: canonicalScreenTemplateDefaultElements(),
     createdAt: timestamp,
     updatedAt: timestamp
   });

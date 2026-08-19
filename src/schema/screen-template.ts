@@ -14,7 +14,7 @@ export const SCREEN_TEMPLATE_CANVAS_HEIGHT = 1080 as const;
 
 export const screenTemplateStatusSchema = z.enum(["active", "inactive"]);
 
-const screenRectSchema = strictObject({
+export const canvasContainedRectSchema = strictObject({
   x: finiteNumberSchema.min(0).max(1),
   y: finiteNumberSchema.min(0).max(1),
   width: positiveNumberSchema.max(1),
@@ -36,37 +36,61 @@ const screenRectSchema = strictObject({
   }
 });
 
-export const screenTransformSchema = strictObject({
-  rect: screenRectSchema,
+export const characterOverflowRectSchema = strictObject({
+  x: finiteNumberSchema,
+  y: finiteNumberSchema,
+  width: positiveNumberSchema,
+  height: positiveNumberSchema
+});
+
+export const canvasContainedScreenTransformSchema = strictObject({
+  rect: canvasContainedRectSchema,
   rotationDeg: finiteNumberSchema
 });
 
-const screenTemplateElementBaseSchema = {
+export const characterOverflowScreenTransformSchema = strictObject({
+  rect: characterOverflowRectSchema,
+  rotationDeg: finiteNumberSchema
+});
+
+/**
+ * Kept as the contained transform name used by generic content and legacy
+ * manifest display geometry. Character elements use the overflow-specific
+ * transform schema below.
+ */
+export const screenTransformSchema = canvasContainedScreenTransformSchema;
+
+const canvasContainedElementBaseSchema = {
   elementId: idSchema,
-  transform: screenTransformSchema
+  transform: canvasContainedScreenTransformSchema
+};
+
+const characterOverflowElementBaseSchema = {
+  elementId: idSchema,
+  transform: characterOverflowScreenTransformSchema
 };
 
 const dialogueWindowElementSchema = strictObject({
-  ...screenTemplateElementBaseSchema,
+  ...canvasContainedElementBaseSchema,
   type: z.literal("dialogue-window"),
   fontSize: positiveNumberSchema
 });
 
 const sectionTitleElementSchema = strictObject({
-  ...screenTemplateElementBaseSchema,
+  ...canvasContainedElementBaseSchema,
   type: z.literal("section-title"),
   fontSize: positiveNumberSchema
 });
 
 const characterVisualElementSchema = strictObject({
-  ...screenTemplateElementBaseSchema,
+  ...characterOverflowElementBaseSchema,
   type: z.literal("character-visual"),
   slot: z.enum(["speaker-1", "speaker-2"]),
   flipX: z.boolean()
 });
 
 const contentSlotElementSchema = strictObject({
-  ...screenTemplateElementBaseSchema,
+  ...canvasContainedElementBaseSchema,
   type: z.literal("content-slot"),
   slot: z.literal("primary")
 });
@@ -162,8 +186,14 @@ export const screenTemplateCatalogSnapshotSchema =
   z.array(screenTemplateSchema);
 
 export type ScreenTemplateStatus = z.infer<typeof screenTemplateStatusSchema>;
-export type ScreenRect = z.infer<typeof screenRectSchema>;
+export type ScreenRect = z.infer<typeof canvasContainedRectSchema>;
+export type CharacterOverflowRect = z.infer<typeof characterOverflowRectSchema>;
 export type ScreenTransform = z.infer<typeof screenTransformSchema>;
+export type CharacterOverflowScreenTransform = z.infer<
+  typeof characterOverflowScreenTransformSchema
+>;
+export type AnyScreenTransform =
+  ScreenTransform | CharacterOverflowScreenTransform;
 export type ScreenTemplateElement = z.infer<typeof screenTemplateElementSchema>;
 export type ScreenTemplate = z.infer<typeof screenTemplateSchema>;
 export type ScreenTemplateCatalogSnapshot = z.infer<
