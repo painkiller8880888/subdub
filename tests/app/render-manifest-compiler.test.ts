@@ -20,7 +20,7 @@ import { characterVisualCatalogSnapshotSchema } from "../../src/schema/character
 import {
   mediaFramesToMilliseconds,
   mediaMillisecondsToFrames,
-  presentationFramesToMediaFrames
+  presentationFramesToMediaPosition
 } from "../../src/media-frame.js";
 
 const validInput = createRenderManifestInput;
@@ -465,25 +465,17 @@ describe("compileRenderManifest", () => {
         }
         return segment;
       });
-    const sourceStartFrame = mediaMillisecondsToFrames(
-      videoSegments[0]!.display.startMs,
-      result.manifest.fps
-    );
+    const sourceStartFrame = videoSegments[0]!.display.sourceTrimBeforeFrame;
     for (let index = 1; index < videoSegments.length; index += 1) {
       const previous = videoSegments[index - 1]!;
       const current = videoSegments[index]!;
       const expectedSourceFrame =
         sourceStartFrame +
-        presentationFramesToMediaFrames(
+        presentationFramesToMediaPosition(
           current.from - videoSegments[0]!.from,
           sourcePlaybackRate
         );
-      expect(
-        mediaMillisecondsToFrames(current.display.startMs, result.manifest.fps)
-      ).toBe(expectedSourceFrame);
-      expect(current.display.startMs).toBe(
-        mediaFramesToMilliseconds(expectedSourceFrame, result.manifest.fps)
-      );
+      expect(current.display.sourceTrimBeforeFrame).toBe(expectedSourceFrame);
       expect(current.display.startMs).toBeGreaterThan(previous.display.startMs);
     }
     expect(videoSegments.at(-1)?.display.endMs).toBe(3_000);
@@ -512,74 +504,63 @@ describe("compileRenderManifest", () => {
 
     expect(visual.display.startMs).toBe(110);
     expect(visual.display.endMs).toBe(1_101);
+    expect(visual.display.sourceTrimBeforeFrame).toBe(4);
+    expect(visual.display.sourceTrimAfterFrame).toBe(34);
     expect(mediaMillisecondsToFrames(visual.display.startMs, 30)).toBe(4);
     expect(mediaMillisecondsToFrames(visual.display.endMs, 30)).toBe(34);
   });
 
   it("keeps a 3n+2 frame template boundary on the same renderer source frame", () => {
-    const { manifest, videoSegments } = compileTemplateBoundaryVideoSegments(1);
+    const { videoSegments } = compileTemplateBoundaryVideoSegments(1);
     expect(videoSegments.map((segment) => segment.from)).toEqual([0, 2, 32]);
 
-    const sourceStartFrame = mediaMillisecondsToFrames(
-      videoSegments[0]!.display.startMs,
-      manifest.fps
-    );
+    const sourceStartFrame = videoSegments[0]!.display.sourceTrimBeforeFrame;
     expect(
-      videoSegments.map((segment) =>
-        mediaMillisecondsToFrames(segment.display.startMs, manifest.fps)
-      )
+      videoSegments.map((segment) => segment.display.sourceTrimBeforeFrame)
     ).toEqual(
       videoSegments.map(
         (segment) =>
           sourceStartFrame +
-          presentationFramesToMediaFrames(
+          presentationFramesToMediaPosition(
             segment.from - videoSegments[0]!.from,
             videoSegments[0]!.display.playbackRate
           )
       )
     );
+    expect(videoSegments[1]!.display.sourceTrimBeforeFrame).toBe(2);
+    expect(videoSegments[0]!.display.sourceTrimAfterFrame).toBe(2);
     expect(videoSegments[1]!.display.startMs).toBe(
-      mediaFramesToMilliseconds(2, manifest.fps)
+      mediaFramesToMilliseconds(2, 30)
     );
     expect(videoSegments[0]!.display.endMs).toBe(
-      mediaFramesToMilliseconds(2, manifest.fps)
+      mediaFramesToMilliseconds(2, 30)
     );
-    expect(
-      mediaMillisecondsToFrames(videoSegments[0]!.display.endMs, manifest.fps)
-    ).toBe(2);
   });
 
   it("uses the same source-frame boundary after applying a non-1 playback rate", () => {
-    const { manifest, videoSegments } =
-      compileTemplateBoundaryVideoSegments(1.25);
-    const sourceStartFrame = mediaMillisecondsToFrames(
-      videoSegments[0]!.display.startMs,
-      manifest.fps
-    );
+    const { videoSegments } = compileTemplateBoundaryVideoSegments(1.25);
+    const sourceStartFrame = videoSegments[0]!.display.sourceTrimBeforeFrame;
 
     expect(
-      videoSegments.map((segment) =>
-        mediaMillisecondsToFrames(segment.display.startMs, manifest.fps)
-      )
+      videoSegments.map((segment) => segment.display.sourceTrimBeforeFrame)
     ).toEqual(
       videoSegments.map(
         (segment) =>
           sourceStartFrame +
-          presentationFramesToMediaFrames(
+          presentationFramesToMediaPosition(
             segment.from - videoSegments[0]!.from,
             videoSegments[0]!.display.playbackRate
           )
       )
     );
+    expect(videoSegments[0]!.display.sourceTrimAfterFrame).toBe(2.5);
+    expect(videoSegments[1]!.display.sourceTrimBeforeFrame).toBe(2.5);
     expect(videoSegments[1]!.display.startMs).toBe(
-      mediaFramesToMilliseconds(3, manifest.fps)
+      mediaFramesToMilliseconds(3, 30)
     );
     expect(videoSegments[0]!.display.endMs).toBe(
-      mediaFramesToMilliseconds(3, manifest.fps)
+      mediaFramesToMilliseconds(3, 30)
     );
-    expect(
-      mediaMillisecondsToFrames(videoSegments[0]!.display.endMs, manifest.fps)
-    ).toBe(3);
   });
 
   it("bakes coordinate space, priority geometry, section titles, and freshness into 2.4.0", () => {

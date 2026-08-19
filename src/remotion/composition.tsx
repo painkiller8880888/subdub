@@ -26,22 +26,14 @@ import { VideoInsert } from "./video-insert";
 import { PhotoVisual, VideoVisual } from "./visuals";
 
 function RenderVisual({
-  manifest,
   visual,
   assetUrlResolver
 }: {
-  manifest: RenderManifest;
   visual: RenderManifest["visuals"][number];
   assetUrlResolver: ManifestAssetUrlResolver;
 }): ReactNode {
   if (visual.kind === "video") {
-    return (
-      <VideoVisual
-        visual={visual}
-        fps={manifest.fps}
-        assetUrlResolver={assetUrlResolver}
-      />
-    );
+    return <VideoVisual visual={visual} assetUrlResolver={assetUrlResolver} />;
   }
   if (visual.kind === "photo") {
     return <PhotoVisual visual={visual} assetUrlResolver={assetUrlResolver} />;
@@ -145,11 +137,7 @@ export function RenderManifestComposition(
           layout="none"
           name={visual.id}
         >
-          <RenderVisual
-            manifest={manifest}
-            visual={visual}
-            assetUrlResolver={assetUrlResolver}
-          />
+          <RenderVisual visual={visual} assetUrlResolver={assetUrlResolver} />
         </Sequence>
       ))}
       <CharacterLayer

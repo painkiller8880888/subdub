@@ -24,6 +24,12 @@ export type ScreenLayoutResolutionOptions = Readonly<{
   readonly prioritizeVisual?: boolean;
 }>;
 
+export type VisualDisplayResolutionOptions = Readonly<{
+  readonly fps: number;
+  readonly sourceTrimBeforeFrame?: number;
+  readonly sourceTrimAfterFrame?: number;
+}>;
+
 function scaledRect(
   rect: ScreenTransform["rect"],
   scale: number
@@ -197,7 +203,8 @@ function contentSlotForLayout(
  */
 export function resolveVisualDisplay(
   display: DisplayV13,
-  layout: ResolvedScreenLayout
+  layout: ResolvedScreenLayout,
+  options: VisualDisplayResolutionOptions
 ): RenderResolvedVisualDisplay {
   const contentSlot = contentSlotForLayout(layout);
   const contentClip = {
@@ -227,6 +234,12 @@ export function resolveVisualDisplay(
       ...common,
       startMs: display.startMs,
       endMs: display.endMs,
+      sourceTrimBeforeFrame:
+        options.sourceTrimBeforeFrame ??
+        Math.ceil((display.startMs / 1000) * options.fps),
+      sourceTrimAfterFrame:
+        options.sourceTrimAfterFrame ??
+        Math.ceil((display.endMs / 1000) * options.fps),
       playbackRate: display.playbackRate,
       volume: display.volume
     };

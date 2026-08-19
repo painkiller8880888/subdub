@@ -3,7 +3,6 @@ import type { ReactNode } from "react";
 import { Img, OffthreadVideo, useCurrentFrame } from "remotion";
 
 import type { RenderVisual } from "../schema/index";
-import { mediaMillisecondsToFrames } from "../media-frame";
 import {
   defaultManifestAssetUrlResolver,
   resolveManifestAssetUrl,
@@ -16,11 +15,9 @@ type RenderPhoto = Extract<RenderVisual, { kind: "photo" }>;
 
 export function VideoVisual({
   visual,
-  fps,
   assetUrlResolver = defaultManifestAssetUrlResolver
 }: {
   visual: RenderVideo;
-  fps: number;
   assetUrlResolver?: ManifestAssetUrlResolver;
 }): ReactNode {
   useCurrentFrame();
@@ -28,8 +25,8 @@ export function VideoVisual({
     <MediaFrame display={visual.display}>
       <OffthreadVideo
         src={resolveManifestAssetUrl(visual.src, assetUrlResolver)}
-        trimBefore={mediaMillisecondsToFrames(visual.display.startMs, fps)}
-        trimAfter={mediaMillisecondsToFrames(visual.display.endMs, fps)}
+        trimBefore={visual.display.sourceTrimBeforeFrame}
+        trimAfter={visual.display.sourceTrimAfterFrame}
         playbackRate={visual.display.playbackRate}
         volume={visual.display.volume}
         style={{

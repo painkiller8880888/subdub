@@ -50,7 +50,7 @@ import { screenTemplateValidationReport } from "../../validation/screen-template
 import {
   mediaFramesToMilliseconds,
   mediaMillisecondsToFrames,
-  presentationFramesToMediaFrames
+  presentationFramesToMediaPosition
 } from "../../media-frame.js";
 
 export const RENDER_MANIFEST_VERSION = "2.4.0" as const;
@@ -1250,18 +1250,24 @@ function buildVisualSegments({
         false
       );
       const sourceDisplay = assignment.display;
-      let display = resolveVisualDisplay(sourceDisplay, templateLayout);
-
-      if (sourceDisplay.kind === "video" && display.kind === "video") {
+      let videoSegmentTrim:
+        | {
+            readonly startMs: number;
+            readonly endMs: number;
+            readonly sourceTrimBeforeFrame: number;
+            readonly sourceTrimAfterFrame: number;
+          }
+        | undefined;
+      if (sourceDisplay.kind === "video") {
         const sourceStartFrame = mediaMillisecondsToFrames(
           sourceDisplay.startMs,
           fps
         );
         const elapsedStartFrames = from - assignmentFrom;
         const elapsedEndFrames = from + durationInFrames - assignmentFrom;
-        const startFrame =
+        const sourceTrimBeforeFrame =
           sourceStartFrame +
-          presentationFramesToMediaFrames(
+          presentationFramesToMediaPosition(
             elapsedStartFrames,
             sourceDisplay.playbackRate
           );
@@ -1271,21 +1277,41 @@ function buildVisualSegments({
             elapsedMediaMs(elapsedEndFrames, fps, sourceDisplay.playbackRate)
         );
         const isFinalSegment = groupEnd === assignmentLines.length - 1;
+        const sourceTrimAfterFrame =
+          !isFinalSegment && legacyEndMs < sourceDisplay.endMs
+            ? sourceStartFrame +
+              presentationFramesToMediaPosition(
+                elapsedEndFrames,
+                sourceDisplay.playbackRate
+              )
+            : mediaMillisecondsToFrames(legacyEndMs, fps);
+        // Keep the legacy millisecond provenance rounded; Remotion uses the
+        // fractional source-trim fields below for the actual video position.
+        const legacyStartFrame = Math.round(sourceTrimBeforeFrame);
         const startMs =
           elapsedStartFrames === 0
             ? sourceDisplay.startMs
-            : mediaFramesToMilliseconds(startFrame, fps);
+            : mediaFramesToMilliseconds(legacyStartFrame, fps);
         const endMs =
           !isFinalSegment && legacyEndMs < sourceDisplay.endMs
-            ? mediaFramesToMilliseconds(
-                sourceStartFrame +
-                  presentationFramesToMediaFrames(
-                    elapsedEndFrames,
-                    sourceDisplay.playbackRate
-                  ),
-                fps
-              )
+            ? mediaFramesToMilliseconds(Math.round(sourceTrimAfterFrame), fps)
             : legacyEndMs;
+        videoSegmentTrim = {
+          startMs,
+          endMs,
+          sourceTrimBeforeFrame,
+          sourceTrimAfterFrame
+        };
+      }
+
+      let display = resolveVisualDisplay(sourceDisplay, templateLayout, {
+        fps,
+        sourceTrimBeforeFrame: videoSegmentTrim?.sourceTrimBeforeFrame,
+        sourceTrimAfterFrame: videoSegmentTrim?.sourceTrimAfterFrame
+      });
+
+      if (videoSegmentTrim && display.kind === "video") {
+        const { startMs, endMs } = videoSegmentTrim;
         if (endMs <= startMs) {
           addDiagnostic(
             diagnostics,
@@ -1407,6 +1433,8 @@ function orderedResolvedDisplay(
       annotations: display.annotations,
       startMs: display.startMs,
       endMs: display.endMs,
+      sourceTrimBeforeFrame: display.sourceTrimBeforeFrame,
+      sourceTrimAfterFrame: display.sourceTrimAfterFrame,
       playbackRate: display.playbackRate,
       volume: display.volume
     };

@@ -20,16 +20,10 @@ export function mediaFramesToMilliseconds(frames: number, fps: number): number {
   return Math.floor((frames * 1000) / fps);
 }
 
-/**
- * Resolve the source media frame at a presentation-frame offset.
- *
- * The compiler uses the source-frame boundary explicitly for split segments;
- * the frame is then encoded using mediaFramesToMilliseconds so the renderer's
- * existing ceil-based millisecond conversion recovers it exactly.
- */
-export function presentationFramesToMediaFrames(
+/** Preserve the fractional source position used by Remotion playback. */
+export function presentationFramesToMediaPosition(
   presentationFrames: number,
   playbackRate: number
 ): number {
-  return Math.round(presentationFrames * playbackRate);
+  return presentationFrames * playbackRate;
 }

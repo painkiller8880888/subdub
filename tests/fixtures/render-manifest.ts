@@ -472,7 +472,8 @@ function resolvedFixtureVisual(
         ...visual.display,
         displayCoordinateSpace: "legacy-media-frame"
       } as Parameters<typeof resolveVisualDisplay>[0],
-      layout
+      layout,
+      { fps: renderManifestFixtureV23.fps }
     )
   } as RenderManifest["visuals"][number];
 }

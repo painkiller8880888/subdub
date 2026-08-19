@@ -12,6 +12,7 @@ import {
 } from "./common.js";
 import {
   idSchema,
+  finiteNumberSchema,
   nonNegativeIntegerSchema,
   positiveIntegerSchema,
   positiveNumberSchema,
@@ -754,6 +755,8 @@ export const renderResolvedVideoDisplaySchema = strictObject({
   kind: z.literal("video"),
   startMs: nonNegativeIntegerSchema,
   endMs: nonNegativeIntegerSchema,
+  sourceTrimBeforeFrame: finiteNumberSchema.nonnegative(),
+  sourceTrimAfterFrame: finiteNumberSchema.nonnegative(),
   playbackRate: positiveNumberSchema,
   volume: unitIntervalSchema
 }).superRefine((display, ctx) => {
