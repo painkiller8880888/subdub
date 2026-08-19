@@ -569,6 +569,66 @@ describe("compileRenderManifest", () => {
     expect(videoSegments[0]!.display.endMs).toBe(3_000);
   });
 
+  it("keeps a fractional source end for a final short video segment", () => {
+    const project = structuredClone(videoProjectFixture) as VideoProject;
+    const introSection = project.script.sections[0];
+    const assignment = project.visuals.assignments[0];
+    const firstLine = introSection?.lines[0];
+    if (
+      introSection === undefined ||
+      firstLine === undefined ||
+      assignment === undefined ||
+      assignment.display.kind !== "video"
+    ) {
+      throw new Error("intro fixture video assignment is missing");
+    }
+
+    assignment.endLineId = assignment.startLineId;
+    assignment.display.startMs = 110;
+    assignment.display.endMs = 3_000;
+    assignment.display.playbackRate = 0.2;
+    firstLine.pauseAfterMs = 0;
+
+    const baseInput = createRenderManifestInput(project);
+    const firstAudio = (baseInput.audioIndex as VoicevoxAudioIndex)[
+      firstLine.id
+    ];
+    if (firstAudio === undefined) {
+      throw new Error("first line audio is missing");
+    }
+    const audioIndex = {
+      ...(baseInput.audioIndex as VoicevoxAudioIndex),
+      [firstAudio.lineId]: { ...firstAudio, durationMs: 66 }
+    } satisfies VoicevoxAudioIndex;
+    const assetMetadata = (
+      baseInput.assetMetadata as readonly RenderManifestAssetMetadata[]
+    ).map((asset) =>
+      asset.path === firstAudio.audioPath ? { ...asset, durationMs: 66 } : asset
+    );
+
+    const result = compileRenderManifest(
+      createRenderManifestInput(project, { audioIndex, assetMetadata })
+    );
+
+    expect(result.success).toBe(true);
+    if (!result.success) {
+      return;
+    }
+    const visual = result.manifest.visuals.find(
+      (candidate) => candidate.sourceAssignmentId === assignment.id
+    );
+    if (visual?.display.kind !== "video") {
+      throw new Error("compiled visual must be a video");
+    }
+
+    expect(visual.from).toBe(0);
+    expect(visual.durationInFrames).toBe(2);
+    expect(visual.display.startMs).toBe(110);
+    expect(visual.display.endMs).toBe(3_000);
+    expect(visual.display.sourceTrimBeforeFrame).toBe(4);
+    expect(visual.display.sourceTrimAfterFrame).toBeCloseTo(4.4);
+  });
+
   it("bakes coordinate space, priority geometry, section titles, and freshness into 2.4.0", () => {
     const legacy = compileRenderManifest(validInput());
     expect(legacy.success).toBe(true);

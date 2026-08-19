@@ -1273,9 +1273,8 @@ function buildVisualSegments({
           sourceDisplay.startMs +
             elapsedMediaMs(elapsedEndFrames, fps, sourceDisplay.playbackRate)
         );
-        const isFinalSegment = groupEnd === assignmentLines.length - 1;
         const sourceTrimAfterFrame =
-          !isFinalSegment && legacyEndMs < sourceDisplay.endMs
+          legacyEndMs < sourceDisplay.endMs
             ? sourceStartFrame +
               presentationFramesToMediaPosition(
                 elapsedEndFrames,
