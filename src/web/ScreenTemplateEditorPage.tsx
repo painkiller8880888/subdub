@@ -953,7 +953,10 @@ export function ScreenTemplateEditorPage() {
       return;
     }
     const messages = [
-      ...screenTemplateValidationMessages(draft),
+      ...screenTemplateValidationMessages(draft, {
+        dialogueText,
+        sectionTitleText
+      }),
       ...(name.trim().length === 0
         ? ["テンプレート名を入力してください。"]
         : []),
@@ -1061,7 +1064,10 @@ export function ScreenTemplateEditorPage() {
     ? errorMessage(updateMutation.error, "保存に失敗しました。")
     : null;
   const active = draft.status === "active";
-  const structuralErrors = screenTemplateValidationMessages(draft);
+  const structuralErrors = screenTemplateValidationMessages(draft, {
+    dialogueText,
+    sectionTitleText
+  });
   const structuralWarnings = screenTemplateValidationWarningMessages(draft);
   const allValidationErrors = [
     ...new Set([...structuralErrors, ...validationErrors])

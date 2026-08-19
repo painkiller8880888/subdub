@@ -90,6 +90,16 @@ export function createRenderManifestAssetMetadata(
     sha256: effect.assetChecksum,
     durationMs: 400
   }));
+  const editVideos = project.edit.videoElements.map((element) => ({
+    path: element.projectMediaPath,
+    kind: "video",
+    sha256: element.assetChecksum,
+    durationMs:
+      visuals.find((asset) => asset.path === element.projectMediaPath)
+        ?.durationMs ?? 1_000,
+    mimeType: "video/mp4",
+    format: "mp4"
+  }));
   const characters = legacyCharacterVariantCatalog.flatMap((variant, index) =>
     variant.files.map((file, fileIndex) => ({
       path: file.destinationPath,
@@ -98,14 +108,16 @@ export function createRenderManifestAssetMetadata(
       durationMs: null
     }))
   );
-  return [
+  const assets = [
     ...audio,
     ...visuals,
     ...backgrounds,
     ...bgms,
     ...effects,
+    ...editVideos,
     ...characters
   ];
+  return [...new Map(assets.map((asset) => [asset.path, asset])).values()];
 }
 
 export function createRenderManifestInput(

@@ -17,6 +17,7 @@ import type { RenderManifest, VideoProject } from "../../src/schema/index.js";
 import { renderManifestFixture } from "../fixtures/render-manifest.js";
 import { createRenderManifestAudioIndex } from "../fixtures/render-manifest-input.js";
 import { videoProjectFixture } from "../fixtures/video-project.js";
+import { createAlternateScreenTemplate } from "../fixtures/e2e/screen-template-project.js";
 
 const projectId = "manual-video-project";
 const roots: string[] = [];
@@ -236,6 +237,34 @@ describe("ManifestPreviewService", () => {
       );
     }
   );
+
+  it("ignores edits to an unreferenced screen template", async () => {
+    const root = await createRoot();
+    const project = createProject();
+    const manifest = createManifest(project);
+    const standard = createStandardScreenTemplate("2026-08-10T00:00:00.000Z");
+    const alternate = createAlternateScreenTemplate("2026-08-10T00:00:00.000Z");
+    const service = await createService(root, project, {
+      manifest,
+      screenTemplateCatalog: {
+        findById: (templateId) =>
+          templateId === standard.templateId
+            ? standard
+            : templateId === alternate.templateId
+              ? alternate
+              : undefined
+      }
+    });
+
+    alternate.revision += 1;
+    alternate.elements[0]!.transform.rect.x += 0.01;
+
+    await expect(service.get(projectId)).resolves.toMatchObject({
+      state: "current",
+      canPlay: true,
+      blockers: []
+    });
+  });
 
   it("uses the voice current-status result instead of audio integrity alone", async () => {
     const root = await createRoot();

@@ -13,6 +13,11 @@ export type ScreenTemplateValidationIssue = Readonly<{
   message: string;
 }>;
 
+export type ScreenTemplateTextContent = Readonly<{
+  dialogueText?: string;
+  sectionTitleText?: string;
+}>;
+
 export type ScreenTemplateValidationReport = Readonly<{
   errors: readonly ScreenTemplateValidationIssue[];
   warnings: readonly ScreenTemplateValidationIssue[];
@@ -107,8 +112,119 @@ function zodIssues(error: {
   }));
 }
 
+const TEXT_LINE_HEIGHT = 1.4;
+const TEXT_HORIZONTAL_PADDING = 0.03;
+
+function estimatedTextWidth(text: string, fontSize: number): number {
+  return Array.from(text).reduce((width, character) => {
+    if (/\s/u.test(character)) {
+      return width + fontSize * 0.35;
+    }
+    if ((character.codePointAt(0) ?? Number.POSITIVE_INFINITY) <= 0xff) {
+      return width + fontSize * 0.55;
+    }
+    return width + fontSize;
+  }, 0);
+}
+
+function wrappedLineCount(
+  text: string,
+  maxWidth: number,
+  fontSize: number
+): number {
+  return text.split("\n").reduce((count, line) => {
+    if (line.length === 0) {
+      return count + 1;
+    }
+    let lineWidth = 0;
+    let wrappedLines = 1;
+    for (const character of Array.from(line)) {
+      const characterWidth = estimatedTextWidth(character, fontSize);
+      if (lineWidth > 0 && lineWidth + characterWidth > maxWidth) {
+        wrappedLines += 1;
+        lineWidth = characterWidth;
+      } else {
+        lineWidth += characterWidth;
+      }
+    }
+    return count + wrappedLines;
+  }, 0);
+}
+
+function textIssuesForElement(
+  element: Extract<
+    ScreenTemplateElement,
+    { type: "dialogue-window" | "section-title" }
+  >,
+  index: number,
+  text: string | undefined
+): ScreenTemplateValidationIssue[] {
+  const widthPx = element.transform.rect.width * SCREEN_TEMPLATE_CANVAS_WIDTH;
+  const heightPx =
+    element.transform.rect.height * SCREEN_TEMPLATE_CANVAS_HEIGHT;
+  const lineHeightPx = element.fontSize * TEXT_LINE_HEIGHT;
+  const path = ["elements", index, "fontSize"] as const;
+  const label =
+    element.type === "dialogue-window" ? "dialogue" : "section title";
+
+  if (lineHeightPx > heightPx) {
+    return [
+      {
+        path,
+        message: `${label} text line height must fit inside the element bounds`
+      }
+    ];
+  }
+
+  if (text === undefined || text.length === 0) {
+    return [];
+  }
+
+  const availableWidth = widthPx * (1 - TEXT_HORIZONTAL_PADDING);
+  if (
+    element.type === "section-title" &&
+    estimatedTextWidth(text, element.fontSize) > availableWidth
+  ) {
+    return [
+      {
+        path: ["elements", index, "transform", "rect"],
+        message: `${label} text overflows the element bounds`
+      }
+    ];
+  }
+
+  const lineCount = wrappedLineCount(text, availableWidth, element.fontSize);
+  const maxLines = Math.max(1, Math.floor(heightPx / lineHeightPx));
+  if (lineCount <= maxLines) {
+    return [];
+  }
+
+  return [
+    {
+      path: ["elements", index, "transform", "rect"],
+      message: `${label} text overflows the element bounds (${lineCount} lines, ${maxLines} fit)`
+    }
+  ];
+}
+
+export function screenTemplateTextValidationIssues(
+  template: ScreenTemplate,
+  textContent: ScreenTemplateTextContent = {}
+): readonly ScreenTemplateValidationIssue[] {
+  return template.elements.flatMap((element, index) => {
+    if (element.type === "dialogue-window") {
+      return textIssuesForElement(element, index, textContent.dialogueText);
+    }
+    if (element.type === "section-title") {
+      return textIssuesForElement(element, index, textContent.sectionTitleText);
+    }
+    return [];
+  });
+}
+
 export function screenTemplateValidationReport(
-  input: unknown
+  input: unknown,
+  textContent: ScreenTemplateTextContent = {}
 ): ScreenTemplateValidationReport {
   const parsed = screenTemplateSchema.safeParse(input);
   if (!parsed.success) {
@@ -118,6 +234,8 @@ export function screenTemplateValidationReport(
   const errors: ScreenTemplateValidationIssue[] = [];
   const warnings: ScreenTemplateValidationIssue[] = [];
   const elements = parsed.data.elements;
+
+  errors.push(...screenTemplateTextValidationIssues(parsed.data, textContent));
 
   for (const [index, element] of elements.entries()) {
     const bounds = elementBounds(element);

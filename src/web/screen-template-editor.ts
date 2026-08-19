@@ -7,7 +7,10 @@ import {
   SCREEN_TEMPLATE_CANVAS_HEIGHT,
   SCREEN_TEMPLATE_CANVAS_WIDTH
 } from "../schema/screen-template.js";
-import { screenTemplateValidationReport } from "../validation/screen-templates.js";
+import {
+  screenTemplateValidationReport,
+  type ScreenTemplateTextContent
+} from "../validation/screen-templates.js";
 
 export type ResizeHandle =
   "north-west" | "north-east" | "south-east" | "south-west";
@@ -494,9 +497,10 @@ export function normalizedPointerDelta(
 }
 
 export function screenTemplateValidationMessages(
-  template: ScreenTemplate
+  template: ScreenTemplate,
+  textContent: ScreenTemplateTextContent = {}
 ): string[] {
-  return screenTemplateValidationReport(template).errors.map(
+  return screenTemplateValidationReport(template, textContent).errors.map(
     (issue) => `${issue.path.join(".")}: ${issue.message}`
   );
 }
