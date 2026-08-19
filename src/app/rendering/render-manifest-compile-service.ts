@@ -16,7 +16,7 @@ import { processAudioMedia } from "../assets/processing/video-audio.js";
 import type { ProjectRepository } from "../projects/project-repository.js";
 import {
   validateVideoProjectScreenTemplateReferences,
-  type ScreenTemplateCatalogPort
+  type ScreenTemplateSnapshotPort
 } from "../projects/screen-template-selection.js";
 import {
   type RenderManifestAssetMetadata,
@@ -28,8 +28,10 @@ import type {
 } from "./render-manifest-store.js";
 import type {
   CharacterVisualCatalogSnapshot,
+  ScreenTemplate,
   VideoProject
 } from "../../schema/index.js";
+import { screenTemplateSchema } from "../../schema/screen-template.js";
 import type { VoicevoxAudioIndex } from "../voicevox/audio-index.js";
 import type { VoicevoxAudioStore } from "../voicevox/audio-store.js";
 import { RENDER_JOB_ERROR_CODE, RenderJobError } from "./render-job-errors.js";
@@ -47,7 +49,7 @@ type AssetMetadataByPath = Map<string, RenderManifestAssetMetadata>;
 export type RenderManifestInputBuilderOptions = {
   readonly workspaceRoot: string;
   readonly projectRepository: ProjectReader;
-  readonly screenTemplateCatalog: ScreenTemplateCatalogPort;
+  readonly screenTemplateCatalog: ScreenTemplateSnapshotPort;
   readonly assetRepository: AssetDetailReader;
   readonly characterVisualCatalogService: CharacterVisualCatalogVerifier;
   readonly audioStore: AudioIndexReader;
@@ -55,7 +57,7 @@ export type RenderManifestInputBuilderOptions = {
 
 function assertScreenTemplateReferences(
   project: VideoProject,
-  screenTemplateCatalog: ScreenTemplateCatalogPort
+  screenTemplateCatalog: ScreenTemplateSnapshotPort
 ): void {
   if (
     validateVideoProjectScreenTemplateReferences(project, screenTemplateCatalog)
@@ -69,6 +71,35 @@ function assertScreenTemplateReferences(
     422,
     "A selected screen template is missing or inactive."
   );
+}
+
+function screenTemplateSnapshotForProject(
+  project: VideoProject,
+  screenTemplateCatalog: ScreenTemplateSnapshotPort
+): ScreenTemplate[] | undefined {
+  const ids = new Set<string>();
+  for (const section of project.script.sections) {
+    ids.add(section.screenTemplateId);
+    for (const line of section.lines) {
+      if (line.screenTemplateId !== null) {
+        ids.add(line.screenTemplateId);
+      }
+    }
+  }
+
+  const snapshot: ScreenTemplate[] = [];
+  for (const templateId of [...ids].sort()) {
+    const candidate = screenTemplateCatalog.findById(templateId);
+    if (candidate === undefined) {
+      return undefined;
+    }
+    const parsed = screenTemplateSchema.safeParse(candidate);
+    if (!parsed.success) {
+      return undefined;
+    }
+    snapshot.push(parsed.data);
+  }
+  return snapshot;
 }
 
 function isPathInside(rootPath: string, candidatePath: string): boolean {
@@ -347,7 +378,7 @@ async function assetMetadataForProject(
 export class RenderManifestInputBuilder {
   private readonly workspaceRoot: string;
   private readonly projectRepository: ProjectReader;
-  private readonly screenTemplateCatalog: ScreenTemplateCatalogPort;
+  private readonly screenTemplateCatalog: ScreenTemplateSnapshotPort;
   private readonly assetRepository: AssetDetailReader;
   private readonly characterVisualCatalogService: CharacterVisualCatalogVerifier;
   private readonly audioStore: AudioIndexReader;
@@ -364,6 +395,10 @@ export class RenderManifestInputBuilder {
   async build(projectId: unknown): Promise<RenderManifestCompilerInput> {
     const project = await this.projectRepository.read(projectId);
     assertScreenTemplateReferences(project, this.screenTemplateCatalog);
+    const screenTemplateCatalogSnapshot = screenTemplateSnapshotForProject(
+      project,
+      this.screenTemplateCatalog
+    );
     const audioIndex = await this.audioStore.readIndex(projectId);
     const characterVisualCatalog =
       await this.characterVisualCatalogService.verifyFiles();
@@ -382,7 +417,10 @@ export class RenderManifestInputBuilder {
       characterCatalogVersion: CHARACTER_VARIANT_CATALOG_VERSION,
       // Retained in the manifest for cache/run-log compatibility. Explicit
       // project references and the validated snapshot resolve every variant.
-      characterMappingVersion: CHARACTER_VARIANT_MAPPING_VERSION
+      characterMappingVersion: CHARACTER_VARIANT_MAPPING_VERSION,
+      ...(screenTemplateCatalogSnapshot === undefined
+        ? {}
+        : { screenTemplateCatalogSnapshot })
     };
   }
 }

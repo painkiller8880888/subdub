@@ -9,6 +9,7 @@ import {
 import { RenderManifestCompileService } from "../../src/app/rendering/render-manifest-compile-service.js";
 import type { RenderManifestCacheResult } from "../../src/app/rendering/render-manifest-store.js";
 import { RENDER_JOB_ERROR_CODE } from "../../src/app/rendering/render-job-errors.js";
+import { createStandardScreenTemplate } from "../../src/app/screen-templates/screen-template-seed.js";
 import type { VideoProject } from "../../src/schema/index.js";
 import { renderManifestFixture } from "../fixtures/render-manifest.js";
 import { videoProjectFixture } from "../fixtures/video-project.js";
@@ -31,11 +32,17 @@ function createCompileService(
       screenTemplateCatalog: {
         findById: (templateId) => {
           if (templateId !== invalidTemplateId) {
-            return { status: "active" as const };
+            return createStandardScreenTemplate("2026-08-10T00:00:00.000Z");
           }
-          return invalidTemplateStatus === "inactive"
-            ? { status: "inactive" as const }
-            : undefined;
+          if (invalidTemplateStatus === "missing") {
+            return undefined;
+          }
+          const template = createStandardScreenTemplate(
+            "2026-08-10T00:00:00.000Z"
+          );
+          template.templateId = invalidTemplateId;
+          template.status = "inactive";
+          return template;
         }
       },
       assetRepository: { findAssetDetail: () => undefined },

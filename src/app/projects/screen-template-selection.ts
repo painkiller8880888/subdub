@@ -3,6 +3,7 @@ import type {
   ScriptSection,
   VideoProject
 } from "../../schema/video-project.js";
+import type { ScreenTemplate } from "../../schema/screen-template.js";
 
 export type ScreenTemplateReference = Readonly<{
   readonly status: "active" | "inactive";
@@ -10,6 +11,14 @@ export type ScreenTemplateReference = Readonly<{
 
 export type ScreenTemplateCatalogPort = Readonly<{
   findById(templateId: string): ScreenTemplateReference | undefined;
+}>;
+
+/**
+ * Render-manifest compilation needs the complete validated template row, not
+ * only the active/inactive reference exposed to project editing services.
+ */
+export type ScreenTemplateSnapshotPort = Readonly<{
+  findById(templateId: string): ScreenTemplate | undefined;
 }>;
 
 export type ScreenTemplateReferenceIssue = Readonly<{

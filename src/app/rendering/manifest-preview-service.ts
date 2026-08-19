@@ -25,8 +25,9 @@ import type { ProjectRepository } from "../projects/project-repository.js";
 import { computeOutlineHash } from "../projects/script-domain.js";
 import {
   validateVideoProjectScreenTemplateReferences,
-  type ScreenTemplateCatalogPort
+  type ScreenTemplateSnapshotPort
 } from "../projects/screen-template-selection.js";
+import { screenTemplateContentHash } from "../screen-templates/screen-template-hash.js";
 import type { VoicevoxGenerationService } from "../voicevox/generation-service.js";
 import { VoicevoxAudioStore } from "../voicevox/audio-store.js";
 import type { VoicevoxAudioIndex } from "../voicevox/audio-index.js";
@@ -34,7 +35,7 @@ import type { VoicevoxAudioIndex } from "../voicevox/audio-index.js";
 export type ManifestPreviewServiceOptions = {
   readonly workspaceRoot: string;
   readonly projectRepository: Pick<ProjectRepository, "read">;
-  readonly screenTemplateCatalog?: ScreenTemplateCatalogPort;
+  readonly screenTemplateCatalog: ScreenTemplateSnapshotPort;
   readonly manifestStore?: Pick<RenderManifestStore, "readDetailed">;
   readonly audioStore?: Pick<VoicevoxAudioStore, "readIndex">;
   readonly voiceGenerationService: Pick<VoicevoxGenerationService, "getStatus">;
@@ -78,7 +79,9 @@ const blockerMessages: Readonly<Record<string, string>> = {
   MANIFEST_UNREADABLE:
     "保存済みプレビューを読み込めません。プレビューを再生成してください。",
   MANIFEST_PROJECT_STALE:
-    "保存済みプレビューが現在のプロジェクトと一致しません。プレビューを再生成してください."
+    "保存済みプレビューが現在のプロジェクトと一致しません。プレビューを再生成してください.",
+  MANIFEST_SCREEN_TEMPLATE_STALE:
+    "保存済みプレビューの画面テンプレートが更新されています。プレビューを再生成してください。"
 };
 
 function isPathInside(rootPath: string, candidatePath: string): boolean {
@@ -134,7 +137,10 @@ function sourceAssetTarget(
     (candidate) => candidate.src === assetPath
   );
   if (visual !== undefined) {
-    return toTarget("visuals", { assignmentId: visual.id, path: assetPath });
+    return toTarget("visuals", {
+      assignmentId: visual.sourceAssignmentId,
+      path: assetPath
+    });
   }
 
   const insert = manifest.inserts.find(
@@ -208,7 +214,7 @@ async function sha256File(filePath: string): Promise<string> {
 export class ManifestPreviewService {
   private readonly workspaceRoot: string;
   private readonly projectRepository: Pick<ProjectRepository, "read">;
-  private readonly screenTemplateCatalog: ScreenTemplateCatalogPort | undefined;
+  private readonly screenTemplateCatalog: ScreenTemplateSnapshotPort;
   private readonly manifestStore: Pick<RenderManifestStore, "readDetailed">;
   private readonly audioStore: Pick<VoicevoxAudioStore, "readIndex">;
   private readonly voiceGenerationService: Pick<
@@ -276,6 +282,7 @@ export class ManifestPreviewService {
           toTarget("manifest", { path: "cache/render-manifest.json" })
         );
       }
+      this.addScreenTemplateStaleBlockers(manifest, blockers);
       await this.addAssetBlockers(safeProjectId, manifest, blockers);
     } else if (manifestResult.status === "missing") {
       addBlocker(
@@ -331,28 +338,66 @@ export class ManifestPreviewService {
     if (computeOutlineHash(project.outline) !== project.script.outlineHash) {
       addBlocker(blockers, "SCRIPT_OUTLINE_HASH_MISMATCH", toTarget("script"));
     }
-    if (this.screenTemplateCatalog !== undefined) {
-      for (const issue of validateVideoProjectScreenTemplateReferences(
-        project,
-        this.screenTemplateCatalog
-      )) {
-        const sectionIndex = issue.path[2];
-        const section =
-          typeof sectionIndex === "number"
-            ? project.script.sections[sectionIndex]
-            : undefined;
-        const lineIndex = issue.path[4];
-        const line =
-          section !== undefined && typeof lineIndex === "number"
-            ? section.lines[lineIndex]
-            : undefined;
+    for (const issue of validateVideoProjectScreenTemplateReferences(
+      project,
+      this.screenTemplateCatalog
+    )) {
+      const sectionIndex = issue.path[2];
+      const section =
+        typeof sectionIndex === "number"
+          ? project.script.sections[sectionIndex]
+          : undefined;
+      const lineIndex = issue.path[4];
+      const line =
+        section !== undefined && typeof lineIndex === "number"
+          ? section.lines[lineIndex]
+          : undefined;
+      addBlocker(
+        blockers,
+        "SCREEN_TEMPLATE_REFERENCE_INVALID",
+        line !== undefined
+          ? toTarget("script", { lineId: line.id })
+          : toTarget("script", { sectionId: section?.id })
+      );
+    }
+  }
+
+  private addScreenTemplateStaleBlockers(
+    manifest: RenderManifest,
+    blockers: ManifestPreviewBlocker[]
+  ): void {
+    const referencedTemplates = new Map<
+      string,
+      { readonly revision: number; readonly hash: string }
+    >();
+    for (const layout of manifest.sectionLayouts) {
+      referencedTemplates.set(layout.templateId, {
+        revision: layout.templateRevision,
+        hash: layout.templateHash
+      });
+    }
+    for (const line of manifest.lines) {
+      referencedTemplates.set(line.screenTemplateId, {
+        revision: line.templateRevision,
+        hash: line.templateHash
+      });
+    }
+
+    for (const [templateId, expected] of referencedTemplates) {
+      const current = this.screenTemplateCatalog.findById(templateId);
+      if (current === undefined || current.status !== "active") {
+        continue;
+      }
+      if (
+        current.revision !== expected.revision ||
+        screenTemplateContentHash(current) !== expected.hash
+      ) {
         addBlocker(
           blockers,
-          "SCREEN_TEMPLATE_REFERENCE_INVALID",
-          line !== undefined
-            ? toTarget("script", { lineId: line.id })
-            : toTarget("script", { sectionId: section?.id })
+          "MANIFEST_SCREEN_TEMPLATE_STALE",
+          toTarget("manifest", { path: "cache/render-manifest.json" })
         );
+        return;
       }
     }
   }

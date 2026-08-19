@@ -22,6 +22,10 @@ import {
   renderManifestSchema,
   sha256Schema,
   characterVisualCatalogSnapshotSchema,
+  screenTemplateSchema,
+  type RenderSectionLayout,
+  type RenderResolvedVisualDisplay,
+  type ResolvedScreenLayout,
   type RenderBackground,
   type RenderCharacter,
   type RenderCharacterVariant,
@@ -30,15 +34,25 @@ import {
   type RenderInsert,
   type RenderSoundEffect,
   type RenderVisual,
-  type DisplayV13,
+  type ScreenTemplate,
   videoProjectSchema
 } from "../../schema/index.js";
 import {
   voicevoxAudioIndexSchema,
   type VoicevoxAudioIndexEntry
 } from "../voicevox/audio-index.js";
+import {
+  resolveScreenTemplateLayout,
+  resolveVisualDisplay
+} from "../screen-templates/screen-layout-resolver.js";
+import { screenTemplateContentHash } from "../screen-templates/screen-template-hash.js";
+import { screenTemplateValidationReport } from "../../validation/screen-templates.js";
+import {
+  mediaMillisecondsToFrames,
+  presentationFramesToMediaPosition
+} from "../../media-frame.js";
 
-export const RENDER_MANIFEST_VERSION = "2.3.0" as const;
+export const RENDER_MANIFEST_VERSION = "2.4.0" as const;
 
 export const renderManifestAssetMetadataSchema = z
   .object({
@@ -103,6 +117,14 @@ export const RENDER_MANIFEST_ERROR_CODE = {
   variantFileMissing: "CHARACTER_VARIANT_FILE_MISSING",
   variantFileKindMismatch: "CHARACTER_VARIANT_FILE_KIND_MISMATCH",
   variantFileChecksumMismatch: "CHARACTER_VARIANT_FILE_CHECKSUM_MISMATCH",
+  screenTemplateSchema: "SCREEN_TEMPLATE_SNAPSHOT_INVALID",
+  screenTemplateMissing: "SCREEN_TEMPLATE_MISSING",
+  screenTemplateInactive: "SCREEN_TEMPLATE_INACTIVE",
+  screenTemplateGeometryInvalid: "SCREEN_TEMPLATE_GEOMETRY_INVALID",
+  screenTemplateCardinalityInvalid: "SCREEN_TEMPLATE_CARDINALITY_INVALID",
+  screenLayoutMissing: "RESOLVED_SCREEN_LAYOUT_MISSING",
+  screenLayoutCharacterMissing: "RESOLVED_SCREEN_LAYOUT_CHARACTER_MISSING",
+  visualSegmentRangeInvalid: "VISUAL_SEGMENT_RANGE_INVALID",
   manifestSchema: "RENDER_MANIFEST_SCHEMA_INVALID"
 } as const;
 
@@ -155,6 +177,11 @@ export type RenderManifestCompilerInput = {
    * callers, but explicit project references now determine every variant.
    */
   readonly characterMappingVersion?: unknown;
+  /** Validated ScreenTemplate catalog snapshot supplied by the application boundary. */
+  readonly screenTemplateCatalogSnapshot?: unknown;
+  /** Compatibility aliases used by callers while the snapshot boundary was introduced. */
+  readonly screenTemplateSnapshot?: unknown;
+  readonly screenTemplates?: unknown;
 };
 
 export type RenderManifestCompileSuccess = {
@@ -219,8 +246,16 @@ type LineEntry = {
   readonly line: RenderProjectLine;
 };
 
+type ResolvedScreenTemplate = Readonly<{
+  readonly template: ScreenTemplate;
+  readonly templateId: string;
+  readonly templateRevision: number;
+  readonly templateHash: string;
+}>;
+
 type RenderProjectLine = {
   readonly id: string;
+  readonly screenTemplateId: string | null;
   readonly speakerId: string;
   readonly spokenText: string;
   readonly subtitleText: string;
@@ -330,6 +365,98 @@ function recordInputCatalog(input: RenderManifestCompilerInput): unknown {
   // Catalog metadata is a required runtime boundary input. The legacy seed
   // fixture is intentionally not available from this production path.
   return input.characterVariantCatalog ?? input.catalog ?? null;
+}
+
+function recordInputScreenTemplates(
+  input: RenderManifestCompilerInput
+): unknown {
+  return (
+    input.screenTemplateCatalogSnapshot ??
+    input.screenTemplateSnapshot ??
+    input.screenTemplates ??
+    null
+  );
+}
+
+function screenTemplateDiagnosticCode(
+  message: string
+): RenderManifestDiagnosticCode {
+  if (/exactly|speaker|unique/.test(message)) {
+    return RENDER_MANIFEST_ERROR_CODE.screenTemplateCardinalityInvalid;
+  }
+  if (/rect|canvas|rotation|x \+|y \+|width|height/.test(message)) {
+    return RENDER_MANIFEST_ERROR_CODE.screenTemplateGeometryInvalid;
+  }
+  return RENDER_MANIFEST_ERROR_CODE.screenTemplateSchema;
+}
+
+function normalizeScreenTemplates(
+  rawTemplates: unknown,
+  diagnostics: RenderManifestDiagnostic[]
+): Map<string, ResolvedScreenTemplate> {
+  if (rawTemplates === null || rawTemplates === undefined) {
+    return new Map();
+  }
+
+  if (!Array.isArray(rawTemplates)) {
+    addDiagnostic(
+      diagnostics,
+      RENDER_MANIFEST_ERROR_CODE.screenTemplateSchema,
+      ["screenTemplateCatalogSnapshot"],
+      "screen template snapshot must be an array"
+    );
+    return new Map();
+  }
+
+  const templates = new Map<string, ResolvedScreenTemplate>();
+  for (const [index, rawTemplate] of rawTemplates.entries()) {
+    const templateResult = screenTemplateSchema.safeParse(rawTemplate);
+    if (!templateResult.success) {
+      for (const issue of templateResult.error.issues) {
+        addDiagnostic(
+          diagnostics,
+          screenTemplateDiagnosticCode(issue.message),
+          ["screenTemplateCatalogSnapshot", index, ...zodPath(issue.path)],
+          issue.message
+        );
+      }
+      continue;
+    }
+    const template = templateResult.data;
+    if (templates.has(template.templateId)) {
+      addDiagnostic(
+        diagnostics,
+        RENDER_MANIFEST_ERROR_CODE.screenTemplateSchema,
+        ["screenTemplateCatalogSnapshot", index, "templateId"],
+        "templateId must be unique in the ScreenTemplate snapshot"
+      );
+      continue;
+    }
+    const report = screenTemplateValidationReport(template);
+    for (const issue of report.errors) {
+      addDiagnostic(
+        diagnostics,
+        issue.message.includes("cardinality") ||
+          issue.message.includes("exactly") ||
+          issue.message.includes("speaker")
+          ? RENDER_MANIFEST_ERROR_CODE.screenTemplateCardinalityInvalid
+          : RENDER_MANIFEST_ERROR_CODE.screenTemplateGeometryInvalid,
+        ["screenTemplateCatalogSnapshot", index, ...issue.path],
+        issue.message,
+        { sectionId: template.templateId }
+      );
+    }
+    if (report.errors.length > 0) {
+      continue;
+    }
+    templates.set(template.templateId, {
+      template,
+      templateId: template.templateId,
+      templateRevision: template.revision,
+      templateHash: screenTemplateContentHash(template)
+    });
+  }
+  return templates;
 }
 
 function normalizeCatalog(
@@ -919,59 +1046,378 @@ export function detectSoundEffectWarnings(
   return warnings;
 }
 
-function orderedVisualDisplay(
-  display: RenderVisual["display"]
-): RenderVisual["display"] {
-  if (display.kind === "video") {
-    return {
-      kind: display.kind,
-      fit: display.fit,
-      crop: display.crop,
-      scale: display.scale,
-      position: display.position,
-      prioritizeVisual: display.prioritizeVisual,
-      annotations: display.annotations,
-      startMs: display.startMs,
-      endMs: display.endMs,
-      playbackRate: display.playbackRate,
-      volume: display.volume
-    };
+function sameTemplate(
+  left: ResolvedScreenTemplate,
+  right: ResolvedScreenTemplate
+): boolean {
+  return (
+    left.templateId === right.templateId &&
+    left.templateRevision === right.templateRevision &&
+    left.templateHash === right.templateHash
+  );
+}
+
+function resolvedLayoutForTemplate(
+  binding: ResolvedScreenTemplate,
+  characters: readonly { readonly id: string }[],
+  prioritizeVisual: boolean
+): ResolvedScreenLayout {
+  return resolveScreenTemplateLayout(binding.template, {
+    characterIds: {
+      "speaker-1": characters[0]?.id,
+      "speaker-2": characters[1]?.id
+    },
+    prioritizeVisual
+  });
+}
+
+function linePrioritySet(
+  project: z.infer<typeof videoProjectSchema>,
+  lineEntries: readonly LineEntry[]
+): Set<string> {
+  const entryById = new Map(lineEntries.map((entry) => [entry.line.id, entry]));
+  const priority = new Set<string>();
+  for (const assignment of project.visuals.assignments) {
+    if (!assignment.display.prioritizeVisual) {
+      continue;
+    }
+    const start = entryById.get(assignment.startLineId);
+    const end = entryById.get(assignment.endLineId);
+    if (
+      start === undefined ||
+      end === undefined ||
+      start.sectionId !== end.sectionId
+    ) {
+      continue;
+    }
+    for (const entry of lineEntries) {
+      if (
+        entry.sectionId === start.sectionId &&
+        entry.lineIndex >= start.lineIndex &&
+        entry.lineIndex <= end.lineIndex
+      ) {
+        priority.add(entry.line.id);
+      }
+    }
   }
-  if (display.kind === "photo") {
-    return {
-      kind: display.kind,
-      fit: display.fit,
-      crop: display.crop,
-      scale: display.scale,
-      position: display.position,
-      prioritizeVisual: display.prioritizeVisual,
-      annotations: display.annotations
-    };
+  return priority;
+}
+
+function visualSegmentId(
+  sourceAssignmentId: string,
+  segmentStartLineId: string,
+  segmentEndLineId: string,
+  binding: ResolvedScreenTemplate
+): string {
+  return `visual-${sha256CanonicalJson({
+    sourceAssignmentId,
+    segmentStartLineId,
+    segmentEndLineId,
+    screenTemplateId: binding.templateId,
+    templateRevision: binding.templateRevision,
+    templateHash: binding.templateHash
+  })}`;
+}
+
+function elapsedMediaMs(
+  frames: number,
+  fps: number,
+  playbackRate: number
+): number {
+  return Math.round((frames * 1000 * playbackRate) / fps);
+}
+
+type VisualSegmentBuildInput = Readonly<{
+  readonly project: z.infer<typeof videoProjectSchema>;
+  readonly lineEntries: readonly LineEntry[];
+  readonly lineRangeById: ReadonlyMap<string, TimelineLineRange>;
+  readonly lineIndexById: ReadonlyMap<string, LineEntry>;
+  readonly visualRanges: readonly {
+    readonly id: string;
+    readonly from: number;
+    readonly durationInFrames: number;
+  }[];
+  readonly sectionShiftById: ReadonlyMap<string, number>;
+  readonly templates: ReadonlyMap<string, ResolvedScreenTemplate>;
+  readonly characters: readonly { readonly id: string }[];
+  readonly fps: number;
+  readonly diagnostics: RenderManifestDiagnostic[];
+}>;
+
+function buildVisualSegments({
+  project,
+  lineEntries,
+  lineRangeById,
+  lineIndexById,
+  visualRanges,
+  sectionShiftById,
+  templates,
+  characters,
+  fps,
+  diagnostics
+}: VisualSegmentBuildInput): RenderVisual[] {
+  const assignmentById = new Map(
+    project.visuals.assignments.map((assignment) => [assignment.id, assignment])
+  );
+  const segments: Array<{ value: RenderVisual; inputIndex: number }> = [];
+
+  for (const [assignmentIndex, range] of visualRanges.entries()) {
+    const assignment = assignmentById.get(range.id);
+    if (assignment === undefined) {
+      continue;
+    }
+    const start = lineIndexById.get(assignment.startLineId);
+    const end = lineIndexById.get(assignment.endLineId);
+    if (
+      start === undefined ||
+      end === undefined ||
+      start.sectionId !== end.sectionId
+    ) {
+      continue;
+    }
+    const assignmentSectionId = start.sectionId;
+    const assignmentFrom = shiftedFrom(
+      range.from,
+      assignmentSectionId,
+      sectionShiftById
+    );
+    const assignmentLines = lineEntries.filter(
+      (entry) =>
+        entry.sectionId === assignmentSectionId &&
+        entry.lineIndex >= start.lineIndex &&
+        entry.lineIndex <= end.lineIndex
+    );
+    let groupStart = 0;
+    let segmentIndex = 0;
+    while (groupStart < assignmentLines.length) {
+      const first = assignmentLines[groupStart];
+      if (first === undefined) {
+        break;
+      }
+      const firstTemplateId =
+        first.line.screenTemplateId ??
+        project.script.sections[first.sectionIndex]?.screenTemplateId;
+      const firstBinding =
+        firstTemplateId === undefined
+          ? undefined
+          : templates.get(firstTemplateId);
+      if (firstBinding === undefined) {
+        groupStart += 1;
+        continue;
+      }
+      let groupEnd = groupStart;
+      while (groupEnd + 1 < assignmentLines.length) {
+        const next = assignmentLines[groupEnd + 1];
+        if (next === undefined) {
+          break;
+        }
+        const nextTemplateId =
+          next.line.screenTemplateId ??
+          project.script.sections[next.sectionIndex]?.screenTemplateId;
+        const nextBinding =
+          nextTemplateId === undefined
+            ? undefined
+            : templates.get(nextTemplateId);
+        if (
+          nextBinding === undefined ||
+          !sameTemplate(firstBinding, nextBinding)
+        ) {
+          break;
+        }
+        groupEnd += 1;
+      }
+
+      const last = assignmentLines[groupEnd];
+      const firstRange = lineRangeById.get(first.line.id);
+      const lastRange =
+        last === undefined ? undefined : lineRangeById.get(last.line.id);
+      if (
+        last === undefined ||
+        firstRange === undefined ||
+        lastRange === undefined
+      ) {
+        groupStart = groupEnd + 1;
+        continue;
+      }
+      const baseFrom = firstRange.from;
+      const baseTo = lastRange.from + lastRange.durationInFrames;
+      const from = shiftedFrom(baseFrom, assignmentSectionId, sectionShiftById);
+      const durationInFrames = baseTo - baseFrom;
+      const templateLayout = resolvedLayoutForTemplate(
+        firstBinding,
+        characters,
+        false
+      );
+      const sourceDisplay = assignment.display;
+      let videoSegmentTrim:
+        | {
+            readonly sourceTrimBeforeFrame: number;
+            readonly sourceTrimAfterFrame: number;
+          }
+        | undefined;
+      if (sourceDisplay.kind === "video") {
+        const sourceStartFrame = mediaMillisecondsToFrames(
+          sourceDisplay.startMs,
+          fps
+        );
+        const elapsedStartFrames = from - assignmentFrom;
+        const elapsedEndFrames = from + durationInFrames - assignmentFrom;
+        const sourceTrimBeforeFrame =
+          sourceStartFrame +
+          presentationFramesToMediaPosition(
+            elapsedStartFrames,
+            sourceDisplay.playbackRate
+          );
+        const legacyEndMs = Math.min(
+          sourceDisplay.endMs,
+          sourceDisplay.startMs +
+            elapsedMediaMs(elapsedEndFrames, fps, sourceDisplay.playbackRate)
+        );
+        const sourceTrimAfterFrame =
+          legacyEndMs < sourceDisplay.endMs
+            ? sourceStartFrame +
+              presentationFramesToMediaPosition(
+                elapsedEndFrames,
+                sourceDisplay.playbackRate
+              )
+            : mediaMillisecondsToFrames(legacyEndMs, fps);
+        videoSegmentTrim = {
+          sourceTrimBeforeFrame,
+          sourceTrimAfterFrame
+        };
+      }
+
+      const display = resolveVisualDisplay(sourceDisplay, templateLayout, {
+        fps,
+        sourceTrimBeforeFrame: videoSegmentTrim?.sourceTrimBeforeFrame,
+        sourceTrimAfterFrame: videoSegmentTrim?.sourceTrimAfterFrame
+      });
+
+      if (videoSegmentTrim && display.kind === "video") {
+        const { sourceTrimBeforeFrame, sourceTrimAfterFrame } =
+          videoSegmentTrim;
+        if (sourceTrimAfterFrame <= sourceTrimBeforeFrame) {
+          addDiagnostic(
+            diagnostics,
+            RENDER_MANIFEST_ERROR_CODE.visualSegmentRangeInvalid,
+            ["visuals", "assignments", assignmentIndex, "display"],
+            "resolved video segment source range must be positive and within the assignment source range",
+            {
+              assignmentId: assignment.id,
+              assetPath: assignment.projectMediaPath
+            }
+          );
+        }
+      }
+
+      const segmentStartLineId = first.line.id;
+      const segmentEndLineId = last.line.id;
+      segments.push({
+        inputIndex: assignmentIndex * 1000 + segmentIndex,
+        value: {
+          id: visualSegmentId(
+            assignment.id,
+            segmentStartLineId,
+            segmentEndLineId,
+            firstBinding
+          ),
+          sourceAssignmentId: assignment.id,
+          segmentIndex,
+          segmentStartLineId,
+          segmentEndLineId,
+          screenTemplateId: firstBinding.templateId,
+          templateRevision: firstBinding.templateRevision,
+          templateHash: firstBinding.templateHash,
+          from,
+          durationInFrames,
+          kind: assignment.display.kind,
+          src: assignment.projectMediaPath,
+          display
+        } as RenderVisual
+      });
+      segmentIndex += 1;
+      groupStart = groupEnd + 1;
+    }
   }
+
+  return stableTimelineSort(segments);
+}
+
+function orderedScreenTransform(
+  transform: ResolvedScreenLayout["elements"][number]["transform"]
+): ResolvedScreenLayout["elements"][number]["transform"] {
   return {
-    kind: display.kind,
-    fit: display.fit,
-    crop: display.crop,
-    scale: display.scale,
-    position: display.position,
-    prioritizeVisual: display.prioritizeVisual,
-    annotations: display.annotations,
-    page: display.page
+    rect: {
+      x: transform.rect.x,
+      y: transform.rect.y,
+      width: transform.rect.width,
+      height: transform.rect.height
+    },
+    rotationDeg: transform.rotationDeg
   };
 }
 
-function toRenderDisplayV23(display: DisplayV13): RenderVisual["display"] {
+function orderedResolvedLayout(
+  layout: ResolvedScreenLayout
+): ResolvedScreenLayout {
+  return {
+    canvasWidth: layout.canvasWidth,
+    canvasHeight: layout.canvasHeight,
+    elements: layout.elements.map((element) => {
+      if (element.type === "dialogue-window") {
+        return {
+          elementId: element.elementId,
+          type: element.type,
+          transform: orderedScreenTransform(element.transform),
+          fontSize: element.fontSize
+        };
+      }
+      if (element.type === "section-title") {
+        return {
+          elementId: element.elementId,
+          type: element.type,
+          transform: orderedScreenTransform(element.transform),
+          fontSize: element.fontSize
+        };
+      }
+      if (element.type === "content-slot") {
+        return {
+          elementId: element.elementId,
+          type: element.type,
+          slot: element.slot,
+          transform: orderedScreenTransform(element.transform)
+        };
+      }
+      return {
+        elementId: element.elementId,
+        type: element.type,
+        slot: element.slot,
+        characterId: element.characterId,
+        transform: orderedScreenTransform(element.transform),
+        flipX: element.flipX
+      };
+    })
+  };
+}
+
+function orderedResolvedDisplay(
+  display: RenderResolvedVisualDisplay
+): RenderResolvedVisualDisplay {
   if (display.kind === "video") {
     return {
       kind: display.kind,
+      outerFrame: orderedScreenTransform(display.outerFrame),
+      contentClip: {
+        transform: orderedScreenTransform(display.contentClip.transform),
+        enabled: display.contentClip.enabled
+      },
       fit: display.fit,
       crop: display.crop,
-      scale: display.scale,
-      position: display.position,
-      prioritizeVisual: display.prioritizeVisual,
       annotations: display.annotations,
       startMs: display.startMs,
       endMs: display.endMs,
+      sourceTrimBeforeFrame: display.sourceTrimBeforeFrame,
+      sourceTrimAfterFrame: display.sourceTrimAfterFrame,
       playbackRate: display.playbackRate,
       volume: display.volume
     };
@@ -979,21 +1425,25 @@ function toRenderDisplayV23(display: DisplayV13): RenderVisual["display"] {
   if (display.kind === "photo") {
     return {
       kind: display.kind,
+      outerFrame: orderedScreenTransform(display.outerFrame),
+      contentClip: {
+        transform: orderedScreenTransform(display.contentClip.transform),
+        enabled: display.contentClip.enabled
+      },
       fit: display.fit,
       crop: display.crop,
-      scale: display.scale,
-      position: display.position,
-      prioritizeVisual: display.prioritizeVisual,
       annotations: display.annotations
     };
   }
   return {
     kind: display.kind,
+    outerFrame: orderedScreenTransform(display.outerFrame),
+    contentClip: {
+      transform: orderedScreenTransform(display.contentClip.transform),
+      enabled: display.contentClip.enabled
+    },
     fit: display.fit,
     crop: display.crop,
-    scale: display.scale,
-    position: display.position,
-    prioritizeVisual: display.prioritizeVisual,
     annotations: display.annotations,
     page: display.page
   };
@@ -1065,6 +1515,16 @@ function orderedManifest(manifest: RenderManifest): RenderManifest {
     width: manifest.width,
     height: manifest.height,
     durationInFrames: manifest.durationInFrames,
+    sectionLayouts: manifest.sectionLayouts.map(
+      (layout): RenderSectionLayout => ({
+        sectionId: layout.sectionId,
+        sectionTitle: layout.sectionTitle,
+        templateId: layout.templateId,
+        templateRevision: layout.templateRevision,
+        templateHash: layout.templateHash,
+        resolvedLayout: orderedResolvedLayout(layout.resolvedLayout)
+      })
+    ),
     lines: manifest.lines.map((line): RenderLine => ({
       id: line.id,
       sectionId: line.sectionId,
@@ -1076,36 +1536,70 @@ function orderedManifest(manifest: RenderManifest): RenderManifest {
       subtitleText: line.subtitleText,
       speakerId: line.speakerId,
       expression: line.expression,
-      characterVariantId: line.characterVariantId
+      characterVariantId: line.characterVariantId,
+      screenTemplateId: line.screenTemplateId,
+      templateRevision: line.templateRevision,
+      templateHash: line.templateHash,
+      resolvedLayout: orderedResolvedLayout(line.resolvedLayout)
     })),
     visuals: manifest.visuals.map((visual): RenderVisual => {
       if (visual.kind === "video") {
         return {
           id: visual.id,
+          sourceAssignmentId: visual.sourceAssignmentId,
+          segmentIndex: visual.segmentIndex,
+          segmentStartLineId: visual.segmentStartLineId,
+          segmentEndLineId: visual.segmentEndLineId,
+          screenTemplateId: visual.screenTemplateId,
+          templateRevision: visual.templateRevision,
+          templateHash: visual.templateHash,
           from: visual.from,
           durationInFrames: visual.durationInFrames,
           src: visual.src,
           kind: visual.kind,
-          display: orderedVisualDisplay(visual.display) as typeof visual.display
+          display: orderedResolvedDisplay(visual.display) as Extract<
+            RenderVisual,
+            { kind: "video" }
+          >["display"]
         };
       }
       if (visual.kind === "photo") {
         return {
           id: visual.id,
+          sourceAssignmentId: visual.sourceAssignmentId,
+          segmentIndex: visual.segmentIndex,
+          segmentStartLineId: visual.segmentStartLineId,
+          segmentEndLineId: visual.segmentEndLineId,
+          screenTemplateId: visual.screenTemplateId,
+          templateRevision: visual.templateRevision,
+          templateHash: visual.templateHash,
           from: visual.from,
           durationInFrames: visual.durationInFrames,
           src: visual.src,
           kind: visual.kind,
-          display: orderedVisualDisplay(visual.display) as typeof visual.display
+          display: orderedResolvedDisplay(visual.display) as Extract<
+            RenderVisual,
+            { kind: "photo" }
+          >["display"]
         };
       }
       return {
         id: visual.id,
+        sourceAssignmentId: visual.sourceAssignmentId,
+        segmentIndex: visual.segmentIndex,
+        segmentStartLineId: visual.segmentStartLineId,
+        segmentEndLineId: visual.segmentEndLineId,
+        screenTemplateId: visual.screenTemplateId,
+        templateRevision: visual.templateRevision,
+        templateHash: visual.templateHash,
         from: visual.from,
         durationInFrames: visual.durationInFrames,
         src: visual.src,
         kind: visual.kind,
-        display: orderedVisualDisplay(visual.display) as typeof visual.display
+        display: orderedResolvedDisplay(visual.display) as Extract<
+          RenderVisual,
+          { kind: "document_scan" }
+        >["display"]
       };
     }),
     backgrounds: manifest.backgrounds.map((background): RenderBackground => ({
@@ -1198,6 +1692,10 @@ export function compileRenderManifest(
   const audioResult = voicevoxAudioIndexSchema.safeParse(audioRaw);
   const assets = normalizeAssets(recordInputAssets(input), diagnostics);
   const assetLookup = getAssetLookup(assets);
+  const screenTemplates = normalizeScreenTemplates(
+    recordInputScreenTemplates(input),
+    diagnostics
+  );
   const catalog = normalizeCatalog(recordInputCatalog(input), diagnostics);
   const catalogByKey = new Map(
     catalog.map((variant) => [
@@ -1309,6 +1807,92 @@ export function compileRenderManifest(
   const lineIndexById = new Map(
     lineEntries.map((entry) => [entry.line.id, entry])
   );
+  const templateBindingByLineId = new Map<string, ResolvedScreenTemplate>();
+  const sectionTemplateBindingById = new Map<string, ResolvedScreenTemplate>();
+  const linePriority = linePrioritySet(project, lineEntries);
+  const charactersForLayout = project.characters.map((character) => ({
+    id: character.id
+  }));
+  const resolvedLayoutByLineId = new Map<string, ResolvedScreenLayout>();
+
+  for (const [sectionIndex, section] of project.script.sections.entries()) {
+    const binding = screenTemplates.get(section.screenTemplateId);
+    if (binding === undefined) {
+      addDiagnostic(
+        diagnostics,
+        RENDER_MANIFEST_ERROR_CODE.screenTemplateMissing,
+        ["script", "sections", sectionIndex, "screenTemplateId"],
+        "selected screen template is missing from the validated snapshot",
+        { sectionId: section.id }
+      );
+      continue;
+    }
+    if (binding.template.status !== "active") {
+      addDiagnostic(
+        diagnostics,
+        RENDER_MANIFEST_ERROR_CODE.screenTemplateInactive,
+        ["script", "sections", sectionIndex, "screenTemplateId"],
+        "selected screen template is inactive",
+        { sectionId: section.id }
+      );
+      continue;
+    }
+    sectionTemplateBindingById.set(section.id, binding);
+  }
+
+  for (const entry of lineEntries) {
+    const section = project.script.sections[entry.sectionIndex];
+    const templateId = entry.line.screenTemplateId ?? section?.screenTemplateId;
+    const path = [
+      "script",
+      "sections",
+      entry.sectionIndex,
+      "lines",
+      entry.lineIndex,
+      "screenTemplateId"
+    ];
+    if (templateId === undefined) {
+      addDiagnostic(
+        diagnostics,
+        RENDER_MANIFEST_ERROR_CODE.screenTemplateMissing,
+        path,
+        "line has no effective screen template",
+        { lineId: entry.line.id, sectionId: entry.sectionId }
+      );
+      continue;
+    }
+    const binding = screenTemplates.get(templateId);
+    if (binding === undefined) {
+      addDiagnostic(
+        diagnostics,
+        RENDER_MANIFEST_ERROR_CODE.screenTemplateMissing,
+        path,
+        "selected screen template is missing from the validated snapshot",
+        { lineId: entry.line.id, sectionId: entry.sectionId }
+      );
+      continue;
+    }
+    if (binding.template.status !== "active") {
+      addDiagnostic(
+        diagnostics,
+        RENDER_MANIFEST_ERROR_CODE.screenTemplateInactive,
+        path,
+        "selected screen template is inactive",
+        { lineId: entry.line.id, sectionId: entry.sectionId }
+      );
+      continue;
+    }
+    templateBindingByLineId.set(entry.line.id, binding);
+    resolvedLayoutByLineId.set(
+      entry.line.id,
+      resolvedLayoutForTemplate(
+        binding,
+        charactersForLayout,
+        linePriority.has(entry.line.id)
+      )
+    );
+  }
+
   const sourceAssets = new Map<string, string>();
   const lineAudio = new Map<string, VoicevoxAudioIndexEntry>();
   for (const entry of lineEntries) {
@@ -1827,6 +2411,10 @@ export function compileRenderManifest(
     }
   }
 
+  // Do not assemble resolved layouts or visual segments after semantic
+  // validation has failed. In particular, invalid templates are intentionally
+  // absent from the normalized map so resolution cannot throw on partial
+  // geometry.
   if (
     diagnostics.length > 0 ||
     lineRanges === undefined ||
@@ -1902,16 +2490,43 @@ export function compileRenderManifest(
       characterVariantId: entry.line.characterVariantId ?? null
     }))
   };
-  const compilerInputHash = computeCompilerInputHash({
-    project,
-    audioIndex,
-    assets: normalizedAssetsForHash,
-    characterCatalogVersion,
-    characterMappingVersion,
-    characterCatalog: catalogForHash,
-    characterSelection: characterSelectionForHash
-  });
-
+  const referencedScreenTemplateIds = sortedUniqueStrings(
+    project.script.sections.flatMap((section) => [
+      section.screenTemplateId,
+      ...section.lines.flatMap((line) =>
+        line.screenTemplateId === null ? [] : [line.screenTemplateId]
+      )
+    ])
+  );
+  const screenTemplateForHash = referencedScreenTemplateIds.map(
+    (templateId) => {
+      const binding = screenTemplates.get(templateId);
+      return {
+        templateId,
+        revision: binding?.templateRevision ?? null,
+        hash: binding?.templateHash ?? null,
+        template:
+          binding === undefined
+            ? null
+            : {
+                canvasWidth: binding.template.canvasWidth,
+                canvasHeight: binding.template.canvasHeight,
+                elements: binding.template.elements
+              },
+        lines: lineEntries
+          .filter(
+            (entry) =>
+              (entry.line.screenTemplateId ??
+                project.script.sections[entry.sectionIndex]
+                  ?.screenTemplateId) === templateId
+          )
+          .map((entry) => ({
+            lineId: entry.line.id,
+            resolvedLayout: resolvedLayoutByLineId.get(entry.line.id) ?? null
+          }))
+      };
+    }
+  );
   const renderLines: RenderLine[] = lineEntries.map((entry) => {
     const baseRange = lineRangeById.get(entry.line.id);
     if (baseRange === undefined) {
@@ -1940,44 +2555,82 @@ export function compileRenderManifest(
       subtitleText: entry.line.subtitleText,
       speakerId: entry.line.speakerId,
       expression: entry.line.expression,
-      characterVariantId
+      characterVariantId,
+      screenTemplateId:
+        templateBindingByLineId.get(entry.line.id)?.templateId ??
+        entry.line.screenTemplateId ??
+        project.script.sections[entry.sectionIndex]?.screenTemplateId ??
+        "screen-template-missing",
+      templateRevision:
+        templateBindingByLineId.get(entry.line.id)?.templateRevision ?? 1,
+      templateHash:
+        templateBindingByLineId.get(entry.line.id)?.templateHash ??
+        "0".repeat(64),
+      resolvedLayout:
+        resolvedLayoutByLineId.get(entry.line.id) ??
+        ({
+          canvasWidth: 1920,
+          canvasHeight: 1080,
+          elements: []
+        } as ResolvedScreenLayout)
     };
   });
 
-  const assignmentById = new Map(
-    project.visuals.assignments.map((assignment) => [assignment.id, assignment])
+  const visualValues = buildVisualSegments({
+    project,
+    lineEntries,
+    lineRangeById,
+    lineIndexById,
+    visualRanges,
+    sectionShiftById: editVideoTimeline.sectionShiftById,
+    templates: screenTemplates,
+    characters: charactersForLayout,
+    fps,
+    diagnostics
+  });
+
+  const sectionLayouts: RenderSectionLayout[] = project.script.sections.map(
+    (section) => {
+      const binding = sectionTemplateBindingById.get(section.id);
+      if (binding === undefined) {
+        throw new Error(`section template binding is missing: ${section.id}`);
+      }
+      return {
+        sectionId: section.id,
+        sectionTitle: section.name,
+        templateId: binding.templateId,
+        templateRevision: binding.templateRevision,
+        templateHash: binding.templateHash,
+        resolvedLayout: resolvedLayoutForTemplate(
+          binding,
+          charactersForLayout,
+          false
+        )
+      };
+    }
   );
-  const assignmentIndexById = new Map(
-    project.visuals.assignments.map((assignment, index) => [
-      assignment.id,
-      index
-    ])
-  );
-  const visualValues = visualRanges.map((range) => {
-    const assignment = assignmentById.get(range.id);
-    if (assignment === undefined) {
-      throw new Error(`visual assignment is missing: ${range.id}`);
-    }
-    const assignmentIndex = assignmentIndexById.get(range.id);
-    if (assignmentIndex === undefined) {
-      throw new Error(`visual assignment index is missing: ${range.id}`);
-    }
-    const sectionId = lineIndexById.get(assignment.startLineId)?.sectionId;
-    if (sectionId === undefined) {
-      throw new Error(`visual assignment section is missing: ${assignment.id}`);
-    }
-    return {
-      id: assignment.id,
-      from: shiftedFrom(
-        range.from,
-        sectionId,
-        editVideoTimeline.sectionShiftById
-      ),
-      durationInFrames: range.durationInFrames,
-      kind: assignment.display.kind,
-      src: assignment.projectMediaPath,
-      display: toRenderDisplayV23(assignment.display)
-    } as RenderVisual;
+  const compilerInputHash = computeCompilerInputHash({
+    project,
+    audioIndex,
+    assets: normalizedAssetsForHash,
+    characterCatalogVersion,
+    characterMappingVersion,
+    characterCatalog: catalogForHash,
+    characterSelection: characterSelectionForHash,
+    screenTemplateSelection: referencedScreenTemplateIds.map((templateId) => ({
+      templateId,
+      lines: lineEntries
+        .filter(
+          (entry) =>
+            (entry.line.screenTemplateId ??
+              project.script.sections[entry.sectionIndex]?.screenTemplateId) ===
+            templateId
+        )
+        .map((entry) => entry.line.id)
+    })),
+    screenTemplate: screenTemplateForHash,
+    sectionLayouts,
+    visualSegments: visualValues
   });
 
   const renderBackgrounds = project.script.sections.map((section) => {
@@ -2124,6 +2777,7 @@ export function compileRenderManifest(
     width: project.metadata.outputSettings.width,
     height: project.metadata.outputSettings.height,
     durationInFrames,
+    sectionLayouts,
     lines: renderLines,
     visuals: visualValues,
     backgrounds: renderBackgrounds,

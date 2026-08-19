@@ -218,7 +218,7 @@ describe("RenderManifestStore", () => {
         }
       ]
     });
-    const serialized = `${JSON.stringify(reused.manifest, null, 2)}\n`;
+    const serialized = await fs.readFile(targetPath(root), "utf8");
     expect(run.outputs[0]?.checksum).toBe(
       createHash("sha256").update(serialized, "utf8").digest("hex")
     );

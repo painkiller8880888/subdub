@@ -13,17 +13,11 @@ import { MediaFrame, mediaAssetStyle } from "./layout";
 type RenderVideo = Extract<RenderVisual, { kind: "video" }>;
 type RenderPhoto = Extract<RenderVisual, { kind: "photo" }>;
 
-function millisecondsToFrames(milliseconds: number, fps: number): number {
-  return Math.ceil((milliseconds / 1000) * fps);
-}
-
 export function VideoVisual({
   visual,
-  fps,
   assetUrlResolver = defaultManifestAssetUrlResolver
 }: {
   visual: RenderVideo;
-  fps: number;
   assetUrlResolver?: ManifestAssetUrlResolver;
 }): ReactNode {
   useCurrentFrame();
@@ -31,8 +25,8 @@ export function VideoVisual({
     <MediaFrame display={visual.display}>
       <OffthreadVideo
         src={resolveManifestAssetUrl(visual.src, assetUrlResolver)}
-        trimBefore={millisecondsToFrames(visual.display.startMs, fps)}
-        trimAfter={millisecondsToFrames(visual.display.endMs, fps)}
+        trimBefore={visual.display.sourceTrimBeforeFrame}
+        trimAfter={visual.display.sourceTrimAfterFrame}
         playbackRate={visual.display.playbackRate}
         volume={visual.display.volume}
         style={{

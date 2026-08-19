@@ -1,20 +1,28 @@
 import type { ReactNode } from "react";
 
-import type { RenderLine, RenderManifest } from "../schema/index";
+import type { CSSProperties } from "react";
+import type {
+  RenderLine,
+  RenderManifest,
+  ResolvedScreenLayout
+} from "../schema/index";
+import { screenTransformStyle } from "../screen-layout-resolver";
 import { REMOTION_FONT_FAMILY } from "./font";
 import { DESIGN_COLORS } from "./layout";
 import {
   resolveSubtitleContent,
   subtitleContainerStyle,
-  subtitleTypographyScale
+  subtitleTypographyScaleForFontSize
 } from "./layout-helpers";
 
 export function SubtitleLayer({
   manifest,
-  lines
+  lines,
+  layout
 }: {
   manifest: RenderManifest;
   lines: readonly RenderLine[];
+  layout?: ResolvedScreenLayout;
 }): ReactNode {
   const line = lines[0];
   if (line === undefined || line.subtitleText.length === 0) {
@@ -23,10 +31,37 @@ export function SubtitleLayer({
 
   const { displayName, side, speakerColor, subtitleText } =
     resolveSubtitleContent(manifest, line);
-  const typographyScale = subtitleTypographyScale(displayName, subtitleText);
+  const dialogueElement =
+    layout === undefined
+      ? undefined
+      : layout.elements.find(
+          (
+            element
+          ): element is Extract<
+            ResolvedScreenLayout["elements"][number],
+            { type: "dialogue-window" }
+          > => element.type === "dialogue-window"
+        );
+  const dialogueFontSize = dialogueElement?.fontSize ?? 38;
+  const typographyScale = subtitleTypographyScaleForFontSize(
+    displayName,
+    subtitleText,
+    dialogueFontSize
+  );
+  const containerStyle: CSSProperties =
+    dialogueElement === undefined
+      ? subtitleContainerStyle(side)
+      : {
+          ...screenTransformStyle(dialogueElement.transform),
+          zIndex: 5,
+          display: "flex",
+          alignItems: "flex-end",
+          justifyContent: side === "left" ? "flex-start" : "flex-end",
+          pointerEvents: "none"
+        };
 
   return (
-    <div style={subtitleContainerStyle(side)}>
+    <div style={containerStyle}>
       <div
         style={{
           width: "fit-content",
@@ -60,14 +95,14 @@ export function SubtitleLayer({
             whiteSpace: "pre-wrap",
             overflowWrap: "anywhere",
             wordBreak: "break-word",
-            fontSize: 26 * typographyScale
+            fontSize: dialogueFontSize * (26 / 38) * typographyScale
           }}
         >
           {displayName}
         </div>
         <div
           style={{
-            fontSize: 38 * typographyScale,
+            fontSize: dialogueFontSize * typographyScale,
             whiteSpace: "pre-wrap",
             overflowWrap: "anywhere",
             wordBreak: "break-word"

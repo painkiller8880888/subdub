@@ -7,6 +7,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { legacyCharacterVariantCatalog } from "../../src/app/character-visuals/character-visual-seed.js";
 import { computeOutlineHash } from "../../src/app/projects/script-domain.js";
+import { createStandardScreenTemplate } from "../../src/app/screen-templates/screen-template-seed.js";
 import { RenderManifestInputBuilder } from "../../src/app/rendering/render-manifest-compile-service.js";
 import {
   compileRenderManifest,
@@ -58,7 +59,7 @@ const snapshot = characterVisualCatalogSnapshotSchema.parse([
 ]);
 
 const activeScreenTemplateCatalog = {
-  findById: () => ({ status: "active" as const })
+  findById: () => createStandardScreenTemplate("2026-08-10T00:00:00.000Z")
 };
 
 function createLegacySnapshot() {

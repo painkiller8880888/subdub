@@ -76,7 +76,11 @@ export class RenderPreflightService implements RenderPreflightServicePort {
           "A render asset could not be read."
         );
       }
-      if (codes.has("MANIFEST_PROJECT_STALE") || preview.state === "stale") {
+      if (
+        codes.has("MANIFEST_PROJECT_STALE") ||
+        codes.has("MANIFEST_SCREEN_TEMPLATE_STALE") ||
+        preview.state === "stale"
+      ) {
         throw new RenderJobError(
           RENDER_JOB_ERROR_CODE.manifestStale,
           422,

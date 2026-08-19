@@ -17,29 +17,23 @@ import {
   selectActiveBackground,
   selectActiveInsert,
   selectActiveLines,
-  selectActiveVisuals
+  selectActiveVisuals,
+  selectActiveScreenLayout
 } from "./selection";
+import { SectionTitleLayer } from "./section-title";
 import { SubtitleLayer } from "./subtitle";
 import { VideoInsert } from "./video-insert";
 import { PhotoVisual, VideoVisual } from "./visuals";
 
 function RenderVisual({
-  manifest,
   visual,
   assetUrlResolver
 }: {
-  manifest: RenderManifest;
   visual: RenderManifest["visuals"][number];
   assetUrlResolver: ManifestAssetUrlResolver;
 }): ReactNode {
   if (visual.kind === "video") {
-    return (
-      <VideoVisual
-        visual={visual}
-        fps={manifest.fps}
-        assetUrlResolver={assetUrlResolver}
-      />
-    );
+    return <VideoVisual visual={visual} assetUrlResolver={assetUrlResolver} />;
   }
   if (visual.kind === "photo") {
     return <PhotoVisual visual={visual} assetUrlResolver={assetUrlResolver} />;
@@ -112,9 +106,11 @@ export function RenderManifestComposition(
   const background = selectActiveBackground(manifest, frame);
   const activeVisuals = selectActiveVisuals(manifest, frame);
   const activeLines = selectActiveLines(manifest, frame);
-  const prioritizeVisual = activeVisuals.some(
-    (visual) => visual.display.prioritizeVisual
-  );
+  const activeLayout = selectActiveScreenLayout(manifest, frame, activeLines);
+  const activeSectionId = activeLines[0]?.sectionId ?? background?.sectionId;
+  const sectionTitle = manifest.sectionLayouts.find(
+    (layout) => layout.sectionId === activeSectionId
+  )?.sectionTitle;
 
   return (
     <AbsoluteFill
@@ -141,20 +137,21 @@ export function RenderManifestComposition(
           layout="none"
           name={visual.id}
         >
-          <RenderVisual
-            manifest={manifest}
-            visual={visual}
-            assetUrlResolver={assetUrlResolver}
-          />
+          <RenderVisual visual={visual} assetUrlResolver={assetUrlResolver} />
         </Sequence>
       ))}
       <CharacterLayer
         manifest={manifest}
         frame={frame}
-        prioritizeVisual={prioritizeVisual}
+        layout={activeLayout}
         assetUrlResolver={assetUrlResolver}
       />
-      <SubtitleLayer manifest={manifest} lines={activeLines} />
+      <SectionTitleLayer layout={activeLayout} title={sectionTitle} />
+      <SubtitleLayer
+        manifest={manifest}
+        lines={activeLines}
+        layout={activeLayout}
+      />
     </AbsoluteFill>
   );
 }

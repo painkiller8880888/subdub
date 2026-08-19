@@ -1,5 +1,6 @@
 import { computeOutlineHash } from "../../src/app/projects/script-domain.js";
 import { legacyCharacterVariantCatalog } from "../../src/app/character-visuals/character-visual-seed.js";
+import { createStandardScreenTemplate } from "../../src/app/screen-templates/screen-template-seed.js";
 import type {
   RenderManifestAssetMetadata,
   RenderManifestCompilerInput
@@ -120,6 +121,9 @@ export function createRenderManifestInput(
     project: currentProject,
     audioIndex,
     characterVariantCatalog: legacyCharacterVariantCatalog,
+    screenTemplateCatalogSnapshot: [
+      createStandardScreenTemplate("2026-08-10T00:00:00.000Z")
+    ],
     assetMetadata: createRenderManifestAssetMetadata(
       currentProject,
       audioIndex
