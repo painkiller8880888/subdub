@@ -87,7 +87,9 @@ line-card preview は line ごとの適用 template、section title（`ScriptSec
 
 ### 1.5 Issue #145 / ST-08 の canonical default と bounds policy
 
-ST-08 は ST-00〜ST-07 の ScreenTemplate 契約を置き換えず、geometry validation と editor UX を拡張する。保存 payload、DB numeric columns、`VideoProject 1.3.0`、`RenderManifest 2.4.0` の version は変更しない。
+ST-08 は ST-00〜ST-07 の ScreenTemplate 契約を置き換えず、geometry validation と editor UX を拡張する。保存 payload、DB numeric columns、`VideoProject 1.3.0`、`RenderManifest 2.4.0` の version は変更しない。現行 SQLite の `REAL` columns は overflow を保持できるが、既存 `screen_template_elements_geometry_check` が全 element に canvas containment を要求するため、character-visual の保存にはこの constraint semantics を変更する database migration を ST-08 のスコープ内で追加する。
+
+実装順は、最初に本書と `doc/doc.md` へ SQLite constraint semantics、migration の既存データ扱い、非 character 要素の互換制約、version 非変更を反映し、その後に SQLite schema / migration、Zod / domain、editor、compiler、preview / render の順で進める。新しい serialized field や project / manifest の version boundary は追加しない。
 
 ScreenTemplate の rect validation は element type ごとに分離する。
 
@@ -99,6 +101,8 @@ character-visual -> partial overflow allowed / fully off-canvas forbidden
 ```
 
 `character-visual` は finite x / y、finite positive width / height、finite rotation を受け付ける。rect または中心回転後の AABB の一部が canvas 外へ出ても保存可能だが、回転後の AABB と `[0, 1] × [0, 1]` の交差が空なら validation error とする。その他 3 element の rect と回転後 AABB は従来どおり canvas 内を要求する。任意の最低表示率は設けない。
+
+SQLite の `screen_template_elements_geometry_check` は、全 element に対して finite な x / y / width / height / rotation と正の width / height を残し、`character-visual` の branch だけは x / y の負値・1 超と width / height の 1 超を許可する。`dialogue-window`、`section-title`、`content-slot` の branch には従来の `x >= 0`、`y >= 0`、`x + width <= 1`、`y + height <= 1` を残す。回転後 AABB の交差判定と完全 off-canvas 判定は DB constraint ではなく application validation の責務とする。既存 rows は numeric values、order、config、metadata を変更せずに新 constraint へ移行し、migration の標準 backup / atomicity 手順を使用する。targeted test では既存 DB の migration、character overflow の保存・再読込、非 character overflow の拒否を検証する。
 
 「デフォルトに戻す」は template-level に 1 個だけ実装する。reset は template を削除して seed し直す操作ではなく、immutable な `screen-template-seed.ts` の canonical default definition を使って既存の complete-template update mutation を呼び出す。対象は全 5 element の編集可能な rect、rotation、dialogue / section-title の font size、character の `flipX` であり、template metadata、status、ID、preview の一時 state、sample text は保持する。UI と backend に default 数値を複製せず、mutable な SQLite の `screen-template-standard` row を default source にしない。`expectedRevision`、revision、content hash、stale 判定、失敗時の atomicity は通常 update と同じ契約とする。
 

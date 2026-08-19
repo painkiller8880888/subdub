@@ -395,7 +395,9 @@ template の geometry を先に解決し、その後に generic assignment の i
 
 #### 5.1.1.1 Issue #145 / ST-08 の geometry と default reset
 
-ST-08 では、element type ごとの bounds policy を現在仕様として確定する。
+ST-08 では、element type ごとの bounds policy を現在仕様として確定する。現行 SQLite の `REAL` columns は overflow を保持できるが、既存 `screen_template_elements_geometry_check` が全 element に canvas containment を要求するため、character-visual の保存にはこの constraint semantics を変更する database migration を ST-08 のスコープ内で追加する。
+
+実装順は、最初に本書と `doc/implementation-spec.md` へ SQLite constraint semantics、migration の既存データ扱い、非 character 要素の互換制約、version 非変更を反映し、その後に SQLite schema / migration、Zod / domain、editor、compiler、preview / render の順で進める。新しい serialized field や project / manifest の version boundary は追加しない。
 
 ```text
 dialogue-window  -> canvas-contained
@@ -405,6 +407,8 @@ character-visual -> partial overflow allowed / fully off-canvas forbidden
 ```
 
 `character-visual` の drag、resize、keyboard 移動、数値入力は canvas edge を理由に `x` / `y` / size を clamp しない。editor の interaction layer（selection outline、handles、pointer hit area）は canvas 外へ出た character を再調整できるよう render preview layer と分離し、render preview、line-card preview、Web preview、Remotion は 1920 × 1080 の composition 境界で同じ pixels を clip する。compiler、resolved layout、`RenderManifest 2.4.0` は valid な overflow geometry を 0..1 へ戻さず、`prioritizeVisual` 適用後も同じ座標系を保持する。
+
+SQLite の `screen_template_elements_geometry_check` は、全 element に対して finite な x / y / width / height / rotation と正の width / height を残し、`character-visual` の branch だけは x / y の負値・1 超と width / height の 1 超を許可する。`dialogue-window`、`section-title`、`content-slot` の branch には従来の `x >= 0`、`y >= 0`、`x + width <= 1`、`y + height <= 1` を残す。回転後 AABB の交差判定と完全 off-canvas 判定は DB constraint ではなく application validation の責務とする。既存 rows は numeric values、order、config、metadata を変更せずに新 constraint へ移行し、migration の標準 backup / atomicity 手順を使用する。targeted test では既存 DB の migration、character overflow の保存・再読込、非 character overflow の拒否を検証する。
 
 ScreenTemplate editor の template-level action に「デフォルトに戻す」を 1 つだけ置く。この操作は template を削除・再 seed せず、既存の revision-aware complete-template update を使って、dialogue-window、section-title、2 つの character-visual、primary content-slot の編集可能な rect、rotation、font size、`flipX` を canonical default へ一括復元する。template ID、name、description、status、createdAt、preview 素材・サンプル文字列などの一時 state は変更しない。default の唯一の参照元は `src/app/screen-templates/screen-template-seed.ts` の immutable な standard seed/default definition とし、mutable な SQLite の `screen-template-standard` row や UI の重複定数から読み取らない。revision、content hash、stale 判定、expectedRevision conflict は通常の update と同じ経路を通る。
 
