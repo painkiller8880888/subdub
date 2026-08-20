@@ -243,6 +243,26 @@ function displayDomainIssues(
   return [];
 }
 
+function displayWithoutPlaybackCues(display: DisplayV15): unknown {
+  if (display.kind !== "video") {
+    return display;
+  }
+  return Object.fromEntries(
+    Object.entries(display).filter(([key]) => key !== "playbackCues")
+  );
+}
+
+function isSnapshotOnlyDisplayUpdate(
+  currentDisplay: DisplayV15,
+  nextDisplay: DisplayV15
+): boolean {
+  return (
+    currentDisplay.kind === nextDisplay.kind &&
+    JSON.stringify(displayWithoutPlaybackCues(currentDisplay)) ===
+      JSON.stringify(displayWithoutPlaybackCues(nextDisplay))
+  );
+}
+
 function formatFromLibraryPath(
   libraryMediaPath: string,
   kind: AssetDetail["kind"]
@@ -793,19 +813,18 @@ export class VisualAssignmentService {
       );
     }
 
-    const asset = this.assetRepository.findAssetDetail(currentAssignment.assetId);
-    if (asset === undefined) {
-      throw visualAssignmentError(
-        VISUAL_ASSIGNMENT_ERROR_CODE.assetNotFound,
-        404,
-        "The selected asset does not exist.",
-        [{ path: ["assignment", "assetId"], message: "asset not found" }]
-      );
-    }
     const display = this.normalizeDisplay(
       request.assignment.display,
       currentAssignment.display.displayCoordinateSpace
     );
+    if (display.kind !== currentAssignment.display.kind) {
+      throw visualAssignmentError(
+        VISUAL_ASSIGNMENT_ERROR_CODE.displayKindMismatch,
+        422,
+        "The display kind does not match the existing assignment snapshot.",
+        [{ path: ["assignment", "display", "kind"], message: "kind mismatch" }]
+      );
+    }
     if (
       display.displayCoordinateSpace !==
       currentAssignment.display.displayCoordinateSpace
@@ -823,19 +842,32 @@ export class VisualAssignmentService {
         ]
       );
     }
-    this.assertAssetUsable(asset, display.kind);
-    this.assertDisplayWithinAsset(asset, display);
-    const confirmedChecksum = this.assertChecksum(asset.checksum);
-    if (
-      normalizeChecksum(confirmedChecksum) !==
-      normalizeChecksum(currentAssignment.assetChecksum)
-    ) {
-      throw visualAssignmentError(
-        VISUAL_ASSIGNMENT_ERROR_CODE.checksumMismatch,
-        422,
-        "The current asset checksum no longer matches the assignment.",
-        [{ path: ["assignment", "assetChecksum"], message: "checksum mismatch" }]
+    if (!isSnapshotOnlyDisplayUpdate(currentAssignment.display, display)) {
+      const asset = this.assetRepository.findAssetDetail(
+        currentAssignment.assetId
       );
+      if (asset === undefined) {
+        throw visualAssignmentError(
+          VISUAL_ASSIGNMENT_ERROR_CODE.assetNotFound,
+          404,
+          "The selected asset does not exist.",
+          [{ path: ["assignment", "assetId"], message: "asset not found" }]
+        );
+      }
+      this.assertAssetUsable(asset, display.kind);
+      this.assertDisplayWithinAsset(asset, display);
+      const confirmedChecksum = this.assertChecksum(asset.checksum);
+      if (
+        normalizeChecksum(confirmedChecksum) !==
+        normalizeChecksum(currentAssignment.assetChecksum)
+      ) {
+        throw visualAssignmentError(
+          VISUAL_ASSIGNMENT_ERROR_CODE.checksumMismatch,
+          422,
+          "The current asset checksum no longer matches the assignment.",
+          [{ path: ["assignment", "assetChecksum"], message: "checksum mismatch" }]
+        );
+      }
     }
 
     const updatedAssignment: VisualAssignment = {

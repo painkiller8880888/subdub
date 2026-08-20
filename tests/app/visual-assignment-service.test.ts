@@ -1128,6 +1128,83 @@ describe("VisualAssignmentService", () => {
     });
   });
 
+  it("updates cue-only assignment snapshots without requiring a live active asset", async () => {
+    const context = await setup({
+      asset: createAsset({
+        kind: "video",
+        durationMs: 1000,
+        libraryMediaPath: `media/${ASSET_ID}/v1.mp4`
+      })
+    });
+    const videoDisplay = {
+      ...clone(videoProjectFixture.visuals.assignments[0].display),
+      endMs: 1000
+    };
+    const assigned = await context.service.assign(PROJECT_ID, {
+      expectedRevision: 0,
+      assignment: createAssignment(
+        "snapshot-video-assignment",
+        ASSET_ID,
+        videoDisplay
+      )
+    });
+    const assignment = assigned.data.visuals.assignments[0];
+    if (assignment === undefined || assignment.display.kind !== "video") {
+      throw new Error("video assignment was not created");
+    }
+
+    const withCue = await context.service.update(PROJECT_ID, assignment.id, {
+      expectedRevision: assigned.revision,
+      assignment: {
+        id: assignment.id,
+        startLineId: assignment.startLineId,
+        endLineId: assignment.endLineId,
+        assetId: assignment.assetId,
+        display: {
+          ...assignment.display,
+          playbackCues: [
+            { lineId: "main-mentor-1", edge: "after", action: "pause" }
+          ]
+        }
+      }
+    });
+
+    const liveAssetAfterReplacement = {
+      ...context.asset,
+      checksum: "b".repeat(64),
+      status: "inactive" as const
+    };
+    const snapshotService = new VisualAssignmentService({
+      repository: context.repository,
+      assetRepository: {
+        findAssetDetail: () => liveAssetAfterReplacement
+      },
+      workspaceRoot: context.workspaceRoot,
+      libraryRoot: context.libraryRoot,
+      createId: () => "temp-file-id"
+    });
+
+    const withoutCue = await snapshotService.update(PROJECT_ID, assignment.id, {
+      expectedRevision: withCue.revision,
+      assignment: {
+        id: assignment.id,
+        startLineId: assignment.startLineId,
+        endLineId: assignment.endLineId,
+        assetId: assignment.assetId,
+        display: {
+          ...withCue.data.visuals.assignments[0]!.display,
+          playbackCues: []
+        }
+      }
+    });
+
+    expect(withoutCue.revision).toBe(withCue.revision + 1);
+    expect(withoutCue.data.visuals.assignments[0]?.display).toMatchObject({
+      kind: "video",
+      playbackCues: []
+    });
+  });
+
   it("does not reinterpret a legacy assignment in a regular update", async () => {
     const context = await setup();
     const assigned = await context.service.assign(PROJECT_ID, {

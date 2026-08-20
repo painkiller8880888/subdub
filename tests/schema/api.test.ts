@@ -5,8 +5,11 @@ import {
   apiSuccessResponseSchema,
   aiRunExportRecordSchema,
   createApiErrorResponse,
-  createApiSuccessResponse
+  createApiSuccessResponse,
+  visualAssignmentRequestSchema,
+  visualAssignmentUpdateRequestSchema
 } from "../../src/schema/api.js";
+import { videoProjectFixture } from "../fixtures/video-project.js";
 
 describe("shared API contract", () => {
   it("requires data and omits revision when it has no meaning", () => {
@@ -73,6 +76,44 @@ describe("shared API contract", () => {
       aiRunExportRecordSchema.safeParse({
         ...record,
         candidateJson: { secret: "must-not-export" }
+      }).success
+    ).toBe(false);
+  });
+
+  it("defaults playback cues for create but requires them for complete update input", () => {
+    const source = videoProjectFixture.visuals.assignments[0];
+    if (source === undefined || source.display.kind !== "video") {
+      throw new Error("video fixture assignment is missing");
+    }
+    const display = Object.fromEntries(
+      Object.entries(structuredClone(source.display)).filter(
+        ([key]) => key !== "playbackCues"
+      )
+    );
+    const assignment = {
+      id: "api-video-assignment",
+      startLineId: source.startLineId,
+      endLineId: source.endLineId,
+      assetId: source.assetId,
+      display
+    };
+
+    const createResult = visualAssignmentRequestSchema.safeParse({
+      expectedRevision: 0,
+      assignment
+    });
+    expect(createResult.success).toBe(true);
+    const parsedDisplay =
+      createResult.success ? createResult.data.assignment.display : undefined;
+    expect(parsedDisplay).toBeDefined();
+    if (parsedDisplay?.kind === "video") {
+      expect(parsedDisplay.playbackCues).toEqual([]);
+    }
+
+    expect(
+      visualAssignmentUpdateRequestSchema.safeParse({
+        expectedRevision: 0,
+        assignment
       }).success
     ).toBe(false);
   });

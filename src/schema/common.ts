@@ -299,24 +299,46 @@ const documentDisplayInputSchema = strictObject({
   displayCoordinateSpace: displayCoordinateSpaceSchema.optional()
 });
 
-const videoDisplayV15InputSchema = strictObject({
+const videoDisplayV15InputFields = {
   ...videoDisplayFields,
   volume: unitIntervalSchema,
-  displayCoordinateSpace: displayCoordinateSpaceSchema.optional(),
+  displayCoordinateSpace: displayCoordinateSpaceSchema.optional()
+};
+
+const videoDisplayV15CreateInputSchema = strictObject({
+  ...videoDisplayV15InputFields,
   playbackCues: z.array(visualPlaybackCueSchema).optional().default([])
 }).superRefine((display, ctx) => {
   validateVideoDisplayRange(display, ctx);
   validatePlaybackCues(display, ctx);
 });
 
-/** API input compatibility: new assignments default the coordinate space and cue list. */
-export const displayV15InputSchema = z.discriminatedUnion("kind", [
-  videoDisplayV15InputSchema,
+const videoDisplayV15UpdateInputSchema = strictObject({
+  ...videoDisplayV15InputFields,
+  playbackCues: z.array(visualPlaybackCueSchema)
+}).superRefine((display, ctx) => {
+  validateVideoDisplayRange(display, ctx);
+  validatePlaybackCues(display, ctx);
+});
+
+/** API create input defaults the coordinate space and cue list. */
+export const displayV15CreateInputSchema = z.discriminatedUnion("kind", [
+  videoDisplayV15CreateInputSchema,
   imageDisplayInputSchema,
   documentDisplayInputSchema
 ]);
 
-export const displayInputSchema = displayV15InputSchema;
+/** API update input is complete; video playbackCues must be explicit. */
+export const displayV15UpdateInputSchema = z.discriminatedUnion("kind", [
+  videoDisplayV15UpdateInputSchema,
+  imageDisplayInputSchema,
+  documentDisplayInputSchema
+]);
+
+/** Backward-compatible name for the create input boundary. */
+export const displayV15InputSchema = displayV15CreateInputSchema;
+export const displayInputSchema = displayV15CreateInputSchema;
+export const displayUpdateInputSchema = displayV15UpdateInputSchema;
 
 export const legacyDisplaySchema = z.discriminatedUnion("kind", [
   legacyVideoDisplaySchema,
@@ -358,6 +380,9 @@ export type DisplayCoordinateSpace = z.infer<
 export type DisplayV13 = z.infer<typeof displayV13Schema>;
 export type DisplayV14 = z.infer<typeof displayV14Schema>;
 export type DisplayV15 = z.infer<typeof displayV15Schema>;
+export type DisplayV15CreateInput = z.infer<typeof displayV15CreateInputSchema>;
+export type DisplayV15UpdateInput = z.infer<typeof displayV15UpdateInputSchema>;
 export type DisplayV15Input = z.infer<typeof displayV15InputSchema>;
+export type DisplayUpdateInput = z.infer<typeof displayUpdateInputSchema>;
 export type DisplayInput = z.infer<typeof displayInputSchema>;
 export type Voice = z.infer<typeof voiceSchema>;
