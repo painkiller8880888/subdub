@@ -435,7 +435,11 @@ function renderDialogueOnlyFrame({
     resolvedLayout.canvasWidth,
     resolvedLayout.canvasHeight
   );
+  const dialogueWidth = bounds.width * resolvedLayout.canvasWidth;
+  const dialogueHeight = bounds.height * resolvedLayout.canvasHeight;
+  const dialogueAspectRatio = dialogueWidth / dialogueHeight;
   const innerStyle: CSSProperties = {
+    containerType: "inline-size",
     height: percentage(1 / bounds.height),
     left: percentage(-bounds.x / bounds.width),
     position: "absolute",
@@ -449,9 +453,9 @@ function renderDialogueOnlyFrame({
       className={className}
       role="img"
       style={{
-        aspectRatio: `${bounds.width * resolvedLayout.canvasWidth} / ${bounds.height * resolvedLayout.canvasHeight}`,
-        containerType: "inline-size",
-        isolation: "isolate"
+        aspectRatio: `${dialogueWidth} / ${dialogueHeight}`,
+        isolation: "isolate",
+        maxWidth: `min(100%, ${dialogueAspectRatio * 7}rem)`
       }}
     >
       <div

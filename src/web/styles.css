@@ -1066,10 +1066,6 @@ input:focus-visible {
   height: auto;
 }
 
-.script-line-card-dialogue-preview {
-  max-height: 7rem;
-}
-
 .script-line-card-preview-state {
   align-items: center;
   aspect-ratio: 16 / 9;

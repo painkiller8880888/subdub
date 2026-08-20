@@ -222,6 +222,8 @@ describe("ScreenTemplate editor geometry", () => {
 
     expect(markup).toContain("screen-layout-dialogue-only-frame");
     expect(markup).toContain("screen-layout-dialogue-only-canvas");
+    expect(markup.match(/container-type:inline-size/g)).toHaveLength(1);
+    expect(markup).toMatch(/max-width:min\(100%,\s*13\.125rem\)/);
     expect(markup).toContain("現在の字幕");
     expect(markup).not.toContain("/character.png");
     expect(markup).not.toContain("/snapshot.png");
