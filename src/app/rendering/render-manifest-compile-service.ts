@@ -80,11 +80,6 @@ function screenTemplateSnapshotForProject(
   const ids = new Set<string>();
   for (const section of project.script.sections) {
     ids.add(section.screenTemplateId);
-    for (const line of section.lines) {
-      if (line.screenTemplateId !== null) {
-        ids.add(line.screenTemplateId);
-      }
-    }
   }
 
   const snapshot: ScreenTemplate[] = [];

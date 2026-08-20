@@ -97,7 +97,6 @@ export function createScreenTemplateProjectFixture(): VideoProject {
   const thirdMainLine = {
     ...firstMainLine,
     id: "main-mentor-2",
-    screenTemplateId: null,
     spokenText: "最後に登録内容を確定します。",
     subtitleText: "登録内容を確定します。",
     characterVariantId: "character-mentor-stand-v1",
@@ -106,7 +105,6 @@ export function createScreenTemplateProjectFixture(): VideoProject {
   };
   intro.screenTemplateId = STANDARD_SCREEN_TEMPLATE_ID;
   main.screenTemplateId = ALTERNATE_SCREEN_TEMPLATE_ID;
-  main.lines[1]!.screenTemplateId = STANDARD_SCREEN_TEMPLATE_ID;
   main.lines = [...main.lines, thirdMainLine];
   outro.screenTemplateId = ALTERNATE_SCREEN_TEMPLATE_ID;
 
@@ -139,6 +137,31 @@ export function createScreenTemplateProjectFixture(): VideoProject {
     }
   ];
 
+  return project;
+}
+
+export function createLineOverrideScreenTemplateProjectFixture(): unknown {
+  const project = structuredClone(
+    createScreenTemplateProjectFixture()
+  ) as unknown as {
+    schemaVersion: string;
+    script: {
+      sections: Array<{
+        lines: Array<Record<string, unknown>>;
+      }>;
+    };
+  };
+  project.schemaVersion = "1.3.0";
+  for (const section of project.script.sections) {
+    for (const line of section.lines) {
+      line.screenTemplateId = null;
+    }
+  }
+  const overrideLine = project.script.sections[1]?.lines[1];
+  if (overrideLine === undefined) {
+    throw new Error("line override fixture is missing a line");
+  }
+  overrideLine.screenTemplateId = STANDARD_SCREEN_TEMPLATE_ID;
   return project;
 }
 

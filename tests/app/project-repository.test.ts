@@ -91,6 +91,28 @@ function legacyVideoProjectV11(): Record<string, unknown> {
   return legacy;
 }
 
+function lineScreenTemplateOverrideProject(): Record<string, unknown> {
+  const project = clone(videoProjectFixture) as unknown as Record<
+    string,
+    unknown
+  >;
+  project.schemaVersion = "1.3.0";
+  const script = project.script as {
+    sections: Array<{ lines: Array<Record<string, unknown>> }>;
+  };
+  for (const section of script.sections) {
+    for (const line of section.lines) {
+      line.screenTemplateId = null;
+    }
+  }
+  const overrideLine = script.sections[1]?.lines[0];
+  if (overrideLine === undefined) {
+    throw new Error("line override fixture is missing a line");
+  }
+  overrideLine.screenTemplateId = "screen-template-alternate";
+  return project;
+}
+
 function asRepositoryError(error: unknown): ProjectRepositoryError {
   if (error instanceof ProjectRepositoryError) {
     return error;
@@ -494,7 +516,7 @@ describe("ProjectRepository", () => {
     const repository = new ProjectRepository(workspaceRoot);
 
     const migrated = await repository.read(projectId);
-    expect(migrated.schemaVersion).toBe("1.3.0");
+    expect(migrated.schemaVersion).toBe("1.4.0");
     expect(migrated.revision).toBe(8);
     expect(migrated.edit).toEqual({ videoElements: [], sectionBgms: [] });
     expect(migrated.audio).not.toHaveProperty("sectionBgms");
@@ -528,11 +550,79 @@ describe("ProjectRepository", () => {
     const migratedBytes = await readProjectBytes();
     expect(migratedBytes).not.toEqual(before);
     expect(JSON.parse(migratedBytes.toString("utf8")).schemaVersion).toBe(
-      "1.3.0"
+      "1.4.0"
     );
 
     await repository.read(projectId);
     expect(await fs.readFile(migrationLogPath, "utf8")).toBe(migrationLog);
+  });
+
+  it("migrates 1.3.0 line overrides and writes one diagnostic per non-null override", async () => {
+    const project = lineScreenTemplateOverrideProject();
+    await writeRawProject(project);
+    const repository = new ProjectRepository(workspaceRoot);
+
+    const migrated = await repository.read(projectId);
+    expect(migrated.schemaVersion).toBe("1.4.0");
+    expect(migrated.revision).toBe((project.revision as number) + 1);
+    for (const line of migrated.script.sections.flatMap((section) => section.lines)) {
+      expect(line).not.toHaveProperty("screenTemplateId");
+    }
+
+    const migrationLogPath = path.join(
+      projectDirectory,
+      "logs",
+      "migration-log.jsonl"
+    );
+    const migrationLog = await fs.readFile(migrationLogPath, "utf8");
+    const entries = migrationLog
+      .trimEnd()
+      .split("\n")
+      .map((line) => JSON.parse(line) as Record<string, unknown>);
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({
+      fromSchemaVersion: "1.3.0",
+      toSchemaVersion: "1.4.0",
+      kind: "removed_line_screen_template_override",
+      sectionId: "section-main",
+      lineId: "main-mentor-1",
+      oldLineScreenTemplateId: "screen-template-alternate",
+      effectiveSectionScreenTemplateId: "screen-template-standard"
+    });
+
+    await repository.read(projectId);
+    expect(await fs.readFile(migrationLogPath, "utf8")).toBe(migrationLog);
+  });
+
+  it("keeps a 1.3.0 project untouched when migration diagnostics cannot be written", async () => {
+    await writeRawProject(lineScreenTemplateOverrideProject());
+    const before = await readProjectBytes();
+    const repository = new ProjectRepository({
+      workspaceRoot,
+      fileSystem: {
+        writeFile: async (filePath, contents) => {
+          if (path.basename(filePath).startsWith("migration-log.jsonl.")) {
+            throw new Error("injected migration log write failure");
+          }
+          await fs.writeFile(filePath, contents, {
+            encoding: "utf8",
+            flag: "wx"
+          });
+        }
+      }
+    });
+
+    const error = await expectRepositoryError(
+      () => repository.read(projectId),
+      "PROJECT_MIGRATION_LOG_WRITE_FAILED",
+      500
+    );
+
+    expect(await readProjectBytes()).toEqual(before);
+    await expect(
+      fs.access(path.join(projectDirectory, "logs", "migration-log.jsonl"))
+    ).rejects.toBeDefined();
+    expectSafeExternalError(error);
   });
 
   it("keeps the legacy project untouched when migration diagnostics cannot be written", async () => {

@@ -373,9 +373,12 @@ function migrationLogEntryKey(
     record.fromSchemaVersion ?? null,
     record.toSchemaVersion ?? null,
     record.sectionId ?? null,
+    record.lineId ?? null,
     record.legacyPath ?? null,
     record.legacyVolume ?? null,
-    record.templateId ?? null
+    record.templateId ?? null,
+    record.oldLineScreenTemplateId ?? null,
+    record.effectiveSectionScreenTemplateId ?? null
   ]);
 }
 

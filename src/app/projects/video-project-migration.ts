@@ -4,14 +4,17 @@ import type { CharacterVisualBinding } from "../../schema/video-project.js";
 import {
   legacyVideoProjectSchema,
   legacyVideoProjectV11Schema,
-  videoProjectV12Schema
+  videoProjectV12Schema,
+  videoProjectV13Schema
 } from "../../schema/video-project.js";
 import { STANDARD_SCREEN_TEMPLATE_ID } from "../screen-templates/screen-template-seed.js";
 import type { ScreenTemplateCatalogPort } from "./screen-template-selection.js";
 
-export const CURRENT_VIDEO_PROJECT_SCHEMA_VERSION = "1.3.0" as const;
+export const CURRENT_VIDEO_PROJECT_SCHEMA_VERSION = "1.4.0" as const;
 export const SCREEN_TEMPLATE_PREVIOUS_VIDEO_PROJECT_SCHEMA_VERSION =
   "1.2.0" as const;
+export const LINE_SCREEN_TEMPLATE_PREVIOUS_VIDEO_PROJECT_SCHEMA_VERSION =
+  "1.3.0" as const;
 export const LEGACY_VIDEO_PROJECT_SCHEMA_VERSION = "1.0.0" as const;
 export const PRE_EDIT_VIDEO_PROJECT_SCHEMA_VERSION = "1.1.0" as const;
 
@@ -33,7 +36,7 @@ export type LegacyBgmMigrationLogEntry = {
 export type ScreenTemplateMigrationLogEntry = {
   readonly migrationId: string;
   readonly fromSchemaVersion: typeof SCREEN_TEMPLATE_PREVIOUS_VIDEO_PROJECT_SCHEMA_VERSION;
-  readonly toSchemaVersion: typeof CURRENT_VIDEO_PROJECT_SCHEMA_VERSION;
+  readonly toSchemaVersion: typeof LINE_SCREEN_TEMPLATE_PREVIOUS_VIDEO_PROJECT_SCHEMA_VERSION;
   readonly kind: "screen_template_selection";
   readonly templateId: typeof STANDARD_SCREEN_TEMPLATE_ID;
   readonly sectionCount: number;
@@ -41,9 +44,21 @@ export type ScreenTemplateMigrationLogEntry = {
   readonly visualAssignmentCount: number;
 };
 
+export type LineScreenTemplateOverrideMigrationLogEntry = {
+  readonly migrationId: string;
+  readonly fromSchemaVersion: typeof LINE_SCREEN_TEMPLATE_PREVIOUS_VIDEO_PROJECT_SCHEMA_VERSION;
+  readonly toSchemaVersion: typeof CURRENT_VIDEO_PROJECT_SCHEMA_VERSION;
+  readonly kind: "removed_line_screen_template_override";
+  readonly sectionId: string;
+  readonly lineId: string;
+  readonly oldLineScreenTemplateId: string;
+  readonly effectiveSectionScreenTemplateId: string;
+};
+
 export type ProjectMigrationLogEntry =
   | LegacyBgmMigrationLogEntry
-  | ScreenTemplateMigrationLogEntry;
+  | ScreenTemplateMigrationLogEntry
+  | LineScreenTemplateOverrideMigrationLogEntry;
 
 export type VideoProjectMigrationOptions = Readonly<{
   /** Live catalog lookup used by the repository/application boundary. */
@@ -137,6 +152,7 @@ function migrationId(
   fromSchemaVersion:
     | LegacyVideoProjectSchemaVersion
     | typeof SCREEN_TEMPLATE_PREVIOUS_VIDEO_PROJECT_SCHEMA_VERSION
+    | typeof LINE_SCREEN_TEMPLATE_PREVIOUS_VIDEO_PROJECT_SCHEMA_VERSION
 ): string {
   const digest = createHash("sha256")
     .update(
@@ -383,7 +399,8 @@ function migrateScreenTemplateProject(
     rawAssignment.display.displayCoordinateSpace = "legacy-media-frame";
   }
 
-  migrated.schemaVersion = CURRENT_VIDEO_PROJECT_SCHEMA_VERSION;
+  migrated.schemaVersion =
+    LINE_SCREEN_TEMPLATE_PREVIOUS_VIDEO_PROJECT_SCHEMA_VERSION;
 
   const lineCount = sections.reduce(
     (count, section) =>
@@ -398,7 +415,7 @@ function migrateScreenTemplateProject(
     logEntry: {
       migrationId: currentMigrationId,
       fromSchemaVersion: SCREEN_TEMPLATE_PREVIOUS_VIDEO_PROJECT_SCHEMA_VERSION,
-      toSchemaVersion: CURRENT_VIDEO_PROJECT_SCHEMA_VERSION,
+      toSchemaVersion: LINE_SCREEN_TEMPLATE_PREVIOUS_VIDEO_PROJECT_SCHEMA_VERSION,
       kind: "screen_template_selection",
       templateId: STANDARD_SCREEN_TEMPLATE_ID,
       sectionCount: sections.length,
@@ -406,6 +423,69 @@ function migrateScreenTemplateProject(
       visualAssignmentCount: visuals.assignments.length
     }
   };
+}
+
+function migrateLineScreenTemplateOverridesProject(
+  project: unknown,
+  currentMigrationId: string,
+  incrementRevision: boolean
+): {
+  readonly project: unknown;
+  readonly logEntries: readonly LineScreenTemplateOverrideMigrationLogEntry[];
+} | undefined {
+  const v13Result = videoProjectV13Schema.safeParse(project);
+  if (!v13Result.success) {
+    return undefined;
+  }
+
+  const migrated = cloneJson(v13Result.data);
+  if (!isRecord(migrated) || !isRecord(migrated.script)) {
+    return undefined;
+  }
+  migrated.revision =
+    v13Result.data.revision + (incrementRevision ? 1 : 0);
+  const sections = migrated.script.sections;
+  if (!Array.isArray(sections)) {
+    return undefined;
+  }
+
+  const logEntries: LineScreenTemplateOverrideMigrationLogEntry[] = [];
+  for (const rawSection of sections) {
+    if (!isRecord(rawSection) || !Array.isArray(rawSection.lines)) {
+      return undefined;
+    }
+    const sectionId = rawSection.id;
+    const sectionTemplateId = rawSection.screenTemplateId;
+    if (
+      typeof sectionId !== "string" ||
+      typeof sectionTemplateId !== "string"
+    ) {
+      return undefined;
+    }
+    for (const rawLine of rawSection.lines) {
+      if (!isRecord(rawLine) || typeof rawLine.id !== "string") {
+        return undefined;
+      }
+      const lineTemplateId = rawLine.screenTemplateId;
+      if (typeof lineTemplateId === "string") {
+        logEntries.push({
+          migrationId: currentMigrationId,
+          fromSchemaVersion:
+            LINE_SCREEN_TEMPLATE_PREVIOUS_VIDEO_PROJECT_SCHEMA_VERSION,
+          toSchemaVersion: CURRENT_VIDEO_PROJECT_SCHEMA_VERSION,
+          kind: "removed_line_screen_template_override",
+          sectionId,
+          lineId: rawLine.id,
+          oldLineScreenTemplateId: lineTemplateId,
+          effectiveSectionScreenTemplateId: sectionTemplateId
+        });
+      }
+      delete rawLine.screenTemplateId;
+    }
+  }
+
+  migrated.schemaVersion = CURRENT_VIDEO_PROJECT_SCHEMA_VERSION;
+  return { project: migrated, logEntries };
 }
 
 export function migrateVideoProjectWithDiagnostics(
@@ -422,7 +502,8 @@ export function migrateVideoProjectWithDiagnostics(
   let sourceProject: unknown = input;
   let fromSchemaVersion:
     | LegacyVideoProjectSchemaVersion
-    | typeof SCREEN_TEMPLATE_PREVIOUS_VIDEO_PROJECT_SCHEMA_VERSION;
+    | typeof SCREEN_TEMPLATE_PREVIOUS_VIDEO_PROJECT_SCHEMA_VERSION
+    | typeof LINE_SCREEN_TEMPLATE_PREVIOUS_VIDEO_PROJECT_SCHEMA_VERSION;
   let legacyLogEntries: readonly LegacyBgmMigrationLogEntry[] = [];
   let currentMigrationId: string;
 
@@ -443,27 +524,53 @@ export function migrateVideoProjectWithDiagnostics(
   ) {
     fromSchemaVersion = SCREEN_TEMPLATE_PREVIOUS_VIDEO_PROJECT_SCHEMA_VERSION;
     currentMigrationId = migrationId(input, fromSchemaVersion);
+  } else if (
+    input.schemaVersion === LINE_SCREEN_TEMPLATE_PREVIOUS_VIDEO_PROJECT_SCHEMA_VERSION
+  ) {
+    fromSchemaVersion =
+      LINE_SCREEN_TEMPLATE_PREVIOUS_VIDEO_PROJECT_SCHEMA_VERSION;
+    currentMigrationId = migrationId(input, fromSchemaVersion);
   } else {
     return noMigration(input);
   }
 
-  if (!standardTemplateIsAvailable(options)) {
-    return noMigration(input, "standard_template_unavailable");
+  let screenTemplateLogEntries: readonly ScreenTemplateMigrationLogEntry[] = [];
+  const migratingFromLineOverrideVersion =
+    input.schemaVersion ===
+    LINE_SCREEN_TEMPLATE_PREVIOUS_VIDEO_PROJECT_SCHEMA_VERSION;
+  if (!migratingFromLineOverrideVersion) {
+    if (!standardTemplateIsAvailable(options)) {
+      return noMigration(input, "standard_template_unavailable");
+    }
+    const screenTemplateMigration = migrateScreenTemplateProject(
+      sourceProject,
+      currentMigrationId
+    );
+    if (screenTemplateMigration === undefined) {
+      return noMigration(input);
+    }
+    sourceProject = screenTemplateMigration.project;
+    screenTemplateLogEntries = [screenTemplateMigration.logEntry];
   }
 
-  const screenTemplateMigration = migrateScreenTemplateProject(
+  const lineOverrideMigration = migrateLineScreenTemplateOverridesProject(
     sourceProject,
-    currentMigrationId
+    currentMigrationId,
+    migratingFromLineOverrideVersion
   );
-  if (screenTemplateMigration === undefined) {
+  if (lineOverrideMigration === undefined) {
     return noMigration(input);
   }
 
   return {
-    project: screenTemplateMigration.project,
+    project: lineOverrideMigration.project,
     migrated: true,
     migrationId: currentMigrationId,
-    logEntries: [...legacyLogEntries, screenTemplateMigration.logEntry],
+    logEntries: [
+      ...legacyLogEntries,
+      ...screenTemplateLogEntries,
+      ...lineOverrideMigration.logEntries
+    ],
     blockedReason: undefined
   };
 }

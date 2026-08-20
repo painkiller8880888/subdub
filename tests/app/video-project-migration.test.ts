@@ -8,6 +8,7 @@ import {
 import {
   legacyVideoProjectSchema,
   legacyVideoProjectV11Schema,
+  videoProjectV13Schema,
   videoProjectSchema
 } from "../../src/schema/index.js";
 import { videoProjectFixture } from "../fixtures/video-project.js";
@@ -109,7 +110,7 @@ function legacyProject(
 }
 
 describe("video project schema migration", () => {
-  it("upgrades the 1.0.0 fixed mapping to explicit bindings and line selections", () => {
+  it("upgrades the 1.0.0 fixed mapping to explicit bindings and section selections", () => {
     const legacy = legacyProject("1.0.0");
 
     expect(legacyVideoProjectSchema.safeParse(legacy).success).toBe(true);
@@ -171,15 +172,18 @@ describe("video project schema migration", () => {
     });
 
     const migrated = videoProjectSchema.parse(result.project);
-    expect(migrated.schemaVersion).toBe("1.3.0");
+    expect(migrated.schemaVersion).toBe("1.4.0");
     expect(migrated.revision).toBe(8);
     expect(
       migrated.script.sections.every(
-        (section) =>
-          section.screenTemplateId === "screen-template-standard" &&
-          section.lines.every((line) => line.screenTemplateId === null)
+        (section) => section.screenTemplateId === "screen-template-standard"
       )
     ).toBe(true);
+    for (const line of migrated.script.sections.flatMap(
+      (section) => section.lines
+    )) {
+      expect(line).not.toHaveProperty("screenTemplateId");
+    }
     expect(migrated.edit).toEqual({ videoElements: [], sectionBgms: [] });
     expect(migrated.audio).toEqual({
       soundEffects: (legacy.audio as { soundEffects: unknown[] }).soundEffects
@@ -216,7 +220,86 @@ describe("video project schema migration", () => {
     const migrated = migrateVideoProject(current);
 
     expect(migrated).toBe(current);
-    expect((migrated as typeof current).schemaVersion).toBe("1.3.0");
+    expect((migrated as typeof current).schemaVersion).toBe("1.4.0");
+  });
+
+  it("removes 1.3.0 line overrides and logs only non-null overrides", () => {
+    const project = clone(videoProjectFixture) as unknown as Record<
+      string,
+      unknown
+    >;
+    project.schemaVersion = "1.3.0";
+    const script = project.script as {
+      sections: Array<{
+        id: string;
+        screenTemplateId: string;
+        lines: Array<Record<string, unknown>>;
+      }>;
+    };
+    for (const section of script.sections) {
+      for (const line of section.lines) {
+        line.screenTemplateId = null;
+      }
+    }
+    const overrideSection = script.sections[1];
+    const overrideLine = overrideSection?.lines[1];
+    if (overrideSection === undefined || overrideLine === undefined) {
+      throw new Error("migration fixture line is missing");
+    }
+    overrideLine.screenTemplateId = "screen-template-alternate";
+
+    expect(videoProjectV13Schema.safeParse(project).success).toBe(true);
+    const before = clone(project);
+    const result = migrateVideoProjectWithDiagnostics(project, {
+      standardTemplateAvailable: false
+    });
+
+    expect(result.migrated).toBe(true);
+    expect(result.logEntries).toHaveLength(1);
+    expect(result.logEntries[0]).toMatchObject({
+      fromSchemaVersion: "1.3.0",
+      toSchemaVersion: "1.4.0",
+      kind: "removed_line_screen_template_override",
+      sectionId: overrideSection.id,
+      lineId: overrideLine.id,
+      oldLineScreenTemplateId: "screen-template-alternate",
+      effectiveSectionScreenTemplateId: overrideSection.screenTemplateId
+    });
+
+    const migrated = videoProjectSchema.parse(result.project);
+    expect(migrated.schemaVersion).toBe("1.4.0");
+    expect(migrated.revision).toBe((project.revision as number) + 1);
+    expect(
+      migrated.script.sections.map((section) => section.screenTemplateId)
+    ).toEqual(script.sections.map((section) => section.screenTemplateId));
+    for (const line of migrated.script.sections.flatMap(
+      (section) => section.lines
+    )) {
+      expect(line).not.toHaveProperty("screenTemplateId");
+    }
+    expect(project).toEqual(before);
+
+    const rerun = migrateVideoProjectWithDiagnostics(migrated);
+    expect(rerun.migrated).toBe(false);
+    expect(rerun.project).toBe(migrated);
+    expect(rerun.logEntries).toEqual([]);
+  });
+
+  it("rejects malformed 1.3.0 input before migration", () => {
+    const malformed = clone(videoProjectFixture) as unknown as Record<
+      string,
+      unknown
+    >;
+    malformed.schemaVersion = "1.3.0";
+    const script = malformed.script as {
+      sections: Array<{ lines: Array<Record<string, unknown>> }>;
+    };
+    delete script.sections[0]!.lines[0]!.screenTemplateId;
+
+    expect(videoProjectV13Schema.safeParse(malformed).success).toBe(false);
+    const result = migrateVideoProjectWithDiagnostics(malformed);
+    expect(result.migrated).toBe(false);
+    expect(result.project).toBe(malformed);
   });
 
   it("does not mutate a strict 1.2.0 project when the standard template is unavailable", () => {

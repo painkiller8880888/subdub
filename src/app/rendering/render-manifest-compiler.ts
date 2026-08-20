@@ -260,7 +260,6 @@ type ResolvedScreenTemplate = Readonly<{
 
 type RenderProjectLine = {
   readonly id: string;
-  readonly screenTemplateId: string | null;
   readonly speakerId: string;
   readonly spokenText: string;
   readonly subtitleText: string;
@@ -1050,17 +1049,6 @@ export function detectSoundEffectWarnings(
   return warnings;
 }
 
-function sameTemplate(
-  left: ResolvedScreenTemplate,
-  right: ResolvedScreenTemplate
-): boolean {
-  return (
-    left.templateId === right.templateId &&
-    left.templateRevision === right.templateRevision &&
-    left.templateHash === right.templateHash
-  );
-}
-
 function resolvedLayoutForTemplate(
   binding: ResolvedScreenTemplate,
   characters: readonly { readonly id: string }[],
@@ -1191,157 +1179,126 @@ function buildVisualSegments({
         entry.lineIndex >= start.lineIndex &&
         entry.lineIndex <= end.lineIndex
     );
-    let groupStart = 0;
-    let segmentIndex = 0;
-    while (groupStart < assignmentLines.length) {
-      const first = assignmentLines[groupStart];
-      if (first === undefined) {
-        break;
-      }
-      const firstTemplateId =
-        first.line.screenTemplateId ??
-        project.script.sections[first.sectionIndex]?.screenTemplateId;
-      const firstBinding =
-        firstTemplateId === undefined
-          ? undefined
-          : templates.get(firstTemplateId);
-      if (firstBinding === undefined) {
-        groupStart += 1;
-        continue;
-      }
-      let groupEnd = groupStart;
-      while (groupEnd + 1 < assignmentLines.length) {
-        const next = assignmentLines[groupEnd + 1];
-        if (next === undefined) {
-          break;
+    const first = assignmentLines[0];
+    if (first === undefined) {
+      continue;
+    }
+    const firstTemplateId =
+      project.script.sections[first.sectionIndex]?.screenTemplateId;
+    const firstBinding =
+      firstTemplateId === undefined
+        ? undefined
+        : templates.get(firstTemplateId);
+    if (firstBinding === undefined) {
+      continue;
+    }
+    const last = assignmentLines.at(-1);
+    const firstRange = lineRangeById.get(first.line.id);
+    const lastRange =
+      last === undefined ? undefined : lineRangeById.get(last.line.id);
+    if (
+      last === undefined ||
+      firstRange === undefined ||
+      lastRange === undefined
+    ) {
+      continue;
+    }
+    const segmentIndex = 0;
+    const baseFrom = firstRange.from;
+    const baseTo = lastRange.from + lastRange.durationInFrames;
+    const from = shiftedFrom(baseFrom, assignmentSectionId, sectionShiftById);
+    const durationInFrames = baseTo - baseFrom;
+    const templateLayout = resolvedLayoutForTemplate(
+      firstBinding,
+      characters,
+      false
+    );
+    const sourceDisplay = assignment.display;
+    let videoSegmentTrim:
+      | {
+          readonly sourceTrimBeforeFrame: number;
+          readonly sourceTrimAfterFrame: number;
         }
-        const nextTemplateId =
-          next.line.screenTemplateId ??
-          project.script.sections[next.sectionIndex]?.screenTemplateId;
-        const nextBinding =
-          nextTemplateId === undefined
-            ? undefined
-            : templates.get(nextTemplateId);
-        if (
-          nextBinding === undefined ||
-          !sameTemplate(firstBinding, nextBinding)
-        ) {
-          break;
-        }
-        groupEnd += 1;
-      }
-
-      const last = assignmentLines[groupEnd];
-      const firstRange = lineRangeById.get(first.line.id);
-      const lastRange =
-        last === undefined ? undefined : lineRangeById.get(last.line.id);
-      if (
-        last === undefined ||
-        firstRange === undefined ||
-        lastRange === undefined
-      ) {
-        groupStart = groupEnd + 1;
-        continue;
-      }
-      const baseFrom = firstRange.from;
-      const baseTo = lastRange.from + lastRange.durationInFrames;
-      const from = shiftedFrom(baseFrom, assignmentSectionId, sectionShiftById);
-      const durationInFrames = baseTo - baseFrom;
-      const templateLayout = resolvedLayoutForTemplate(
-        firstBinding,
-        characters,
-        false
+      | undefined;
+    if (sourceDisplay.kind === "video") {
+      const sourceStartFrame = mediaMillisecondsToFrames(
+        sourceDisplay.startMs,
+        fps
       );
-      const sourceDisplay = assignment.display;
-      let videoSegmentTrim:
-        | {
-            readonly sourceTrimBeforeFrame: number;
-            readonly sourceTrimAfterFrame: number;
+      const elapsedStartFrames = from - assignmentFrom;
+      const elapsedEndFrames = from + durationInFrames - assignmentFrom;
+      const sourceTrimBeforeFrame =
+        sourceStartFrame +
+        presentationFramesToMediaPosition(
+          elapsedStartFrames,
+          sourceDisplay.playbackRate
+        );
+      const legacyEndMs = Math.min(
+        sourceDisplay.endMs,
+        sourceDisplay.startMs +
+          elapsedMediaMs(elapsedEndFrames, fps, sourceDisplay.playbackRate)
+      );
+      const sourceTrimAfterFrame =
+        legacyEndMs < sourceDisplay.endMs
+          ? sourceStartFrame +
+            presentationFramesToMediaPosition(
+              elapsedEndFrames,
+              sourceDisplay.playbackRate
+            )
+          : mediaMillisecondsToFrames(legacyEndMs, fps);
+      videoSegmentTrim = {
+        sourceTrimBeforeFrame,
+        sourceTrimAfterFrame
+      };
+    }
+
+    const display = resolveVisualDisplay(sourceDisplay, templateLayout, {
+      fps,
+      sourceTrimBeforeFrame: videoSegmentTrim?.sourceTrimBeforeFrame,
+      sourceTrimAfterFrame: videoSegmentTrim?.sourceTrimAfterFrame
+    });
+
+    if (videoSegmentTrim && display.kind === "video") {
+      const { sourceTrimBeforeFrame, sourceTrimAfterFrame } = videoSegmentTrim;
+      if (sourceTrimAfterFrame <= sourceTrimBeforeFrame) {
+        addDiagnostic(
+          diagnostics,
+          RENDER_MANIFEST_ERROR_CODE.visualSegmentRangeInvalid,
+          ["visuals", "assignments", assignmentIndex, "display"],
+          "resolved video segment source range must be positive and within the assignment source range",
+          {
+            assignmentId: assignment.id,
+            assetPath: assignment.projectMediaPath
           }
-        | undefined;
-      if (sourceDisplay.kind === "video") {
-        const sourceStartFrame = mediaMillisecondsToFrames(
-          sourceDisplay.startMs,
-          fps
         );
-        const elapsedStartFrames = from - assignmentFrom;
-        const elapsedEndFrames = from + durationInFrames - assignmentFrom;
-        const sourceTrimBeforeFrame =
-          sourceStartFrame +
-          presentationFramesToMediaPosition(
-            elapsedStartFrames,
-            sourceDisplay.playbackRate
-          );
-        const legacyEndMs = Math.min(
-          sourceDisplay.endMs,
-          sourceDisplay.startMs +
-            elapsedMediaMs(elapsedEndFrames, fps, sourceDisplay.playbackRate)
-        );
-        const sourceTrimAfterFrame =
-          legacyEndMs < sourceDisplay.endMs
-            ? sourceStartFrame +
-              presentationFramesToMediaPosition(
-                elapsedEndFrames,
-                sourceDisplay.playbackRate
-              )
-            : mediaMillisecondsToFrames(legacyEndMs, fps);
-        videoSegmentTrim = {
-          sourceTrimBeforeFrame,
-          sourceTrimAfterFrame
-        };
       }
+    }
 
-      const display = resolveVisualDisplay(sourceDisplay, templateLayout, {
-        fps,
-        sourceTrimBeforeFrame: videoSegmentTrim?.sourceTrimBeforeFrame,
-        sourceTrimAfterFrame: videoSegmentTrim?.sourceTrimAfterFrame
-      });
-
-      if (videoSegmentTrim && display.kind === "video") {
-        const { sourceTrimBeforeFrame, sourceTrimAfterFrame } =
-          videoSegmentTrim;
-        if (sourceTrimAfterFrame <= sourceTrimBeforeFrame) {
-          addDiagnostic(
-            diagnostics,
-            RENDER_MANIFEST_ERROR_CODE.visualSegmentRangeInvalid,
-            ["visuals", "assignments", assignmentIndex, "display"],
-            "resolved video segment source range must be positive and within the assignment source range",
-            {
-              assignmentId: assignment.id,
-              assetPath: assignment.projectMediaPath
-            }
-          );
-        }
-      }
-
-      const segmentStartLineId = first.line.id;
-      const segmentEndLineId = last.line.id;
-      segments.push({
-        inputIndex: assignmentIndex * 1000 + segmentIndex,
-        value: {
-          id: visualSegmentId(
-            assignment.id,
-            segmentStartLineId,
-            segmentEndLineId,
-            firstBinding
-          ),
-          sourceAssignmentId: assignment.id,
-          segmentIndex,
+    const segmentStartLineId = first.line.id;
+    const segmentEndLineId = last.line.id;
+    segments.push({
+      inputIndex: assignmentIndex * 1000 + segmentIndex,
+      value: {
+        id: visualSegmentId(
+          assignment.id,
           segmentStartLineId,
           segmentEndLineId,
-          screenTemplateId: firstBinding.templateId,
-          templateRevision: firstBinding.templateRevision,
-          templateHash: firstBinding.templateHash,
-          from,
-          durationInFrames,
-          kind: assignment.display.kind,
-          src: assignment.projectMediaPath,
-          display
-        } as RenderVisual
-      });
-      segmentIndex += 1;
-      groupStart = groupEnd + 1;
-    }
+          firstBinding
+        ),
+        sourceAssignmentId: assignment.id,
+        segmentIndex,
+        segmentStartLineId,
+        segmentEndLineId,
+        screenTemplateId: firstBinding.templateId,
+        templateRevision: firstBinding.templateRevision,
+        templateHash: firstBinding.templateHash,
+        from,
+        durationInFrames,
+        kind: assignment.display.kind,
+        src: assignment.projectMediaPath,
+        display
+      } as RenderVisual
+    });
   }
 
   return stableTimelineSort(segments);
@@ -1821,8 +1778,6 @@ export function compileRenderManifest(
     project.characters.map((character) => [character.id, character.name])
   );
   const resolvedLayoutByLineId = new Map<string, ResolvedScreenLayout>();
-  const validatedSectionTitleTemplateKeys = new Set<string>();
-
   for (const [sectionIndex, section] of project.script.sections.entries()) {
     const binding = screenTemplates.get(section.screenTemplateId);
     if (binding === undefined) {
@@ -1856,54 +1811,22 @@ export function compileRenderManifest(
         { sectionId: section.id }
       );
     }
-    validatedSectionTitleTemplateKeys.add(
-      `${section.id}\u0000${binding.templateId}`
-    );
     sectionTemplateBindingById.set(section.id, binding);
   }
 
   for (const entry of lineEntries) {
-    const section = project.script.sections[entry.sectionIndex];
-    const templateId = entry.line.screenTemplateId ?? section?.screenTemplateId;
+    const binding = sectionTemplateBindingById.get(entry.sectionId);
+    if (binding === undefined) {
+      continue;
+    }
     const path = [
       "script",
       "sections",
       entry.sectionIndex,
       "lines",
       entry.lineIndex,
-      "screenTemplateId"
+      "subtitleText"
     ];
-    if (templateId === undefined) {
-      addDiagnostic(
-        diagnostics,
-        RENDER_MANIFEST_ERROR_CODE.screenTemplateMissing,
-        path,
-        "line has no effective screen template",
-        { lineId: entry.line.id, sectionId: entry.sectionId }
-      );
-      continue;
-    }
-    const binding = screenTemplates.get(templateId);
-    if (binding === undefined) {
-      addDiagnostic(
-        diagnostics,
-        RENDER_MANIFEST_ERROR_CODE.screenTemplateMissing,
-        path,
-        "selected screen template is missing from the validated snapshot",
-        { lineId: entry.line.id, sectionId: entry.sectionId }
-      );
-      continue;
-    }
-    if (binding.template.status !== "active") {
-      addDiagnostic(
-        diagnostics,
-        RENDER_MANIFEST_ERROR_CODE.screenTemplateInactive,
-        path,
-        "selected screen template is inactive",
-        { lineId: entry.line.id, sectionId: entry.sectionId }
-      );
-      continue;
-    }
     for (const issue of screenTemplateTextValidationIssues(binding.template, {
       dialogueText: entry.line.subtitleText,
       speakerNameText: characterNameById.get(entry.line.speakerId)
@@ -1922,21 +1845,6 @@ export function compileRenderManifest(
         issue.message,
         { lineId: entry.line.id, sectionId: entry.sectionId }
       );
-    }
-    const sectionTitleTemplateKey = `${entry.sectionId}\u0000${binding.templateId}`;
-    if (!validatedSectionTitleTemplateKeys.has(sectionTitleTemplateKey)) {
-      for (const issue of screenTemplateTextValidationIssues(binding.template, {
-        sectionTitleText: section?.name
-      })) {
-        addDiagnostic(
-          diagnostics,
-          RENDER_MANIFEST_ERROR_CODE.screenTemplateTextOverflow,
-          ["script", "sections", entry.sectionIndex, "name"],
-          issue.message,
-          { lineId: entry.line.id, sectionId: entry.sectionId }
-        );
-      }
-      validatedSectionTitleTemplateKeys.add(sectionTitleTemplateKey);
     }
     const prioritizeVisual = linePriority.has(entry.line.id);
     const resolvedLayout = resolvedLayoutForTemplate(
@@ -2559,12 +2467,7 @@ export function compileRenderManifest(
     }))
   };
   const referencedScreenTemplateIds = sortedUniqueStrings(
-    project.script.sections.flatMap((section) => [
-      section.screenTemplateId,
-      ...section.lines.flatMap((line) =>
-        line.screenTemplateId === null ? [] : [line.screenTemplateId]
-      )
-    ])
+    project.script.sections.map((section) => section.screenTemplateId)
   );
   const screenTemplateForHash = referencedScreenTemplateIds.map(
     (templateId) => {
@@ -2581,17 +2484,9 @@ export function compileRenderManifest(
                 canvasHeight: binding.template.canvasHeight,
                 elements: binding.template.elements
               },
-        lines: lineEntries
-          .filter(
-            (entry) =>
-              (entry.line.screenTemplateId ??
-                project.script.sections[entry.sectionIndex]
-                  ?.screenTemplateId) === templateId
-          )
-          .map((entry) => ({
-            lineId: entry.line.id,
-            resolvedLayout: resolvedLayoutByLineId.get(entry.line.id) ?? null
-          }))
+        sectionIds: project.script.sections
+          .filter((section) => section.screenTemplateId === templateId)
+          .map((section) => section.id)
       };
     }
   );
@@ -2626,7 +2521,6 @@ export function compileRenderManifest(
       characterVariantId,
       screenTemplateId:
         templateBindingByLineId.get(entry.line.id)?.templateId ??
-        entry.line.screenTemplateId ??
         project.script.sections[entry.sectionIndex]?.screenTemplateId ??
         "screen-template-missing",
       templateRevision:
@@ -2687,14 +2581,9 @@ export function compileRenderManifest(
     characterSelection: characterSelectionForHash,
     screenTemplateSelection: referencedScreenTemplateIds.map((templateId) => ({
       templateId,
-      lines: lineEntries
-        .filter(
-          (entry) =>
-            (entry.line.screenTemplateId ??
-              project.script.sections[entry.sectionIndex]?.screenTemplateId) ===
-            templateId
-        )
-        .map((entry) => entry.line.id)
+      sections: project.script.sections
+        .filter((section) => section.screenTemplateId === templateId)
+        .map((section) => section.id)
     })),
     screenTemplate: screenTemplateForHash,
     sectionLayouts,

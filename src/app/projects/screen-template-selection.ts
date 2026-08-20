@@ -1,8 +1,4 @@
-import type {
-  ScriptLine,
-  ScriptSection,
-  VideoProject
-} from "../../schema/video-project.js";
+import type { VideoProject } from "../../schema/video-project.js";
 import type { ScreenTemplate } from "../../schema/screen-template.js";
 
 export type ScreenTemplateReference = Readonly<{
@@ -27,14 +23,6 @@ export type ScreenTemplateReferenceIssue = Readonly<{
   readonly templateId: string;
   readonly reason: "missing" | "inactive";
 }>;
-
-/** Resolve a line's effective template without consulting the workspace catalog. */
-export function resolveScreenTemplateId(
-  section: Pick<ScriptSection, "screenTemplateId">,
-  line: Pick<ScriptLine, "screenTemplateId">
-): string {
-  return line.screenTemplateId ?? section.screenTemplateId;
-}
 
 function referenceIssue(
   path: readonly (string | number)[],
@@ -81,26 +69,6 @@ export function validateVideoProjectScreenTemplateReferences(
       issues.push(sectionIssue);
     }
 
-    for (const [lineIndex, line] of section.lines.entries()) {
-      if (line.screenTemplateId === null) {
-        continue;
-      }
-      const lineIssue = referenceIssue(
-        [
-          "script",
-          "sections",
-          sectionIndex,
-          "lines",
-          lineIndex,
-          "screenTemplateId"
-        ],
-        line.screenTemplateId,
-        catalog.findById(line.screenTemplateId)
-      );
-      if (lineIssue !== undefined) {
-        issues.push(lineIssue);
-      }
-    }
   }
 
   return issues;

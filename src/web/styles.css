@@ -1088,46 +1088,17 @@ input:focus-visible {
   min-width: 0;
 }
 
-.script-section-template-control,
-.script-line-template-controls {
+.script-section-template-control {
   display: grid;
   gap: 0.45rem;
   margin-top: 0.75rem;
 }
 
-.script-section-template-control label,
-.script-line-template-controls .eyebrow {
+.script-section-template-control label {
   color: #59647b;
   font-size: 0.82rem;
   font-weight: 700;
   margin: 0;
-}
-
-.script-line-template-controls {
-  align-items: center;
-  background: #f8faff;
-  border: 1px solid #d7deea;
-  border-radius: 0.6rem;
-  grid-template-columns: minmax(0, 1fr) auto;
-  padding: 0.8rem;
-}
-
-.script-line-template-controls > div:first-child {
-  display: grid;
-  gap: 0.25rem;
-  min-width: 0;
-}
-
-.script-line-template-actions {
-  align-items: center;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.45rem;
-  justify-content: flex-end;
-}
-
-.script-line-template-picker {
-  grid-column: 1 / -1;
 }
 
 .script-template-reference-error {
@@ -1436,15 +1407,6 @@ input:focus-visible {
 
   .script-line-card-preview {
     max-width: 34rem;
-  }
-
-  .script-line-template-controls {
-    align-items: start;
-    grid-template-columns: 1fr;
-  }
-
-  .script-line-template-actions {
-    justify-content: start;
   }
 
   .script-line-actions {

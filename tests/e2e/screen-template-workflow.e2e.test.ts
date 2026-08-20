@@ -43,7 +43,10 @@ type WorkflowState = {
   templates: Map<string, ScreenTemplate>;
   project: VideoProject;
   templateSaves: unknown[];
-  scriptSaves: unknown[];
+  scriptSaves: Array<{
+    script: VideoProject["script"];
+    expectedRevision: number;
+  }>;
   templateDetailRequests: number;
 };
 
@@ -730,7 +733,7 @@ describe("ScreenTemplate workflow browser E2E", () => {
   );
 
   it(
-    "keeps section inheritance, explicit line overrides, actual previews, and null revert through ScriptPage autosave",
+    "keeps section-only template selection and actual previews through ScriptPage autosave",
     { timeout: 60_000 },
     async () => {
       const { context, page, state } = await openScript();
@@ -741,7 +744,6 @@ describe("ScreenTemplate workflow browser E2E", () => {
         const lineCard = page.locator(
           '.script-line-card[aria-label="セリフ main-learner-1"]'
         );
-        expect(await lineCard.textContent()).toContain("個別設定: Standard");
         expect(await lineCard.textContent()).toContain(
           "内容を確認してから登録します。"
         );
@@ -788,47 +790,17 @@ describe("ScreenTemplate workflow browser E2E", () => {
             ])
           }
         });
-        expect(state.scriptSaves.at(-1)).toMatchObject({
-          script: {
-            sections: expect.arrayContaining([
-              expect.objectContaining({
-                id: "section-main",
-                lines: expect.arrayContaining([
-                  expect.objectContaining({
-                    id: "main-learner-1",
-                    screenTemplateId: "screen-template-standard"
-                  })
-                ])
-              })
-            ])
-          }
-        });
-
         await page
           .locator("#section-main-screen-template")
           .selectOption(ALTERNATE_SCREEN_TEMPLATE_ID);
         await waitForScriptSave();
-        expect(await lineCard.textContent()).toContain("個別設定: Standard");
-
-        await lineCard
-          .getByRole("button", { name: "セクション設定に戻す" })
-          .click();
-        await waitForScriptSave();
-        expect(state.scriptSaves.at(-1)).toMatchObject({
-          script: {
-            sections: expect.arrayContaining([
-              expect.objectContaining({
-                id: "section-main",
-                lines: expect.arrayContaining([
-                  expect.objectContaining({
-                    id: "main-learner-1",
-                    screenTemplateId: null
-                  })
-                ])
-              })
-            ])
-          }
-        });
+        const savedMainLine = state.scriptSaves
+          .at(-1)
+          ?.script.sections.find(
+            (section: { id: string }) => section.id === "section-main"
+          )
+          ?.lines.find((line: { id: string }) => line.id === "main-learner-1");
+        expect(savedMainLine).not.toHaveProperty("screenTemplateId");
 
         await page.reload({ waitUntil: "domcontentloaded" });
         await page.locator("#section-main-screen-template").waitFor({
@@ -837,10 +809,7 @@ describe("ScreenTemplate workflow browser E2E", () => {
         expect(
           await page.locator("#section-main-screen-template").inputValue()
         ).toBe(ALTERNATE_SCREEN_TEMPLATE_ID);
-        await page
-          .locator('.script-line-card[aria-label="セリフ main-learner-1"]')
-          .getByText("セクション設定を使用: Alternate")
-          .waitFor({ state: "visible" });
+        await lineCard.waitFor({ state: "visible" });
 
         const subtitle = page.locator("#main-learner-1-subtitle");
         await subtitle.fill("テンプレート継承後の字幕");

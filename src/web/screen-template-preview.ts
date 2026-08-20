@@ -13,7 +13,6 @@ import type {
   ScreenLayoutContentPreview,
   ScreenLayoutPreview
 } from "../remotion/screen-template-layout";
-import { resolveScreenTemplateId } from "../app/projects/screen-template-selection.js";
 import { sortByStartThenInputIndex } from "../timeline/visual-ranges.js";
 import { characterVisualFileUrl } from "./character-visual-picker";
 import { createProjectManifestAssetUrlResolver } from "./preview-asset-url";
@@ -30,22 +29,16 @@ export function screenTemplateIdsForScript(
   const ids = new Set<string>();
   for (const section of script.sections) {
     ids.add(section.screenTemplateId);
-    for (const line of section.lines) {
-      if (line.screenTemplateId !== null) {
-        ids.add(line.screenTemplateId);
-      }
-    }
   }
   return [...ids];
 }
 
 export function resolveScriptScreenTemplate(
   section: Pick<ScriptSection, "screenTemplateId">,
-  line: Pick<ScriptLine, "screenTemplateId">,
   templates: ReadonlyMap<string, ScreenTemplate>,
   loadingTemplateIds: ReadonlySet<string> = new Set()
 ): ResolvedScriptScreenTemplate {
-  const templateId = resolveScreenTemplateId(section, line);
+  const templateId = section.screenTemplateId;
   const template = templates.get(templateId);
   if (template === undefined) {
     if (loadingTemplateIds.has(templateId)) {

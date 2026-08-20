@@ -140,7 +140,6 @@ function line(
   } as const;
   return {
     id,
-    screenTemplateId: null,
     speakerId,
     spokenText,
     subtitleText,

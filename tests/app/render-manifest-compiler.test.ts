@@ -17,10 +17,7 @@ import { videoProjectFixture } from "../fixtures/video-project.js";
 import type { RenderVisual, VideoProject } from "../../src/schema/index.js";
 import type { VoicevoxAudioIndex } from "../../src/app/voicevox/audio-index.js";
 import { characterVisualCatalogSnapshotSchema } from "../../src/schema/character-visual.js";
-import {
-  mediaMillisecondsToFrames,
-  presentationFramesToMediaPosition
-} from "../../src/media-frame.js";
+import { mediaMillisecondsToFrames } from "../../src/media-frame.js";
 
 const validInput = createRenderManifestInput;
 
@@ -102,8 +99,7 @@ function compileTemplateBoundaryVideoSegments(playbackRate: number) {
   }
   const thirdLine = {
     ...secondLine,
-    id: "intro-learner-2",
-    screenTemplateId: null
+    id: "intro-learner-2"
   };
   introSection.lines = [...introSection.lines, thirdLine];
 
@@ -112,14 +108,6 @@ function compileTemplateBoundaryVideoSegments(playbackRate: number) {
   introSection.lines[0]!.pauseAfterMs = 0;
   introSection.lines[1]!.pauseBeforeMs = 0;
   introSection.lines[1]!.pauseAfterMs = 0;
-
-  const alternateTemplate = createStandardScreenTemplate(
-    "2026-08-10T00:00:00.000Z"
-  );
-  alternateTemplate.templateId = "screen-template-alternate";
-  alternateTemplate.name = "Alternate";
-  alternateTemplate.elements[0]!.transform.rect.x = 0.06;
-  introSection.lines[1]!.screenTemplateId = alternateTemplate.templateId;
 
   const assignment = project.visuals.assignments[0];
   if (assignment === undefined || assignment.display.kind !== "video") {
@@ -149,8 +137,7 @@ function compileTemplateBoundaryVideoSegments(playbackRate: number) {
       audioIndex,
       assetMetadata,
       screenTemplateCatalogSnapshot: [
-        createStandardScreenTemplate("2026-08-10T00:00:00.000Z"),
-        alternateTemplate
+        createStandardScreenTemplate("2026-08-10T00:00:00.000Z")
       ]
     })
   );
@@ -398,7 +385,7 @@ describe("compileRenderManifest", () => {
     );
   });
 
-  it("partitions visual assignments at effective template boundaries and keeps video time continuous", () => {
+  it("keeps one visual segment when line template boundaries are removed", () => {
     const project = structuredClone(videoProjectFixture) as VideoProject;
     const introSection = project.script.sections[0];
     if (introSection === undefined || introSection.lines[1] === undefined) {
@@ -406,18 +393,9 @@ describe("compileRenderManifest", () => {
     }
     const thirdLine = {
       ...introSection.lines[1],
-      id: "intro-learner-2",
-      screenTemplateId: null
+      id: "intro-learner-2"
     };
     introSection.lines = [...introSection.lines, thirdLine];
-
-    const alternateTemplate = createStandardScreenTemplate(
-      "2026-08-10T00:00:00.000Z"
-    );
-    alternateTemplate.templateId = "screen-template-alternate";
-    alternateTemplate.name = "Alternate";
-    alternateTemplate.elements[0]!.transform.rect.x = 0.06;
-    introSection.lines[1]!.screenTemplateId = alternateTemplate.templateId;
 
     const assignment = project.visuals.assignments[0];
     if (assignment === undefined) {
@@ -429,14 +407,7 @@ describe("compileRenderManifest", () => {
     const sourcePlaybackRate = assignment.display.playbackRate;
     assignment.endLineId = thirdLine.id;
 
-    const result = compileRenderManifest(
-      createRenderManifestInput(project, {
-        screenTemplateCatalogSnapshot: [
-          createStandardScreenTemplate("2026-08-10T00:00:00.000Z"),
-          alternateTemplate
-        ]
-      })
-    );
+    const result = compileRenderManifest(createRenderManifestInput(project));
 
     expect(result.success).toBe(true);
     if (!result.success) {
@@ -445,40 +416,23 @@ describe("compileRenderManifest", () => {
     const segments = result.manifest.visuals.filter(
       (visual) => visual.sourceAssignmentId === assignment.id
     );
-    expect(segments.map((segment) => segment.segmentIndex)).toEqual([0, 1, 2]);
-    expect(segments.map((segment) => segment.segmentStartLineId)).toEqual([
-      introSection.lines[0]!.id,
-      introSection.lines[1]!.id,
-      introSection.lines[2]!.id
-    ]);
-    expect(segments.map((segment) => segment.screenTemplateId)).toEqual([
-      "screen-template-standard",
-      "screen-template-alternate",
-      "screen-template-standard"
-    ]);
+    expect(segments).toHaveLength(1);
+    expect(segments[0]).toMatchObject({
+      segmentIndex: 0,
+      segmentStartLineId: introSection.lines[0]!.id,
+      segmentEndLineId: thirdLine.id,
+      screenTemplateId: "screen-template-standard"
+    });
 
-    const videoSegments: Extract<RenderVisual, { kind: "video" }>[] =
-      segments.map((segment) => {
-        if (segment.kind !== "video" || segment.display.kind !== "video") {
-          throw new Error("fixture visual must remain a video");
-        }
-        return segment;
-      });
-    const sourceStartFrame = videoSegments[0]!.display.sourceTrimBeforeFrame;
-    for (let index = 1; index < videoSegments.length; index += 1) {
-      const previous = videoSegments[index - 1]!;
-      const current = videoSegments[index]!;
-      const expectedSourceFrame =
-        sourceStartFrame +
-        presentationFramesToMediaPosition(
-          current.from - videoSegments[0]!.from,
-          sourcePlaybackRate
-        );
-      expect(current.display.sourceTrimBeforeFrame).toBe(expectedSourceFrame);
-      expect(current.display.startMs).toBe(previous.display.startMs);
-      expect(current.display.endMs).toBe(previous.display.endMs);
+    const visual = segments[0];
+    if (visual?.kind !== "video" || visual.display.kind !== "video") {
+      throw new Error("fixture visual must remain a video");
     }
-    expect(videoSegments.at(-1)?.display.endMs).toBe(3_000);
+    expect(visual.display.sourceTrimBeforeFrame).toBe(0);
+    expect(visual.display.sourceTrimAfterFrame).toBeGreaterThan(
+      visual.display.sourceTrimBeforeFrame
+    );
+    expect(visual.display.playbackRate).toBe(sourcePlaybackRate);
   });
 
   it("preserves arbitrary millisecond trim points for an unsplit video", () => {
@@ -510,51 +464,32 @@ describe("compileRenderManifest", () => {
     expect(mediaMillisecondsToFrames(visual.display.endMs, 30)).toBe(34);
   });
 
-  it("keeps a 3n+2 frame template boundary on the same renderer source frame", () => {
+  it("keeps the unsplit video source range at 1x playback", () => {
     const { videoSegments } = compileTemplateBoundaryVideoSegments(1);
-    expect(videoSegments.map((segment) => segment.from)).toEqual([0, 2, 32]);
+    expect(videoSegments).toHaveLength(1);
 
     const sourceStartFrame = videoSegments[0]!.display.sourceTrimBeforeFrame;
     expect(
       videoSegments.map((segment) => segment.display.sourceTrimBeforeFrame)
-    ).toEqual(
-      videoSegments.map(
-        (segment) =>
-          sourceStartFrame +
-          presentationFramesToMediaPosition(
-            segment.from - videoSegments[0]!.from,
-            videoSegments[0]!.display.playbackRate
-          )
-      )
+    ).toEqual([sourceStartFrame]);
+    expect(videoSegments[0]!.display.sourceTrimAfterFrame).toBeGreaterThan(
+      sourceStartFrame
     );
-    expect(videoSegments[1]!.display.sourceTrimBeforeFrame).toBe(2);
-    expect(videoSegments[0]!.display.sourceTrimAfterFrame).toBe(2);
-    expect(videoSegments[1]!.display.startMs).toBe(0);
-    expect(videoSegments[1]!.display.endMs).toBe(3_000);
     expect(videoSegments[0]!.display.startMs).toBe(0);
     expect(videoSegments[0]!.display.endMs).toBe(3_000);
   });
 
-  it("uses the same source-frame boundary after applying a non-1 playback rate", () => {
+  it("keeps one unsplit video segment at a non-1 playback rate", () => {
     const { videoSegments } = compileTemplateBoundaryVideoSegments(1.25);
     const sourceStartFrame = videoSegments[0]!.display.sourceTrimBeforeFrame;
 
-    expect(
-      videoSegments.map((segment) => segment.display.sourceTrimBeforeFrame)
-    ).toEqual(
-      videoSegments.map(
-        (segment) =>
-          sourceStartFrame +
-          presentationFramesToMediaPosition(
-            segment.from - videoSegments[0]!.from,
-            videoSegments[0]!.display.playbackRate
-          )
-      )
+    expect(videoSegments).toHaveLength(1);
+    expect(videoSegments[0]!.display.sourceTrimBeforeFrame).toBe(
+      sourceStartFrame
     );
-    expect(videoSegments[0]!.display.sourceTrimAfterFrame).toBe(2.5);
-    expect(videoSegments[1]!.display.sourceTrimBeforeFrame).toBe(2.5);
-    expect(videoSegments[1]!.display.startMs).toBe(0);
-    expect(videoSegments[1]!.display.endMs).toBe(3_000);
+    expect(videoSegments[0]!.display.sourceTrimAfterFrame).toBeGreaterThan(
+      sourceStartFrame
+    );
     expect(videoSegments[0]!.display.startMs).toBe(0);
     expect(videoSegments[0]!.display.endMs).toBe(3_000);
   });
@@ -563,8 +498,8 @@ describe("compileRenderManifest", () => {
     const { videoSegments } = compileTemplateBoundaryVideoSegments(0.2);
 
     expect(videoSegments[0]!.display.sourceTrimBeforeFrame).toBe(0);
-    expect(videoSegments[0]!.display.sourceTrimAfterFrame).toBe(0.4);
-    expect(videoSegments[1]!.display.sourceTrimBeforeFrame).toBe(0.4);
+    expect(videoSegments[0]!.display.sourceTrimAfterFrame).toBeCloseTo(14.6);
+    expect(videoSegments).toHaveLength(1);
     expect(videoSegments[0]!.display.startMs).toBe(0);
     expect(videoSegments[0]!.display.endMs).toBe(3_000);
   });

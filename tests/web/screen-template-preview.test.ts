@@ -25,22 +25,16 @@ import {
 const TIMESTAMP = "2026-08-18T00:00:00.000Z";
 const CHECKSUM = "0".repeat(64);
 
-function createLine(
-  id: string,
-  screenTemplateId: string | null = null
-): ScriptLine {
-  return {
-    ...createDefaultScriptLine("character-mentor", id),
-    screenTemplateId
-  };
+function createLine(id: string): ScriptLine {
+  return createDefaultScriptLine("character-mentor", id);
 }
 
 function createSection(
   screenTemplateId = "screen-template-standard",
   lines: readonly ScriptLine[] = [
     createLine("line-one"),
-    createLine("line-two", "template-inactive"),
-    createLine("line-three", "template-missing")
+    createLine("line-two"),
+    createLine("line-three")
   ]
 ): ScriptSection {
   return {
@@ -186,7 +180,7 @@ const characterCatalog: CharacterVisualCatalogSnapshot = [
 ];
 
 describe("script ScreenTemplate preview resolution", () => {
-  it("resolves line overrides and reports missing or inactive references without fallback", () => {
+  it("resolves the section template and reports missing or inactive references without fallback", () => {
     const standard = createStandardScreenTemplate(TIMESTAMP);
     const inactive: ScreenTemplate = {
       ...standard,
@@ -201,30 +195,35 @@ describe("script ScreenTemplate preview resolution", () => {
     const section = createSection();
 
     expect(screenTemplateIdsForScript({ sections: [section] })).toEqual([
-      "screen-template-standard",
-      "template-inactive",
-      "template-missing"
+      "screen-template-standard"
     ]);
+    expect(resolveScriptScreenTemplate(section, templates).status).toBe(
+      "ready"
+    );
     expect(
-      resolveScriptScreenTemplate(section, section.lines[0]!, templates).status
-    ).toBe("ready");
-    expect(
-      resolveScriptScreenTemplate(section, section.lines[1]!, templates).status
+      resolveScriptScreenTemplate(
+        { ...section, screenTemplateId: inactive.templateId },
+        templates
+      ).status
     ).toBe("inactive");
     expect(
-      resolveScriptScreenTemplate(section, section.lines[2]!, templates).status
+      resolveScriptScreenTemplate(
+        { ...section, screenTemplateId: "template-missing" },
+        templates
+      ).status
     ).toBe("missing");
     expect(
       resolveScriptScreenTemplate(
         { ...section, screenTemplateId: "template-missing-section" },
-        { screenTemplateId: standard.templateId },
         templates
       )
-    ).toMatchObject({ status: "ready", templateId: standard.templateId });
+    ).toMatchObject({
+      status: "missing",
+      templateId: "template-missing-section"
+    });
     expect(
       resolveScriptScreenTemplate(
-        section,
-        { screenTemplateId: "template-loading" },
+        { ...section, screenTemplateId: "template-loading" },
         templates,
         new Set(["template-loading"])
       ).status

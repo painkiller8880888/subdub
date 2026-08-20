@@ -438,7 +438,6 @@ describe("outline editing and approval APIs", () => {
               lines: [
                 {
                   id: "script-line",
-                  screenTemplateId: null,
                   speakerId: "character-mentor",
                   spokenText: "script",
                   subtitleText: "script",

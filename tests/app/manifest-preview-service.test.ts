@@ -150,8 +150,6 @@ describe("ManifestPreviewService", () => {
     const root = await createRoot();
     const project = createProject();
     project.script.sections[0]!.screenTemplateId = "missing-template";
-    project.script.sections[0]!.lines[0]!.screenTemplateId =
-      "inactive-template";
     const manifest = createManifest(project);
     const service = await createService(root, project, {
       manifest,
@@ -178,10 +176,6 @@ describe("ManifestPreviewService", () => {
         expect.objectContaining({
           code: "SCREEN_TEMPLATE_REFERENCE_INVALID",
           target: { kind: "script", sectionId: "section-intro" }
-        }),
-        expect.objectContaining({
-          code: "SCREEN_TEMPLATE_REFERENCE_INVALID",
-          target: { kind: "script", lineId: "intro-mentor-1" }
         })
       ])
     );
