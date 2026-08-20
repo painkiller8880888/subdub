@@ -226,6 +226,35 @@ describe("compileRenderManifest", () => {
     );
   });
 
+  it("rejects non-empty playback cues until RenderManifest 2.5.0 exists", () => {
+    const project = structuredClone(videoProjectFixture) as VideoProject;
+    const assignment = project.visuals.assignments[0];
+    if (assignment === undefined || assignment.display.kind !== "video") {
+      throw new Error("video fixture assignment is missing");
+    }
+    assignment.display.playbackCues = [
+      { lineId: "intro-mentor-1", edge: "after", action: "pause" },
+      { lineId: "intro-learner-1", edge: "after", action: "resume" }
+    ];
+
+    const result = compileRenderManifest(validInput(project));
+
+    expect(result.success).toBe(false);
+    expect(diagnosticCodes(result)).toContain(
+      "VISUAL_PLAYBACK_CUES_UNSUPPORTED"
+    );
+    if (!result.success) {
+      expect(result.diagnostics).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            path: ["visuals", "assignments", 0, "display", "playbackCues"],
+            assignmentId: assignment.id
+          })
+        ])
+      );
+    }
+  });
+
   it("resolves explicit character selections and compiles all timeline inputs", () => {
     const result = compileRenderManifest(validInput());
 

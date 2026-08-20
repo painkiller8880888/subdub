@@ -54,6 +54,108 @@ describe("videoProjectSchema", () => {
     expect(result.success).toBe(true);
   });
 
+  it("requires playback cues only on current video displays", () => {
+    const missingCues = clone(videoProjectFixture);
+    Reflect.deleteProperty(
+      missingCues.visuals.assignments[0].display,
+      "playbackCues"
+    );
+    expectInvalid(missingCues, [
+      "visuals",
+      "assignments",
+      0,
+      "display",
+      "playbackCues"
+    ]);
+
+    const photoCue = clone(videoProjectFixture);
+    Object.assign(photoCue.visuals.assignments[1].display, {
+      playbackCues: []
+    });
+    expectInvalid(photoCue, [
+      "visuals",
+      "assignments",
+      1,
+      "display"
+    ]);
+  });
+
+  it("validates cue uniqueness, range, and state transitions", () => {
+    const duplicate = clone(videoProjectFixture);
+    Object.assign(duplicate.visuals.assignments[0].display, {
+      playbackCues: [
+        { lineId: "intro-mentor-1", edge: "after", action: "pause" },
+        { lineId: "intro-mentor-1", edge: "after", action: "pause" }
+      ]
+    });
+    expectInvalid(duplicate, [
+      "visuals",
+      "assignments",
+      0,
+      "display",
+      "playbackCues",
+      1
+    ]);
+
+    const outsideRange = clone(videoProjectFixture);
+    Object.assign(outsideRange.visuals.assignments[0].display, {
+      playbackCues: [
+        { lineId: "main-mentor-1", edge: "before", action: "pause" }
+      ]
+    });
+    expectInvalid(outsideRange, [
+      "visuals",
+      "assignments",
+      0,
+      "display",
+      "playbackCues",
+      0,
+      "lineId"
+    ]);
+
+    const valid = clone(videoProjectFixture);
+    Object.assign(valid.visuals.assignments[0].display, {
+      playbackCues: [
+        { lineId: "intro-mentor-1", edge: "after", action: "pause" },
+        { lineId: "intro-learner-1", edge: "after", action: "resume" }
+      ]
+    });
+    expect(videoProjectSchema.safeParse(valid).success).toBe(true);
+
+    const pauseTwice = clone(valid);
+    Object.assign(pauseTwice.visuals.assignments[0].display, {
+      playbackCues: [
+        { lineId: "intro-mentor-1", edge: "after", action: "pause" },
+        { lineId: "intro-learner-1", edge: "after", action: "pause" }
+      ]
+    });
+    expectInvalid(pauseTwice, [
+      "visuals",
+      "assignments",
+      0,
+      "display",
+      "playbackCues",
+      1,
+      "action"
+    ]);
+
+    const resumeWhilePlaying = clone(videoProjectFixture);
+    Object.assign(resumeWhilePlaying.visuals.assignments[0].display, {
+      playbackCues: [
+        { lineId: "intro-mentor-1", edge: "before", action: "resume" }
+      ]
+    });
+    expectInvalid(resumeWhilePlaying, [
+      "visuals",
+      "assignments",
+      0,
+      "display",
+      "playbackCues",
+      0,
+      "action"
+    ]);
+  });
+
   it("requires a section template and rejects line template fields", () => {
     const missingSectionTemplate = clone(videoProjectFixture);
     Reflect.deleteProperty(

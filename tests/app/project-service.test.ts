@@ -48,7 +48,7 @@ describe("ProjectService", () => {
     expect(project.metadata.title).toBe("作成テスト");
     expect(project.metadata.createdAt).toBe("2026-08-04T01:02:03.000Z");
     expect(project.metadata.updatedAt).toBe("2026-08-04T01:02:03.000Z");
-    expect(project.schemaVersion).toBe("1.4.0");
+    expect(project.schemaVersion).toBe("1.5.0");
     expect(project.characters).toEqual([
       expect.objectContaining({
         id: "character-mentor",

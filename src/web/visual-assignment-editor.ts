@@ -1,7 +1,7 @@
 import type {
   AssetDetail,
   AssetListItem,
-  DisplayV13,
+  DisplayV15,
   StaticAnnotation,
   VisualAssignment
 } from "../schema/index.js";
@@ -12,7 +12,7 @@ export type VisualAsset = Pick<
 >;
 
 export type DefaultDisplayResult =
-  | { readonly display: DisplayV13; readonly reason?: undefined }
+  | { readonly display: DisplayV15; readonly reason?: undefined }
   | { readonly display: undefined; readonly reason: string };
 
 export function clampUnitInterval(value: number): number {
@@ -53,7 +53,8 @@ export function defaultDisplayForAsset(
         startMs: 0,
         endMs: asset.durationMs,
         playbackRate: 1,
-        volume: 0
+        volume: 0,
+        playbackCues: []
       }
     };
   }

@@ -129,6 +129,7 @@ export const RENDER_MANIFEST_ERROR_CODE = {
   screenTemplateTextOverflow: "SCREEN_TEMPLATE_TEXT_OVERFLOW",
   screenLayoutMissing: "RESOLVED_SCREEN_LAYOUT_MISSING",
   screenLayoutCharacterMissing: "RESOLVED_SCREEN_LAYOUT_CHARACTER_MISSING",
+  visualPlaybackCuesUnsupported: "VISUAL_PLAYBACK_CUES_UNSUPPORTED",
   visualSegmentRangeInvalid: "VISUAL_SEGMENT_RANGE_INVALID",
   manifestSchema: "RENDER_MANIFEST_SCHEMA_INVALID"
 } as const;
@@ -1710,6 +1711,27 @@ export function compileRenderManifest(
   const project = projectResult.data;
   const audioIndex = audioResult.data;
   const sourceProjectHash = sha256CanonicalJson(project);
+
+  for (const [
+    assignmentIndex,
+    assignment
+  ] of project.visuals.assignments.entries()) {
+    if (
+      assignment.display.kind === "video" &&
+      assignment.display.playbackCues.length > 0
+    ) {
+      addDiagnostic(
+        diagnostics,
+        RENDER_MANIFEST_ERROR_CODE.visualPlaybackCuesUnsupported,
+        ["visuals", "assignments", assignmentIndex, "display", "playbackCues"],
+        "RenderManifest 2.4.0 cannot represent video playback cues; compile with RenderManifest 2.5.0.",
+        {
+          assignmentId: assignment.id,
+          assetPath: assignment.projectMediaPath
+        }
+      );
+    }
+  }
 
   if (project.outline.status !== "approved") {
     addDiagnostic(

@@ -8,6 +8,7 @@ import {
 import {
   legacyVideoProjectSchema,
   legacyVideoProjectV11Schema,
+  videoProjectV14Schema,
   videoProjectV13Schema,
   videoProjectSchema
 } from "../../src/schema/index.js";
@@ -73,6 +74,7 @@ function legacyProject(
     if (assignment.display.kind !== "video") {
       continue;
     }
+    delete assignment.display.playbackCues;
     assignment.display.muted = assignment.display.volume === 0;
     delete assignment.display.volume;
   }
@@ -172,8 +174,8 @@ describe("video project schema migration", () => {
     });
 
     const migrated = videoProjectSchema.parse(result.project);
-    expect(migrated.schemaVersion).toBe("1.4.0");
-    expect(migrated.revision).toBe(8);
+    expect(migrated.schemaVersion).toBe("1.5.0");
+    expect(migrated.revision).toBe(9);
     expect(
       migrated.script.sections.every(
         (section) => section.screenTemplateId === "screen-template-standard"
@@ -220,7 +222,45 @@ describe("video project schema migration", () => {
     const migrated = migrateVideoProject(current);
 
     expect(migrated).toBe(current);
-    expect((migrated as typeof current).schemaVersion).toBe("1.4.0");
+    expect((migrated as typeof current).schemaVersion).toBe("1.5.0");
+  });
+
+  it("adds empty cues to video assignments through a strict 1.4.0 boundary", () => {
+    const legacy = clone(videoProjectFixture) as unknown as Record<
+      string,
+      unknown
+    >;
+    legacy.schemaVersion = "1.4.0";
+    legacy.revision = 12;
+    const visuals = legacy.visuals as {
+      assignments: Array<{ display: Record<string, unknown> }>;
+    };
+    for (const assignment of visuals.assignments) {
+      if (assignment.display.kind === "video") {
+        delete assignment.display.playbackCues;
+      }
+    }
+
+    expect(videoProjectV14Schema.safeParse(legacy).success).toBe(true);
+    expect(videoProjectSchema.safeParse(legacy).success).toBe(false);
+    const before = clone(legacy);
+    const result = migrateVideoProjectWithDiagnostics(legacy);
+
+    expect(result.migrated).toBe(true);
+    const migrated = videoProjectSchema.parse(result.project);
+    expect(migrated.schemaVersion).toBe("1.5.0");
+    expect(migrated.revision).toBe(13);
+    expect(migrated.visuals.assignments[0]?.display).toMatchObject({
+      kind: "video",
+      playbackCues: []
+    });
+    expect(migrated.visuals.assignments[1]?.display).not.toHaveProperty(
+      "playbackCues"
+    );
+    expect(migrated.visuals.assignments[2]?.display).not.toHaveProperty(
+      "playbackCues"
+    );
+    expect(legacy).toEqual(before);
   });
 
   it("removes 1.3.0 line overrides and logs only non-null overrides", () => {
@@ -240,6 +280,13 @@ describe("video project schema migration", () => {
       for (const line of section.lines) {
         line.screenTemplateId = null;
       }
+    }
+    for (const assignment of (
+      project.visuals as {
+        assignments: Array<{ display: Record<string, unknown> }>;
+      }
+    ).assignments) {
+      delete assignment.display.playbackCues;
     }
     const overrideSection = script.sections[1];
     const overrideLine = overrideSection?.lines[1];
@@ -267,8 +314,8 @@ describe("video project schema migration", () => {
     });
 
     const migrated = videoProjectSchema.parse(result.project);
-    expect(migrated.schemaVersion).toBe("1.4.0");
-    expect(migrated.revision).toBe((project.revision as number) + 1);
+    expect(migrated.schemaVersion).toBe("1.5.0");
+    expect(migrated.revision).toBe((project.revision as number) + 2);
     expect(
       migrated.script.sections.map((section) => section.screenTemplateId)
     ).toEqual(script.sections.map((section) => section.screenTemplateId));

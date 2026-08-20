@@ -5,6 +5,7 @@ import {
   backgroundDefinitionSchema,
   displaySchema,
   displayV13Schema,
+  displayV15Schema,
   expressionSchema,
   legacyDisplaySchema,
   sectionRoleSchema,
@@ -22,6 +23,7 @@ import {
   strictObject,
   unitIntervalSchema
 } from "./primitives.js";
+import { validateVisualPlaybackSequence } from "../timeline/visual-playback.js";
 
 export const outputSettingsSchema = strictObject({
   width: z.literal(1920),
@@ -244,7 +246,19 @@ export const visualAssignmentV13Schema = strictObject({
   display: displayV13Schema
 });
 
-export const visualAssignmentSchema = visualAssignmentV13Schema;
+export const visualAssignmentV14Schema = visualAssignmentV13Schema;
+
+export const visualAssignmentV15Schema = strictObject({
+  id: idSchema,
+  startLineId: idSchema,
+  endLineId: idSchema,
+  assetId: idSchema,
+  assetChecksum: sha256Schema,
+  projectMediaPath: relativePosixPathSchema,
+  display: displayV15Schema
+});
+
+export const visualAssignmentSchema = visualAssignmentV15Schema;
 
 const legacyVisualAssignmentSchema = strictObject({
   id: idSchema,
@@ -262,10 +276,22 @@ const visualPlanV12Schema = strictObject({
   assignments: z.array(visualAssignmentV12Schema)
 });
 
-export const visualPlanSchema = strictObject({
+export const visualPlanV13Schema = strictObject({
   ...visualPlanV12Schema.shape,
   assignments: z.array(visualAssignmentV13Schema)
 });
+
+export const visualPlanV14Schema = strictObject({
+  ...visualPlanV12Schema.shape,
+  assignments: z.array(visualAssignmentV14Schema)
+});
+
+export const visualPlanV15Schema = strictObject({
+  ...visualPlanV12Schema.shape,
+  assignments: z.array(visualAssignmentV15Schema)
+});
+
+export const visualPlanSchema = visualPlanV15Schema;
 
 const legacyVisualPlanSchema = strictObject({
   status: approvalStatusSchema,
@@ -422,7 +448,7 @@ const videoProjectV13BaseSchema = strictObject({
   characters: z.array(characterSchema).length(2),
   outline: outlineSchema,
   script: scriptSchemaV13,
-  visuals: visualPlanSchema,
+  visuals: visualPlanV13Schema,
   audio: audioPlanSchema,
   edit: editPlanSchema,
   thumbnail: thumbnailPlanSchema
@@ -438,7 +464,23 @@ const videoProjectV14BaseSchema = strictObject({
   characters: z.array(characterSchema).length(2),
   outline: outlineSchema,
   script: scriptSchema,
-  visuals: visualPlanSchema,
+  visuals: visualPlanV14Schema,
+  audio: audioPlanSchema,
+  edit: editPlanSchema,
+  thumbnail: thumbnailPlanSchema
+});
+
+const videoProjectV15BaseSchema = strictObject({
+  schemaVersion: z.literal("1.5.0"),
+  revision: finiteNumberSchema.int().nonnegative(),
+  metadata: projectMetadataSchema,
+  source: projectSourceSchema,
+  brief: projectBriefSchema,
+  aiSettings: aiSettingsSchema,
+  characters: z.array(characterSchema).length(2),
+  outline: outlineSchema,
+  script: scriptSchema,
+  visuals: visualPlanV15Schema,
   audio: audioPlanSchema,
   edit: editPlanSchema,
   thumbnail: thumbnailPlanSchema
@@ -519,7 +561,8 @@ function addReferenceIssue(
 type VideoProjectDomainShape =
   | z.infer<typeof videoProjectV12BaseSchema>
   | z.infer<typeof videoProjectV13BaseSchema>
-  | z.infer<typeof videoProjectV14BaseSchema>;
+  | z.infer<typeof videoProjectV14BaseSchema>
+  | z.infer<typeof videoProjectV15BaseSchema>;
 
 function refineVideoProject(
   project: VideoProjectDomainShape,
@@ -762,6 +805,30 @@ function refineVideoProject(
           );
         }
       }
+
+      if (
+        entry.assignment.display.kind === "video" &&
+        "playbackCues" in entry.assignment.display
+      ) {
+        const playbackValidation = validateVisualPlaybackSequence(
+          {
+            id: entry.assignment.id,
+            startLineId: entry.assignment.startLineId,
+            endLineId: entry.assignment.endLineId,
+            display: entry.assignment.display
+          },
+          project.script
+        );
+        if (!playbackValidation.success) {
+          for (const playbackIssue of playbackValidation.issues) {
+            addReferenceIssue(
+              ctx,
+              [...entry.path, ...playbackIssue.path],
+              playbackIssue.message
+            );
+          }
+        }
+      }
     }
 
     const annotationEntries = visualAssignmentEntries.flatMap((entry) =>
@@ -946,8 +1013,11 @@ export const videoProjectV12Schema =
   videoProjectV12BaseSchema.superRefine(refineVideoProject);
 export const videoProjectV13Schema =
   videoProjectV13BaseSchema.superRefine(refineVideoProject);
-export const videoProjectSchema =
+export const videoProjectV14Schema =
   videoProjectV14BaseSchema.superRefine(refineVideoProject);
+export const videoProjectV15Schema =
+  videoProjectV15BaseSchema.superRefine(refineVideoProject);
+export const videoProjectSchema = videoProjectV15Schema;
 
 export type AiTaskKind = z.infer<typeof aiTaskKindSchema>;
 export type OutputSettings = z.infer<typeof outputSettingsSchema>;
@@ -975,9 +1045,14 @@ export type ScriptLineV13 = z.infer<typeof scriptLineV13Schema>;
 export type ScriptSectionV13 = z.infer<typeof scriptSectionV13Schema>;
 export type ScriptV13 = z.infer<typeof scriptSchemaV13>;
 export type VisualAssignmentV12 = z.infer<typeof visualAssignmentV12Schema>;
+export type VisualAssignmentV13 = z.infer<typeof visualAssignmentV13Schema>;
+export type VisualAssignmentV14 = z.infer<typeof visualAssignmentV14Schema>;
 export type VisualAssignment = z.infer<typeof visualAssignmentSchema>;
 export type VisualPlan = z.infer<typeof visualPlanSchema>;
 export type VisualPlanV12 = z.infer<typeof visualPlanV12Schema>;
+export type VisualPlanV13 = z.infer<typeof visualPlanV13Schema>;
+export type VisualPlanV14 = z.infer<typeof visualPlanV14Schema>;
+export type VisualPlanV15 = z.infer<typeof visualPlanV15Schema>;
 export type ProjectAssetSnapshot = z.infer<typeof projectAssetSnapshotSchema>;
 export type EditVideoPlacement = z.infer<typeof editVideoPlacementSchema>;
 export type EditVideoElement = z.infer<typeof editVideoElementSchema>;
@@ -1014,4 +1089,6 @@ export type InsertPlan = z.infer<typeof insertPlanSchema>;
 export type ThumbnailPlan = z.infer<typeof thumbnailPlanSchema>;
 export type VideoProjectV12 = z.infer<typeof videoProjectV12Schema>;
 export type VideoProjectV13 = z.infer<typeof videoProjectV13Schema>;
+export type VideoProjectV14 = z.infer<typeof videoProjectV14Schema>;
+export type VideoProjectV15 = z.infer<typeof videoProjectV15Schema>;
 export type VideoProject = z.infer<typeof videoProjectSchema>;

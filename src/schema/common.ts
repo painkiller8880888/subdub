@@ -10,6 +10,10 @@ import {
   strictObject,
   unitIntervalSchema
 } from "./primitives.js";
+import {
+  visualPlaybackCueSchema,
+  type VisualPlaybackCue
+} from "./visual-playback.js";
 
 export const approvalStatusSchema = z.enum([
   "draft",
@@ -180,7 +184,7 @@ export const displayCoordinateSpaceSchema = z.enum([
   "content-slot-relative"
 ]);
 
-const videoDisplayV13Schema = strictObject({
+export const videoDisplayV13Schema = strictObject({
   ...videoDisplayFields,
   volume: unitIntervalSchema,
   displayCoordinateSpace: displayCoordinateSpaceSchema
@@ -215,11 +219,62 @@ export const displayV13Schema = z.discriminatedUnion("kind", [
   documentDisplayV13Schema
 ]);
 
-const videoDisplayInputSchema = strictObject({
+function validatePlaybackCues(
+  display: { playbackCues: readonly VisualPlaybackCue[] },
+  ctx: z.RefinementCtx
+): void {
+  const exactCues = new Set<string>();
+  const boundaryCues = new Set<string>();
+
+  for (const [index, cue] of display.playbackCues.entries()) {
+    const exactKey = `${cue.lineId}:${cue.edge}:${cue.action}`;
+    if (exactCues.has(exactKey)) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["playbackCues", index],
+        message: "playback cue must be unique"
+      });
+      continue;
+    }
+    exactCues.add(exactKey);
+
+    const boundaryKey = `${cue.lineId}:${cue.edge}`;
+    if (boundaryCues.has(boundaryKey)) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["playbackCues", index],
+        message: "playback cue boundary must be unambiguous"
+      });
+    } else {
+      boundaryCues.add(boundaryKey);
+    }
+  }
+}
+
+/** The project-side video display used by VideoProject 1.4.0. */
+export const videoDisplayV14Schema = videoDisplayV13Schema;
+export const displayV14Schema = displayV13Schema;
+
+const videoDisplayV15Fields = {
   ...videoDisplayFields,
   volume: unitIntervalSchema,
-  displayCoordinateSpace: displayCoordinateSpaceSchema.optional()
-}).superRefine(validateVideoDisplayRange);
+  displayCoordinateSpace: displayCoordinateSpaceSchema,
+  playbackCues: z.array(visualPlaybackCueSchema)
+};
+
+/** The current project-side video display used by VideoProject 1.5.0. */
+export const videoDisplayV15Schema = strictObject(
+  videoDisplayV15Fields
+).superRefine((display, ctx) => {
+  validateVideoDisplayRange(display, ctx);
+  validatePlaybackCues(display, ctx);
+});
+
+export const displayV15Schema = z.discriminatedUnion("kind", [
+  videoDisplayV15Schema,
+  imageDisplayV13Schema,
+  documentDisplayV13Schema
+]);
 
 const imageDisplayInputSchema = strictObject({
   kind: z.literal("photo"),
@@ -244,12 +299,46 @@ const documentDisplayInputSchema = strictObject({
   displayCoordinateSpace: displayCoordinateSpaceSchema.optional()
 });
 
-/** API input compatibility: new assignments default the coordinate space in the service. */
-export const displayInputSchema = z.discriminatedUnion("kind", [
-  videoDisplayInputSchema,
+const videoDisplayV15InputFields = {
+  ...videoDisplayFields,
+  volume: unitIntervalSchema,
+  displayCoordinateSpace: displayCoordinateSpaceSchema.optional()
+};
+
+const videoDisplayV15CreateInputSchema = strictObject({
+  ...videoDisplayV15InputFields,
+  playbackCues: z.array(visualPlaybackCueSchema).optional().default([])
+}).superRefine((display, ctx) => {
+  validateVideoDisplayRange(display, ctx);
+  validatePlaybackCues(display, ctx);
+});
+
+const videoDisplayV15UpdateInputSchema = strictObject({
+  ...videoDisplayV15InputFields,
+  playbackCues: z.array(visualPlaybackCueSchema)
+}).superRefine((display, ctx) => {
+  validateVideoDisplayRange(display, ctx);
+  validatePlaybackCues(display, ctx);
+});
+
+/** API create input defaults the coordinate space and cue list. */
+export const displayV15CreateInputSchema = z.discriminatedUnion("kind", [
+  videoDisplayV15CreateInputSchema,
   imageDisplayInputSchema,
   documentDisplayInputSchema
 ]);
+
+/** API update input is complete; video playbackCues must be explicit. */
+export const displayV15UpdateInputSchema = z.discriminatedUnion("kind", [
+  videoDisplayV15UpdateInputSchema,
+  imageDisplayInputSchema,
+  documentDisplayInputSchema
+]);
+
+/** Backward-compatible name for the create input boundary. */
+export const displayV15InputSchema = displayV15CreateInputSchema;
+export const displayInputSchema = displayV15CreateInputSchema;
+export const displayUpdateInputSchema = displayV15UpdateInputSchema;
 
 export const legacyDisplaySchema = z.discriminatedUnion("kind", [
   legacyVideoDisplaySchema,
@@ -278,6 +367,9 @@ export type StaticAnnotation = z.infer<typeof staticAnnotationSchema>;
 export type CommonDisplay = z.infer<typeof commonDisplaySchema>;
 export type VideoDisplay = z.infer<typeof videoDisplaySchema>;
 export type LegacyVideoDisplay = z.infer<typeof legacyVideoDisplaySchema>;
+export type VideoDisplayV13 = z.infer<typeof videoDisplayV13Schema>;
+export type VideoDisplayV14 = z.infer<typeof videoDisplayV14Schema>;
+export type VideoDisplayV15 = z.infer<typeof videoDisplayV15Schema>;
 export type ImageDisplay = z.infer<typeof imageDisplaySchema>;
 export type DocumentDisplay = z.infer<typeof documentDisplaySchema>;
 export type Display = z.infer<typeof displaySchema>;
@@ -286,5 +378,11 @@ export type DisplayCoordinateSpace = z.infer<
   typeof displayCoordinateSpaceSchema
 >;
 export type DisplayV13 = z.infer<typeof displayV13Schema>;
+export type DisplayV14 = z.infer<typeof displayV14Schema>;
+export type DisplayV15 = z.infer<typeof displayV15Schema>;
+export type DisplayV15CreateInput = z.infer<typeof displayV15CreateInputSchema>;
+export type DisplayV15UpdateInput = z.infer<typeof displayV15UpdateInputSchema>;
+export type DisplayV15Input = z.infer<typeof displayV15InputSchema>;
+export type DisplayUpdateInput = z.infer<typeof displayUpdateInputSchema>;
 export type DisplayInput = z.infer<typeof displayInputSchema>;
 export type Voice = z.infer<typeof voiceSchema>;

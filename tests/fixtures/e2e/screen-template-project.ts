@@ -157,6 +157,16 @@ export function createLineOverrideScreenTemplateProjectFixture(): unknown {
       line.screenTemplateId = null;
     }
   }
+  const visuals = (
+    project as unknown as {
+      visuals: {
+        assignments: Array<{ display: { playbackCues?: unknown } }>;
+      };
+    }
+  ).visuals;
+  for (const assignment of visuals.assignments) {
+    delete assignment.display.playbackCues;
+  }
   const overrideLine = project.script.sections[1]?.lines[1];
   if (overrideLine === undefined) {
     throw new Error("line override fixture is missing a line");
@@ -178,7 +188,7 @@ export function createLegacyScreenTemplateProjectFixture(): unknown {
     };
     visuals: {
       assignments: Array<{
-        display: { displayCoordinateSpace?: string };
+        display: { displayCoordinateSpace?: string; playbackCues?: unknown };
       }>;
     };
   };
@@ -191,6 +201,7 @@ export function createLegacyScreenTemplateProjectFixture(): unknown {
   }
   for (const assignment of project.visuals.assignments) {
     delete assignment.display.displayCoordinateSpace;
+    delete assignment.display.playbackCues;
   }
   return project;
 }
