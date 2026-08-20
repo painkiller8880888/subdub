@@ -116,30 +116,15 @@ describe("POST /api/projects/:projectId/manifest/compile", () => {
       name: "an inactive section template",
       location: "section",
       status: "inactive" as const
-    },
-    {
-      name: "a missing line override",
-      location: "line",
-      status: "missing" as const
-    },
-    {
-      name: "an inactive line override",
-      location: "line",
-      status: "inactive" as const
     }
   ])("blocks compilation for $name", async ({ location, status }) => {
     const project = structuredClone(videoProjectFixture) as VideoProject;
     const invalidTemplateId = `invalid-${location}-template`;
     const section = project.script.sections[0];
-    const line = section?.lines[0];
-    if (section === undefined || line === undefined) {
-      throw new Error("The compile fixture is missing its first line.");
+    if (section === undefined) {
+      throw new Error("The compile fixture is missing its first section.");
     }
-    if (location === "section") {
-      section.screenTemplateId = invalidTemplateId;
-    } else {
-      line.screenTemplateId = invalidTemplateId;
-    }
+    section.screenTemplateId = invalidTemplateId;
 
     const { service, compileAndStore } = createCompileService(
       project,

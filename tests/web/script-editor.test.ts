@@ -130,20 +130,13 @@ describe("script editor helpers", () => {
     expect(changed.sections[0]?.lines[0]?.subtitleText).toBe("一つ目");
   });
 
-  it("updates a section template without changing explicit line overrides", () => {
-    const withOverride = updateScriptLine(script, 0, 1, {
-      screenTemplateId: "screen-template-line"
-    });
-    const changed = updateScriptSection(withOverride, 0, {
+  it("updates only the section template", () => {
+    const changed = updateScriptSection(script, 0, {
       screenTemplateId: "screen-template-section"
     });
 
     expect(changed.sections[0]?.screenTemplateId).toBe(
       "screen-template-section"
-    );
-    expect(changed.sections[0]?.lines[0]?.screenTemplateId).toBeNull();
-    expect(changed.sections[0]?.lines[1]?.screenTemplateId).toBe(
-      "screen-template-line"
     );
     expect(script.sections[0]?.screenTemplateId).toBe(
       "screen-template-standard"

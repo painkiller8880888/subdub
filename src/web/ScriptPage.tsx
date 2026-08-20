@@ -297,7 +297,6 @@ function ScriptLineCard({
   project,
   catalog,
   catalogUnavailable,
-  activeTemplates,
   resolvedTemplate,
   linePreview,
   issues,
@@ -310,8 +309,7 @@ function ScriptLineCard({
   onDuplicate,
   onDelete,
   onGenerateVoice,
-  onOpenPicker,
-  onTemplateChange
+  onOpenPicker
 }: {
   readonly line: ScriptLine;
   readonly sectionIndex: number;
@@ -319,7 +317,6 @@ function ScriptLineCard({
   readonly project: VideoProject;
   readonly catalog: CharacterVisualCatalogSnapshot | undefined;
   readonly catalogUnavailable: boolean;
-  readonly activeTemplates: readonly ScreenTemplateSummary[];
   readonly resolvedTemplate: ResolvedScriptScreenTemplate;
   readonly linePreview: ReturnType<typeof resolveScriptLineScreenPreview>;
   readonly issues: readonly ScriptDraftIssue[];
@@ -333,9 +330,7 @@ function ScriptLineCard({
   readonly onDelete: () => void;
   readonly onGenerateVoice: () => void;
   readonly onOpenPicker: () => void;
-  readonly onTemplateChange: (templateId: string | null) => void;
 }) {
-  const [templatePickerOpen, setTemplatePickerOpen] = useState(false);
   const lineIssues = lineIssueText(issues, sectionIndex, lineIndex);
   const { character, visual, variant } = visualForLine(project, catalog, line);
   const numberValue = (value: number): string =>
@@ -357,16 +352,8 @@ function ScriptLineCard({
               : variant.status === "active" && visual.status === "active"
                 ? "選択中"
                 : "非アクティブな参照です";
-  const effectiveTemplateName = screenTemplateName(
-    resolvedTemplate,
-    activeTemplates
-  );
   const templateReferenceError =
     screenTemplateReferenceMessage(resolvedTemplate);
-  const lineTemplateIsOverride = line.screenTemplateId !== null;
-  const activeTemplateIds = new Set(
-    activeTemplates.map((template) => template.templateId)
-  );
 
   return (
     <article className="script-line-card" aria-label={`セリフ ${line.id}`}>
@@ -435,79 +422,6 @@ function ScriptLineCard({
               </button>
             </div>
           </header>
-
-          <section
-            aria-label={`${line.id}の画面テンプレート設定`}
-            className="script-line-template-controls"
-          >
-            <div>
-              <p className="eyebrow">画面テンプレート</p>
-              <strong>
-                {lineTemplateIsOverride
-                  ? "個別設定: "
-                  : "セクション設定を使用: "}
-                {effectiveTemplateName}
-              </strong>
-              {templateReferenceError !== null ? (
-                <span className="script-template-reference-error" role="alert">
-                  {templateReferenceError}
-                </span>
-              ) : null}
-            </div>
-            <div className="script-line-template-actions">
-              <button
-                className="button button-small"
-                disabled={activeTemplates.length === 0}
-                type="button"
-                onClick={() => setTemplatePickerOpen((current) => !current)}
-              >
-                {lineTemplateIsOverride ? "変更" : "個別に変更"}
-              </button>
-              {lineTemplateIsOverride ? (
-                <button
-                  className="button button-small"
-                  type="button"
-                  onClick={() => {
-                    setTemplatePickerOpen(false);
-                    onTemplateChange(null);
-                  }}
-                >
-                  セクション設定に戻す
-                </button>
-              ) : null}
-            </div>
-            {templatePickerOpen ? (
-              <div className="form-field script-line-template-picker">
-                <label htmlFor={`${line.id}-screen-template`}>個別設定</label>
-                <select
-                  id={`${line.id}-screen-template`}
-                  value={line.screenTemplateId ?? ""}
-                  onChange={(event) => {
-                    onTemplateChange(event.target.value);
-                    setTemplatePickerOpen(false);
-                  }}
-                >
-                  <option disabled value="">
-                    activeなテンプレートを選択
-                  </option>
-                  {line.screenTemplateId !== null &&
-                  !activeTemplateIds.has(line.screenTemplateId) ? (
-                    <option value={line.screenTemplateId}>
-                      未解決: {line.screenTemplateId}
-                    </option>
-                  ) : null}
-                  {activeTemplates.map((template) => (
-                    <option
-                      key={template.templateId}
-                      value={template.templateId}
-                    >
-                      {template.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            ) : null}
-          </section>
 
           <div className="script-line-fields">
             <div className="form-field">
@@ -1707,7 +1621,6 @@ export function ScriptPage() {
           {draft.sections.map((section, sectionIndex) => {
             const sectionTemplate = resolveScriptScreenTemplate(
               section,
-              { screenTemplateId: null },
               templateDetails,
               templateLoadingIds
             );
@@ -1788,7 +1701,6 @@ export function ScriptPage() {
                       (() => {
                         const resolvedTemplate = resolveScriptScreenTemplate(
                           section,
-                          line,
                           templateDetails,
                           templateLoadingIds
                         );
@@ -1808,7 +1720,6 @@ export function ScriptPage() {
                             catalogUnavailable={
                               catalogQuery.isPending || catalogQuery.isError
                             }
-                            activeTemplates={activeTemplates}
                             resolvedTemplate={resolvedTemplate}
                             linePreview={resolveScriptLineScreenPreview({
                               projectId: project.metadata.id,
@@ -1830,11 +1741,6 @@ export function ScriptPage() {
                             projectId={project.metadata.id}
                             onChange={(update) =>
                               updateLine(sectionIndex, lineIndex, update)
-                            }
-                            onTemplateChange={(templateId) =>
-                              updateLine(sectionIndex, lineIndex, {
-                                screenTemplateId: templateId
-                              })
                             }
                             onMove={(direction) =>
                               updateDraft(

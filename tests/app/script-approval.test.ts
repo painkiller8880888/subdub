@@ -70,7 +70,6 @@ function editFirstSpokenText(script: Script): Script {
 function addLine(script: Script): Script {
   const defaultLine: Script["sections"][number]["lines"][number] = {
     id: "draft-added-line",
-    screenTemplateId: null,
     speakerId: "character-mentor",
     spokenText: "追加されたセリフ",
     subtitleText: "追加された字幕",
@@ -94,7 +93,6 @@ function addLine(script: Script): Script {
 function addTwoLines(script: Script): Script {
   const base: Script["sections"][number]["lines"][number] = {
     id: "draft-added-line-1",
-    screenTemplateId: null,
     speakerId: "character-mentor",
     spokenText: "追加されたセリフ1",
     subtitleText: "追加された字幕1",

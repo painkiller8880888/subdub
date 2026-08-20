@@ -96,8 +96,7 @@ function manifestFieldsChanged(
     current.subtitleText !== candidate.subtitleText ||
     current.expression !== candidate.expression ||
     current.pauseBeforeMs !== candidate.pauseBeforeMs ||
-    current.pauseAfterMs !== candidate.pauseAfterMs ||
-    current.screenTemplateId !== candidate.screenTemplateId
+    current.pauseAfterMs !== candidate.pauseAfterMs
   );
 }
 

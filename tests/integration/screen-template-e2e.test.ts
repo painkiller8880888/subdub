@@ -3,10 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
 import { migrateVideoProjectWithDiagnostics } from "../../src/app/projects/video-project-migration.js";
-import {
-  resolveScreenTemplateId,
-  validateVideoProjectScreenTemplateReferences
-} from "../../src/app/projects/screen-template-selection.js";
+import { validateVideoProjectScreenTemplateReferences } from "../../src/app/projects/screen-template-selection.js";
 import {
   compileRenderManifest,
   type RenderManifestCompilerInput
@@ -18,6 +15,7 @@ import {
 } from "../../src/screen-layout-resolver.js";
 import {
   videoProjectSchema,
+  videoProjectV13Schema,
   type AssetDetail,
   type CharacterVisualCatalogSnapshot,
   type ScreenTemplate,
@@ -52,6 +50,7 @@ import {
   ALTERNATE_SCREEN_TEMPLATE_ID,
   createAlternateScreenTemplate,
   createLegacyScreenTemplateProjectFixture,
+  createLineOverrideScreenTemplateProjectFixture,
   createScreenTemplateProjectFixture,
   createStandardAndAlternateTemplateSnapshot,
   SCREEN_TEMPLATE_FIXTURE_TIMESTAMP
@@ -135,21 +134,24 @@ function compileRepresentativeProject(
 }
 
 describe("ScreenTemplate cross-layer acceptance fixture", () => {
-  it("migrates 1.2.0 selections to standard/null without changing unrelated data", () => {
+  it("migrates 1.2.0 selections to section-level standard templates", () => {
     const legacy = createLegacyScreenTemplateProjectFixture();
     expect(videoProjectSchema.safeParse(legacy).success).toBe(false);
     const migrated = migrateVideoProjectWithDiagnostics(legacy);
 
     expect(migrated.migrated).toBe(true);
     const project = videoProjectSchema.parse(migrated.project);
-    expect(project.schemaVersion).toBe("1.3.0");
+    expect(project.schemaVersion).toBe("1.4.0");
     expect(
       project.script.sections.every(
-        (section) =>
-          section.screenTemplateId === STANDARD_SCREEN_TEMPLATE_ID &&
-          section.lines.every((line) => line.screenTemplateId === null)
+        (section) => section.screenTemplateId === STANDARD_SCREEN_TEMPLATE_ID
       )
     ).toBe(true);
+    for (const line of project.script.sections.flatMap(
+      (section) => section.lines
+    )) {
+      expect(line).not.toHaveProperty("screenTemplateId");
+    }
     expect(project.metadata.title).toBe("申請手順の基本");
     expect(
       project.visuals.assignments.map((assignment) => assignment.id)
@@ -184,6 +186,35 @@ describe("ScreenTemplate cross-layer acceptance fixture", () => {
     expect(inactiveResult.blockedReason).toBe("standard_template_unavailable");
     expect(inactiveResult.project).toBe(inactive);
     expect(inactive).toEqual(inactiveBefore);
+  });
+
+  it("migrates the retained 1.3.0 line override fixture to section authority", () => {
+    const legacy = createLineOverrideScreenTemplateProjectFixture();
+    expect(videoProjectV13Schema.safeParse(legacy).success).toBe(true);
+
+    const migrated = migrateVideoProjectWithDiagnostics(legacy);
+    expect(migrated.migrated).toBe(true);
+    expect(migrated.logEntries).toHaveLength(1);
+    expect(migrated.logEntries[0]).toMatchObject({
+      fromSchemaVersion: "1.3.0",
+      toSchemaVersion: "1.4.0",
+      kind: "removed_line_screen_template_override",
+      sectionId: "section-main",
+      lineId: "main-learner-1",
+      oldLineScreenTemplateId: STANDARD_SCREEN_TEMPLATE_ID,
+      effectiveSectionScreenTemplateId: ALTERNATE_SCREEN_TEMPLATE_ID
+    });
+
+    const project = videoProjectSchema.parse(migrated.project);
+    expect(project.schemaVersion).toBe("1.4.0");
+    expect(project.script.sections[1]?.screenTemplateId).toBe(
+      ALTERNATE_SCREEN_TEMPLATE_ID
+    );
+    for (const line of project.script.sections.flatMap(
+      (section) => section.lines
+    )) {
+      expect(line).not.toHaveProperty("screenTemplateId");
+    }
   });
 
   it("keeps editor move/resize/rotate/flip operations valid across save and reload", () => {
@@ -301,7 +332,7 @@ describe("ScreenTemplate cross-layer acceptance fixture", () => {
     ).toEqual(expect.arrayContaining([expect.stringContaining("overflows")]));
   });
 
-  it("validates section titles for line override templates and points to the section name", () => {
+  it("validates section titles for the selected section template", () => {
     const project = createScreenTemplateProjectFixture();
     const alternate = createAlternateScreenTemplate();
     project.script.sections[1]!.screenTemplateId = STANDARD_SCREEN_TEMPLATE_ID;
@@ -321,8 +352,7 @@ describe("ScreenTemplate cross-layer acceptance fixture", () => {
           : element
       )
     });
-    project.script.sections[1]!.lines[1]!.screenTemplateId =
-      narrowTitle.templateId;
+    project.script.sections[1]!.screenTemplateId = narrowTitle.templateId;
     const input = createRenderManifestInput(project, {
       screenTemplateCatalogSnapshot: [
         createStandardAndAlternateTemplateSnapshot()[0]!,
@@ -336,13 +366,12 @@ describe("ScreenTemplate cross-layer acceptance fixture", () => {
       : result.diagnostics.find(
           (diagnostic) =>
             diagnostic.code === "SCREEN_TEMPLATE_TEXT_OVERFLOW" &&
-            diagnostic.lineId === "main-learner-1"
+            diagnostic.sectionId === "section-main"
         );
     expect(result.success).toBe(false);
     expect(titleDiagnostic).toMatchObject({
       path: ["script", "sections", 1, "name"],
-      sectionId: "section-main",
-      lineId: "main-learner-1"
+      sectionId: "section-main"
     });
   });
 
@@ -362,14 +391,11 @@ describe("ScreenTemplate cross-layer acceptance fixture", () => {
         template
       ])
     );
-    const resolved = resolveScriptScreenTemplate(main, line, templates);
+    const resolved = resolveScriptScreenTemplate(main, templates);
     expect(resolved).toMatchObject({
       status: "ready",
       templateId: ALTERNATE_SCREEN_TEMPLATE_ID
     });
-    expect(resolveScreenTemplateId(main, line)).toBe(
-      ALTERNATE_SCREEN_TEMPLATE_ID
-    );
 
     const preview = resolveScriptLineScreenPreview({
       projectId: project.metadata.id,
@@ -435,7 +461,7 @@ describe("ScreenTemplate cross-layer acceptance fixture", () => {
     );
     expect(mainLines.map((line) => line.screenTemplateId)).toEqual([
       ALTERNATE_SCREEN_TEMPLATE_ID,
-      STANDARD_SCREEN_TEMPLATE_ID,
+      ALTERNATE_SCREEN_TEMPLATE_ID,
       ALTERNATE_SCREEN_TEMPLATE_ID
     ]);
 
@@ -458,8 +484,6 @@ describe("ScreenTemplate cross-layer acceptance fixture", () => {
       (visual) => visual.sourceAssignmentId === "visual-main-photo"
     );
     expect(photoSegments.map((segment) => segment.screenTemplateId)).toEqual([
-      ALTERNATE_SCREEN_TEMPLATE_ID,
-      STANDARD_SCREEN_TEMPLATE_ID,
       ALTERNATE_SCREEN_TEMPLATE_ID
     ]);
     expect(photoSegments[0]?.display.contentClip.enabled).toBe(true);

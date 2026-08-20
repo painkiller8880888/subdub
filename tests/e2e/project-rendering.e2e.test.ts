@@ -2275,15 +2275,7 @@ describe("MVP final verification E2E", () => {
                     ? section
                     : {
                         ...section,
-                        screenTemplateId: ALTERNATE_SCREEN_TEMPLATE_ID,
-                        lines: section.lines.map((line, lineIndex) =>
-                          lineIndex === 1
-                            ? {
-                                ...line,
-                                screenTemplateId: "screen-template-standard"
-                              }
-                            : line
-                        )
+                        screenTemplateId: ALTERNATE_SCREEN_TEMPLATE_ID
                       }
               )
             },

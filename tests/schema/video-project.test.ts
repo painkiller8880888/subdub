@@ -54,7 +54,7 @@ describe("videoProjectSchema", () => {
     expect(result.success).toBe(true);
   });
 
-  it("requires a section template and accepts nullable line overrides", () => {
+  it("requires a section template and rejects line template fields", () => {
     const missingSectionTemplate = clone(videoProjectFixture);
     Reflect.deleteProperty(
       missingSectionTemplate.script.sections[0],
@@ -67,24 +67,17 @@ describe("videoProjectSchema", () => {
       "screenTemplateId"
     ]);
 
-    const missingLineTemplate = clone(videoProjectFixture);
-    Reflect.deleteProperty(
-      missingLineTemplate.script.sections[0].lines[0],
-      "screenTemplateId"
-    );
-    expectInvalid(missingLineTemplate, [
+    const lineOverride = clone(videoProjectFixture);
+    Object.assign(lineOverride.script.sections[0].lines[0], {
+      screenTemplateId: "screen-template-custom"
+    });
+    expectInvalid(lineOverride, [
       "script",
       "sections",
       0,
       "lines",
-      0,
-      "screenTemplateId"
+      0
     ]);
-
-    const lineOverride = clone(videoProjectFixture);
-    lineOverride.script.sections[0].lines[0].screenTemplateId =
-      "screen-template-custom";
-    expect(videoProjectSchema.safeParse(lineOverride).success).toBe(true);
   });
 
   it("defaults newly created sound effects to 0.2 without rewriting explicit volume", () => {
