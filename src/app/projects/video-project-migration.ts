@@ -5,12 +5,14 @@ import {
   legacyVideoProjectSchema,
   legacyVideoProjectV11Schema,
   videoProjectV12Schema,
-  videoProjectV13Schema
+  videoProjectV13Schema,
+  videoProjectV14Schema
 } from "../../schema/video-project.js";
 import { STANDARD_SCREEN_TEMPLATE_ID } from "../screen-templates/screen-template-seed.js";
 import type { ScreenTemplateCatalogPort } from "./screen-template-selection.js";
 
-export const CURRENT_VIDEO_PROJECT_SCHEMA_VERSION = "1.4.0" as const;
+export const CURRENT_VIDEO_PROJECT_SCHEMA_VERSION = "1.5.0" as const;
+export const PREVIOUS_VIDEO_PROJECT_SCHEMA_VERSION = "1.4.0" as const;
 export const SCREEN_TEMPLATE_PREVIOUS_VIDEO_PROJECT_SCHEMA_VERSION =
   "1.2.0" as const;
 export const LINE_SCREEN_TEMPLATE_PREVIOUS_VIDEO_PROJECT_SCHEMA_VERSION =
@@ -47,7 +49,7 @@ export type ScreenTemplateMigrationLogEntry = {
 export type LineScreenTemplateOverrideMigrationLogEntry = {
   readonly migrationId: string;
   readonly fromSchemaVersion: typeof LINE_SCREEN_TEMPLATE_PREVIOUS_VIDEO_PROJECT_SCHEMA_VERSION;
-  readonly toSchemaVersion: typeof CURRENT_VIDEO_PROJECT_SCHEMA_VERSION;
+  readonly toSchemaVersion: typeof PREVIOUS_VIDEO_PROJECT_SCHEMA_VERSION;
   readonly kind: "removed_line_screen_template_override";
   readonly sectionId: string;
   readonly lineId: string;
@@ -153,6 +155,7 @@ function migrationId(
     | LegacyVideoProjectSchemaVersion
     | typeof SCREEN_TEMPLATE_PREVIOUS_VIDEO_PROJECT_SCHEMA_VERSION
     | typeof LINE_SCREEN_TEMPLATE_PREVIOUS_VIDEO_PROJECT_SCHEMA_VERSION
+    | typeof PREVIOUS_VIDEO_PROJECT_SCHEMA_VERSION
 ): string {
   const digest = createHash("sha256")
     .update(
@@ -472,7 +475,7 @@ function migrateLineScreenTemplateOverridesProject(
           migrationId: currentMigrationId,
           fromSchemaVersion:
             LINE_SCREEN_TEMPLATE_PREVIOUS_VIDEO_PROJECT_SCHEMA_VERSION,
-          toSchemaVersion: CURRENT_VIDEO_PROJECT_SCHEMA_VERSION,
+          toSchemaVersion: PREVIOUS_VIDEO_PROJECT_SCHEMA_VERSION,
           kind: "removed_line_screen_template_override",
           sectionId,
           lineId: rawLine.id,
@@ -484,8 +487,39 @@ function migrateLineScreenTemplateOverridesProject(
     }
   }
 
-  migrated.schemaVersion = CURRENT_VIDEO_PROJECT_SCHEMA_VERSION;
+  migrated.schemaVersion = PREVIOUS_VIDEO_PROJECT_SCHEMA_VERSION;
   return { project: migrated, logEntries };
+}
+
+function migratePlaybackCuesProject(
+  project: unknown,
+  incrementRevision: boolean
+): unknown | undefined {
+  const v14Result = videoProjectV14Schema.safeParse(project);
+  if (!v14Result.success) {
+    return undefined;
+  }
+
+  const migrated = cloneJson(v14Result.data);
+  if (!isRecord(migrated) || !isRecord(migrated.visuals)) {
+    return undefined;
+  }
+  if (!Array.isArray(migrated.visuals.assignments)) {
+    return undefined;
+  }
+
+  for (const rawAssignment of migrated.visuals.assignments) {
+    if (!isRecord(rawAssignment) || !isRecord(rawAssignment.display)) {
+      return undefined;
+    }
+    if (rawAssignment.display.kind === "video") {
+      rawAssignment.display.playbackCues = [];
+    }
+  }
+
+  migrated.schemaVersion = CURRENT_VIDEO_PROJECT_SCHEMA_VERSION;
+  migrated.revision = v14Result.data.revision + (incrementRevision ? 1 : 0);
+  return migrated;
 }
 
 export function migrateVideoProjectWithDiagnostics(
@@ -497,6 +531,24 @@ export function migrateVideoProjectWithDiagnostics(
   }
   if (input.schemaVersion === CURRENT_VIDEO_PROJECT_SCHEMA_VERSION) {
     return noMigration(input);
+  }
+
+  if (input.schemaVersion === PREVIOUS_VIDEO_PROJECT_SCHEMA_VERSION) {
+    const currentMigrationId = migrationId(
+      input,
+      PREVIOUS_VIDEO_PROJECT_SCHEMA_VERSION
+    );
+    const migrated = migratePlaybackCuesProject(input, true);
+    if (migrated === undefined) {
+      return noMigration(input);
+    }
+    return {
+      project: migrated,
+      migrated: true,
+      migrationId: currentMigrationId,
+      logEntries: [],
+      blockedReason: undefined
+    };
   }
 
   let sourceProject: unknown = input;
@@ -562,8 +614,16 @@ export function migrateVideoProjectWithDiagnostics(
     return noMigration(input);
   }
 
+  const playbackCueMigration = migratePlaybackCuesProject(
+    lineOverrideMigration.project,
+    true
+  );
+  if (playbackCueMigration === undefined) {
+    return noMigration(input);
+  }
+
   return {
-    project: lineOverrideMigration.project,
+    project: playbackCueMigration,
     migrated: true,
     migrationId: currentMigrationId,
     logEntries: [

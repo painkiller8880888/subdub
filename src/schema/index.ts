@@ -13,3 +13,4 @@ export * from "./video-project.js";
 export * from "./terminology.js";
 export * from "./visual-search-intent.js";
 export * from "./improvement-log.js";
+export * from "./visual-playback.js";

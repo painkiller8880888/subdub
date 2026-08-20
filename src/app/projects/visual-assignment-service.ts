@@ -10,14 +10,14 @@ import {
   type VisualAssignmentRequest
 } from "../../schema/api.js";
 import {
-  displayV13Schema,
+  displayV15Schema,
   idSchema,
   relativePosixPathSchema,
   sha256Schema,
   visualSuggestionCandidateSchema,
   videoProjectSchema,
   type DisplayInput,
-  type DisplayV13,
+  type DisplayV15,
   type AssetDetail,
   type VisualAssignment,
   type VideoProject
@@ -190,7 +190,7 @@ type DisplayDomainIssue = {
 
 function displayDomainIssues(
   asset: AssetDetail,
-  display: DisplayV13
+  display: DisplayV15
 ): DisplayDomainIssue[] {
   if (display.kind === "video") {
     if (
@@ -671,7 +671,8 @@ export class VisualAssignmentService {
         startMs: 0,
         endMs: asset.durationMs,
         playbackRate: 1,
-        volume: 0
+        volume: 0,
+        playbackCues: []
       };
     }
 
@@ -704,9 +705,9 @@ export class VisualAssignmentService {
 
   private normalizeDisplay(
     display: DisplayInput,
-    fallbackCoordinateSpace: DisplayV13["displayCoordinateSpace"]
-  ): DisplayV13 {
-    return displayV13Schema.parse({
+    fallbackCoordinateSpace: DisplayV15["displayCoordinateSpace"]
+  ): DisplayV15 {
+    return displayV15Schema.parse({
       ...display,
       displayCoordinateSpace:
         display.displayCoordinateSpace ?? fallbackCoordinateSpace
@@ -715,9 +716,9 @@ export class VisualAssignmentService {
 
   private assertDisplayWithinAsset(
     asset: AssetDetail,
-    display: DisplayV13
+    display: DisplayV15
   ): void {
-    const displayResult = displayV13Schema.safeParse(display);
+    const displayResult = displayV15Schema.safeParse(display);
     if (!displayResult.success) {
       throw visualAssignmentError(
         VISUAL_ASSIGNMENT_ERROR_CODE.candidateInvalid,
@@ -1036,7 +1037,7 @@ export class VisualAssignmentService {
         );
       }
 
-      const displayResult = displayV13Schema.safeParse(assignment.display);
+      const displayResult = displayV15Schema.safeParse(assignment.display);
       if (!displayResult.success) {
         for (const issue of validationDetails(displayResult.error.issues)) {
           validationIssuesForApproval.push(
@@ -1185,7 +1186,7 @@ export class VisualAssignmentService {
 
   private assertAssetUsable(
     asset: AssetDetail,
-    displayKind: DisplayV13["kind"]
+    displayKind: DisplayV15["kind"]
   ): void {
     if (asset.status !== "active") {
       throw visualAssignmentError(

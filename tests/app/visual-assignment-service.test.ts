@@ -1017,6 +1017,117 @@ describe("VisualAssignmentService", () => {
     expect(await fs.readFile(destination)).toEqual(beforeRemove);
   });
 
+  it("saves video pause/resume cues and rejects range shortening without deleting them", async () => {
+    const context = await setup({
+      asset: createAsset({
+        kind: "video",
+        durationMs: 1000,
+        libraryMediaPath: `media/${ASSET_ID}/v1.mp4`
+      })
+    });
+    const videoDisplay = {
+      ...clone(videoProjectFixture.visuals.assignments[0].display),
+      endMs: 1000
+    };
+    const assigned = await context.service.assign(PROJECT_ID, {
+      expectedRevision: 0,
+      assignment: createAssignment(
+        "new-visual-assignment",
+        ASSET_ID,
+        videoDisplay
+      )
+    });
+    const savedAssignment = assigned.data.visuals.assignments[0];
+    if (
+      savedAssignment === undefined ||
+      savedAssignment.display.kind !== "video"
+    ) {
+      throw new Error("video assignment was not created");
+    }
+
+    const updated = await context.service.update(
+      PROJECT_ID,
+      savedAssignment.id,
+      {
+        expectedRevision: assigned.revision,
+        assignment: {
+          id: savedAssignment.id,
+          startLineId: "main-mentor-1",
+          endLineId: "main-learner-1",
+          assetId: savedAssignment.assetId,
+          display: {
+            ...savedAssignment.display,
+            playbackCues: [
+              { lineId: "main-learner-1", edge: "after", action: "resume" },
+              { lineId: "main-mentor-1", edge: "after", action: "pause" }
+            ]
+          }
+        }
+      }
+    );
+    expect(updated.data.visuals.assignments[0]?.display).toMatchObject({
+      kind: "video",
+      playbackCues: [
+        { lineId: "main-learner-1", edge: "after", action: "resume" },
+        { lineId: "main-mentor-1", edge: "after", action: "pause" }
+      ]
+    });
+
+    const beforeInvalidUpdate = await fs.readFile(context.projectFile);
+    const invalid = await expectError(
+      () =>
+        context.service.update(PROJECT_ID, savedAssignment.id, {
+          expectedRevision: updated.revision,
+          assignment: {
+            id: savedAssignment.id,
+            startLineId: "main-mentor-1",
+            endLineId: "main-mentor-1",
+            assetId: savedAssignment.assetId,
+            display: {
+              ...updated.data.visuals.assignments[0]!.display,
+              playbackCues:
+                updated.data.visuals.assignments[0]!.display.kind === "video"
+                  ? updated.data.visuals.assignments[0]!.display.playbackCues
+                  : []
+            }
+          }
+        }),
+      VISUAL_ASSIGNMENT_ERROR_CODE.candidateInvalid
+    );
+    expect((invalid as VisualAssignmentError).details).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          message:
+            "playback cue line must stay inside the visual assignment range"
+        })
+      ])
+    );
+    expect(await fs.readFile(context.projectFile)).toEqual(beforeInvalidUpdate);
+
+    const removedCues = await context.service.update(
+      PROJECT_ID,
+      savedAssignment.id,
+      {
+        expectedRevision: updated.revision,
+        assignment: {
+          id: savedAssignment.id,
+          startLineId: "main-mentor-1",
+          endLineId: "main-mentor-1",
+          assetId: savedAssignment.assetId,
+          display: {
+            ...updated.data.visuals.assignments[0]!.display,
+            playbackCues: []
+          }
+        }
+      }
+    );
+    expect(removedCues.revision).toBe(updated.revision + 1);
+    expect(removedCues.data.visuals.assignments[0]?.display).toMatchObject({
+      kind: "video",
+      playbackCues: []
+    });
+  });
+
   it("does not reinterpret a legacy assignment in a regular update", async () => {
     const context = await setup();
     const assigned = await context.service.assign(PROJECT_ID, {

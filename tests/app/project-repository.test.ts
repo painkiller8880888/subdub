@@ -73,6 +73,7 @@ function legacyVideoProjectV11(): Record<string, unknown> {
     if (assignment.display.kind !== "video") {
       continue;
     }
+    delete assignment.display.playbackCues;
     assignment.display.muted = assignment.display.volume === 0;
     delete assignment.display.volume;
   }
@@ -104,6 +105,12 @@ function lineScreenTemplateOverrideProject(): Record<string, unknown> {
     for (const line of section.lines) {
       line.screenTemplateId = null;
     }
+  }
+  const visuals = project.visuals as {
+    assignments: Array<{ display: Record<string, unknown> }>;
+  };
+  for (const assignment of visuals.assignments) {
+    delete assignment.display.playbackCues;
   }
   const overrideLine = script.sections[1]?.lines[0];
   if (overrideLine === undefined) {
@@ -364,7 +371,7 @@ describe("ProjectRepository", () => {
     candidate.metadata.title = "migration と同時の保存";
     let saveCompleted = false;
     const savePromise = repository
-      .save(projectId, candidate, 8)
+      .save(projectId, candidate, 9)
       .then((saved) => {
         saveCompleted = true;
         return saved;
@@ -375,14 +382,14 @@ describe("ProjectRepository", () => {
 
     releaseMigrationRename();
     const [migrated, saved] = await Promise.all([readPromise, savePromise]);
-    expect(migrated.revision).toBe(8);
-    expect(saved.revision).toBe(9);
+    expect(migrated.revision).toBe(9);
+    expect(saved.revision).toBe(10);
     expect(saved.metadata.title).toBe("migration と同時の保存");
 
     const finalProject = JSON.parse(
       await fs.readFile(projectFile, "utf8")
     ) as VideoProject;
-    expect(finalProject.revision).toBe(9);
+    expect(finalProject.revision).toBe(10);
     expect(finalProject.metadata.title).toBe("migration と同時の保存");
   });
 
@@ -516,8 +523,8 @@ describe("ProjectRepository", () => {
     const repository = new ProjectRepository(workspaceRoot);
 
     const migrated = await repository.read(projectId);
-    expect(migrated.schemaVersion).toBe("1.4.0");
-    expect(migrated.revision).toBe(8);
+    expect(migrated.schemaVersion).toBe("1.5.0");
+    expect(migrated.revision).toBe(9);
     expect(migrated.edit).toEqual({ videoElements: [], sectionBgms: [] });
     expect(migrated.audio).not.toHaveProperty("sectionBgms");
 
@@ -550,7 +557,7 @@ describe("ProjectRepository", () => {
     const migratedBytes = await readProjectBytes();
     expect(migratedBytes).not.toEqual(before);
     expect(JSON.parse(migratedBytes.toString("utf8")).schemaVersion).toBe(
-      "1.4.0"
+      "1.5.0"
     );
 
     await repository.read(projectId);
@@ -563,8 +570,8 @@ describe("ProjectRepository", () => {
     const repository = new ProjectRepository(workspaceRoot);
 
     const migrated = await repository.read(projectId);
-    expect(migrated.schemaVersion).toBe("1.4.0");
-    expect(migrated.revision).toBe((project.revision as number) + 1);
+    expect(migrated.schemaVersion).toBe("1.5.0");
+    expect(migrated.revision).toBe((project.revision as number) + 2);
     for (const line of migrated.script.sections.flatMap((section) => section.lines)) {
       expect(line).not.toHaveProperty("screenTemplateId");
     }

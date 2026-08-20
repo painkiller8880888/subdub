@@ -14,7 +14,7 @@ const BGM_CHECKSUM =
   "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff";
 
 export const videoProjectFixture = {
-  schemaVersion: "1.4.0",
+  schemaVersion: "1.5.0",
   revision: 0,
   metadata: {
     id: "manual-video-project",
@@ -350,7 +350,8 @@ export const videoProjectFixture = {
           startMs: 0,
           endMs: 3000,
           playbackRate: 1,
-          volume: 0
+          volume: 0,
+          playbackCues: []
         }
       },
       {
