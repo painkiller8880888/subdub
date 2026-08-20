@@ -226,6 +226,13 @@ describe("VoicevoxGenerationService", { timeout: 30_000 }, () => {
 
     expect(status.available).toBe(true);
     expect(status.lines.every((line) => line.status === "current")).toBe(true);
+    expect(
+      status.lines.every(
+        (line) =>
+          line.audioPath?.startsWith(`projects/${projectId}/audio/voice/`) ===
+          true
+      )
+    ).toBe(true);
     expect(harness.client.getVersion).toHaveBeenCalledTimes(1);
     expect(harness.client.getAudioQuery).not.toHaveBeenCalled();
     expect(harness.client.synthesize).not.toHaveBeenCalled();

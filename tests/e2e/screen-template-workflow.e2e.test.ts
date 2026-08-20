@@ -199,7 +199,11 @@ function voiceStatus(project: VideoProject): VoiceGenerationStatusData {
   return {
     available: true,
     lines: project.script.sections.flatMap((section) =>
-      section.lines.map((line) => ({ lineId: line.id, status: "current" }))
+      section.lines.map((line) => ({
+        lineId: line.id,
+        status: "current" as const,
+        audioPath: `projects/${project.metadata.id}/audio/voice/${line.id}.wav`
+      }))
     ),
     jobs: []
   };
@@ -761,6 +765,13 @@ describe("ScreenTemplate workflow browser E2E", () => {
             )
             .count()
         ).toBe(1);
+        expect(
+          await lineCard
+            .locator('audio[aria-label="main-learner-1の現在の音声"]')
+            .getAttribute("src")
+        ).toContain(
+          `/api/projects/${projectId}/files/audio/voice/main-learner-1.wav`
+        );
         await lineCard
           .locator(
             '.script-line-card-screen-preview img[src*="/api/assets/asset-application-form/"]'
@@ -827,6 +838,18 @@ describe("ScreenTemplate workflow browser E2E", () => {
           .getByRole("button", { name: "このセリフの音声を調整" })
           .first()
           .waitFor({ state: "visible" });
+        await lineCard
+          .getByRole("button", { name: "このセリフの音声を調整" })
+          .click();
+        const voiceDialog = page.getByRole("dialog", {
+          name: "セリフ main-learner-1"
+        });
+        await voiceDialog.waitFor({ state: "visible" });
+        expect(await voiceDialog.locator("h2").textContent()).toContain(
+          "セリフ main-learner-1"
+        );
+        await voiceDialog.getByRole("button", { name: "閉じる" }).click();
+        await voiceDialog.waitFor({ state: "detached" });
       } finally {
         await context.close();
       }

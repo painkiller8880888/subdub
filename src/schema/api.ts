@@ -257,7 +257,8 @@ export const voiceGenerationAcceptedResponseSchema = strictObject({
 export const voiceGenerationLineStatusSchema = strictObject({
   lineId: idSchema,
   status: voiceLineGenerationStatusSchema,
-  errorCode: z.string().min(1).optional()
+  errorCode: z.string().min(1).optional(),
+  audioPath: relativePosixPathSchema.optional()
 }).superRefine((line, ctx) => {
   if (line.status === "failed" && line.errorCode === undefined) {
     ctx.addIssue({

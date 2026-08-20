@@ -264,6 +264,7 @@ type GenerationTarget = {
 
 type LineInspection = GenerationTarget & {
   readonly current: boolean;
+  readonly audioPath: string | undefined;
 };
 
 function allLines(project: VideoProject): Array<{
@@ -687,7 +688,8 @@ export class VoicevoxGenerationService {
         sectionOrder: item.sectionOrder,
         lineOrder: item.lineOrder,
         conditions,
-        current
+        current,
+        audioPath: current ? entry?.audioPath : undefined
       });
     }
     return inspections;
@@ -892,7 +894,10 @@ export class VoicevoxGenerationService {
     }
     return {
       lineId: inspection.line.id,
-      status: inspection.current ? "current" : "stale"
+      status: inspection.current ? "current" : "stale",
+      ...(inspection.audioPath === undefined
+        ? {}
+        : { audioPath: inspection.audioPath })
     };
   }
 
