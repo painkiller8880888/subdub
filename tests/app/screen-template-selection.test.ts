@@ -11,25 +11,33 @@ function projectFixture(): VideoProject {
 describe("screen template selection", () => {
   it("reports missing and inactive references without rewriting their IDs", () => {
     const project = projectFixture();
-    const section = project.script.sections[0]!;
-    section.screenTemplateId = "missing-template";
+    const missingSection = project.script.sections[0]!;
+    missingSection.screenTemplateId = "missing-template";
+    const inactiveSection = project.script.sections[1]!;
+    inactiveSection.screenTemplateId = "inactive-template";
 
     const issues = validateVideoProjectScreenTemplateReferences(project, {
       findById: (templateId) =>
         templateId === "screen-template-standard"
           ? { status: "active" }
-          : templateId === "missing-template"
+          : templateId === "inactive-template"
             ? { status: "inactive" }
             : undefined
     });
 
     expect(issues).toEqual([
       expect.objectContaining({
-        reason: "inactive",
+        reason: "missing",
         templateId: "missing-template",
         path: ["script", "sections", 0, "screenTemplateId"]
+      }),
+      expect.objectContaining({
+        reason: "inactive",
+        templateId: "inactive-template",
+        path: ["script", "sections", 1, "screenTemplateId"]
       })
     ]);
-    expect(section.screenTemplateId).toBe("missing-template");
+    expect(missingSection.screenTemplateId).toBe("missing-template");
+    expect(inactiveSection.screenTemplateId).toBe("inactive-template");
   });
 });

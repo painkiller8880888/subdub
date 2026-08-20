@@ -27,6 +27,7 @@ import type {
   CharacterVisualSet,
   Script,
   ScriptLine,
+  ScriptSection,
   ScreenTemplate,
   VideoProject
 } from "../schema/index.js";
@@ -75,6 +76,7 @@ import { VoiceAdjustmentEditor } from "./VoiceAdjustmentEditor";
 import { visualAssignmentsPath } from "./VisualAssignmentsPage";
 import { WorkflowIndicator } from "./WorkflowIndicator";
 import { ScreenLayoutFrame } from "../remotion/screen-template-layout";
+import { createProjectManifestAssetUrlResolver } from "./preview-asset-url";
 import {
   findVisualAssignmentsForLine,
   projectAssetVersion,
@@ -207,6 +209,23 @@ function screenTemplateStatusIsSelectable(
   return resolved.status === "ready";
 }
 
+function sectionBackgroundSummary(
+  background: ScriptSection["background"]
+): string {
+  return background.kind === "solid"
+    ? "単色（background）"
+    : `${background.src}（${background.fit}）`;
+}
+
+function projectAudioUrl(
+  projectId: string,
+  audioPath: string | undefined
+): string | undefined {
+  return audioPath === undefined
+    ? undefined
+    : createProjectManifestAssetUrlResolver(projectId)(audioPath);
+}
+
 function variantFileSlots(variant: CharacterVariant): readonly {
   key: "single" | "closed" | "open";
   label: string;
@@ -333,6 +352,9 @@ function ScriptLineCard({
 }) {
   const lineIssues = lineIssueText(issues, sectionIndex, lineIndex);
   const { character, visual, variant } = visualForLine(project, catalog, line);
+  const [expandedTextField, setExpandedTextField] = useState<
+    "subtitle" | "spoken" | null
+  >(null);
   const numberValue = (value: number): string =>
     Number.isFinite(value) ? String(value) : "";
   const visualButtonDisabled =
@@ -354,6 +376,42 @@ function ScriptLineCard({
                 : "非アクティブな参照です";
   const templateReferenceError =
     screenTemplateReferenceMessage(resolvedTemplate);
+  const audioUrl =
+    voiceStatus?.status === "current"
+      ? projectAudioUrl(projectId, voiceStatus.audioPath)
+      : undefined;
+  const variantSummary =
+    variant === undefined
+      ? visualSummary
+      : `${variant.label}（${variant.renderType}）`;
+
+  function textRow(
+    field: "subtitle" | "spoken",
+    label: string,
+    value: string,
+    onChange: (value: string) => void
+  ) {
+    const expanded = expandedTextField === field;
+    return (
+      <div
+        className={`script-line-text-row${
+          expanded ? " script-line-text-row-expanded" : ""
+        }`}
+      >
+        <label htmlFor={`${line.id}-${field}`}>{label}</label>
+        <textarea
+          aria-label={`${line.id}の${label}`}
+          className="script-line-text-input"
+          id={`${line.id}-${field}`}
+          rows={expanded ? 4 : 1}
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+          onFocus={() => setExpandedTextField(field)}
+          onBlur={() => setExpandedTextField(null)}
+        />
+      </div>
+    );
+  }
 
   return (
     <article className="script-line-card" aria-label={`セリフ ${line.id}`}>
@@ -389,42 +447,13 @@ function ScriptLineCard({
         </aside>
 
         <div className="script-line-card-editor">
-          <header className="script-line-card-header">
-            <div>
-              <p className="eyebrow">セリフ識別子</p>
+          <div className="script-line-primary-row">
+            <div className="script-line-identity">
+              <span className="eyebrow">セリフID</span>
               <code>{line.id}</code>
             </div>
-            <div className="script-line-actions">
-              <button
-                className="button"
-                type="button"
-                onClick={() => onMove("up")}
-                disabled={lineIndex === 0}
-              >
-                上へ移動
-              </button>
-              <button
-                className="button"
-                type="button"
-                onClick={() => onMove("down")}
-                disabled={
-                  lineIndex ===
-                  (project.script.sections[sectionIndex]?.lines.length ?? 1) - 1
-                }
-              >
-                下へ移動
-              </button>
-              <button className="button" type="button" onClick={onDuplicate}>
-                複製
-              </button>
-              <button className="button" type="button" onClick={onDelete}>
-                削除
-              </button>
-            </div>
-          </header>
 
-          <div className="script-line-fields">
-            <div className="form-field">
+            <div className="form-field script-line-speaker-field">
               <label htmlFor={`${line.id}-speaker`}>話者</label>
               <select
                 id={`${line.id}-speaker`}
@@ -443,100 +472,15 @@ function ScriptLineCard({
                 ))}
               </select>
             </div>
-            <div className="form-field">
-              <label htmlFor={`${line.id}-expression`}>
-                表情（表示選択には影響しません）
-              </label>
-              <select
-                id={`${line.id}-expression`}
-                value={line.expression}
-                onChange={(event) =>
-                  onChange({
-                    expression: event.target.value as ScriptLine["expression"]
-                  })
-                }
-              >
-                <option value="neutral">通常</option>
-                <option value="smile">喜び</option>
-                <option value="explain">説明</option>
-                <option value="caution">注意</option>
-              </select>
-            </div>
-            <div className="form-field script-line-wide-field">
-              <label htmlFor={`${line.id}-spoken`}>
-                読み上げる文章（VOICEVOX）
-              </label>
-              <textarea
-                id={`${line.id}-spoken`}
-                rows={3}
-                value={line.spokenText}
-                onChange={(event) =>
-                  onChange({ spokenText: event.target.value })
-                }
-              />
-            </div>
-            <div className="form-field script-line-wide-field">
-              <label htmlFor={`${line.id}-subtitle`}>字幕に表示する文章</label>
-              <textarea
-                id={`${line.id}-subtitle`}
-                rows={3}
-                value={line.subtitleText}
-                onChange={(event) =>
-                  onChange({ subtitleText: event.target.value })
-                }
-              />
-            </div>
-            <div className="form-field">
-              <label htmlFor={`${line.id}-pause-before`}>
-                発話前の間（ミリ秒）
-              </label>
-              <input
-                id={`${line.id}-pause-before`}
-                type="number"
-                min={0}
-                step={1}
-                value={numberValue(line.pauseBeforeMs)}
-                onChange={(event) =>
-                  onChange({
-                    pauseBeforeMs:
-                      event.target.value.length === 0
-                        ? Number.NaN
-                        : Number(event.target.value)
-                  })
-                }
-              />
-            </div>
-            <div className="form-field">
-              <label htmlFor={`${line.id}-pause-after`}>
-                発話後の間（ミリ秒）
-              </label>
-              <input
-                id={`${line.id}-pause-after`}
-                type="number"
-                min={0}
-                step={1}
-                value={numberValue(line.pauseAfterMs)}
-                onChange={(event) =>
-                  onChange({
-                    pauseAfterMs:
-                      event.target.value.length === 0
-                        ? Number.NaN
-                        : Number(event.target.value)
-                  })
-                }
-              />
-            </div>
-          </div>
 
-          <section
-            aria-label={`${line.id}のキャラクタービジュアル設定`}
-            className="script-line-character-visual"
-          >
-            <div className="script-line-character-visual-content">
-              <div>
-                <p className="eyebrow">キャラクタービジュアル</p>
-                <strong>{visual?.name ?? "プロジェクト binding 未設定"}</strong>
-                <span className="status-message">{visualSummary}</span>
+            <div
+              aria-label={`${line.id}のキャラクタービジュアル設定`}
+              className="script-line-visual-control"
+            >
+              <div className="script-line-visual-control-copy">
+                <span className="eyebrow">ビジュアル</span>
+                <strong>{visual?.name ?? "binding 未設定"}</strong>
+                <span className="status-message">{variantSummary}</span>
               </div>
               {visual !== undefined && variant !== undefined ? (
                 <CharacterVariantPreview
@@ -544,69 +488,190 @@ function ScriptLineCard({
                   variant={variant}
                   characterName={character?.name ?? line.speakerId}
                 />
-              ) : (
-                <div className="script-line-character-visual-empty">未選択</div>
-              )}
-              {variant !== undefined ? (
-                <dl className="script-line-variant-details">
-                  <div>
-                    <dt>ラベル</dt>
-                    <dd>{variant.label}</dd>
-                  </div>
-                  <div>
-                    <dt>renderType</dt>
-                    <dd>{variant.renderType}</dd>
-                  </div>
-                </dl>
               ) : null}
-            </div>
-            <button
-              className="button button-small"
-              type="button"
-              disabled={visualButtonDisabled}
-              onClick={onOpenPicker}
-            >
-              {variant === undefined ? "ビジュアルを選択" : "ビジュアルを変更"}
-            </button>
-          </section>
-
-          <div className="script-line-voice-status" aria-label="音声状態">
-            <span className="eyebrow">音声状態</span>
-            {voiceStatus === undefined ? (
-              <span className="status-message">確認中…</span>
-            ) : (
-              <span
-                className={`voice-status voice-status-${voiceStatus.status}`}
+              <button
+                aria-label={`${line.id}のビジュアルを${
+                  variant === undefined ? "選択" : "変更"
+                }`}
+                className="button button-small"
+                type="button"
+                disabled={visualButtonDisabled}
+                onClick={onOpenPicker}
               >
-                {voiceStatusLabel(voiceStatus.status)}
+                {variant === undefined
+                  ? "ビジュアルを選択"
+                  : "ビジュアルを変更"}
+              </button>
+            </div>
+
+            <div className="script-line-audio-control" aria-label="音声操作">
+              <div className="script-line-audio-status">
+                <span className="eyebrow">音声</span>
+                {voiceStatus === undefined ? (
+                  <span className="status-message">確認中…</span>
+                ) : (
+                  <span
+                    className={`voice-status voice-status-${voiceStatus.status}`}
+                  >
+                    {voiceStatusLabel(voiceStatus.status)}
+                  </span>
+                )}
+                {voiceStatus?.status === "failed" &&
+                voiceStatus.errorCode !== undefined ? (
+                  <code>{voiceStatus.errorCode}</code>
+                ) : null}
+              </div>
+              {audioUrl !== undefined ? (
+                <audio
+                  aria-label={`${line.id}の現在の音声`}
+                  controls
+                  preload="none"
+                  src={audioUrl}
+                />
+              ) : (
+                <span className="status-message">現在の音声なし</span>
+              )}
+              <button
+                aria-label={`${line.id}の音声を再生成`}
+                className="button button-small"
+                type="button"
+                disabled={
+                  voiceGenerationDisabled ||
+                  lineIssues.length > 0 ||
+                  voiceStatus?.status === "current" ||
+                  voiceStatus?.status === "generating" ||
+                  voiceStatus?.status === "needs_review"
+                }
+                onClick={onGenerateVoice}
+              >
+                {voiceStatus?.status === "generating" ? "生成中…" : "再生成"}
+              </button>
+            </div>
+
+            <VoiceAdjustmentEditor
+              projectId={projectId}
+              line={line}
+              voiceAvailable={voiceAvailable}
+            />
+
+            {lineIssues.length > 0 ? (
+              <span className="script-line-validation-error" role="alert">
+                入力エラー {lineIssues.length}件
               </span>
-            )}
-            {voiceStatus?.status === "failed" &&
-            voiceStatus.errorCode !== undefined ? (
-              <code>{voiceStatus.errorCode}</code>
             ) : null}
-            <button
-              className="button button-small"
-              type="button"
-              disabled={
-                voiceGenerationDisabled ||
-                lineIssues.length > 0 ||
-                voiceStatus?.status === "current" ||
-                voiceStatus?.status === "generating" ||
-                voiceStatus?.status === "needs_review"
-              }
-              onClick={onGenerateVoice}
-            >
-              {voiceStatus?.status === "generating"
-                ? "生成中…"
-                : "このセリフを生成"}
-            </button>
           </div>
-          <VoiceAdjustmentEditor
-            projectId={projectId}
-            line={line}
-            voiceAvailable={voiceAvailable}
-          />
+
+          {textRow("subtitle", "字幕", line.subtitleText, (value) =>
+            onChange({ subtitleText: value })
+          )}
+          {textRow("spoken", "読み上げ（VOICEVOX）", line.spokenText, (value) =>
+            onChange({ spokenText: value })
+          )}
+
+          <div className="script-line-action-row">
+            <span className="eyebrow">セリフ操作</span>
+            <div className="script-line-actions">
+              <button
+                className="button button-small"
+                type="button"
+                onClick={() => onMove("up")}
+                disabled={lineIndex === 0}
+              >
+                上へ移動
+              </button>
+              <button
+                className="button button-small"
+                type="button"
+                onClick={() => onMove("down")}
+                disabled={
+                  lineIndex ===
+                  (project.script.sections[sectionIndex]?.lines.length ?? 1) - 1
+                }
+              >
+                下へ移動
+              </button>
+              <button
+                className="button button-small"
+                type="button"
+                onClick={onDuplicate}
+              >
+                複製
+              </button>
+              <button
+                className="button button-small"
+                type="button"
+                onClick={onDelete}
+              >
+                削除
+              </button>
+            </div>
+          </div>
+
+          <details className="script-line-details">
+            <summary>詳細設定（表情・発話前後の間）</summary>
+            <div className="script-line-secondary-fields">
+              <div className="form-field">
+                <label htmlFor={`${line.id}-expression`}>
+                  表情（表示選択には影響しません）
+                </label>
+                <select
+                  id={`${line.id}-expression`}
+                  value={line.expression}
+                  onChange={(event) =>
+                    onChange({
+                      expression: event.target.value as ScriptLine["expression"]
+                    })
+                  }
+                >
+                  <option value="neutral">通常</option>
+                  <option value="smile">喜び</option>
+                  <option value="explain">説明</option>
+                  <option value="caution">注意</option>
+                </select>
+              </div>
+              <div className="form-field">
+                <label htmlFor={`${line.id}-pause-before`}>
+                  発話前の間（ミリ秒）
+                </label>
+                <input
+                  id={`${line.id}-pause-before`}
+                  type="number"
+                  min={0}
+                  step={1}
+                  value={numberValue(line.pauseBeforeMs)}
+                  onChange={(event) =>
+                    onChange({
+                      pauseBeforeMs:
+                        event.target.value.length === 0
+                          ? Number.NaN
+                          : Number(event.target.value)
+                    })
+                  }
+                />
+              </div>
+              <div className="form-field">
+                <label htmlFor={`${line.id}-pause-after`}>
+                  発話後の間（ミリ秒）
+                </label>
+                <input
+                  id={`${line.id}-pause-after`}
+                  type="number"
+                  min={0}
+                  step={1}
+                  value={numberValue(line.pauseAfterMs)}
+                  onChange={(event) =>
+                    onChange({
+                      pauseAfterMs:
+                        event.target.value.length === 0
+                          ? Number.NaN
+                          : Number(event.target.value)
+                    })
+                  }
+                />
+              </div>
+            </div>
+          </details>
+
           {lineIssues.length > 0 ? (
             <ul className="form-error script-line-errors" role="alert">
               {lineIssues.map((issue) => (
@@ -1683,6 +1748,12 @@ export function ScriptPage() {
                           {sectionTemplateError}
                         </span>
                       ) : null}
+                    </div>
+                    <div className="script-section-background-summary">
+                      <span>背景</span>
+                      <code>
+                        {sectionBackgroundSummary(section.background)}
+                      </code>
                     </div>
                   </div>
                   <button
