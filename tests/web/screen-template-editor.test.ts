@@ -21,6 +21,7 @@ import {
   ScreenLayoutFrame,
   screenLayoutContentFrameStyle,
   screenLayoutContentInnerStyle,
+  screenLayoutElementBounds,
   screenTemplateElementStyle,
   type ScreenLayoutPreview
 } from "../../src/remotion/screen-template-layout.js";
@@ -179,6 +180,51 @@ describe("ScreenTemplate editor geometry", () => {
 
     expect(markup).toContain("重要な箇所");
     expect(markup).toContain("font-size:1.25cqw");
+  });
+
+  it("renders dialogue-only previews through the shared template geometry", () => {
+    const template = createStandardScreenTemplate(TIMESTAMP);
+    const dialogueElement = template.elements.find(
+      (element) => element.type === "dialogue-window"
+    );
+    if (dialogueElement === undefined) {
+      throw new Error("dialogue element is missing");
+    }
+    expect(
+      screenLayoutElementBounds(dialogueElement, 1920, 1080)
+    ).toMatchObject({
+      x: 60 / 1920,
+      y: 60 / 1080,
+      width: 1800 / 1920,
+      height: 960 / 1080
+    });
+    const preview: ScreenLayoutPreview = {
+      characters: {
+        "speaker-1": { alt: "speaker", src: "/character.png" },
+        "speaker-2": { alt: "other speaker", src: "/other-character.png" }
+      },
+      content: {
+        alt: "snapshot",
+        src: "/snapshot.png"
+      },
+      dialogueText: "現在の字幕",
+      sectionTitleText: "操作"
+    };
+
+    const markup = renderToStaticMarkup(
+      createElement(ScreenLayoutFrame, {
+        ariaLabel: "字幕コンパクトプレビュー",
+        mode: "dialogue-only",
+        preview,
+        template
+      })
+    );
+
+    expect(markup).toContain("screen-layout-dialogue-only-frame");
+    expect(markup).toContain("screen-layout-dialogue-only-canvas");
+    expect(markup).toContain("現在の字幕");
+    expect(markup).not.toContain("/character.png");
+    expect(markup).not.toContain("/snapshot.png");
   });
 
   it("keeps production MediaFrame annotation lengths unitized", () => {

@@ -808,22 +808,31 @@ describe("ScreenTemplate workflow browser E2E", () => {
         const lineCard = page.locator(
           '.script-line-card[aria-label="セリフ main-learner-1"]'
         );
+        const firstLineCard = page.locator(
+          '.script-line-card[aria-label="セリフ main-mentor-1"]'
+        );
         expect(await lineCard.textContent()).toContain(
           "内容を確認してから登録します。"
         );
         expect(
-          await lineCard
+          await firstLineCard
             .locator(
-              '.script-line-card-screen-preview img[src*="/api/character-visuals/"]'
+              '.script-line-card-full-preview img[src*="/api/character-visuals/"]'
             )
             .count()
         ).toBe(2);
         expect(
-          await lineCard
+          await firstLineCard
             .locator(
-              '.script-line-card-screen-preview img[src*="application-system.png"]'
+              '.script-line-card-full-preview img[src*="application-system.png"]'
             )
             .count()
+        ).toBe(1);
+        expect(
+          await lineCard.locator(".script-line-card-full-preview").count()
+        ).toBe(0);
+        expect(
+          await lineCard.locator(".script-line-card-dialogue-preview").count()
         ).toBe(1);
         expect(
           await lineCard
@@ -855,9 +864,9 @@ describe("ScreenTemplate workflow browser E2E", () => {
         expect(primaryRowLayout.maxChildRight).toBeLessThanOrEqual(
           primaryRowLayout.rowRight + 1
         );
-        await lineCard
+        await firstLineCard
           .locator(
-            '.script-line-card-screen-preview img[src*="/api/assets/asset-application-form/"]'
+            '.script-line-card-full-preview img[src*="/api/assets/asset-application-form/"]'
           )
           .waitFor({ state: "visible" });
 

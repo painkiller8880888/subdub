@@ -1048,6 +1048,8 @@ input:focus-visible {
 }
 
 .script-line-card-preview {
+  display: grid;
+  gap: 0.35rem;
   min-width: 0;
 }
 
@@ -1062,6 +1064,10 @@ input:focus-visible {
 
 .script-line-card-screen-preview {
   height: auto;
+}
+
+.script-line-card-dialogue-preview {
+  max-height: 7rem;
 }
 
 .script-line-card-preview-state {
@@ -1080,6 +1086,16 @@ input:focus-visible {
 .script-line-card-preview-state span {
   color: rgb(255 255 255 / 76%);
   font-size: 0.82rem;
+}
+
+.script-line-card-preview-warning {
+  background: #fff8e6;
+  border: 1px solid #e5c875;
+  border-radius: 0.45rem;
+  color: #6a4d00;
+  font-size: 0.78rem;
+  margin: 0;
+  padding: 0.35rem 0.5rem;
 }
 
 .script-line-card-editor {

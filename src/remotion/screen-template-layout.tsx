@@ -382,11 +382,94 @@ function renderScreenLayoutBackground(
   );
 }
 
+export function screenLayoutElementBounds(
+  element: Pick<ScreenTemplateElement, "transform">,
+  canvasWidth: number,
+  canvasHeight: number
+): Readonly<{ x: number; y: number; width: number; height: number }> {
+  const { rect, rotationDeg } = element.transform;
+  const radians = (rotationDeg * Math.PI) / 180;
+  const cosine = Math.abs(Math.cos(radians));
+  const sine = Math.abs(Math.sin(radians));
+  const width =
+    cosine * rect.width + sine * rect.height * (canvasHeight / canvasWidth);
+  const height =
+    sine * rect.width * (canvasWidth / canvasHeight) + cosine * rect.height;
+  return {
+    x: rect.x + (rect.width - width) / 2,
+    y: rect.y + (rect.height - height) / 2,
+    width,
+    height
+  };
+}
+
+function renderDialogueOnlyFrame({
+  resolvedLayout,
+  preview,
+  className,
+  ariaLabel
+}: {
+  readonly resolvedLayout: ReturnType<typeof resolveScreenTemplateLayout>;
+  readonly preview: ScreenLayoutPreview;
+  readonly className: string;
+  readonly ariaLabel: string;
+}): ReactNode {
+  const dialogueElement = resolvedLayout.elements.find(
+    (
+      element
+    ): element is Extract<ResolvedScreenElement, { type: "dialogue-window" }> =>
+      element.type === "dialogue-window"
+  );
+  if (dialogueElement === undefined) {
+    return (
+      <div aria-label={ariaLabel} className={className} role="img">
+        <span className="screen-layout-placeholder">
+          dialogue preview unavailable
+        </span>
+      </div>
+    );
+  }
+
+  const bounds = screenLayoutElementBounds(
+    dialogueElement,
+    resolvedLayout.canvasWidth,
+    resolvedLayout.canvasHeight
+  );
+  const innerStyle: CSSProperties = {
+    height: percentage(1 / bounds.height),
+    left: percentage(-bounds.x / bounds.width),
+    position: "absolute",
+    top: percentage(-bounds.y / bounds.height),
+    width: percentage(1 / bounds.width)
+  };
+
+  return (
+    <div
+      aria-label={ariaLabel}
+      className={className}
+      role="img"
+      style={{
+        aspectRatio: `${bounds.width * resolvedLayout.canvasWidth} / ${bounds.height * resolvedLayout.canvasHeight}`,
+        containerType: "inline-size",
+        isolation: "isolate"
+      }}
+    >
+      <div
+        className="screen-layout-frame screen-layout-dialogue-only-canvas"
+        style={innerStyle}
+      >
+        {renderScreenTemplateElement(dialogueElement, preview)}
+      </div>
+    </div>
+  );
+}
+
 export function ScreenLayoutFrame({
   template,
   preview,
   className,
-  ariaLabel = "16対9 ScreenTemplate preview"
+  ariaLabel = "16対9 ScreenTemplate preview",
+  mode = "full"
 }: {
   readonly template: Pick<
     ScreenTemplate,
@@ -395,6 +478,7 @@ export function ScreenLayoutFrame({
   readonly preview?: ScreenLayoutPreview;
   readonly className?: string;
   readonly ariaLabel?: string;
+  readonly mode?: "full" | "dialogue-only";
 }): ReactNode {
   const resolvedPreview = previewOrDefault(preview);
   const contentPreviewsForLayout = contentPreviews(resolvedPreview);
@@ -406,6 +490,15 @@ export function ScreenLayoutFrame({
   const classes = ["screen-layout-frame", className]
     .filter((value): value is string => value !== undefined)
     .join(" ");
+
+  if (mode === "dialogue-only") {
+    return renderDialogueOnlyFrame({
+      resolvedLayout,
+      preview: resolvedPreview,
+      className: `${classes} screen-layout-dialogue-only-frame`,
+      ariaLabel
+    });
+  }
 
   return (
     <div

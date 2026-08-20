@@ -17,6 +17,7 @@ import { ZodError } from "zod";
 
 import type {
   ProjectSummary,
+  ScreenTemplateDetail,
   ScreenTemplateSummary,
   VoiceLineGenerationStatus
 } from "../schema/api.js";
@@ -28,7 +29,6 @@ import type {
   Script,
   ScriptLine,
   ScriptSection,
-  ScreenTemplate,
   VideoProject
 } from "../schema/index.js";
 import {
@@ -78,13 +78,15 @@ import { WorkflowIndicator } from "./WorkflowIndicator";
 import { ScreenLayoutFrame } from "../remotion/screen-template-layout";
 import { createProjectManifestAssetUrlResolver } from "./preview-asset-url";
 import {
-  findVisualAssignmentsForLine,
+  previewLineKey,
   projectAssetVersion,
   resolveScriptLineScreenPreview,
+  resolveScriptLinePreviewStates,
   resolveScriptScreenTemplate,
   screenPreviewAssetKey,
   screenTemplateIdsForScript,
-  type ResolvedScriptScreenTemplate
+  type ResolvedScriptScreenTemplate,
+  type ScriptLinePreviewState
 } from "./screen-template-preview";
 
 function charactersPath(projectId: string): string {
@@ -316,7 +318,7 @@ function ScriptLineCard({
   project,
   catalog,
   catalogUnavailable,
-  resolvedTemplate,
+  previewState,
   linePreview,
   issues,
   voiceStatus,
@@ -336,7 +338,7 @@ function ScriptLineCard({
   readonly project: VideoProject;
   readonly catalog: CharacterVisualCatalogSnapshot | undefined;
   readonly catalogUnavailable: boolean;
-  readonly resolvedTemplate: ResolvedScriptScreenTemplate;
+  readonly previewState: ScriptLinePreviewState;
   readonly linePreview: ReturnType<typeof resolveScriptLineScreenPreview>;
   readonly issues: readonly ScriptDraftIssue[];
   readonly voiceStatus: VoiceLineGenerationStatus | undefined;
@@ -352,6 +354,7 @@ function ScriptLineCard({
 }) {
   const lineIssues = lineIssueText(issues, sectionIndex, lineIndex);
   const { character, visual, variant } = visualForLine(project, catalog, line);
+  const { mode, resolvedTemplate, persistentScreenState } = previewState;
   const [expandedTextField, setExpandedTextField] = useState<
     "subtitle" | "spoken" | null
   >(null);
@@ -384,6 +387,9 @@ function ScriptLineCard({
     variant === undefined
       ? visualSummary
       : `${variant.label}（${variant.renderType}）`;
+  const unresolvedVisual = persistentScreenState.visualPresentationState.some(
+    (visualState) => visualState.assetResolution === "unresolved"
+  );
 
   function textRow(
     field: "subtitle" | "spoken",
@@ -423,8 +429,17 @@ function ScriptLineCard({
           {resolvedTemplate.status === "ready" &&
           resolvedTemplate.template !== undefined ? (
             <ScreenLayoutFrame
-              ariaLabel={`${line.id}の16対9画面プレビュー`}
-              className="script-line-card-screen-preview"
+              ariaLabel={
+                mode === "full-screen"
+                  ? `${line.id}の16対9画面プレビュー`
+                  : `${line.id}の字幕コンパクトプレビュー`
+              }
+              className={`script-line-card-screen-preview${
+                mode === "full-screen"
+                  ? " script-line-card-full-preview"
+                  : " script-line-card-dialogue-preview"
+              }`}
+              mode={mode === "full-screen" ? "full" : "dialogue-only"}
               preview={linePreview}
               template={resolvedTemplate.template}
             />
@@ -444,6 +459,12 @@ function ScriptLineCard({
               ) : null}
             </div>
           )}
+          {unresolvedVisual ? (
+            <p className="script-line-card-preview-warning" role="status">
+              表示素材を解決できません。出力 validation
+              の詳細を確認してください。
+            </p>
+          ) : null}
         </aside>
 
         <div className="script-line-card-editor">
@@ -1278,7 +1299,7 @@ export function ScriptPage() {
   const project = projectQuery.data;
   const catalog = catalogQuery.data;
   const activeTemplates = screenTemplatesQuery.data ?? [];
-  const templateDetails = new Map<string, ScreenTemplate>();
+  const templateDetails = new Map<string, ScreenTemplateDetail>();
   const templateLoadingIds = new Set<string>();
   selectedTemplateIds.forEach((templateId, index) => {
     const query = templateDetailQueries[index];
@@ -1290,8 +1311,12 @@ export function ScriptPage() {
     }
   });
   const assets = new Map<string, AssetDetail | undefined>();
+  const assetLoadingKeys = new Set<string>();
   assetReferences.forEach((reference, index) => {
     assets.set(reference.key, assetQueries[index]?.data);
+    if (assetQueries[index]?.isPending === true) {
+      assetLoadingKeys.add(reference.key);
+    }
   });
   const isInitializing = initializeMutation.isPending;
   const isReadyToInitialize =
@@ -1456,6 +1481,14 @@ export function ScriptPage() {
     pickerLine === undefined
       ? undefined
       : visualForLine(project, catalog, pickerLine);
+  const previewStates = resolveScriptLinePreviewStates({
+    script: draft,
+    templates: templateDetails,
+    loadingTemplateIds: templateLoadingIds,
+    assignments: project.visuals.assignments,
+    assets,
+    assetLoadingKeys
+  });
 
   return (
     <main className="page-shell script-editor-page">
@@ -1768,83 +1801,77 @@ export function ScriptPage() {
                   <p className="status-message">セリフはまだありません。</p>
                 ) : (
                   <div className="script-line-list">
-                    {section.lines.map((line, lineIndex) =>
-                      (() => {
-                        const resolvedTemplate = resolveScriptScreenTemplate(
-                          section,
-                          templateDetails,
-                          templateLoadingIds
-                        );
-                        const assignments = findVisualAssignmentsForLine(
-                          section,
-                          line.id,
-                          project.visuals.assignments
-                        );
-                        return (
-                          <ScriptLineCard
-                            key={line.id}
-                            line={line}
-                            sectionIndex={sectionIndex}
-                            lineIndex={lineIndex}
-                            project={project}
-                            catalog={catalog}
-                            catalogUnavailable={
-                              catalogQuery.isPending || catalogQuery.isError
-                            }
-                            resolvedTemplate={resolvedTemplate}
-                            linePreview={resolveScriptLineScreenPreview({
-                              projectId: project.metadata.id,
-                              project,
-                              section,
-                              line,
-                              catalog,
-                              assignments,
-                              assets
-                            })}
-                            issues={issues}
-                            voiceStatus={voiceStatusByLine.get(line.id)}
-                            voiceGenerationDisabled={
-                              voiceGenerationDisabled || issues.length > 0
-                            }
-                            voiceAvailable={
-                              voiceStatusQuery.data?.available === true
-                            }
-                            projectId={project.metadata.id}
-                            onChange={(update) =>
-                              updateLine(sectionIndex, lineIndex, update)
-                            }
-                            onMove={(direction) =>
-                              updateDraft(
-                                moveScriptLine(
-                                  draft,
-                                  sectionIndex,
-                                  lineIndex,
-                                  direction
-                                )
+                    {section.lines.map((line, lineIndex) => {
+                      const previewState = previewStates.get(
+                        previewLineKey(section.id, line.id)
+                      );
+                      if (previewState === undefined) {
+                        return null;
+                      }
+                      return (
+                        <ScriptLineCard
+                          key={line.id}
+                          line={line}
+                          sectionIndex={sectionIndex}
+                          lineIndex={lineIndex}
+                          project={project}
+                          catalog={catalog}
+                          catalogUnavailable={
+                            catalogQuery.isPending || catalogQuery.isError
+                          }
+                          previewState={previewState}
+                          linePreview={resolveScriptLineScreenPreview({
+                            projectId: project.metadata.id,
+                            project,
+                            section,
+                            line,
+                            catalog,
+                            assignments: previewState.assignments,
+                            assets
+                          })}
+                          issues={issues}
+                          voiceStatus={voiceStatusByLine.get(line.id)}
+                          voiceGenerationDisabled={
+                            voiceGenerationDisabled || issues.length > 0
+                          }
+                          voiceAvailable={
+                            voiceStatusQuery.data?.available === true
+                          }
+                          projectId={project.metadata.id}
+                          onChange={(update) =>
+                            updateLine(sectionIndex, lineIndex, update)
+                          }
+                          onMove={(direction) =>
+                            updateDraft(
+                              moveScriptLine(
+                                draft,
+                                sectionIndex,
+                                lineIndex,
+                                direction
                               )
-                            }
-                            onDuplicate={() =>
-                              updateDraft(
-                                duplicateScriptLine(
-                                  draft,
-                                  sectionIndex,
-                                  lineIndex
-                                )
+                            )
+                          }
+                          onDuplicate={() =>
+                            updateDraft(
+                              duplicateScriptLine(
+                                draft,
+                                sectionIndex,
+                                lineIndex
                               )
-                            }
-                            onDelete={() =>
-                              updateDraft(
-                                deleteScriptLine(draft, sectionIndex, lineIndex)
-                              )
-                            }
-                            onGenerateVoice={() =>
-                              void generateVoiceLine(section.id, line.id)
-                            }
-                            onOpenPicker={() => openVisualPicker(line.id)}
-                          />
-                        );
-                      })()
-                    )}
+                            )
+                          }
+                          onDelete={() =>
+                            updateDraft(
+                              deleteScriptLine(draft, sectionIndex, lineIndex)
+                            )
+                          }
+                          onGenerateVoice={() =>
+                            void generateVoiceLine(section.id, line.id)
+                          }
+                          onOpenPicker={() => openVisualPicker(line.id)}
+                        />
+                      );
+                    })}
                   </div>
                 )}
               </section>

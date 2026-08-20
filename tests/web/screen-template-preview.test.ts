@@ -13,11 +13,16 @@ import type {
 import { createDefaultScriptLine } from "../../src/web/script-editor.js";
 import {
   findVisualAssignmentsForLine,
+  persistentScreenStateKey,
+  previewLineKey,
+  previewModeForLine,
   resolveCharacterPreviewForSlot,
   resolveCharacterPreviews,
   resolveContentPreview,
+  resolvePersistentScreenState,
   screenPreviewAssetKey,
   resolveScriptLineScreenPreview,
+  resolveScriptLinePreviewStates,
   resolveScriptScreenTemplate,
   screenTemplateIdsForScript
 } from "../../src/web/screen-template-preview.js";
@@ -359,5 +364,147 @@ describe("script ScreenTemplate preview resolution", () => {
       display: assignment.display,
       src: null
     });
+  });
+
+  it("uses one persistent state comparison for full and dialogue-only modes", () => {
+    const template = createStandardScreenTemplate(TIMESTAMP);
+    const section = createSection();
+    const states = resolveScriptLinePreviewStates({
+      script: { sections: [section] },
+      templates: new Map([[template.templateId, template]]),
+      assignments: [],
+      assets: new Map()
+    });
+
+    expect(states.get(previewLineKey(section.id, "line-one"))?.mode).toBe(
+      "full-screen"
+    );
+    expect(states.get(previewLineKey(section.id, "line-two"))?.mode).toBe(
+      "dialogue-only"
+    );
+    expect(states.get(previewLineKey(section.id, "line-three"))?.mode).toBe(
+      "dialogue-only"
+    );
+
+    const nextSection = {
+      ...createSection(template.templateId, [createLine("line-four")]),
+      id: "script-section-next"
+    };
+    const withSectionBoundary = resolveScriptLinePreviewStates({
+      script: { sections: [section, nextSection] },
+      templates: new Map([[template.templateId, template]]),
+      assignments: [],
+      assets: new Map()
+    });
+    expect(
+      withSectionBoundary.get(previewLineKey(nextSection.id, "line-four"))?.mode
+    ).toBe("full-screen");
+  });
+
+  it("does not include line text or character variant fields in persistent state", () => {
+    const template = createStandardScreenTemplate(TIMESTAMP);
+    const section = createSection();
+    const resolvedTemplate = resolveScriptScreenTemplate(
+      section,
+      new Map([[template.templateId, template]])
+    );
+    const first = resolvePersistentScreenState({
+      section,
+      resolvedTemplate,
+      assignments: [],
+      assets: new Map()
+    });
+    const changedLine = {
+      ...section.lines[0]!,
+      subtitleText: "別の字幕",
+      spokenText: "別の読み上げ",
+      speakerId: "character-learner",
+      characterVariantId: "variant-changed"
+    };
+    const changedLineSection = {
+      ...section,
+      lines: [changedLine, ...section.lines.slice(1)]
+    };
+    const second = resolvePersistentScreenState({
+      section: changedLineSection,
+      resolvedTemplate,
+      assignments: [],
+      assets: new Map()
+    });
+
+    expect(persistentScreenStateKey(first)).toBe(
+      persistentScreenStateKey(second)
+    );
+    expect(previewModeForLine(first, second, false)).toBe("dialogue-only");
+  });
+
+  it("promotes assignment identity and display changes to a full preview", () => {
+    const template = createStandardScreenTemplate(TIMESTAMP);
+    const section = createSection();
+    const firstAssignment = createAssignment(
+      "assignment-first",
+      "line-one",
+      "line-two"
+    );
+    const changedAssignment = {
+      ...createAssignment("assignment-second", "line-three", "line-three"),
+      display: { ...firstAssignment.display, scale: 0.8 }
+    };
+    const states = resolveScriptLinePreviewStates({
+      script: { sections: [section] },
+      templates: new Map([[template.templateId, template]]),
+      assignments: [firstAssignment, changedAssignment],
+      assets: new Map()
+    });
+
+    expect(states.get(previewLineKey(section.id, "line-one"))?.mode).toBe(
+      "full-screen"
+    );
+    expect(states.get(previewLineKey(section.id, "line-two"))?.mode).toBe(
+      "dialogue-only"
+    );
+    expect(states.get(previewLineKey(section.id, "line-three"))?.mode).toBe(
+      "full-screen"
+    );
+  });
+
+  it("keeps template revision and API contentHash in the persistent key", () => {
+    const section = createSection();
+    const base = createStandardScreenTemplate(TIMESTAMP);
+    const firstTemplate = {
+      ...base,
+      contentHash: "a".repeat(64)
+    };
+    const secondTemplate = {
+      ...firstTemplate,
+      revision: firstTemplate.revision + 1,
+      contentHash: "b".repeat(64)
+    };
+    const first = resolvePersistentScreenState({
+      section,
+      resolvedTemplate: resolveScriptScreenTemplate(
+        section,
+        new Map([[base.templateId, firstTemplate]])
+      ),
+      assignments: [],
+      assets: new Map()
+    });
+    const second = resolvePersistentScreenState({
+      section,
+      resolvedTemplate: resolveScriptScreenTemplate(
+        section,
+        new Map([[base.templateId, secondTemplate]])
+      ),
+      assignments: [],
+      assets: new Map()
+    });
+
+    expect(first.screenTemplateIdentity).toMatchObject({
+      revision: 1,
+      contentHash: "a".repeat(64)
+    });
+    expect(persistentScreenStateKey(first)).not.toBe(
+      persistentScreenStateKey(second)
+    );
   });
 });
