@@ -1083,6 +1083,8 @@ input:focus-visible {
 }
 
 .script-line-card-editor {
+  container-name: script-line-editor;
+  container-type: inline-size;
   display: grid;
   gap: 0.6rem;
   min-width: 0;
@@ -1096,10 +1098,14 @@ input:focus-visible {
   display: grid;
   gap: 0.6rem;
   grid-template-columns: minmax(4rem, 0.55fr) minmax(8rem, 1fr) minmax(
-      10rem,
+      0,
       1.45fr
-    ) minmax(12rem, 1.35fr) auto;
+    ) minmax(0, 1.35fr) minmax(8rem, 0.9fr);
   padding: 0.6rem;
+}
+
+.script-line-primary-row > * {
+  min-width: 0;
 }
 
 .script-line-identity,
@@ -1158,10 +1164,17 @@ input:focus-visible {
 }
 
 .script-line-audio-control audio {
+  flex: 1 1 8rem;
   height: 2.2rem;
   max-width: 15rem;
-  min-width: 8rem;
+  min-width: 0;
   width: 100%;
+}
+
+.script-line-primary-row .button {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 
 .script-line-validation-error {
@@ -1455,7 +1468,28 @@ input:focus-visible {
 .voice-adjustment-editor {
   align-items: center;
   display: flex;
-  min-width: max-content;
+  min-width: 0;
+}
+
+@container script-line-editor (max-width: 1000px) {
+  .script-line-primary-row {
+    grid-template-columns: minmax(4rem, 0.55fr) minmax(8rem, 1fr) minmax(
+        0,
+        1.45fr
+      );
+  }
+}
+
+@container script-line-editor (max-width: 720px) {
+  .script-line-primary-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@container script-line-editor (max-width: 480px) {
+  .script-line-primary-row {
+    grid-template-columns: 1fr;
+  }
 }
 
 .voice-adjustment-panel {
@@ -1662,6 +1696,17 @@ input:focus-visible {
 
   .voice-adjustment-dialog-header .button {
     align-self: start;
+  }
+}
+
+@supports not (container-type: inline-size) {
+  @media (min-width: 701px) and (max-width: 1280px) {
+    .script-line-primary-row {
+      grid-template-columns: minmax(4rem, 0.55fr) minmax(8rem, 1fr) minmax(
+          0,
+          1.45fr
+        );
+    }
   }
 }
 

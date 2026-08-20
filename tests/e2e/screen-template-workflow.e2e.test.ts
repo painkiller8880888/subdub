@@ -23,9 +23,14 @@ import type {
 import type {
   ScreenTemplateDetail,
   ScreenTemplateSummary,
+  VoiceAdjustmentSnapshot,
   VoiceGenerationStatusData
 } from "../../src/schema/api.js";
 import { legacyCharacterVariantCatalog } from "../../src/app/character-visuals/character-visual-seed.js";
+import {
+  createVoicevoxAudioQueryFixture,
+  syntheticVoicevoxStyleId
+} from "../fixtures/voicevox.js";
 import {
   ALTERNATE_SCREEN_TEMPLATE_ID,
   createScreenTemplateProjectFixture,
@@ -48,6 +53,28 @@ type WorkflowState = {
     expectedRevision: number;
   }>;
   templateDetailRequests: number;
+};
+
+type BrowserRect = {
+  readonly right: number;
+};
+
+type BrowserFocusable = {
+  hasAttribute(name: string): boolean;
+};
+
+type BrowserElement = {
+  readonly children: ArrayLike<{
+    getBoundingClientRect(): BrowserRect;
+  }>;
+  readonly clientWidth: number;
+  readonly ownerDocument: {
+    readonly activeElement: unknown;
+  };
+  readonly scrollWidth: number;
+  contains(node: unknown): boolean;
+  getBoundingClientRect(): BrowserRect;
+  querySelectorAll(selector: string): ArrayLike<BrowserFocusable>;
 };
 
 function serverPort(server: ViteDevServer): number {
@@ -209,6 +236,23 @@ function voiceStatus(project: VideoProject): VoiceGenerationStatusData {
   };
 }
 
+function voiceAdjustmentSnapshot(lineId: string): VoiceAdjustmentSnapshot {
+  return {
+    lineId,
+    status: "current",
+    query: createVoicevoxAudioQueryFixture(),
+    adjustment: null,
+    currentBase: {
+      baseHash: "a".repeat(64),
+      resolvedSpokenText: "内容を確認してから登録します。",
+      speakerUuid: "speaker-fixture-uuid",
+      styleName: "ノーマル",
+      resolvedStyleId: syntheticVoicevoxStyleId(),
+      voicevoxEngineVersion: "engine-fixture-1"
+    }
+  };
+}
+
 function errorResponse(status: number, message: string) {
   return {
     status,
@@ -332,6 +376,21 @@ async function installApiRoutes(
         status: 200,
         contentType: "application/json",
         body: JSON.stringify({ data: voiceStatus(state.project) })
+      });
+      return;
+    }
+    const voiceAdjustmentMatch = pathname.match(
+      new RegExp(`^/api/projects/${projectId}/voice/adjustments/([^/]+)$`, "u")
+    );
+    if (request.method() === "GET" && voiceAdjustmentMatch !== null) {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          data: voiceAdjustmentSnapshot(
+            decodeURIComponent(voiceAdjustmentMatch[1]!)
+          )
+        })
       });
       return;
     }
@@ -506,6 +565,7 @@ describe("ScreenTemplate workflow browser E2E", () => {
       templateDetailRequests: 0
     };
     await installApiRoutes(page, state);
+    await page.setViewportSize({ width: 1200, height: 900 });
     await page.goto(`${webUrl}/projects/${projectId}/script`, {
       waitUntil: "domcontentloaded"
     });
@@ -772,6 +832,29 @@ describe("ScreenTemplate workflow browser E2E", () => {
         ).toContain(
           `/api/projects/${projectId}/files/audio/voice/main-learner-1.wav`
         );
+        const primaryRowLayout = await lineCard
+          .locator(".script-line-primary-row")
+          .evaluate((element) => {
+            const row = element as unknown as BrowserElement;
+            const bounds = row.getBoundingClientRect();
+            const childBounds = Array.from(row.children).map((child) =>
+              child.getBoundingClientRect()
+            );
+            return {
+              clientWidth: row.clientWidth,
+              maxChildRight: Math.max(
+                ...childBounds.map((child) => child.right)
+              ),
+              rowRight: bounds.right,
+              scrollWidth: row.scrollWidth
+            };
+          });
+        expect(primaryRowLayout.scrollWidth).toBeLessThanOrEqual(
+          primaryRowLayout.clientWidth
+        );
+        expect(primaryRowLayout.maxChildRight).toBeLessThanOrEqual(
+          primaryRowLayout.rowRight + 1
+        );
         await lineCard
           .locator(
             '.script-line-card-screen-preview img[src*="/api/assets/asset-application-form/"]'
@@ -838,9 +921,18 @@ describe("ScreenTemplate workflow browser E2E", () => {
           .getByRole("button", { name: "このセリフの音声を調整" })
           .first()
           .waitFor({ state: "visible" });
-        await lineCard
-          .getByRole("button", { name: "このセリフの音声を調整" })
-          .click();
+        const adjustmentTrigger = lineCard.getByRole("button", {
+          name: "このセリフの音声を調整"
+        });
+        await adjustmentTrigger.focus();
+        expect(
+          await adjustmentTrigger.evaluate(
+            (element) =>
+              (element as unknown as BrowserElement).ownerDocument
+                .activeElement === element
+          )
+        ).toBe(true);
+        await adjustmentTrigger.click();
         const voiceDialog = page.getByRole("dialog", {
           name: "セリフ main-learner-1"
         });
@@ -848,8 +940,63 @@ describe("ScreenTemplate workflow browser E2E", () => {
         expect(await voiceDialog.locator("h2").textContent()).toContain(
           "セリフ main-learner-1"
         );
-        await voiceDialog.getByRole("button", { name: "閉じる" }).click();
+        await voiceDialog.getByRole("tab", { name: "基本" }).waitFor({
+          state: "visible"
+        });
+        const focusableCount = await voiceDialog.evaluate((dialog) => {
+          const dialogElement = dialog as unknown as BrowserElement;
+          return Array.from(
+            dialogElement.querySelectorAll(
+              'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+            )
+          ).filter((element) => !element.hasAttribute("disabled")).length;
+        });
+        expect(focusableCount).toBeGreaterThan(1);
+        const closeButton = voiceDialog.getByRole("button", {
+          name: "閉じる"
+        });
+        expect(
+          await closeButton.evaluate(
+            (element) =>
+              (element as unknown as BrowserElement).ownerDocument
+                .activeElement === element
+          )
+        ).toBe(true);
+        await page.keyboard.press("Shift+Tab");
+        expect(
+          await voiceDialog.evaluate((dialog) => {
+            const dialogElement = dialog as unknown as BrowserElement;
+            return dialogElement.contains(
+              dialogElement.ownerDocument.activeElement
+            );
+          })
+        ).toBe(true);
+        await page.keyboard.press("Tab");
+        expect(
+          await closeButton.evaluate(
+            (element) =>
+              (element as unknown as BrowserElement).ownerDocument
+                .activeElement === element
+          )
+        ).toBe(true);
+        await page.keyboard.press("Tab");
+        expect(
+          await voiceDialog.evaluate((dialog) => {
+            const dialogElement = dialog as unknown as BrowserElement;
+            return dialogElement.contains(
+              dialogElement.ownerDocument.activeElement
+            );
+          })
+        ).toBe(true);
+        await page.keyboard.press("Escape");
         await voiceDialog.waitFor({ state: "detached" });
+        expect(
+          await adjustmentTrigger.evaluate(
+            (element) =>
+              (element as unknown as BrowserElement).ownerDocument
+                .activeElement === element
+          )
+        ).toBe(true);
       } finally {
         await context.close();
       }
