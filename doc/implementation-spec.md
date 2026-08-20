@@ -141,18 +141,20 @@ type VideoDisplayV15 = VideoDisplayV13 & {
 
 上記は概念型であり、実装時の field 名は既存 schema の命名規則に合わせて調整してよい。ただし cue の意味、video-only の適用、validation invariant は変更しない。
 
+VP-02 の resolved video display は `playbackState: "playing" | "paused"` を discriminant とする。`playing` branch は既存の `sourceTrimBeforeFrame` / `sourceTrimAfterFrame` を持ち、`sourceTrimAfterFrame > sourceTrimBeforeFrame` を検証する。`paused` branch は一点の `sourceFrame` だけを持ち、source trim の before / after pair を持たない。これにより paused segment の frame を freeze しながら、V24 と V25 の playing branch の strict source-range invariant を維持する。`RenderVisualV25` は start BEFORE から end AFTER までの visible interval だけを segment として保存し、video の `hidden` は serialized segment state にしない。`static-visible` は photo / `document_scan` branch にだけ許可し、ScriptPage / `PersistentScreenState` の lifecycle read model が `hidden` / `ended` / `static-visible` を扱うこととは分ける。
+
 - `startLineId` / `endLineId` は同一 section 内の inclusive line range。`startLineId` の line 開始境界 BEFORE で素材を表示し video を `startMs` から再生し、`endLineId` の line 終了境界 AFTER で素材を隠して video を終了する。end line の発話と `pauseAfterMs` は区間に含める。
 - cue の `lineId` は assignment range 内でなければならず、range 外は validation error。`pause` は playing state、`resume` は paused state でだけ有効。同じ line / edge に相反する cue を複数保存しない。
-- cue order は project array の順序へ依存せず、line order と BEFORE / AFTER の edge order で決定論的に解決する。initial play と final hide / end は cue として保存せず、range boundary から implicit に導出する。
-- 標準操作は「再生開始 / 再開 = selected line BEFORE」「一時停止 = selected line BEFORE」「終了 = selected line AFTER」。line 内任意 millisecond cue は対象外。
+- cue order は project array の順序へ依存せず、line order と BEFORE / AFTER の edge order で決定論的に解決する。同じ boundary の event は、`startLineId` BEFORE では implicit play → cue、`endLineId` AFTER では cue → implicit hide / end の順に適用する。したがって start BEFORE の pause は play 後の pause として有効であり、state 不一致または no-op / redundant cue は validation error とする。initial play と final hide / end は cue として保存せず、range boundary から implicit に導出する。
+- 標準操作は「再生開始 = selected line BEFORE」「再開 = selected line BEFORE」「一時停止 = selected line BEFORE」「終了 = selected line AFTER」。UI の再生開始（再起動）は `startLineId` を更新し、終了は `endLineId` を更新する。再開 / 一時停止は `VisualPlaybackCue` の resume / pause だけで表し、cue に play / end action は追加しない。line 内任意 millisecond cue は対象外。
 - paused presentation interval は pause 境界の source frame を保持し、source media time と video 内音声を進めない。line speech、BGM、sound effect 等の別 audio layer は通常どおり進める。resume は同じ source position から継続し、`playbackRate` は playing interval のみへ適用する。
 - source position は composition の経過時間ではなく、assignment 開始後の playing presentation frames の累積で解決する。`sourcePosition = sourceStart + sum(playingPresentationFrames) * playbackRate` とし、paused frames は加算しない。既存 `startMs` / `endMs`、fractional frame、source end 到達時の generic behavior は変更しない。
 - photo / `document_scan` は playback cue を持たず、start BEFORE で表示、end AFTER で非表示、表示中は同じ static media を保持する。slide は existing photo / document kind で表現できる範囲を使い、dedicated slide kind / parser は追加しない。
 - generic overlap / priority semantics は変更しない。cue を理由に compositing、z-order editor、複数 video の同時表示を追加しない。
 
-VP-01 は `VideoProject 1.4.0 → 1.5.0` を導入し、既存 video assignment を `playbackCues: []` として migration する。VP-02 は pause / resume を解決済み render contract へ追加するため `RenderManifest 2.5.0` を導入し、2.4.0 の意味を変更しない。2.5.0 は cue を resolved media state と playing-frame authoritative source range へ固定し、WebUI preview と Remotion は同じ結果を描画する。
+VP-01 は `VideoProject 1.4.0 → 1.5.0` を導入し、既存 video assignment を `playbackCues: []` として migration する。VP-02 は pause / resume を解決済み render contract へ追加するため `RenderManifest 2.5.0` を導入し、2.4.0 の意味を変更しない。2.5.0 は cue を resolved media state へ固定し、playing branch は source trim pair、paused branch は一点の `sourceFrame` を持つ。WebUI preview と Remotion は同じ結果を描画する。
 
-後続 ScriptPage では #149 の compact line card の右側へ media pane を追加し、assignment / asset title / kind、state（hidden / playing / paused / static-visible）、表示・再生開始、一時停止、再開、終了、asset 選択・差し替え導線を表示する。操作可否は resolved state から決定し、不正な cue sequence を UI から作らせない。#150 の `PersistentScreenState` へは action 名ではなく cue 解決後の media state を渡し、前 line と state が異なる場合だけ full preview とする。
+後続 ScriptPage では #149 の compact line card の右側へ media pane を追加し、assignment / asset title / kind、lifecycle state（hidden / playing / paused / static-visible）、表示・再生開始、一時停止、再開、終了、asset 選択・差し替え導線を表示する。これは UI の lifecycle read model であり、V25 の serialized video segment state は playing / paused に限定する。操作可否は resolved state から決定し、不正な cue sequence を UI から作らせない。#150 の `PersistentScreenState` へは action 名ではなく cue 解決後の media state を渡し、前 line と state が異なる場合だけ full preview とする。
 
 対象外は line 内任意 millisecond cue、waveform / NLE timeline、reverse playback、scrubbing keyframe、video transition effects、speed keyframe、automatic / AI slide generation、dedicated presentation parser、Asset library CRUD UI である。
 
@@ -229,7 +231,7 @@ VP-01 は `VideoProject 1.4.0 → 1.5.0` を導入し、既存 video assignment 
 | `ScriptSection.screenTemplateId` | `project.json` に保存する section default / section authority | 現行 `VideoProject 1.4.0` では section 内の全 line の唯一の authority。`1.3.0` では line override の fallback だった |
 | `ScriptLine.screenTemplateId` | `project.json` に保存する nullable line-level ScreenTemplate override | `VideoProject 1.3.0` の legacy input にだけ存在し、#148 の `1.4.0` migration で削除して削除ログを残す |
 | `characterVariantCatalog` | `CharacterVisualSet` から生成する型、検証入力、または純粋な catalog snapshot | DB から取得した検証済み snapshot または純粋な view model。実在項目を静的ソースへ二重管理しない |
-| `RenderManifest` | 特定レンダリングへ使う解決済み派生データ | 現行 `RenderManifest 2.4.0` は explicit variant、実動画 insert、最終 section BGM、section layout、line / visual resolved fields を保持する。VP-02 後は `RenderManifest 2.5.0` とし、section authority、resolved media state、playing-frame source range を固定する |
+| `RenderManifest` | 特定レンダリングへ使う解決済み派生データ | 現行 `RenderManifest 2.4.0` は explicit variant、実動画 insert、最終 section BGM、section layout、line / visual resolved fields を保持する。VP-02 後は `RenderManifest 2.5.0` とし、section authority、resolved media state、playing branch の source trim pair、paused branch の一点 `sourceFrame` を固定する |
 
 `CharacterVisualSet` と配下の物理 variant は別エンティティとして扱う。visual 全体は一部の表情・ポーズ variant が未登録でも登録できるが、`single-image` は `single`、`mouth-pair` は `closed` と `open` が揃った場合だけ完成 variant とする。最初の完成 variant のキャンバスサイズを visual 単位の基準とし、同じ visual へ異なるサイズの画像を追加しない。
 
@@ -1121,12 +1123,12 @@ type BackgroundDefinition =
 - `volume` は `0` 以上 `1` 以下とする。旧 generic `muted` は ED-01 migration 時に `true → 0`、`false → 1` として変換し、`1.2.0` では保存しない。ED-07 はこの変換後の `volume` を UI、API、compiler、Remotion 側の project 表現で扱う。既存 `RenderManifest 2.2.0` の legacy adapter は 0 / 1 だけを受け付け、その他の値を `muted` へ丸めない。
 - 帳票の `page` は 1 始まりとし、素材の `pageCount` 以下とする。
 
-`VisualPlaybackCue` は VP-01 の `VideoDisplayV15` にだけ保存する。`startLineId` / `endLineId` は同一 section 内の inclusive range であり、`startLineId` の line 開始境界 BEFORE で display / play を開始し、`endLineId` の line 終了境界 AFTER で hide / end する。end line の発話と `pauseAfterMs` は区間に含める。initial play と final hide / end は synthetic cue として保存しない。
+`VisualPlaybackCue` は VP-01 の `VideoDisplayV15` にだけ保存する。`startLineId` / `endLineId` は同一 section 内の inclusive range であり、`startLineId` の line 開始境界 BEFORE で display / play を開始し、`endLineId` の line 終了境界 AFTER で hide / end する。end line の発話と `pauseAfterMs` は区間に含める。start BEFORE は implicit play → cue、end AFTER は cue → implicit hide / end の順で適用し、state 不一致または no-op / redundant cue は validation error とする。initial play と final hide / end は synthetic cue として保存しない。
 
 - cue の `lineId` は assignment range 内であること。range 外は validation error。
 - `pause` は playing state、`resume` は paused state でだけ有効であること。同じ line / edge に相反する cue を複数保存しないこと。
-- cue order は project array の順序ではなく line order + BEFORE / AFTER edge order で deterministic に解決すること。
-- ScriptPage の既定操作は、再生開始 / 再開 = selected line BEFORE、一時停止 = selected line BEFORE、終了 = selected line AFTER とすること。line 内任意 millisecond cue は保存しないこと。
+- cue order は project array の順序ではなく line order + BEFORE / AFTER edge order で deterministic に解決し、start BEFORE では implicit play → cue、end AFTER では cue → implicit hide / end の precedence を持つこと。
+- ScriptPage の既定操作は、再生開始 = selected line BEFORE、再開 = selected line BEFORE、一時停止 = selected line BEFORE、終了 = selected line AFTER とすること。再生開始（再起動）は `startLineId`、終了は `endLineId` の更新であり、再開 / 一時停止は cue の resume / pause だけを表すこと。cue に play / end action は追加せず、line 内任意 millisecond cue は保存しないこと。
 - photo / `document_scan` には cue field を持たせず、range 中は同じ static media を表示すること。
 
 ### 7.9 音声、編集、サムネイル
@@ -1797,7 +1799,7 @@ const previewModeForLine = (
 
 各 segment は `sourceAssignmentId`、0 始まりの `segmentIndex`、`segmentStartLineId`、`segmentEndLineId`、対象 section の template ID / revision / hash、最終 timeline 上の `from` / `durationInFrames`、resolved `display` を持つ。`id` は `sourceAssignmentId`、segment の開始・終了 line ID、対象 section template snapshot、必要な cue state を canonical JSON 化して hash した決定論的な segment ID とする。同じ assignment の segment は line 順に並べ、segment の半開区間が隣接して重複・欠落しないようにする。`from` と `durationInFrames` は intro / outro / cutin の shift 後に確定した line timeline と assignment 範囲の交差から計算し、section または cue state の境界を segment 境界にする。
 
-動画 segment の `startMs` / `endMs` は元の `VisualAssignment` の media range を provenance / compatibility data として各 segment へそのまま保持する。これらは segment の renderer source range ではない。Remotion が実際に使用する authoritative source range は `sourceTrimBeforeFrame` / `sourceTrimAfterFrame` であり、fractional frame を保持して整数 millisecond への round-trip を行わない。
+動画 segment の `startMs` / `endMs` は元の `VisualAssignment` の media range を provenance / compatibility data として各 segment へそのまま保持する。これらは segment の renderer source range ではない。V24 と V25 の `playing` segment で Remotion が使用する authoritative source range は `sourceTrimBeforeFrame` / `sourceTrimAfterFrame` であり、fractional frame を保持して整数 millisecond への round-trip を行わない。V25 の `paused` segment は source range pair ではなく、一点の `sourceFrame` を持つ。`sourceTrimAfterFrame > sourceTrimBeforeFrame` は V24 と V25 の `playing` branch にだけ適用し、paused branch では source frame の一点性を検証する。
 
 `assignmentFrom` を最終 timeline 上の元 assignment 開始 frame とし、cue を line order + edge order で解決した playing state から、各 segment の source position を次のように解決する。`playingPresentationFrames(a, b)` は `[a, b)` のうち media state が playing である presentation frames だけを数え、paused frames は含めない。
 
@@ -1812,25 +1814,32 @@ playingBefore = playingPresentationFrames(
   assignmentFrom,
   segment.from
 )
-playingThrough = playingPresentationFrames(
-  assignmentFrom,
-  segment.from + segment.durationInFrames
-)
 
-sourceTrimBeforeFrame = sourceStartFrame + playingBefore * playbackRate
-sourceTrimAfterFrame = min(
-  sourceEndFrame,
-  sourceStartFrame + playingThrough * playbackRate
-)
+if mediaState == "playing":
+  playingThrough = playingPresentationFrames(
+    assignmentFrom,
+    segment.from + segment.durationInFrames
+  )
+  sourceTrimBeforeFrame = sourceStartFrame + playingBefore * playbackRate
+  sourceTrimAfterFrame = min(
+    sourceEndFrame,
+    sourceStartFrame + playingThrough * playbackRate
+  )
+  require sourceTrimAfterFrame > sourceTrimBeforeFrame
+
+if mediaState == "paused":
+  sourceFrame = sourceStartFrame + playingBefore * playbackRate
+  require sourceStartFrame <= sourceFrame <= sourceEndFrame
+  // Do not emit sourceTrimBeforeFrame/sourceTrimAfterFrame for this branch.
 ```
 
-`mediaMillisecondsToFrames` は既存の ceil-based `ms → frame` 変換を表す。`sourceTrimBeforeFrame` / `sourceTrimAfterFrame` はこの既存の開始・終了 frame と playing-frame の累積から解決し、fractional source position を保持する。
+`mediaMillisecondsToFrames` は既存の ceil-based `ms → frame` 変換を表す。`playing` branch の `sourceTrimBeforeFrame` / `sourceTrimAfterFrame` はこの既存の開始・終了 frame と playing-frame の累積から解決し、fractional source position を保持する。`paused` branch は同じ累積位置を `sourceFrame` に固定し、source trim pair を出力しない。
 
-例えば元の `startMs` が 5000、`playbackRate` が 1、assignment 開始から 2 秒後の pause 境界までが playing なら、後続 paused segment の `startMs` は 5000 のまま保持し、`sourceTrimBeforeFrame` は元の source 開始位置から 60 playing presentation frames 分進んだ位置（30fps なら 7000ms 相当）になる。pause 中の 60 frames は source position へ加算しない。resume 後はその位置から再開し、`playbackRate` が 1 以外の場合も playing frames だけへ倍率を適用する。segment 境界で動画を再ロードして先頭から再生しない。V24 の既存 source range invariant は保持し、V25 は paused state を表現するために source progress を人工的に増やさない。Remotion は source range と resolved playback state を使い、video 内 audio を paused interval で無効化する。
+例えば元の `startMs` が 5000、`playbackRate` が 1、assignment 開始から 2 秒後の pause 境界までが playing なら、後続 paused segment の `startMs` は 5000 のまま保持し、`sourceFrame` は元の source 開始位置から 60 playing presentation frames 分進んだ一点（30fps なら 7000ms 相当）になる。pause 中の 60 frames は source position へ加算しない。resume 後の playing segment は同じ `sourceFrame` を `sourceTrimBeforeFrame` として再開し、playing 区間に正の長さがあるため `sourceTrimAfterFrame > sourceTrimBeforeFrame` を満たす。`playbackRate` が 1 以外の場合も playing frames だけへ倍率を適用する。segment 境界で動画を再ロードして先頭から再生しない。V24 の既存 source range invariant と V25 の playing branch の invariant は保持し、V25 の paused branch は source progress を人工的に増やさない。Remotion は playing branch の source trim、paused branch の `sourceFrame` と resolved playback state を使い、paused interval では frame を保持して video 内 audio を無効化する。
 
 speaker mapping は resolver の固定規則とする。`speaker-1` は `project.characters[0]`、`speaker-2` は `project.characters[1]` に対応し、現在 Remotion の `characters.slice(0, 2)` と index 0 = left / index 1 = right の挙動を維持する。`mentor` / `learner`、表示名、template 内の実素材選択から別 mapping を推測しない。2 件を解決できない場合は validation error とし、`characterId` と speaker slot を preview / manifest / Remotion で共通利用する。
 
-`RenderManifestV24.compilerInputHash` は、project JSON hash、section template selection、`ScriptSection.name` から得た `sectionTitle`、template revision、deterministic template hash、resolved normalized geometry、speaker-to-character mapping、generic assignment inner transform、VisualAssignment の section / persistent state segment partition（source assignment ID、segment line 境界、template ID / revision / hash、segment の `from` / `durationInFrames`）、解決済み generic visual の `outerFrame` / `contentClip` / `fit` / `crop` / annotation、動画 segment の provenance `startMs` / `endMs` と authoritative `sourceTrimBeforeFrame` / `sourceTrimAfterFrame`、`displayCoordinateSpace`、`prioritizeVisual` の適用結果、CharacterVisual snapshot、audio index、Asset snapshot を含めて生成する。`displayCoordinateSpace` は入力 display の legacy/content-slot の解釈を選ぶために hash へ含めるが、Remotion がその値を再解釈するための出力 field ではない。VP-02 の 2.5.0 compiler input は section selection、cue の canonical order、resolved media state、playing-frame source range を追加し、同一 section 内の line template selection / partition を新しい境界にしない。template の revision / hash、section title、既存 display の互換モード、cue、または authoritative source trim range が変わった場合は旧 manifest を current と判定しない。過去 revision を project.json に埋め込む immutable history や rollback UI は対象外とする。
+`RenderManifestV24.compilerInputHash` は、project JSON hash、section template selection、`ScriptSection.name` から得た `sectionTitle`、template revision、deterministic template hash、resolved normalized geometry、speaker-to-character mapping、generic assignment inner transform、VisualAssignment の section / persistent state segment partition（source assignment ID、segment line 境界、template ID / revision / hash、segment の `from` / `durationInFrames`）、解決済み generic visual の `outerFrame` / `contentClip` / `fit` / `crop` / annotation、動画 segment の provenance `startMs` / `endMs` と version に応じた resolved video branch（V24 / V25 playing の `sourceTrimBeforeFrame` / `sourceTrimAfterFrame`、V25 paused の `sourceFrame`）、`displayCoordinateSpace`、`prioritizeVisual` の適用結果、CharacterVisual snapshot、audio index、Asset snapshot を含めて生成する。`displayCoordinateSpace` は入力 display の legacy/content-slot の解釈を選ぶために hash へ含めるが、Remotion がその値を再解釈するための出力 field ではない。VP-02 の 2.5.0 compiler input は section selection、cue の canonical order、resolved media state、playing-frame source accumulation、paused sourceFrame を追加し、同一 section 内の line template selection / partition を新しい境界にしない。template の revision / hash、section title、既存 display の互換モード、cue、または authoritative source state が変わった場合は旧 manifest を current と判定しない。過去 revision を project.json に埋め込む immutable history や rollback UI は対象外とする。
 
 layout resolver の順序は次のとおりとする。
 
@@ -1838,16 +1847,16 @@ layout resolver の順序は次のとおりとする。
 2. ScreenTemplate snapshot の status、revision、element cardinality、element type 別 geometry policy、font size `> 0`、rect center rotation、回転後の canvas 範囲または character の canvas 交差を検証する。missing / inactive は自動代替せず error とする。
 3. template の outer geometry を 1920 × 1080 canvas へ解決する。
 4. `speaker-1` / `speaker-2` を project character の配列先頭2件へ解決し、`characterId` を resolved layout へ固定する。
-5. generic `VisualAssignment` がある場合、現行 2.4.0 は start / end line 範囲を既存 section / template boundary と persistent state boundary で partition する。VP-02 の 2.5.0 は section 境界または `VisualPlaybackCue` が解決した persistent media state boundary だけで partition し、同一 section 内の line template 差分を新しい境界にしない。各 segment について `displayCoordinateSpace` に応じて legacy adapter または content-slot-relative の `fit`、`crop`、`scale`、`position`、annotation を解決し、version に応じた `RenderVisualV24.display` / `RenderVisualV25.display` の `outerFrame`、`contentClip`、`fit`、`crop`、annotation として保存する。legacy adapter は full-canvas の既存 MediaFrame semantics を `outerFrame` に焼き込み、`contentClip.enabled: false` とする。content-slot-relative は対象 section の content slot の内側へ inner transform を適用して `outerFrame` を確定し、`contentClip.enabled: true` とする。assignment の inner transform は template element の outer geometry を変更せず、raw `position` / `scale` / `displayCoordinateSpace` を Remotion 用 manifest に残さない。動画は元の `startMs` / `endMs` を provenance として保持し、segment 境界の authoritative source range を playing presentation frames の累積から fractional frame のまま解決する。
+5. generic `VisualAssignment` がある場合、現行 2.4.0 は start / end line 範囲を既存 section / template boundary と persistent state boundary で partition する。VP-02 の 2.5.0 は section 境界または `VisualPlaybackCue` が解決した persistent media state boundary だけで partition し、同一 section 内の line template 差分を新しい境界にしない。各 segment について `displayCoordinateSpace` に応じて legacy adapter または content-slot-relative の `fit`、`crop`、`scale`、`position`、annotation を解決し、version に応じた `RenderVisualV24.display` / `RenderVisualV25.display` の `outerFrame`、`contentClip`、`fit`、`crop`、annotation として保存する。legacy adapter は full-canvas の既存 MediaFrame semantics を `outerFrame` に焼き込み、`contentClip.enabled: false` とする。content-slot-relative は対象 section の content slot の内側へ inner transform を適用して `outerFrame` を確定し、`contentClip.enabled: true` とする。assignment の inner transform は template element の outer geometry を変更せず、raw `position` / `scale` / `displayCoordinateSpace` を Remotion 用 manifest に残さない。動画は元の `startMs` / `endMs` を provenance として保持し、`playing` branch は segment 境界の authoritative source trim pair を playing presentation frames の累積から fractional frame のまま解決し、`paused` branch は一点の `sourceFrame` を保持する。
 6. `prioritizeVisual` が true の場合だけ、既存互換 policy により解決済み character element を縮小する。初期版では非表示にせず、新しい固定座標も生成せず、適用後の状態を resolved layout に固定する。将来非表示を導入する場合は `visible` などを manifest 契約へ追加する。
-7. `sectionTitle`、実際の subtitle、speaker / character variant、background、generic assignment と共に version に応じた section / line resolved layout を生成し、現行 2.4.0 は `RenderLineV24` / `RenderVisualV24`、VP-02 の 2.5.0 は parent section を参照する `RenderLineV25` / `RenderVisualV25` と video の resolved playback state を同じ compiler 出力へ追加する。
+7. `sectionTitle`、実際の subtitle、speaker / character variant、background、generic assignment と共に version に応じた section / line resolved layout を生成し、現行 2.4.0 は `RenderLineV24` / `RenderVisualV24`、VP-02 の 2.5.0 は parent section を参照する `RenderLineV25` / `RenderVisualV25` と video の resolved playback state（playing の source trim pair / paused の `sourceFrame`）を同じ compiler 出力へ追加する。
 8. line-card preview / Remotion は同じ resolved layout を描画し、section-title layer は `RenderSectionLayout.sectionTitle` を表示する。2.4.0 と 2.5.0 の cache は manifest version に応じた schema を使う。
 
 `ScreenTemplate` の preview 素材選択は template snapshot / manifest へ保存しない。preview は active な CharacterVisualSet / variant と generic Asset の一時 view model で行い、production compile は project の明示参照と validated snapshot から再解決する。
 
 ### 8.1.3 `RenderManifest 2.5.0` section-only + playback model（VP-02 target）
 
-`VideoProject 1.5.0` の section-only + playback cue contract を compile する場合は `manifestVersion: "2.5.0"` を必須とする。`RenderManifest 2.4.0` の line / visual resolved fields、parser、cache key、run log の意味を変更せず、2.5.0 で section reference と video playback state / authoritative source range を追加する。同じ `manifestVersion` のまま shape を変更せず、2.4.0 cache を 2.5.0 として暗黙変換しない。
+`VideoProject 1.5.0` の section-only + playback cue contract を compile する場合は `manifestVersion: "2.5.0"` を必須とする。`RenderManifest 2.4.0` の line / visual resolved fields、parser、cache key、run log の意味を変更せず、2.5.0 で section reference と video playback state を追加する。V25 の video display は `playing` branch の source trim pair または `paused` branch の一点 `sourceFrame` を持ち、同じ `manifestVersion` のまま shape を変更せず、2.4.0 cache を 2.5.0 として暗黙変換しない。
 
 ```ts
 type RenderLineV25 = Omit<
@@ -1867,19 +1876,27 @@ type RenderVisualV25 = Omit<RenderVisualV24, "screenTemplateId" | "display"> & {
     | ResolvedDocumentDisplay;
 };
 
-type ResolvedVideoDisplayV25 = Omit<ResolvedVideoDisplay, "kind"> & {
+type ResolvedVideoDisplayV25Common = Omit<
+  ResolvedVideoDisplay,
+  "kind" | "sourceTrimBeforeFrame" | "sourceTrimAfterFrame"
+> & {
   kind: "video";
   // Project cues are resolved in line/edge order; exact serialized field names may follow the schema convention.
   playbackCues: VisualPlaybackCue[];
-  playbackStateAtSegmentStart:
-    | "hidden"
-    | "playing"
-    | "paused"
-    | "static-visible";
-  // Source range advances only during playing presentation frames.
-  sourceTrimBeforeFrame: number;
-  sourceTrimAfterFrame: number;
 };
+
+type ResolvedVideoDisplayV25 =
+  | (ResolvedVideoDisplayV25Common & {
+      playbackState: "playing";
+      // Existing strict source-range invariant applies to this branch.
+      sourceTrimBeforeFrame: number;
+      sourceTrimAfterFrame: number;
+    })
+  | (ResolvedVideoDisplayV25Common & {
+      playbackState: "paused";
+      // A paused segment freezes one source position; no trim pair is emitted.
+      sourceFrame: number;
+    });
 
 type RenderManifestV25 = Omit<
   RenderManifestV24,
@@ -1891,7 +1908,7 @@ type RenderManifestV25 = Omit<
 };
 ```
 
-`sectionLayouts[]` は `2.4.0` と `2.5.0` で共通の section authority として保持する。`RenderLineV25` は `sectionId` だけで親 section の resolved layout と section title を参照し、line-level template ID、template revision / hash、resolved layout を重複保存しない。`RenderVisualV25` は `screenTemplateId` の代わりに `sectionId` と section template revision / hash を持ち、同一 section 内の line template 差分では segment を増やさない。video branch だけが resolved `playbackCues`、segment start state、playing-frame source range を持ち、pause 中の presentation frames と video audio を進めない。photo / `document_scan` は `static-visible` state だけを解決する。表示素材の state boundary は `PersistentScreenState` と VP-01 cue model の deterministic result を使って決める。
+`sectionLayouts[]` は `2.4.0` と `2.5.0` で共通の section authority として保持する。`RenderLineV25` は `sectionId` だけで親 section の resolved layout と section title を参照し、line-level template ID、template revision / hash、resolved layout を重複保存しない。`RenderVisualV25` は `screenTemplateId` の代わりに `sectionId` と section template revision / hash を持ち、同一 section 内の line template 差分では segment を増やさない。video branch は `playbackState: "playing" | "paused"` を持ち、playing では source trim pair、paused では一点の `sourceFrame` を持つ。video segment に `hidden` や `static-visible` は保存せず、pause 中の presentation frames と video audio を進めない。photo / `document_scan` は `static-visible` state だけを解決する。表示素材の state boundary は `PersistentScreenState` と VP-01 cue model の deterministic result を使って決める。
 
 ### 8.2 音声インデックス
 
@@ -2378,12 +2395,12 @@ ED-08 完了前の compile 経路では、既存 `RenderManifest 2.2.0` の gene
 11. 無音時間と音声長をフレームへ変換する。
 12. セリフを累積して line range を作る。
 13. visual assignment の line ID 範囲を frame range へ解決し、現行 2.4.0 では既存 section / template / persistent state の segment 境界、`sourceAssignmentId`、segment ID、segment 順序を記録する。VP-02 の 2.5.0 では section または `VisualPlaybackCue` が解決した persistent state の境界だけを使い、同一 section 内の line template 差分は新しい segment 境界にしない。各 segment の最終 `from` / `durationInFrames` は後続の timeline shift を反映して確定する。
-13.1. video cue を line order + edge order で解決し、`startLineId` BEFORE を implicit play、`endLineId` AFTER を implicit hide / end とする。`pause` は playing state、`resume` は paused state でだけ有効とし、paused presentation frames は source-time accumulation に加算しない。video 内 audio は pause 中に停止し、speech / BGM / sound effect は継続する。photo / `document_scan` は static-visible state だけを持つ。
+13.1. video cue を line order + edge order で解決する。同じ boundary の event は `startLineId` BEFORE では implicit play → cue、`endLineId` AFTER では cue → implicit hide / end の順に適用し、state 不一致または no-op / redundant cue は validation error とする。再生開始（再起動）は `startLineId` の更新、終了は `endLineId` の更新であり、再開 / 一時停止は cue の resume / pause だけを表す。cue に play / end action は追加しない。`pause` は playing state、`resume` は paused state でだけ有効とし、paused presentation frames は source-time accumulation に加算しない。video 内 audio は pause 中に停止し、speech / BGM / sound effect は継続する。photo / `document_scan` は static-visible state だけを持つ。
 14. section background を frame range へ解決する。
 15. `EditPlan.videoElements` の cutin を、最初のセクションを除く `before_section` 境界へ `order` 順に挿入する。最初のセクション直前の cutin は validation error とする。
-16. 先頭へ intro、末尾へ outro を挿入し、後続の section / line / visual segment / background の frame range を shift する。visual segment の動画 `startMs` / `endMs` は元 assignment の provenance として保持し、shift 後も assignment 開始後の playing presentation frames だけを累積して authoritative `sourceTrimBeforeFrame` / `sourceTrimAfterFrame` を再計算する。pause 中の frame を source range へ加算せず、segment 境界で再生を先頭へ戻さない。
+16. 先頭へ intro、末尾へ outro を挿入し、後続の section / line / visual segment / background の frame range を shift する。visual segment の動画 `startMs` / `endMs` は元 assignment の provenance として保持し、shift 後も assignment 開始後の playing presentation frames だけを累積する。`playing` segment は authoritative `sourceTrimBeforeFrame` / `sourceTrimAfterFrame` を再計算し、`paused` segment は一点の `sourceFrame` を解決する。pause 中の frame を source range へ加算せず、segment 境界で再生を先頭へ戻さない。
 17. shift 後の section range へ `EditPlan.sectionBgms` を解決し、動画要素の区間では BGM を再生しない。効果音をセリフ基準の位置へ統合する。
-18. `RenderVideoInsert`、`RenderAudioTrack`、`sectionLayouts`（`sectionTitle` を含む）、section を参照する line、version に応じた segment 化済み `RenderVisualV24[]` / `RenderVisualV25[]`（`sourceAssignmentId`、segment ID、`from` / `durationInFrames`、section template snapshot、resolved display、video の resolved playback state、provenance range、authoritative source trim range を含む）、全体 duration、hash、checksum を確定し、Zod で検証する。manifest では section title、template revision / hash、speaker mapping、入力 display coordinate space、section / persistent media state partition、resolved visual の outer frame / content clip / fit / crop / annotation、動画 segment の provenance `startMs` / `endMs`、resolved cue、playing-frame source range を `compilerInputHash` に含める。現行 1.4.0 input は `manifestVersion: "2.4.0"` を使用し、VP-02 の 1.5.0 input だけが `manifestVersion: "2.5.0"` を要求する。2.4.0 cache と混在させない。
+18. `RenderVideoInsert`、`RenderAudioTrack`、`sectionLayouts`（`sectionTitle` を含む）、section を参照する line、version に応じた segment 化済み `RenderVisualV24[]` / `RenderVisualV25[]`（`sourceAssignmentId`、segment ID、`from` / `durationInFrames`、section template snapshot、resolved display、video の resolved playback state、provenance range、V24 / V25 playing の source trim pair または V25 paused の `sourceFrame` を含む）、全体 duration、hash、checksum を確定し、Zod で検証する。manifest では section title、template revision / hash、speaker mapping、入力 display coordinate space、section / persistent media state partition、resolved visual の outer frame / content clip / fit / crop / annotation、動画 segment の provenance `startMs` / `endMs`、resolved cue、resolved video branch を `compilerInputHash` に含める。現行 1.4.0 input は `manifestVersion: "2.4.0"` を使用し、VP-02 の 1.5.0 input だけが `manifestVersion: "2.5.0"` を要求する。2.4.0 cache と混在させない。
 19. 一時ファイルから `cache/render-manifest.json` へ置換する。
 
 失敗時は新しいマニフェストを保存せず、全エラーを line ID、assignment ID、パスと関連付けて返す。
@@ -2468,7 +2485,7 @@ editor のサイドバーは active な CharacterVisualSet / variant と、必�
 - 既存の section template 参照が missing / inactive になった場合は別 template へ自動代替せず、section header に validation と修正導線を表示する。
 - section の先頭 line、section template / background の境界、generic visual の persistent canvas state が変化する line では full screen preview を表示する。それ以外の line は dialogue / subtitle 領域だけの compact preview とする。subtitle、spokenText、speaker、character variant、voice parameter、音声 current / stale state だけの変化は full preview の trigger にしない。
 - preview mode は `persistentScreenState` の pure helper / read model で決定する。full / compact preview は同じ resolver / renderer の結果を使い、compact preview 専用の geometry や CSS 座標を再実装しない。
-- VP-01 / VP-02 の media pane は compact line card の右側へ置き、current assignment / asset title / kind、state（hidden / playing / paused / static-visible）、表示・再生開始、一時停止、再開、終了、asset 選択 / 差し替え導線を表示する。操作の enabled / disabled は resolved state から決め、UI から不正な cue sequence を作らせない。
+- VP-01 / VP-02 の media pane は compact line card の右側へ置き、current assignment / asset title / kind、lifecycle state（hidden / playing / paused / static-visible）、表示・再生開始、一時停止、再開、終了、asset 選択 / 差し替え導線を表示する。これは UI の lifecycle read model であり、V25 の serialized video segment state は playing / paused に限定する。操作の enabled / disabled は resolved state から決め、UI から不正な cue sequence を作らせない。
 - media pane の action 名を `PersistentScreenState` の full preview 判定へ直接渡さない。`VisualPlaybackCue` を line order + edge order で解決した media state を渡し、前 line と state が変わった場合だけ full preview とする。video paused 中も frame は保持し、photo / `document_scan` は static-visible として扱う。
 
 現在の標準 `/script` 画面には、現在の編集対象、制作 ビジュアル候補、AI ビジュアル候補 UI、手順3-3 素材検索、素材検索結果、素材制作・表示設定カードを置かない。AI visual suggestion、Asset Search、generic `VisualAssignment` は backend とデータを維持し、必要なら別画面または補助導線で再利用する。
@@ -2598,11 +2615,11 @@ editor のサイドバーは active な CharacterVisualSet / variant と、必�
 - 現行 `RenderManifest 2.4.0` の `RenderLine.expression` は論理表情であり、物理ファイルパスとして解釈しない。
 - 現行 `RenderManifest 2.4.0` の `characters[].idleVariantId`、`lines[].characterVariantId`、`characterVariants[]` が project の explicit reference と validated snapshot から解決されていることを確認する。expression、tag、label、旧固定 mapping からの自動代替は許可しない。
 - 現行 `RenderManifest 2.4.0` の `inserts[]` が `EditPlan.videoElements` の実尺、src、role、volume を持ち、placeholder の `kind` や固定 2000 ms を持たないことを確認する。
-- 現行 `RenderManifest 2.4.0` の `audioTracks[]` が shift 後の section 範囲、BGM src、`volume`、固定 loop を持ち、fade fields を持たないことを確認する。`sectionLayouts[]` が sectionTitle、resolved layout、template revision / hash を持ち、line が現行 line-level resolved fields と layout を持つことを確認する。VP-02 の `RenderManifest 2.5.0` では line が parent section layout を参照し、video の resolved playback state / source range を持つことを確認する。
+- 現行 `RenderManifest 2.4.0` の `audioTracks[]` が shift 後の section 範囲、BGM src、`volume`、固定 loop を持ち、fade fields を持たないことを確認する。`sectionLayouts[]` が sectionTitle、resolved layout、template revision / hash を持ち、line が現行 line-level resolved fields と layout を持つことを確認する。VP-02 の `RenderManifest 2.5.0` では line が parent section layout を参照し、video の resolved playback state、playing branch の source trim pair、paused branch の一点 `sourceFrame` を持つことを確認する。
 - `RenderManifest 2.4.0` の `sectionLayouts[]` が `sectionId` と `sectionTitle`、resolved layout を持ち、section-title layer がその文字列を描画できることを確認する。
 - `RenderManifest 2.4.0` の `visuals[]` が `RenderVisualV24.display` を使い、`outerFrame`、`contentClip`、`fit`、`crop`、annotation を最終値として持つこと、Remotion が raw `displayCoordinateSpace` / `position` / `scale` を再解釈しないことを確認する。
-- 現行 `RenderManifest 2.4.0` の `VisualAssignment` が既存 section / template / persistent state boundary で `RenderVisualV24` segment へ分割され、segment が `screenTemplateId`、template revision / hash、最終 frame range を持つことを確認する。VP-02 の `RenderManifest 2.5.0` では同一 section 内の line template 差分で分割されず、`RenderVisualV25` が `sectionId` と video の resolved playback state を持つことを確認する。各 video segment の source range が assignment 開始後の playing presentation frames だけで連続し、pause 中の frames を加算しないことも確認する。
-- `RenderManifest 2.4.0` の `compilerInputHash` が現行 resolved fields を含み、VP-02 の `RenderManifest 2.5.0` の hash が section selection、section title、template revision / hash、resolved geometry、speaker mapping、generic inner transform、resolved visual display、display coordinate space、cue canonical order、resolved media state、playing-frame source range、CharacterVisual / Asset snapshot を含むことを確認する。template、section name、cue、source range 更新後に旧 manifest を current と誤認しないことを確認する。
+- 現行 `RenderManifest 2.4.0` の `VisualAssignment` が既存 section / template / persistent state boundary で `RenderVisualV24` segment へ分割され、segment が `screenTemplateId`、template revision / hash、最終 frame range を持つことを確認する。VP-02 の `RenderManifest 2.5.0` では同一 section 内の line template 差分で分割されず、`RenderVisualV25` が `sectionId` と video の `playbackState: "playing" | "paused"` を持つことを確認する。`playing` video segment は strict source trim pair、`paused` video segment は一点の `sourceFrame` を持ち、pause 中の frames を source position へ加算しないことも確認する。video segment に `hidden` / `static-visible` を保存しないことを確認する。
+- `RenderManifest 2.4.0` の `compilerInputHash` が現行 resolved fields を含み、VP-02 の `RenderManifest 2.5.0` の hash が section selection、section title、template revision / hash、resolved geometry、speaker mapping、generic inner transform、resolved visual display、display coordinate space、cue canonical order、resolved media state、playing source trim pair または paused `sourceFrame`、CharacterVisual / Asset snapshot を含むことを確認する。template、section name、cue、resolved source state 更新後に旧 manifest を current と誤認しないことを確認する。
 - 解決済み `variantId`、character ID、renderType、ファイルパス、checksum、mouth slot が manifest に固定されていることを確認する。
 - 正の duration
 - フレーム範囲の境界
@@ -2961,6 +2978,6 @@ Issue #151（VP-00）は `doc/doc.md` と本書だけを更新する docs-only I
 |---|---|
 | VP-00 | `VisualAssignment` の asset snapshot / `startLineId` / `endLineId` authority、BEFORE / AFTER timing、video-only `VisualPlaybackCue`、cue validation、pause 中の frame / source time / video audio、playing-frame source accumulation、photo / document static semantics、ScriptPage media pane、`PersistentScreenState` integration、対象外を正本文書へ定義する。 |
 | VP-01 | `VideoProject 1.4.0 → 1.5.0` migration。既存 video display へ `playbackCues: []` を追加し、写真・帳票へ cue を追加しない。cue range、state transition、deterministic order、implicit initial play / final end を保存時・出力前に検証する。 |
-| VP-02 | pause / resume を解決済み render contract へ追加する `RenderManifest 2.5.0` boundary。2.4.0 parser / cache / run log の意味を変更せず、resolved media state、cue boundary、playing-frame source range を WebUI preview と Remotion で共有する。 |
+| VP-02 | pause / resume を解決済み render contract へ追加する `RenderManifest 2.5.0` boundary。2.4.0 parser / cache / run log の意味を変更せず、resolved media state、cue boundary、playing branch の source trim pair、paused branch の一点 `sourceFrame` を WebUI preview と Remotion で共有する。 |
 
 実装順序は `VP-01 → VP-02` とする。ScriptPage の media pane は compact line card の右側へ配置し、current state から操作可否を決める。full preview の判定は action 名の比較ではなく、cue 解決後の `PersistentScreenState` が前 line と異なるかで決める。line 内任意 millisecond cue、waveform / NLE timeline、reverse、scrubbing、transition、speed keyframe、automatic slide generation、dedicated presentation parser、Asset library CRUD UI は VP-00〜VP-02 の対象外とする。
