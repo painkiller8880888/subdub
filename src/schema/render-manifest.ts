@@ -26,6 +26,7 @@ import {
   screenTransformSchema
 } from "./screen-template.js";
 import { visualPlaybackCueSchema } from "./visual-playback.js";
+import { mediaMillisecondsToFrames } from "../media-frame.js";
 
 export const sourceAssetChecksumSchema = strictObject({
   path: relativePosixPathSchema,
@@ -861,6 +862,18 @@ export const renderSectionLayoutSchema = strictObject({
   resolvedLayout: resolvedScreenLayoutSchema
 });
 
+/**
+ * Render-time layout changes are kept separately from the section template
+ * snapshot. This preserves policies such as prioritizeVisual without adding
+ * line-level template metadata back to RenderManifest 2.5.
+ */
+export const renderLayoutIntervalSchema = strictObject({
+  sectionId: idSchema,
+  from: nonNegativeIntegerSchema,
+  durationInFrames: positiveIntegerSchema,
+  resolvedLayout: resolvedScreenLayoutSchema
+});
+
 const renderManifestV24BaseSchema = strictObject({
   manifestVersion: z.literal("2.4.0"),
   sourceProjectHash: sha256Schema,
@@ -1354,6 +1367,7 @@ const renderManifestV25BaseSchema = strictObject({
   height: positiveIntegerSchema,
   durationInFrames: positiveIntegerSchema,
   sectionLayouts: z.array(renderSectionLayoutSchema),
+  layoutIntervals: z.array(renderLayoutIntervalSchema),
   lines: z.array(renderLineV25Schema),
   visuals: z.array(renderVisualV25Schema),
   backgrounds: z.array(renderBackgroundSchema),
@@ -1481,6 +1495,41 @@ export const renderManifestV25Schema = renderManifestV25BaseSchema.superRefine(
         variant
       ])
     );
+
+    for (const [index, interval] of manifest.layoutIntervals.entries()) {
+      if (!sectionLayoutIds.has(interval.sectionId)) {
+        addIssue(
+          ctx,
+          ["layoutIntervals", index, "sectionId"],
+          "layout interval sectionId must reference a section layout"
+        );
+      }
+      validateResolvedLayout(
+        interval.resolvedLayout,
+        ["layoutIntervals", index, "resolvedLayout"],
+        ctx
+      );
+      for (const [elementIndex, element] of interval.resolvedLayout.elements.entries()) {
+        if (
+          element.type === "character-visual" &&
+          (element.characterId.length === 0 ||
+            !renderCharacterIds.has(element.characterId))
+        ) {
+          addIssue(
+            ctx,
+            [
+              "layoutIntervals",
+              index,
+              "resolvedLayout",
+              "elements",
+              elementIndex,
+              "characterId"
+            ],
+            "character visual characterId must reference a render character"
+          );
+        }
+      }
+    }
 
     for (const [index, variant] of manifest.characterVariants.entries()) {
       if (
@@ -1707,6 +1756,21 @@ export const renderManifestV25Schema = renderManifestV25BaseSchema.superRefine(
       }
       visualSegmentKeys.add(segmentKey);
       if (visual.display.kind === "video") {
+        const sourceStartFrame = mediaMillisecondsToFrames(
+          visual.display.startMs,
+          manifest.fps
+        );
+        const sourceEndFrame = mediaMillisecondsToFrames(
+          visual.display.endMs,
+          manifest.fps
+        );
+        if (sourceEndFrame <= sourceStartFrame) {
+          addIssue(
+            ctx,
+            ["visuals", index, "display", "endMs"],
+            "video source range must contain at least one source frame"
+          );
+        }
         if (
           visual.display.playbackState === "playing" &&
           visual.display.sourceTrimAfterFrame <=
@@ -1716,6 +1780,47 @@ export const renderManifestV25Schema = renderManifestV25BaseSchema.superRefine(
             ctx,
             ["visuals", index, "display", "sourceTrimAfterFrame"],
             "video segment source trim range must be positive"
+          );
+        }
+        if (
+          visual.display.playbackState === "playing" &&
+          visual.display.sourceTrimBeforeFrame < sourceStartFrame
+        ) {
+          addIssue(
+            ctx,
+            ["visuals", index, "display", "sourceTrimBeforeFrame"],
+            "playing sourceTrimBeforeFrame must be within the video source range"
+          );
+        }
+        if (
+          visual.display.playbackState === "playing" &&
+          visual.display.sourceTrimAfterFrame > sourceEndFrame
+        ) {
+          addIssue(
+            ctx,
+            ["visuals", index, "display", "sourceTrimAfterFrame"],
+            "playing sourceTrimAfterFrame must be within the video source range"
+          );
+        }
+        if (
+          visual.display.playbackState === "paused" &&
+          (visual.display.sourceFrame < sourceStartFrame ||
+            visual.display.sourceFrame >= sourceEndFrame)
+        ) {
+          addIssue(
+            ctx,
+            ["visuals", index, "display", "sourceFrame"],
+            "paused sourceFrame must be within the video source range"
+          );
+        }
+        if (
+          visual.display.playbackState === "ended" &&
+          visual.display.sourceFrame !== sourceEndFrame - 1
+        ) {
+          addIssue(
+            ctx,
+            ["visuals", index, "display", "sourceFrame"],
+            "ended sourceFrame must be the final frame of the video source range"
           );
         }
         if (
@@ -1737,14 +1842,22 @@ export const renderManifestV25Schema = renderManifestV25BaseSchema.superRefine(
     validateTimelineOrder(manifest.audioTracks, "audioTracks", ctx);
     validateTimelineOrder(manifest.soundEffects, "soundEffects", ctx);
     validateTimelineOrder(manifest.inserts, "inserts", ctx);
+    validateTimelineOrder(manifest.layoutIntervals, "layoutIntervals", ctx);
     validateTimelineNoOverlap(manifest.lines, "lines", ctx);
     validateTimelineNoOverlap(manifest.inserts, "inserts", ctx);
+    validateTimelineNoOverlap(manifest.layoutIntervals, "layoutIntervals", ctx);
     validateTimelineBounds(manifest.lines, "lines", manifest.durationInFrames, ctx);
     validateTimelineBounds(manifest.visuals, "visuals", manifest.durationInFrames, ctx);
     validateTimelineBounds(manifest.backgrounds, "backgrounds", manifest.durationInFrames, ctx);
     validateTimelineBounds(manifest.audioTracks, "audioTracks", manifest.durationInFrames, ctx);
     validateTimelineBounds(manifest.soundEffects, "soundEffects", manifest.durationInFrames, ctx);
     validateTimelineBounds(manifest.inserts, "inserts", manifest.durationInFrames, ctx);
+    validateTimelineBounds(
+      manifest.layoutIntervals,
+      "layoutIntervals",
+      manifest.durationInFrames,
+      ctx
+    );
   }
 );
 
@@ -1790,6 +1903,7 @@ export type RenderResolvedVisualDisplay = z.infer<
 >;
 export type RenderVisualV24 = z.infer<typeof renderVisualV24Schema>;
 export type RenderSectionLayout = z.infer<typeof renderSectionLayoutSchema>;
+export type RenderLayoutInterval = z.infer<typeof renderLayoutIntervalSchema>;
 export type LegacyRenderManifestV22 = z.infer<
   typeof legacyRenderManifestV22Schema
 >;

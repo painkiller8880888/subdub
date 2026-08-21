@@ -17,6 +17,7 @@ export const defaultRenderManifest: RenderManifest = {
   height: 1080,
   durationInFrames: 120,
   sectionLayouts: [],
+  layoutIntervals: [],
   lines: [],
   visuals: [],
   backgrounds: [],

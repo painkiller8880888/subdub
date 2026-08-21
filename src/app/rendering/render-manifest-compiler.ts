@@ -24,6 +24,7 @@ import {
   sha256Schema,
   characterVisualCatalogSnapshotSchema,
   screenTemplateSchema,
+  type RenderLayoutInterval,
   type RenderSectionLayout,
   type RenderResolvedVisualDisplay,
   type ResolvedScreenLayout,
@@ -1716,6 +1717,14 @@ function orderedManifest(manifest: RenderManifestV25): RenderManifestV25 {
         resolvedLayout: orderedResolvedLayout(layout.resolvedLayout)
       })
     ),
+    layoutIntervals: manifest.layoutIntervals.map(
+      (interval): RenderLayoutInterval => ({
+        sectionId: interval.sectionId,
+        from: interval.from,
+        durationInFrames: interval.durationInFrames,
+        resolvedLayout: orderedResolvedLayout(interval.resolvedLayout)
+      })
+    ),
     lines: manifest.lines.map((line): RenderLine => ({
       id: line.id,
       sectionId: line.sectionId,
@@ -3027,55 +3036,15 @@ function playbackScriptForProject(project: z.infer<typeof videoProjectSchema>) {
   };
 }
 
-function v25SectionLayouts(
-  project: z.infer<typeof videoProjectSchema>,
+function v25LayoutIntervals(
   baseManifest: RenderManifestV24
-): RenderSectionLayout[] {
-  const lineEntries = project.script.sections.flatMap((section) =>
-    section.lines.map((line, lineIndex) => ({
-      sectionId: section.id,
-      lineId: line.id,
-      lineIndex
-    }))
-  );
-  const entryByLineId = new Map(
-    lineEntries.map((entry) => [entry.lineId, entry])
-  );
-  const prioritizedLineIds = new Set<string>();
-
-  for (const assignment of project.visuals.assignments) {
-    if (!assignment.display.prioritizeVisual) {
-      continue;
-    }
-    const start = entryByLineId.get(assignment.startLineId);
-    const end = entryByLineId.get(assignment.endLineId);
-    if (
-      start === undefined ||
-      end === undefined ||
-      start.sectionId !== end.sectionId
-    ) {
-      continue;
-    }
-    for (const entry of lineEntries) {
-      if (
-        entry.sectionId === start.sectionId &&
-        entry.lineIndex >= start.lineIndex &&
-        entry.lineIndex <= end.lineIndex
-      ) {
-        prioritizedLineIds.add(entry.lineId);
-      }
-    }
-  }
-
-  return baseManifest.sectionLayouts.map((layout) => {
-    const prioritizedLine = baseManifest.lines.find(
-      (line) =>
-        line.sectionId === layout.sectionId && prioritizedLineIds.has(line.id)
-    );
-    return prioritizedLine === undefined
-      ? layout
-      : { ...layout, resolvedLayout: prioritizedLine.resolvedLayout };
-  });
+): RenderLayoutInterval[] {
+  return baseManifest.lines.map((line) => ({
+    sectionId: line.sectionId,
+    from: line.from,
+    durationInFrames: line.durationInFrames,
+    resolvedLayout: line.resolvedLayout
+  }));
 }
 
 function projectWithoutPlaybackCues(
@@ -3472,7 +3441,8 @@ export function compileRenderManifest(
   }
 
   const baseManifest = baseResult.manifest;
-  const sectionLayouts = v25SectionLayouts(projectResult.data, baseManifest);
+  const sectionLayouts = baseManifest.sectionLayouts;
+  const layoutIntervals = v25LayoutIntervals(baseManifest);
   const playbackScript = playbackScriptForProject(projectResult.data);
   const assignmentById = new Map(
     projectResult.data.visuals.assignments.map((assignment) => [
@@ -3522,6 +3492,7 @@ export function compileRenderManifest(
     baseCompilerInputHash: baseManifest.compilerInputHash,
     sourceProjectHash,
     sectionLayouts,
+    layoutIntervals,
     project: projectResult.data,
     visualSegments: visualValues
   });
@@ -3531,6 +3502,7 @@ export function compileRenderManifest(
     sourceProjectHash,
     compilerInputHash,
     sectionLayouts,
+    layoutIntervals,
     lines,
     visuals: visualValues
   } satisfies RenderManifestV25;

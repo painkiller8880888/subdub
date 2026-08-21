@@ -234,7 +234,7 @@ describe("renderManifestSchema", () => {
     ) {
       throw new Error("fixture must contain a video display");
     }
-    validDisplay.endMs = validDisplay.startMs;
+    validDisplay.endMs = validDisplay.startMs + 1_000;
     validDisplay.sourceTrimBeforeFrame = 0;
     validDisplay.sourceTrimAfterFrame = 0.4;
     expect(renderManifestSchema.safeParse(validFractionalRange).success).toBe(
@@ -256,6 +256,76 @@ describe("renderManifestSchema", () => {
       0,
       "display",
       "sourceTrimAfterFrame"
+    ]);
+
+    const invalidTrimBoundary = clone(renderManifestFixture);
+    const invalidTrimDisplay = invalidTrimBoundary.visuals[0]?.display;
+    if (
+      invalidTrimDisplay?.kind !== "video" ||
+      invalidTrimDisplay.playbackState !== "playing"
+    ) {
+      throw new Error("fixture must contain a playing video display");
+    }
+    invalidTrimDisplay.sourceTrimAfterFrame = 91;
+    expectInvalid(invalidTrimBoundary, [
+      "visuals",
+      0,
+      "display",
+      "sourceTrimAfterFrame"
+    ]);
+  });
+
+  it("keeps paused and ended source frames inside the resolved source range", () => {
+    const validPaused = clone(renderManifestFixture);
+    const validPausedDisplay = validPaused.visuals[0]?.display;
+    if (validPausedDisplay?.kind !== "video") {
+      throw new Error("fixture must contain a video display");
+    }
+    Reflect.deleteProperty(validPausedDisplay, "sourceTrimBeforeFrame");
+    Reflect.deleteProperty(validPausedDisplay, "sourceTrimAfterFrame");
+    Object.assign(validPausedDisplay, {
+      playbackState: "paused",
+      sourceFrame: 10,
+      volume: 0
+    });
+    expect(renderManifestSchema.safeParse(validPaused).success).toBe(true);
+
+    const invalidPaused = clone(renderManifestFixture);
+    const invalidPausedDisplay = invalidPaused.visuals[0]?.display;
+    if (invalidPausedDisplay?.kind !== "video") {
+      throw new Error("fixture must contain a video display");
+    }
+    Reflect.deleteProperty(invalidPausedDisplay, "sourceTrimBeforeFrame");
+    Reflect.deleteProperty(invalidPausedDisplay, "sourceTrimAfterFrame");
+    Object.assign(invalidPausedDisplay, {
+      playbackState: "paused",
+      sourceFrame: 90,
+      volume: 0
+    });
+    expectInvalid(invalidPaused, [
+      "visuals",
+      0,
+      "display",
+      "sourceFrame"
+    ]);
+
+    const invalidEnded = clone(renderManifestFixture);
+    const invalidEndedDisplay = invalidEnded.visuals[0]?.display;
+    if (invalidEndedDisplay?.kind !== "video") {
+      throw new Error("fixture must contain a video display");
+    }
+    Reflect.deleteProperty(invalidEndedDisplay, "sourceTrimBeforeFrame");
+    Reflect.deleteProperty(invalidEndedDisplay, "sourceTrimAfterFrame");
+    Object.assign(invalidEndedDisplay, {
+      playbackState: "ended",
+      sourceFrame: 88,
+      volume: 0
+    });
+    expectInvalid(invalidEnded, [
+      "visuals",
+      0,
+      "display",
+      "sourceFrame"
     ]);
   });
 
