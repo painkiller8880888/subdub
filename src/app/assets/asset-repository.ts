@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, sql, type SQL } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, sql, type SQL } from "drizzle-orm";
 
 import type { WorkspaceDatabase } from "../../db/client.js";
 import {
@@ -17,20 +17,30 @@ import {
   type AssetListItem,
   type AssetListResult,
   type AssetStatus,
-  type AssetTag
+  type AssetTag,
+  type AssetVersionStatus,
+  type AssetVersionSummary
 } from "../../schema/index.js";
 import type {
   AssetProcessingErrorCode,
   AssetTagAxis
 } from "../../schema/asset.js";
 import {
+  AssetError,
   AssetDatabaseError,
-  AssetProcessingRaceError
+  AssetInvalidStateError,
+  AssetNotFoundError,
+  AssetProcessingRaceError,
+  AssetRevisionConflictError,
+  AssetTagNotFoundError,
+  AssetVersionNotReadyError
 } from "./asset-errors.js";
 import { ASSET_FORMATS, type AssetFormat } from "./asset-formats.js";
 
 export type AssetInsert = {
   assetId: string;
+  revision?: number;
+  currentVersion?: number | null;
   kind: AssetKind;
   title: string;
   description: string;
@@ -45,8 +55,14 @@ export type AssetInsert = {
 export type AssetVersionInsert = {
   assetId: string;
   version: number;
+  status?: AssetVersionStatus;
+  baseRevision?: number;
+  baseCurrentVersion?: number | null;
+  stagingPath?: string | null;
   libraryMediaPath: string;
   mimeType: string;
+  errorCode?: AssetProcessingErrorCode | null;
+  errorMessage?: string | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -59,6 +75,8 @@ export type AssetTagLinkInsert = {
 
 export type AssetRecord = {
   assetId: string;
+  revision: number;
+  currentVersion: number | null;
   kind: AssetKind;
   title: string;
   description: string;
@@ -75,6 +93,10 @@ export type AssetRecord = {
 export type AssetVersionRecord = {
   assetId: string;
   version: number;
+  status: AssetVersionStatus;
+  baseRevision: number;
+  baseCurrentVersion: number | null;
+  stagingPath: string | null;
   libraryMediaPath: string;
   mimeType: string;
   checksum: string | null;
@@ -84,6 +106,8 @@ export type AssetVersionRecord = {
   durationMs: number | null;
   pageCount: number | null;
   thumbnailPaths: string | null;
+  errorCode: AssetProcessingErrorCode | null;
+  errorMessage: string | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -103,6 +127,7 @@ export type AssetProcessingSuccessValues = {
 
 export type AssetProcessingFailureValues = {
   assetId: string;
+  version: number;
   errorCode: AssetProcessingErrorCode;
   errorMessage: string;
   updatedAt: string;
@@ -111,6 +136,45 @@ export type AssetProcessingFailureValues = {
 export type AssetProcessingKey = {
   assetId: string;
   version: number;
+};
+
+export type AssetMetadataUpdateValues = {
+  assetId: string;
+  expectedRevision: number;
+  title: string;
+  description: string;
+  confidentiality: string;
+  department: string | null;
+  system: string | null;
+  tagIds: readonly string[];
+  updatedAt: string;
+};
+
+export type AssetStatusChangeValues = {
+  assetId: string;
+  expectedRevision: number;
+  status: "active" | "inactive";
+  updatedAt: string;
+};
+
+export type AssetReplacementReservationValues = {
+  assetId: string;
+  expectedRevision: number;
+  stagingPath: string;
+  libraryMediaPath: string;
+  mimeType: string;
+  updatedAt: string;
+};
+
+export type AssetReplacementReservation = {
+  assetId: string;
+  version: number;
+  revision: number;
+  currentVersion: number | null;
+  kind: AssetKind;
+  status: "processing";
+  createdAt: string;
+  updatedAt: string;
 };
 
 export type AssetRepositoryListFilters = {
@@ -152,7 +216,10 @@ export type AssetRepositoryVisualSearchResult = {
 
 type AssetListRow = {
   assetId: string;
+  revision: number;
+  currentVersion: number | null;
   version: number | null;
+  versionStatus: AssetVersionStatus | null;
   kind: AssetKind;
   title: string;
   description: string;
@@ -205,6 +272,8 @@ function toTag(row: typeof tags.$inferSelect): AssetTag {
 function toAssetRecord(row: typeof assets.$inferSelect): AssetRecord {
   return {
     assetId: row.assetId,
+    revision: row.revision,
+    currentVersion: row.currentVersion,
     kind: row.kind,
     title: row.title,
     description: row.description,
@@ -225,6 +294,10 @@ function toAssetVersionRecord(
   return {
     assetId: row.assetId,
     version: row.version,
+    status: row.status,
+    baseRevision: row.baseRevision,
+    baseCurrentVersion: row.baseCurrentVersion,
+    stagingPath: row.stagingPath,
     libraryMediaPath: row.libraryMediaPath,
     mimeType: row.mimeType,
     checksum: row.checksum,
@@ -234,6 +307,8 @@ function toAssetVersionRecord(
     durationMs: row.durationMs,
     pageCount: row.pageCount,
     thumbnailPaths: row.thumbnailPaths,
+    errorCode: row.errorCode as AssetProcessingErrorCode | null,
+    errorMessage: row.errorMessage,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt
   };
@@ -303,7 +378,10 @@ function substringSearchCondition(query: string): SQL {
 function toAssetListItem(row: AssetListRow): AssetListItem {
   return assetListItemSchema.parse({
     assetId: row.assetId,
+    revision: row.revision,
+    currentVersion: row.currentVersion,
     version: row.version,
+    versionStatus: row.versionStatus,
     kind: row.kind,
     title: row.title,
     description: row.description,
@@ -332,6 +410,9 @@ function withDatabaseErrors<T>(operation: () => T): T {
   try {
     return operation();
   } catch (error) {
+    if (error instanceof AssetError) {
+      throw error;
+    }
     if (error instanceof AssetDatabaseError) {
       throw error;
     }
@@ -466,27 +547,46 @@ export class AssetRepository {
 
   findProcessingAssetKeys(): AssetProcessingKey[] {
     return withDatabaseErrors(() => {
-      const rows = this.database
-        .select()
-        .from(assets)
-        .where(eq(assets.status, "processing"))
-        .orderBy(assets.createdAt)
+      return this.database
+        .select({
+          assetId: assetVersions.assetId,
+          version: assetVersions.version
+        })
+        .from(assetVersions)
+        .where(eq(assetVersions.status, "processing"))
+        .orderBy(
+          assetVersions.createdAt,
+          assetVersions.assetId,
+          assetVersions.version
+        )
         .all();
-      const keys: AssetProcessingKey[] = [];
-      for (const row of rows) {
-        const version = this.database
-          .select({ version: assetVersions.version })
-          .from(assetVersions)
-          .where(eq(assetVersions.assetId, row.assetId))
-          .orderBy(desc(assetVersions.version))
-          .limit(1)
-          .get();
-        if (version !== undefined) {
-          keys.push({ assetId: row.assetId, version: version.version });
-        }
-      }
-      return keys;
     });
+  }
+
+  private findAssetVersionSummaries(assetId: string): AssetVersionSummary[] {
+    const rows = this.database
+      .select({
+        version: assetVersions.version,
+        status: assetVersions.status,
+        checksum: assetVersions.checksum,
+        errorCode: assetVersions.errorCode,
+        errorMessage: assetVersions.errorMessage,
+        createdAt: assetVersions.createdAt,
+        updatedAt: assetVersions.updatedAt
+      })
+      .from(assetVersions)
+      .where(eq(assetVersions.assetId, assetId))
+      .orderBy(desc(assetVersions.version))
+      .all();
+    return rows.map((row) => ({
+      version: row.version,
+      status: row.status,
+      checksum: row.checksum,
+      errorCode: row.errorCode as AssetProcessingErrorCode | null,
+      errorMessage: row.errorMessage,
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt
+    }));
   }
 
   findAssetDetail(
@@ -504,7 +604,12 @@ export class AssetRepository {
       }
       const versionCondition =
         requestedVersion === undefined
-          ? eq(assetVersions.assetId, assetId)
+          ? asset.currentVersion === null
+            ? eq(assetVersions.assetId, assetId)
+            : and(
+                eq(assetVersions.assetId, assetId),
+                eq(assetVersions.version, asset.currentVersion)
+              )
           : and(
               eq(assetVersions.assetId, assetId),
               eq(assetVersions.version, requestedVersion)
@@ -519,9 +624,19 @@ export class AssetRepository {
       if (version === undefined) {
         return undefined;
       }
+      const versionHistory = this.findAssetVersionSummaries(assetId);
+      const pendingVersion =
+        versionHistory.find((summary) => summary.status === "processing") ??
+        null;
       return assetDetailSchema.parse({
         assetId: asset.assetId,
+        revision: asset.revision,
+        currentVersion: asset.currentVersion,
         version: version.version,
+        versionStatus: version.status,
+        versionHistory,
+        versions: versionHistory,
+        pendingVersion,
         kind: asset.kind,
         title: asset.title,
         description: asset.description,
@@ -538,8 +653,8 @@ export class AssetRepository {
         pageCount: version.pageCount,
         thumbnailPaths: parseThumbnailPaths(version.thumbnailPaths),
         status: asset.status,
-        errorCode: asset.errorCode,
-        errorMessage: asset.errorMessage,
+        errorCode: version.errorCode ?? asset.errorCode,
+        errorMessage: version.errorMessage ?? asset.errorMessage,
         createdAt: asset.createdAt,
         updatedAt: asset.updatedAt
       });
@@ -639,7 +754,10 @@ export class AssetRepository {
         LEFT JOIN asset_versions AS latest_version
           ON latest_version.asset_id = assets.asset_id
          AND latest_version.version = (
-           SELECT MAX(version)
+           SELECT COALESCE(
+             assets.current_version,
+             MAX(version)
+           )
            FROM asset_versions
            WHERE asset_versions.asset_id = assets.asset_id
          )
@@ -698,7 +816,10 @@ export class AssetRepository {
       const rows = this.database.all<AssetListRow>(sql`
         SELECT
           assets.asset_id AS assetId,
+          assets.revision AS revision,
+          assets.current_version AS currentVersion,
           latest_version.version AS version,
+          latest_version.status AS versionStatus,
           assets.kind AS kind,
           assets.title AS title,
           assets.description AS description,
@@ -769,11 +890,67 @@ export class AssetRepository {
     });
   }
 
-  markProcessingSucceeded(values: AssetProcessingSuccessValues): void {
-    withDatabaseErrors(() => {
+  markProcessingSucceeded(values: AssetProcessingSuccessValues): boolean {
+    return withDatabaseErrors(() => {
+      const version = this.database
+        .select()
+        .from(assetVersions)
+        .where(
+          and(
+            eq(assetVersions.assetId, values.assetId),
+            eq(assetVersions.version, values.version)
+          )
+        )
+        .get();
+      const asset = this.database
+        .select()
+        .from(assets)
+        .where(eq(assets.assetId, values.assetId))
+        .get();
+      if (
+        asset === undefined ||
+        version === undefined ||
+        version.status !== "processing"
+      ) {
+        throw new AssetProcessingRaceError();
+      }
+
+      const baseMatches =
+        asset.revision === version.baseRevision &&
+        asset.currentVersion === version.baseCurrentVersion;
+      const initialActivation =
+        version.baseCurrentVersion === null &&
+        asset.status === "processing" &&
+        asset.currentVersion === null;
+      if (!baseMatches && !initialActivation) {
+        if (version.baseCurrentVersion !== null) {
+          this.database
+            .update(assetVersions)
+            .set({
+              status: "error",
+              errorCode: "REPLACEMENT_REVISION_CONFLICT",
+              errorMessage:
+                "差し替え受付後に素材が更新されたため、差し替えを適用できませんでした。",
+              stagingPath: null,
+              updatedAt: values.updatedAt
+            })
+            .where(
+              and(
+                eq(assetVersions.assetId, values.assetId),
+                eq(assetVersions.version, values.version),
+                eq(assetVersions.status, "processing")
+              )
+            )
+            .run();
+          return false;
+        }
+        throw new AssetProcessingRaceError();
+      }
+
       this.database
         .update(assetVersions)
         .set({
+          status: "ready",
           checksum: values.checksum,
           sizeBytes: values.sizeBytes,
           width: values.width,
@@ -784,19 +961,32 @@ export class AssetRepository {
             values.thumbnailPaths.length === 0
               ? null
               : JSON.stringify(values.thumbnailPaths),
+          errorCode: null,
+          errorMessage: null,
+          stagingPath: null,
           updatedAt: values.updatedAt
         })
         .where(
           and(
             eq(assetVersions.assetId, values.assetId),
-            eq(assetVersions.version, values.version)
+            eq(assetVersions.version, values.version),
+            eq(assetVersions.status, "processing")
           )
         )
         .run();
+
+      const nextStatus =
+        asset.status === "processing" ? "active" : asset.status;
+      const currentVersionCondition =
+        asset.currentVersion === null
+          ? isNull(assets.currentVersion)
+          : eq(assets.currentVersion, asset.currentVersion);
       const result = this.database
         .update(assets)
         .set({
-          status: "active",
+          currentVersion: values.version,
+          status: nextStatus,
+          revision: asset.revision + 1,
           errorCode: null,
           errorMessage: null,
           updatedAt: values.updatedAt
@@ -804,34 +994,71 @@ export class AssetRepository {
         .where(
           and(
             eq(assets.assetId, values.assetId),
-            eq(assets.status, "processing")
+            eq(assets.revision, asset.revision),
+            currentVersionCondition
           )
         )
         .run();
       if ((result.changes ?? 0) === 0) {
         throw new AssetProcessingRaceError();
       }
+      return true;
     });
   }
 
   markProcessingFailed(values: AssetProcessingFailureValues): boolean {
     return withDatabaseErrors(() => {
-      const result = this.database
-        .update(assets)
+      const version = this.database
+        .select()
+        .from(assetVersions)
+        .where(
+          and(
+            eq(assetVersions.assetId, values.assetId),
+            eq(assetVersions.version, values.version),
+            eq(assetVersions.status, "processing")
+          )
+        )
+        .get();
+      if (version === undefined) {
+        return false;
+      }
+      this.database
+        .update(assetVersions)
         .set({
           status: "error",
           errorCode: values.errorCode,
           errorMessage: values.errorMessage,
+          stagingPath: null,
           updatedAt: values.updatedAt
         })
         .where(
           and(
-            eq(assets.assetId, values.assetId),
-            eq(assets.status, "processing")
+            eq(assetVersions.assetId, values.assetId),
+            eq(assetVersions.version, values.version),
+            eq(assetVersions.status, "processing")
           )
         )
         .run();
-      return (result.changes ?? 0) > 0;
+      if (version.baseCurrentVersion === null) {
+        this.database
+          .update(assets)
+          .set({
+            status: "error",
+            currentVersion: null,
+            errorCode: values.errorCode,
+            errorMessage: values.errorMessage,
+            updatedAt: values.updatedAt
+          })
+          .where(
+            and(
+              eq(assets.assetId, values.assetId),
+              eq(assets.status, "processing"),
+              isNull(assets.currentVersion)
+            )
+          )
+          .run();
+      }
+      return true;
     });
   }
 
@@ -841,6 +1068,8 @@ export class AssetRepository {
         .insert(assets)
         .values({
           assetId: values.assetId,
+          revision: values.revision ?? 1,
+          currentVersion: values.currentVersion ?? null,
           kind: values.kind,
           title: values.title,
           description: values.description,
@@ -862,8 +1091,14 @@ export class AssetRepository {
         .values({
           assetId: values.assetId,
           version: values.version,
+          status: values.status ?? "processing",
+          baseRevision: values.baseRevision ?? 1,
+          baseCurrentVersion: values.baseCurrentVersion ?? null,
+          stagingPath: values.stagingPath ?? null,
           libraryMediaPath: values.libraryMediaPath,
           mimeType: values.mimeType,
+          errorCode: values.errorCode ?? null,
+          errorMessage: values.errorMessage ?? null,
           createdAt: values.createdAt,
           updatedAt: values.updatedAt
         })
@@ -883,6 +1118,213 @@ export class AssetRepository {
           }))
         )
         .run();
+    });
+  }
+
+  updateMetadata(values: AssetMetadataUpdateValues): AssetRecord {
+    return withDatabaseErrors(() => {
+      const asset = this.database
+        .select()
+        .from(assets)
+        .where(eq(assets.assetId, values.assetId))
+        .get();
+      if (asset === undefined) {
+        throw new AssetNotFoundError();
+      }
+      if (asset.revision !== values.expectedRevision) {
+        throw new AssetRevisionConflictError();
+      }
+
+      const activeTags = this.findActiveTags([...values.tagIds]);
+      const activeTagIds = new Set(activeTags.map((tag) => tag.tagId));
+      if (values.tagIds.some((tagId) => !activeTagIds.has(tagId))) {
+        throw new AssetTagNotFoundError();
+      }
+
+      const nextRevision = asset.revision + 1;
+      const result = this.database
+        .update(assets)
+        .set({
+          title: values.title,
+          description: values.description,
+          confidentiality: values.confidentiality,
+          department: values.department,
+          system: values.system,
+          revision: nextRevision,
+          updatedAt: values.updatedAt
+        })
+        .where(
+          and(
+            eq(assets.assetId, values.assetId),
+            eq(assets.revision, values.expectedRevision)
+          )
+        )
+        .run();
+      if ((result.changes ?? 0) === 0) {
+        throw new AssetRevisionConflictError();
+      }
+
+      this.database
+        .delete(assetTags)
+        .where(eq(assetTags.assetId, values.assetId))
+        .run();
+      if (values.tagIds.length > 0) {
+        this.insertAssetTags(
+          values.tagIds.map((tagId) => ({
+            assetId: values.assetId,
+            tagId,
+            createdAt: values.updatedAt
+          }))
+        );
+      }
+
+      const updated = this.database
+        .select()
+        .from(assets)
+        .where(eq(assets.assetId, values.assetId))
+        .get();
+      if (updated === undefined) {
+        throw new AssetDatabaseError();
+      }
+      return toAssetRecord(updated);
+    });
+  }
+
+  changeStatus(values: AssetStatusChangeValues): AssetRecord {
+    return withDatabaseErrors(() => {
+      const asset = this.database
+        .select()
+        .from(assets)
+        .where(eq(assets.assetId, values.assetId))
+        .get();
+      if (asset === undefined) {
+        throw new AssetNotFoundError();
+      }
+      if (asset.revision !== values.expectedRevision) {
+        throw new AssetRevisionConflictError();
+      }
+      if (asset.status === values.status) {
+        return toAssetRecord(asset);
+      }
+      if (
+        asset.status !== (values.status === "active" ? "inactive" : "active")
+      ) {
+        throw new AssetInvalidStateError();
+      }
+      if (values.status === "active") {
+        if (asset.currentVersion === null) {
+          throw new AssetVersionNotReadyError();
+        }
+        const current = this.database
+          .select({ status: assetVersions.status })
+          .from(assetVersions)
+          .where(
+            and(
+              eq(assetVersions.assetId, asset.assetId),
+              eq(assetVersions.version, asset.currentVersion)
+            )
+          )
+          .get();
+        if (current?.status !== "ready") {
+          throw new AssetVersionNotReadyError();
+        }
+      }
+
+      const result = this.database
+        .update(assets)
+        .set({
+          status: values.status,
+          revision: asset.revision + 1,
+          updatedAt: values.updatedAt
+        })
+        .where(
+          and(
+            eq(assets.assetId, values.assetId),
+            eq(assets.revision, values.expectedRevision)
+          )
+        )
+        .run();
+      if ((result.changes ?? 0) === 0) {
+        throw new AssetRevisionConflictError();
+      }
+      const updated = this.database
+        .select()
+        .from(assets)
+        .where(eq(assets.assetId, values.assetId))
+        .get();
+      if (updated === undefined) {
+        throw new AssetDatabaseError();
+      }
+      return toAssetRecord(updated);
+    });
+  }
+
+  reserveReplacement(
+    values: AssetReplacementReservationValues
+  ): AssetReplacementReservation {
+    return withDatabaseErrors(() => {
+      const asset = this.database
+        .select()
+        .from(assets)
+        .where(eq(assets.assetId, values.assetId))
+        .get();
+      if (asset === undefined) {
+        throw new AssetNotFoundError();
+      }
+      if (asset.revision !== values.expectedRevision) {
+        throw new AssetRevisionConflictError();
+      }
+      if (asset.status !== "active" && asset.status !== "inactive") {
+        throw new AssetInvalidStateError();
+      }
+
+      const latest = this.database
+        .select({ version: assetVersions.version })
+        .from(assetVersions)
+        .where(eq(assetVersions.assetId, asset.assetId))
+        .orderBy(desc(assetVersions.version))
+        .limit(1)
+        .get();
+      const version = (latest?.version ?? 0) + 1;
+      const nextRevision = asset.revision + 1;
+      this.insertAssetVersion({
+        assetId: asset.assetId,
+        version,
+        status: "processing",
+        baseRevision: nextRevision,
+        baseCurrentVersion: asset.currentVersion,
+        stagingPath: values.stagingPath,
+        libraryMediaPath: values.libraryMediaPath.replace(
+          "{version}",
+          String(version)
+        ),
+        mimeType: values.mimeType,
+        createdAt: values.updatedAt,
+        updatedAt: values.updatedAt
+      });
+      const result = this.database
+        .update(assets)
+        .set({ revision: nextRevision, updatedAt: values.updatedAt })
+        .where(
+          and(
+            eq(assets.assetId, asset.assetId),
+            eq(assets.revision, values.expectedRevision)
+          )
+        )
+        .run();
+      if ((result.changes ?? 0) === 0) {
+        throw new AssetRevisionConflictError();
+      }
+      return {
+        assetId: asset.assetId,
+        version,
+        revision: nextRevision,
+        currentVersion: asset.currentVersion,
+        kind: asset.kind,
+        status: "processing",
+        createdAt: values.updatedAt,
+        updatedAt: values.updatedAt
+      };
     });
   }
 

@@ -40,6 +40,9 @@ import {
   assetListResultSchema,
   assetKindSchema,
   assetStatusSchema,
+  assetTagDictionaryEntrySchema,
+  assetTagStatusSchema,
+  assetReplacementReceiptSchema,
   assetUploadReceiptSchema,
   normalizeAssetOptionalField,
   normalizeAssetSearchQuery,
@@ -1038,6 +1041,33 @@ export const assetUploadFieldsSchema = strictObject({
   tagIds: assetTagIdsInputSchema
 });
 
+export const assetMetadataUpdateRequestSchema = strictObject({
+  expectedRevision: positiveIntegerSchema,
+  title: z
+    .string()
+    .transform(normalizeAssetTextField)
+    .refine((value) => value.length > 0, "タイトルは必須です。"),
+  description: z.string().transform(normalizeAssetTextField),
+  confidentiality: z
+    .string()
+    .transform(normalizeAssetTextField)
+    .refine((value) => value.length > 0, "機密区分は必須です。"),
+  department: z
+    .string()
+    .transform(normalizeAssetOptionalField)
+    .nullable(),
+  system: z.string().transform(normalizeAssetOptionalField).nullable(),
+  tagIds: assetTagIdsInputSchema
+});
+
+export const assetStatusChangeRequestSchema = strictObject({
+  expectedRevision: positiveIntegerSchema
+});
+
+export const assetReplacementFieldsSchema = strictObject({
+  expectedRevision: z.coerce.number().int().positive()
+});
+
 export const assetUploadResponseSchema = strictObject({
   data: assetUploadReceiptSchema,
   revision: nonNegativeIntegerSchema.optional()
@@ -1046,6 +1076,19 @@ export const assetUploadResponseSchema = strictObject({
 export const assetDetailResponseSchema = strictObject({
   data: assetDetailSchema,
   revision: nonNegativeIntegerSchema.optional()
+});
+
+export const assetReplacementResponseSchema = strictObject({
+  data: assetReplacementReceiptSchema,
+  revision: nonNegativeIntegerSchema.optional()
+});
+
+export const assetTagDictionaryQuerySchema = strictObject({
+  status: assetTagStatusSchema.optional().default("active")
+});
+
+export const assetTagDictionaryResponseSchema = strictObject({
+  data: z.array(assetTagDictionaryEntrySchema)
 });
 
 export const assetListQuerySchema = strictObject({
@@ -1290,6 +1333,24 @@ export type TerminologyPreviewResponse = z.infer<
 export type AssetUploadFields = z.infer<typeof assetUploadFieldsSchema>;
 export type AssetUploadResponse = z.infer<typeof assetUploadResponseSchema>;
 export type AssetDetailResponse = z.infer<typeof assetDetailResponseSchema>;
+export type AssetMetadataUpdateRequest = z.infer<
+  typeof assetMetadataUpdateRequestSchema
+>;
+export type AssetStatusChangeRequest = z.infer<
+  typeof assetStatusChangeRequestSchema
+>;
+export type AssetReplacementFields = z.infer<
+  typeof assetReplacementFieldsSchema
+>;
+export type AssetReplacementResponse = z.infer<
+  typeof assetReplacementResponseSchema
+>;
+export type AssetTagDictionaryQuery = z.infer<
+  typeof assetTagDictionaryQuerySchema
+>;
+export type AssetTagDictionaryResponse = z.infer<
+  typeof assetTagDictionaryResponseSchema
+>;
 export type AssetListQuery = z.infer<typeof assetListQuerySchema>;
 export type AssetListResponse = z.infer<typeof assetListResponseSchema>;
 export type ManifestPreviewState = z.infer<typeof manifestPreviewStateSchema>;

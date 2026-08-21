@@ -108,7 +108,7 @@ describe("workspace SQLite", () => {
     const first = await initializeWorkspaceDatabase({ workspaceRoot });
     const firstHistory = migrationHistory(first.connection);
     expect(first.migrationResult.applied).toBe(true);
-    expect(firstHistory).toHaveLength(12);
+    expect(firstHistory).toHaveLength(13);
     first.close();
 
     const second = await initializeWorkspaceDatabase({ workspaceRoot });

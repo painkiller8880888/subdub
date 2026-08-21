@@ -39,6 +39,8 @@ export const assets = sqliteTable(
   "assets",
   {
     assetId: text("asset_id").primaryKey(),
+    revision: integer("revision").notNull().default(1),
+    currentVersion: integer("current_version"),
     kind: text("kind", {
       enum: ["video", "bgm", "photo", "document_scan", "sound_effect"]
     }).notNull(),
@@ -64,6 +66,11 @@ export const assets = sqliteTable(
     check(
       "assets_status_check",
       sql`${table.status} IN ('processing', 'active', 'inactive', 'error')`
+    ),
+    check("assets_revision_check", sql`${table.revision} > 0`),
+    check(
+      "assets_current_version_check",
+      sql`${table.currentVersion} IS NULL OR ${table.currentVersion} > 0`
     )
   ]
 );
@@ -75,6 +82,14 @@ export const assetVersions = sqliteTable(
       .notNull()
       .references(() => assets.assetId),
     version: integer("version").notNull(),
+    status: text("status", {
+      enum: ["processing", "ready", "error"]
+    })
+      .notNull()
+      .default("processing"),
+    baseRevision: integer("base_revision").notNull().default(1),
+    baseCurrentVersion: integer("base_current_version"),
+    stagingPath: text("staging_path"),
     libraryMediaPath: text("library_media_path").notNull(),
     mimeType: text("mime_type").notNull(),
     checksum: text("checksum"),
@@ -84,12 +99,25 @@ export const assetVersions = sqliteTable(
     durationMs: integer("duration_ms"),
     pageCount: integer("page_count"),
     thumbnailPaths: text("thumbnail_paths"),
+    errorCode: text("error_code"),
+    errorMessage: text("error_message"),
     createdAt: text("created_at").notNull(),
     updatedAt: text("updated_at").notNull()
   },
   (table) => [
     primaryKey({ columns: [table.assetId, table.version] }),
-    index("asset_versions_asset_id_idx").on(table.assetId)
+    index("asset_versions_asset_id_idx").on(table.assetId),
+    index("asset_versions_status_idx").on(table.status),
+    check(
+      "asset_versions_status_check",
+      sql`${table.status} IN ('processing', 'ready', 'error')`
+    ),
+    check("asset_versions_version_check", sql`${table.version} > 0`),
+    check("asset_versions_base_revision_check", sql`${table.baseRevision} > 0`),
+    check(
+      "asset_versions_base_current_version_check",
+      sql`${table.baseCurrentVersion} IS NULL OR ${table.baseCurrentVersion} > 0`
+    )
   ]
 );
 
