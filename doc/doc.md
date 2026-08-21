@@ -163,17 +163,18 @@ type AssetVersion = {
   status: "processing" | "ready" | "error";
   baseRevision: number;
   baseCurrentVersion: number | null;
+  stagingPath: string | null;
   // managed file, checksum, thumbnail, and technical metadata
 };
 ```
 
-initial upload の処理中は `currentVersion = null` でもよい。v1 の検証・thumbnail・technical metadata 処理が成功した時だけ `currentVersion = 1` とし、Asset を `active` にする。既存 Asset の file replacement は同じ `assetId` の次 version を candidate として追加する。v2 が `processing` または `error` の間は current v1 と Asset 本体の `active` / `inactive` を維持し、v2 の status が `ready` になった後、検証済み metadata と managed file が揃った transaction でだけ `currentVersion = 2` へ切り替える。切り替え失敗時も v1 を失わず、旧 version と history は保持する。inactive Asset の replacement が成功しても、利用停止状態を自動で active に戻さない。
+initial upload の処理中は `currentVersion = null` でもよい。v1 の検証・thumbnail・technical metadata 処理が成功した時だけ、同じ SQLite transaction で `currentVersion = 1` と Asset `active`、AssetVersion `ready` を確定する。既存 Asset の file replacement は同じ `assetId` の次 version を candidate として追加する。v2 が `processing` または `error` の間は current v1 と Asset 本体の `active` / `inactive` を維持し、検証済み metadata と managed file が揃った時だけ v2 の `ready` 化と `currentVersion = 2` への切替を同じ transaction で commit する。新規 candidate が ready だが non-current の状態を永続化せず、transaction rollback / process crash では candidate を `processing` のまま再び worker の対象にする。revision conflict は同じ transaction で candidate を `error` にし、旧 current version と history は保持する。inactive Asset の replacement が成功しても、利用停止状態を自動で active に戻さない。
 
 非同期処理の work item は Asset 本体ではなく `AssetVersion.status = "processing"` の `(assetId, version)` として列挙する。initial upload では Asset 本体を `processing` としてよいが、これは初期登録中であることを表す状態に限定し、worker の探索条件にはしない。したがって Asset が `active` または `inactive` のままでも、その AssetVersion が `processing` の replacement candidate は worker の対象となる。worker / processing service は親 Asset の status だけを理由に candidate を `skipped` にせず、candidate 自身がまだ `processing` かを確認する。
 
-`/replace` の受付 transaction では、request の `expectedRevision` が一致した時点の Asset `revision` と `currentVersion` を、それぞれ candidate の `baseRevision` と `baseCurrentVersion` へ保存する。worker は再起動後もこの値を AssetVersion から読み込み、ready 化後の同一 transaction で現在の Asset `revision` / `currentVersion` と比較する。両方が一致した場合だけ current version を切り替え、revision を増やす。一致しなかった場合は旧 current version と Asset status を維持し、candidate を `error`（`REPLACEMENT_REVISION_CONFLICT`）として履歴に残す。candidate の自動再 activation は行わず、再試行は新しい `/replace` として新しい base 値を取得する。
+`/replace` の受付 transaction では、request の `expectedRevision` が一致した時点の Asset `revision`、`currentVersion`、`StagedUploadRecord.stagingRelativePath` を、それぞれ candidate の `baseRevision`、`baseCurrentVersion`、`stagingPath` へ保存する。`stagingPath` は staging root 相対 locator（例: `staging/{uploadId}/upload.bin`）であり、worker は再起動後も HTTP request のメモリ状態なしに staged file を解決する。処理済み metadata と managed file が揃った後、worker は finalization transaction 内で base 値を比較し、candidate を `ready`、current version 切替、revision increment、`stagingPath = null` を一度に commit する。照合に失敗した場合は同じ transaction で candidate を `error`（`REPLACEMENT_REVISION_CONFLICT`）にし、旧 current version と Asset status を維持する。candidate の自動再 activation は行わず、再試行は新しい `/replace` として新しい base 値を取得する。
 
-replacement の次 version number の確保と AssetVersion insert は同一 write transaction で行う。`MAX(version) + 1` を transaction の外で計算してはならず、`(assetId, version)` の unique conflict が発生した場合は transaction 全体を再実行する。
+activation transaction の rollback / commit 前の process crash では candidate は `processing` と persisted `stagingPath` のまま残り、worker が再列挙して retry する。staging file の物理削除は成功 commit 後にだけ行い、cleanup 失敗は orphan として診断する。replacement の次 version number の確保と AssetVersion insert は同一 write transaction で行う。`MAX(version) + 1` を transaction の外で計算してはならず、`(assetId, version)` の unique conflict が発生した場合は transaction 全体を再実行する。
 
 後続実装の API boundary は次のとおりとする。
 
@@ -872,7 +873,7 @@ AI に素材そのもの、完成スライド、図解を生成させない。AI
 3. バックエンドが一覧表示用サムネイルを生成する。動画は代表フレーム、複数ページ帳票はページごとのサムネイルを生成し、音声系は必要な technical metadata を返す。
 4. 人間が title、description、confidentiality、department、system、tagIds を確認・編集する。kind、checksum、size、duration、解像度、page count、MIME など file-derived technical metadata は編集しない。
 5. 素材を `active` にした時点で generic Asset Search の検索対象にする。通常の「削除」は `inactive` への利用停止とし、再有効化は `active` へ戻す。差し替えや利用停止は履歴を残し、inactive Asset を新規 picker / search candidate へ返さず、既存 project の snapshot を暗黙に変更しない。
-6. 初期登録は v1 の検証・処理が成功してから current version を確定する。既存 Asset の差し替えは同じ `assetId` の新 version candidate として処理し、candidate の processing / error 中は旧 current version を維持する。candidate の technical metadata と thumbnail が揃って ready になった時だけ current version を切り替える。
+6. 初期登録は v1 の検証・処理が成功してから current version を確定する。既存 Asset の差し替えは同じ `assetId` の新 version candidate として処理し、candidate の processing / error 中は旧 current version を維持する。candidate の technical metadata と thumbnail が揃った時だけ、candidate の `ready` 化と current version 切替を同じ transaction で commit する。
 
 #### 6.4.2 AI サジェスト（現場素材の補助機能）
 
@@ -1483,7 +1484,7 @@ WebUI は SQLite、キャラクターファイル、ローカルファイルシ�
 
 metadata 編集で更新できるのは title、description、confidentiality、department、system、tagIds とする。kind と、checksum、size、duration、width、height、page count、MIME、extension、thumbnail path など file-derived technical metadata は read-only とする。通常の「削除」ボタンは「利用停止」と表示し、DB row、managed media、thumbnail、version history を物理削除しない。inactive Asset は新規 candidate から除外するが、既存 project snapshot は変更しない。
 
-file 差し替えは同じ `assetId` の次 version を作成する。candidate が processing / error の間は旧 current version の thumbnail と technical metadata を表示し、Asset 本体の active / inactive を維持する。検証済み candidate が ready になった後だけ current version を atomic に切り替え、切替失敗時も旧 version を保持する。
+file 差し替えは同じ `assetId` の次 version を作成する。candidate が processing / error の間は旧 current version の thumbnail と technical metadata を表示し、Asset 本体の active / inactive を維持する。検証済み metadata と managed file が揃った時だけ、candidate の `processing → ready` と current version 切替を同じ transaction で commit し、切替失敗時も旧 version を保持する。
 
 #### ビジュアル選択 UI
 
@@ -1541,7 +1542,7 @@ Uploads are streamed directly into workspace staging with a separate 32 MiB per-
 - OpenRouter API キーは環境変数 `OPENROUTER_API_KEY` からバックエンドだけが読み取り、レスポンス、ログ、ブラウザストレージへ出力しない。
 - `GET /api/assets` はキーワード、タグ、素材種別、部門、対象システム、状態、ページングを受け取り、全 5 kind を対象にサムネイル情報、current version、technical metadata、processing/error 情報を含む検索結果を返す。通常の Asset Search / picker では `inactive` を候補から除外する。
 - `PUT /api/assets/{assetId}` は title、description、confidentiality、department、system、tagIds だけを metadata として更新し、`kind` と file-derived technical metadata を受け付けない。`expectedRevision` を検証し、成功時に Asset revision を増やす。
-- `POST /api/assets/{assetId}/replace` は同じ kind の multipart file と `expectedRevision` を受け、受付時点の Asset `revision` / `currentVersion` を candidate の `baseRevision` / `baseCurrentVersion` として永続化する。extension / MIME / 実ファイル形式、checksum、technical metadata、thumbnail 処理が成功するまで current version を変更せず、candidate の processing / error と履歴を detail で確認できるようにする。成功した current version activation は persisted base 値との照合と atomic な切替で保護する。
+- `POST /api/assets/{assetId}/replace` は同じ kind の multipart file と `expectedRevision` を受け、受付時点の Asset `revision` / `currentVersion` / staging locator を candidate の `baseRevision` / `baseCurrentVersion` / `stagingPath` として永続化する。`stagingPath` は `staging/{uploadId}/upload.bin` のような staging root 相対値とする。extension / MIME / 実ファイル形式、checksum、technical metadata、thumbnail 処理が成功するまで current version を変更せず、candidate は `processing` のまま保持する。candidate の `ready` 化、current version activation、revision increment は同じ SQLite transaction で行い、commit 前の crash では persisted staging locator 付きの processing candidate を worker が再取得する。
 - `POST /api/assets/{assetId}/deactivate` と `POST /api/assets/{assetId}/activate` は Asset の status だけを `inactive` / `active` へ変更する soft delete / reactivate 操作であり、いずれも `expectedRevision` を検証する。`DELETE /api/assets/{assetId}` は通常 API に追加しない。
 - `GET /api/assets/{assetId}` の detail は current version を最大 version row の暗黙値ではなく明示的な current identity として返し、各 version の status、error、checksum、managed file、thumbnail、technical metadata を確認できるようにする。
 - `GET /api/character-visuals` と `GET /api/character-visuals/{visualId}` は SQLite の `CharacterVisualSet` を読み、登録済み variant とファイルの管理された配信情報を返す。TypeScript の静的配列を一覧の正本として使用しない。
@@ -1864,6 +1865,7 @@ version
 status: processing | ready | error
 baseRevision
 baseCurrentVersion: number | null
+stagingPath: string | null
 libraryMediaPath
 thumbnailPaths[]
 checksum
@@ -1879,9 +1881,9 @@ createdAt / updatedAt
 
 `durationMs` は動画、BGM、効果音に、`pageCount` は帳票に設定する。タグはタグマスターとの関連テーブルで管理し、正規名、分類軸、別名、利用状態を持たせる。Asset metadata で編集できるのは title、description、confidentiality、department、system、tagIds であり、kind と version の file-derived fields は編集できない。素材の差し替えは同じファイルを上書きせず、新しい version と checksum を持つ candidate として登録する。
 
-Asset 本体の status と version candidate の status は分離する。初期登録では Asset が `processing`、currentVersion が null の状態を許可し、v1 が ready になった時だけ currentVersion を設定する。active / inactive Asset の replacement candidate が `processing` または `error` になっても Asset の status と旧 currentVersion を維持し、candidate が ready になってから expectedRevision を検証した transaction で currentVersion を切り替える。通常 UI は version row、managed media、thumbnail、history を物理削除しない。
+Asset 本体の status と version candidate の status は分離する。初期登録では Asset が `processing`、currentVersion が null の状態を許可し、v1 の `ready` 化、currentVersion 設定、Asset `active` 化を同じ SQLite transaction で commit する。active / inactive Asset の replacement candidate が `processing` または `error` になっても Asset の status と旧 currentVersion を維持し、candidate は checksum、technical metadata、thumbnail、managed file が揃うまで `processing` のままとする。`expectedRevision`、`baseRevision`、`baseCurrentVersion` を検証する同じ transaction でだけ candidate を `ready` にして currentVersion を切り替え、`stagingPath` を null にする。ready だが non-current の新規 candidate は永続化せず、rollback / crash では `processing` と staging locator を残して worker が再開する。通常 UI は version row、managed media、thumbnail、history を物理削除しない。
 
-非同期 worker の work item は Asset 本体の status ではなく `AssetVersion.status = processing` の `(assetId, version)` を基準に列挙する。initial upload の Asset `status = processing` は queue の正本ではなく、親 Asset が `active` / `inactive` の replacement candidate も処理する。worker は request の in-memory state に依存せず、AssetVersion に保存した `baseRevision` / `baseCurrentVersion` を読み、ready 化時に現在値と照合する。revision conflict は旧 currentVersion と Asset status を維持したまま candidate を `error`（`REPLACEMENT_REVISION_CONFLICT`）にし、自動再 activation は行わない。次 version の確保と AssetVersion insert は同じ write transaction で行い、unique conflict 時は transaction 全体を retry する。
+非同期 worker の work item は Asset 本体の status ではなく `AssetVersion.status = processing` の `(assetId, version)` を基準に列挙する。initial upload の Asset `status = processing` は queue の正本ではなく、親 Asset が `active` / `inactive` の replacement candidate も処理する。worker は request の in-memory state に依存せず、AssetVersion に保存した `baseRevision` / `baseCurrentVersion` / `stagingPath` を読み、ready 化と current 切替を同じ finalization transaction で行う。revision conflict は旧 currentVersion と Asset status を維持したまま candidate を `error`（`REPLACEMENT_REVISION_CONFLICT`）にし、自動再 activation は行わない。次 version の確保と AssetVersion insert は同じ write transaction で行い、unique conflict 時は transaction 全体を retry する。
 
 編集フェーズで使用する形式は次のとおり固定する。
 
@@ -2072,10 +2074,10 @@ Issue #155（AL-00）は `doc/doc.md` と本書だけを更新する docs-only �
 | 対象 | `video`、`bgm`、`photo`、`document_scan`、`sound_effect` を同じ `/assets` で管理する。 |
 | metadata | title、description、confidentiality、department、system、tagIds を編集し、kind と file-derived technical metadata は編集しない。 |
 | status | 通常の削除は `inactive` 化。再有効化を提供し、inactive は新規 candidate から除外する。物理 purge / orphan GC は対象外。 |
-| concurrency | Asset `revision` と `expectedRevision` で metadata、status、current version activation の stale write を拒否する。replacement candidate には受付時点の `baseRevision` と `baseCurrentVersion` を永続化し、worker は ready 化時に現在値と照合する。revision conflict は candidate を `error`（`REPLACEMENT_REVISION_CONFLICT`）として旧 current version を維持し、自動再 activation は行わない。 |
+| concurrency | Asset `revision` と `expectedRevision` で metadata、status、current version activation の stale write を拒否する。replacement candidate には受付時点の `baseRevision`、`baseCurrentVersion`、`stagingPath` を永続化し、worker は finalization transaction 内で現在値と照合する。revision conflict は同じ transaction で candidate を `error`（`REPLACEMENT_REVISION_CONFLICT`）として旧 current version を維持し、自動再 activation は行わない。 |
 | version | Asset に explicit `currentVersion` を持たせ、version status (`processing` / `ready` / `error`) と error history を保持する。最大 version number を current とみなさない。 |
-| worker queue | work item は `AssetVersion.status = processing` の `(assetId, version)` を基準に列挙する。initial upload の `Asset.status = processing` は queue の正本ではなく、`active` / `inactive` Asset の replacement candidate も同じ worker で処理する。 |
-| replacement | 同じ `assetId` に次 version candidate を作り、検証・thumbnail・technical metadata 完了後だけ atomic に current を切り替える。次 version の確保と AssetVersion insert は同一 transaction で行い、unique conflict 時は transaction 全体を retry する。失敗時と切替 transaction failure 時は旧 current version を維持する。 |
+| worker queue | work item は `AssetVersion.status = processing` の `(assetId, version)` を基準に列挙する。initial upload の `Asset.status = processing` は queue の正本ではなく、`active` / `inactive` Asset の replacement candidate も同じ worker で処理する。processing service は親 Asset status だけを理由に candidate を `skipped` にしない。`stagingPath` は `staging/{uploadId}/upload.bin` のような staging root 相対 locator として永続化する。 |
+| replacement | 同じ `assetId` に次 version candidate を作り、検証・thumbnail・technical metadata・managed file が揃った candidate の `processing → ready` と current 切替を同じ SQLite transaction で commit する。ready だが non-current の新規 candidate を永続化せず、rollback / crash では processing と stagingPath を残して再列挙する。次 version の確保と AssetVersion insert も同一 transaction で行い、unique conflict 時は transaction 全体を retry する。失敗時と切替 transaction failure 時は旧 current version を維持する。 |
 | snapshot | library の metadata / status / version 更新で既存 project の Asset snapshot を自動更新しない。再選択時だけ current active version を snapshot する。 |
 
 後続実装では initial upload、metadata update、replace、activate / deactivate、一覧検索、detail、paging、processing/error 表示を API と `/assets` UI へ接続する。`DELETE /api/assets/{assetId}`、Asset kind 変更、version rollback UI、immutable version diff viewer、tag dictionary CRUD、bulk upload、folder import、cloud storage は AL-00 の対象外とする。
