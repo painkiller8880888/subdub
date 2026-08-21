@@ -2,7 +2,7 @@
 
 文書版: 0.4
 作成日: 2026-07-28  
-更新日: 2026-08-20<br>
+更新日: 2026-08-21<br>
 上位仕様: [`doc.md`](./doc.md)
 
 現在の正本は `doc/doc.md` と本書の 2 文書に固定する。要求、目的、機能、ユーザー体験は `doc/doc.md` を優先し、データモデル、API、保存、validation、アーキテクチャ、実装詳細は本書を正本とする。実装詳細が要求と矛盾する場合は、本書を更新して `doc/doc.md` と整合させる。`doc/legacy/` 配下は履歴資料であり、新規実装の仕様根拠または実装順序の根拠には使用しない。legacy 文書と現在の正本が矛盾する場合は、現在の正本を採用する。
@@ -61,7 +61,7 @@ ED-00 は docs-only の仕様改訂であり、この Issue の作業ではコ�
 
 - 編集素材は workspace SQLite に登録済みで、選択・差し替え時点に `active` な Asset だけを使用する。
 - intro / outro / cutin は MP4 の `video` Asset、BGM は MP3 の `bgm` Asset に限定する。
-- project data には Asset 本体の `version` / `checksum` を `assetVersion` / `assetChecksum` として、`assetId`、`projectMediaPath` とともに snapshot 固定する。OS path や任意ファイルを保存しない。
+- project data には Asset の currentVersion が示す AssetVersion の `version` / `checksum` を `assetVersion` / `assetChecksum` として、`assetId`、`projectMediaPath` とともに snapshot 固定する。OS path や任意ファイルを保存しない。
 - snapshot 作成後の Asset の差し替え・利用停止は既存 project の出力エラーにしない。出力時は project 内 `projectMediaPath` の存在、`assetChecksum`、MP4 / MP3 の実ファイル形式だけを検証し、live な Asset `status` や Asset Service の SQLite を必須入力にしない。
 - 動画と BGM は `0 <= volume <= 1` を持つ。generic `VideoDisplay.muted` の `true → 0`、`false → 1` 変換は ED-01 の `1.1.0 → 1.2.0` schema migration が担当する。ED-01 は既存 `RenderManifest 2.2.0` の `muted` legacy schema と project schema の分離、および 0 / 1 の compatibility adapter まで担当する。ED-08 を ED-07 より先に完了させて `RenderManifest 2.3.0` の任意 volume 経路を用意し、その後の ED-07 が変換後の `volume` の UI / API / compiler / Remotion 側対応を公開する。
 
@@ -156,7 +156,61 @@ VP-01 は `VideoProject 1.4.0 → 1.5.0` を導入し、既存 video assignment 
 
 後続 ScriptPage では #149 の compact line card の右側へ media pane を追加し、assignment / asset title / kind、lifecycle state（hidden / playing / paused / ended / static-visible）、表示・再生開始、一時停止、再開、終了、asset 選択・差し替え導線を表示する。これは UI の lifecycle read model であり、V25 の serialized video segment state は playing / paused / ended に限定する。source end 到達後は ended と `lastDrawableSourceFrame` を表示し、pause / resume button を disabled にする。操作可否は resolved state から決定し、不正な cue sequence を UI から作らせない。#150 の `PersistentScreenState` へは action 名ではなく cue と source-end を解決した media state を渡し、前 line と state が異なる場合だけ full preview とする。
 
-対象外は line 内任意 millisecond cue、waveform / NLE timeline、reverse playback、scrubbing keyframe、video transition effects、speed keyframe、automatic / AI slide generation、dedicated presentation parser、Asset library CRUD UI である。
+対象外は line 内任意 millisecond cue、waveform / NLE timeline、reverse playback、scrubbing keyframe、video transition effects、speed keyframe、automatic / AI slide generation、dedicated presentation parser である。Asset library CRUD UI は VP-00〜VP-02 の ScriptPage media pane に含めず、1.8 と 27 の AL-00 境界で定義する。
+
+### 1.8 Issue #155 / AL-00 の Asset library 管理仕様
+
+Issue #155（AL-00）は `doc/doc.md` と本書だけを更新する docs-only の仕様改訂である。この Issue ではコード、Zod schema、SQLite migration、API、React UI、worker、compiler、Remotion、テストコードを変更しない。現行実装の `GET /api/assets`、`POST /api/assets`、`GET /api/assets/{assetId}`、managed media / thumbnail read を後続の管理機能が拡張する。
+
+`/assets` は workspace 共通の Asset 管理画面とし、`video`、`bgm`、`photo`、`document_scan`、`sound_effect` を同じ管理境界で扱う。kind ごとの extension、MIME、実ファイル形式、upload limit、technical metadata validation は維持し、kind を metadata mutation で変更しない。`AssetsPage` は一覧専用から、追加、一覧 / search / filter / paging、detail、metadata 編集、file 差し替え、利用停止、再有効化、processing / error 表示を扱う画面へ拡張する。`bgm` と `sound_effect` を表示・filter・label から除外しない。
+
+通常の削除は物理削除ではなく `inactive` 化とする。`active → inactive`、`inactive → active` の status mutation を提供し、DB row、managed media、thumbnail、version history は通常 UI から削除しない。inactive Asset は新規 picker / search candidate から除外するが、既存 project snapshot の `assetId`、`assetVersion`、`assetChecksum`、`projectMediaPath` を書き換えず、既存 project の出力を壊さない。physical purge、orphan file GC、storage cleanup は別の destructive maintenance scope とする。
+
+Asset 本体には `revision` を持たせ、metadata update、activate / deactivate、successful current version activation の全 mutation で `expectedRevision` を検証する。検証成功時だけ revision を増やし、stale mutation は conflict として変更なしで拒否する。current version は version number 最大値や latest row join から推測せず、Asset の `currentVersion: number | null` で明示する。
+
+```ts
+type Asset = {
+  assetId: string;
+  revision: number;
+  currentVersion: number | null;
+  kind: "video" | "bgm" | "photo" | "document_scan" | "sound_effect";
+  // editable metadata and Asset status
+};
+
+type AssetVersion = {
+  assetId: string;
+  version: number;
+  status: "processing" | "ready" | "error";
+  baseRevision: number;
+  baseCurrentVersion: number | null;
+  stagingPath: string | null;
+  // managed file, checksum, thumbnail, technical metadata, and error detail
+};
+```
+
+初期登録では Asset `status = processing`、`currentVersion = null` を許可し、v1 の validation、technical metadata、thumbnail が成功した時だけ v1 を ready にして current version を確定する。replacement は同じ `assetId` の次 version candidate として作成し、candidate が processing / error の間は active / inactive と旧 current version を維持する。managed file と metadata が揃った後、candidate の `processing → ready` と current version の切替を同じ SQLite transaction で行う。新しい candidate が `ready` だが current ではない状態を commit せず、transaction の rollback / process crash では candidate を `processing` のまま worker が再取得できるようにする。revision conflict はその transaction 内で candidate を `error` にし、旧 current version を維持する。inactive Asset の replacement 成功は active への自動復帰を意味しない。
+
+非同期処理の work item は Asset 本体ではなく、`AssetVersion.status = "processing"` の `(assetId, version)` を正本として列挙する。初期 upload では Asset `status = processing` としてよいが、これは current version が未確定であることを示す親 Asset の状態に限定し、worker の探索条件にはしない。Asset が `active` または `inactive` のままでも replacement candidate の AssetVersion が `processing` なら worker の処理対象とする。worker / processing service は親 Asset の status が `active` / `inactive` であることだけを理由に candidate を `skipped` にせず、candidate 自身の status と `(assetId, version)` identity を確認する。
+
+`/replace` の受付時には request の `expectedRevision` を現在の Asset revision と比較し、一致した同じ transaction で candidate の `baseRevision`、`baseCurrentVersion`、`stagingPath` を保存する。`baseCurrentVersion` は受付時点で想定した旧 current version であり、`stagingPath` は `StagedUploadRecord.fileRelativePath` から引き継ぐ staged file の staging root 相対 locator（例: `staging/{uploadId}/upload.bin`）である。directory locator である `stagingRelativePath` は `stagingPath` に使用しない。worker のメモリや HTTP request の状態に依存させず、worker は再起動後も AssetVersion row からこれらを読み込む。処理済み metadata と checksum 検証済み managed file が揃った後、candidate がまだ `processing` で、Asset の `revision` / `currentVersion` が base 値と一致することを同じ transaction で確認し、`ready` 化、currentVersion 切替、Asset revision increment、`stagingPath = null` を一度に commit する。
+
+照合に失敗した revision conflict では同じ transaction 内で candidate を `error`（`REPLACEMENT_REVISION_CONFLICT`）にし、旧 current version、Asset status、既存 project snapshot を維持する。candidate の自動再 activation は行わず、再試行は新しい `/replace` として新しい `baseRevision` / `baseCurrentVersion` / `stagingPath` を保存する。initial upload も同じ persisted base fields と staging locator を使い、`baseCurrentVersion = null` として初期 Asset の current version 未確定を表す。
+
+metadata mutation で編集できるのは `title`、`description`、`confidentiality`、`department`、`system`、`tagIds` とする。`kind`、checksum、size、duration、width、height、page count、declared / detected MIME、extension、thumbnail path など file-derived fields は read-only とする。tag dictionary CRUD は対象外で、必要な active tag dictionary の read endpoint だけを後続 Issue で追加できる。
+
+後続 API の boundary は次のとおりとする。
+
+```text
+POST /api/assets                         create / initial multipart upload
+GET  /api/assets                         list / search / filter / paging
+GET  /api/assets/{assetId}               detail / current version / history
+PUT  /api/assets/{assetId}               metadata update (expectedRevision)
+POST /api/assets/{assetId}/replace       new version multipart upload
+POST /api/assets/{assetId}/deactivate    soft delete (expectedRevision)
+POST /api/assets/{assetId}/activate      reactivate (expectedRevision)
+```
+
+通常管理 API として `DELETE /api/assets/{assetId}` は追加しない。replace は Asset kind を変更せず、candidate の version status / error history を detail から確認できるようにする。current version の切替、status mutation、metadata update はすべて revision-aware とする。
 
 ## 2. 今回確定した判断
 
@@ -2133,23 +2187,16 @@ repository は template row と element rows を同一 SQLite transaction で更
 
 ### 10.4 エンティティ
 
-素材レコードは少なくとも次を持つ。
+Asset 本体と Asset version は別の責務を持つ。`Asset` の `revision` は metadata / status / current version activation の stale-write guard、`currentVersion` は現在利用する version の explicit identity である。最大 version number の row や latest row join を current とみなさない。
 
 ```ts
 type Asset = {
   assetId: string;
-  version: number;
+  revision: number;
+  currentVersion: number | null;
   kind: "video" | "photo" | "document_scan" | "sound_effect" | "bgm";
   title: string;
   description: string;
-  libraryMediaPath: string;
-  thumbnailPaths: string[];
-  checksum: string;
-  mimeType: string;
-  width: number | null;
-  height: number | null;
-  durationMs: number | null;
-  pageCount: number | null;
   confidentiality: string;
   department: string | null;
   system: string | null;
@@ -2157,9 +2204,35 @@ type Asset = {
   createdAt: string;
   updatedAt: string;
 };
+
+type AssetVersion = {
+  assetId: string;
+  version: number;
+  status: "processing" | "ready" | "error";
+  // replacement activation guard captured when this candidate is accepted
+  baseRevision: number;
+  baseCurrentVersion: number | null;
+  // staging-root-relative locator while status is processing
+  stagingPath: string | null;
+  libraryMediaPath: string | null;
+  thumbnailPaths: string[];
+  checksum: string | null;
+  mimeType: string;
+  sizeBytes: number | null;
+  width: number | null;
+  height: number | null;
+  durationMs: number | null;
+  pageCount: number | null;
+  errorCode: string | null;
+  errorMessage: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
 ```
 
-タグは素材との多対多関連、タグの分類軸、正規名、別名、利用状態を別テーブルで管理する。全文検索対象はタイトル、説明、部門、対象システム、タグ正規名、タグ別名とする。`sound_effect` は `confirm`、`attention`、`warning` の用途タグを必須とする。動画、写真、帳票では `width` と `height` を必須とし、動画、BGM、効果音では `durationMs` を必須とする。
+タグは素材との多対多関連、タグの分類軸、正規名、別名、利用状態を別テーブルで管理する。全文検索対象はタイトル、説明、部門、対象システム、タグ正規名、タグ別名とする。`sound_effect` は `confirm`、`attention`、`warning` の用途タグを必須とする。動画、写真、帳票では `width` と `height` を必須とし、動画、BGM、効果音では `durationMs` を必須とする。metadata mutation が許可されるのは title、description、confidentiality、department、system、tagIds であり、kind と AssetVersion の file-derived fields は変更しない。
+
+Asset 本体の status と AssetVersion の status は混同しない。初期 upload の処理中は Asset が `processing`、`currentVersion = null` でよく、v1 の処理成功後にだけ、同じ SQLite transaction で AssetVersion を `ready`、Asset の currentVersion を v1、Asset を `active` とする。active / inactive Asset の replacement candidate が `processing` または `error` になっても Asset の status と旧 currentVersion を維持する。candidate は checksum、technical metadata、thumbnail、managed file が揃うまで `processing` のままとし、`expectedRevision`、`baseRevision`、`baseCurrentVersion` を確認する同じ transaction でだけ `ready` 化と currentVersion 切替を commit する。新規 candidate の ready / non-current 状態を永続化せず、transaction rollback / process crash では `processing` と persisted `stagingPath` を残して worker が再開する。inactive Asset の version activation は inactive のままとする。
 
 編集フェーズの形式 validation は次のとおりとする。
 
@@ -2168,30 +2241,44 @@ type Asset = {
 | `video` | `.mp4` | `video/mp4` | MP4 container | intro / outro / cutin |
 | `bgm` | `.mp3` | `audio/mpeg` | MP3 | section BGM |
 
-拡張子だけで許可せず、MIME と実ファイル形式を登録時に検証する。`bgm` は generic `VisualAssignment` の候補に含めず、編集画面の BGM picker だけへ返す。Asset 本体の `version` / `checksum` は、動画要素と BGM の project snapshot では `assetVersion` / `assetChecksum` として `assetId`、`projectMediaPath` とともに固定し、Asset の後続更新で既存 project を変更しない。`active` は選択・差し替え時だけ要求し、出力時は project 内ファイルの存在、`assetChecksum`、MP4 / MP3 の実ファイル形式を検証する。
+拡張子だけで許可せず、MIME と実ファイル形式を登録時に検証する。`bgm` は generic `VisualAssignment` の候補に含めず、編集画面の BGM picker だけへ返す。Asset の currentVersion が示す AssetVersion の `version` / `checksum` は、動画要素と BGM の project snapshot では `assetVersion` / `assetChecksum` として `assetId`、`projectMediaPath` とともに固定し、Asset の後続更新で既存 project を変更しない。`active` は選択・差し替え時だけ要求し、出力時は project 内ファイルの存在、`assetChecksum`、MP4 / MP3 の実ファイル形式を検証する。
 
-### 10.5 登録
+### 10.5 登録と version lifecycle
 
-1. 許可した MIME type と実ファイル形式を検証する。
-2. 一時領域へ受信する。
-3. SHA-256、サイズ、該当する場合は解像度、動画尺、音声尺またはページ数を取得する。
-4. 素材 ID と版を確定し `library/media/` へ移動する。
-5. 動画、写真、帳票ではサムネイルを生成する。効果音では試聴用波形の生成を必須にしない。
-6. SQLite レコードを `processing` で作成し、全処理成功後に `active` にする。
-7. 失敗時は `error` と理由を記録し、検索候補に含めない。
+initial upload は、multipart を受信する HTTP request と、後続 worker の非同期処理を分け、次の順序で処理する。
 
-同一チェックサムの重複登録は警告し、既存素材を返すか別メタデータとして登録するかを人間に選ばせる。素材の差し替えは同じファイルを上書きせず、新しい版として登録する。
+1. multipart の field 名・個数、kind、declared MIME、extension など、byte を読まずに検証できる metadata を早期検証する。sniffed MIME、実ファイル形式、checksum、per-kind の実サイズはこの段階では判定しない。
+2. upload limit を適用しながら multipart stream を一時領域へ受信する。全体・part・ファイルの上限超過、切断、書き込み失敗時は staging を破棄して managed media へ commit しない。
+3. staged file の bytes を入力として SHA-256、sniffed MIME、実ファイル形式、declared MIME / extension との整合、per-kind size limit、解像度、動画尺、音声尺、page count などを検証・取得する。ここで形式不一致または per-kind limit 超過を拒否する。
+4. staged file の検証後、Asset ID と v1 を確定し、Asset row を `revision` 付き、`status = processing`、`currentVersion = null` で作成する。同じ write transaction で AssetVersion row を `processing` として作り、initial upload では `baseRevision`、`baseCurrentVersion = null`、`stagingPath` を保存する。`stagingPath` は `StagedUploadRecord.fileRelativePath` から引き継ぐ staged file の staging root 相対 locator（例: `staging/{uploadId}/upload.bin`）であり、directory locator の `stagingRelativePath` は使用しない。worker が再起動後に解決できる形で永続化する。managed media の最終 commit 後も、成功 transaction の commit までは staged file を削除しない。
+5. worker は `AssetVersion.status = processing` の `(assetId, version)` を列挙し、AssetVersion の persisted `stagingPath` から staged file を読み込んで、動画・写真・帳票の thumbnail、音声系の technical metadata などを生成する。worker の探索条件は Asset `status` ではなく AssetVersion `status` であり、processing service は親 Asset が `active` / `inactive` であることだけを理由に replacement candidate を `skipped` にしない。
+6. 全処理が成功し、checksum 検証済みの managed file と metadata が揃ったら、candidate をまだ `processing` のまま SQLite transaction を開始する。candidate の `baseRevision` / `baseCurrentVersion` と現在の Asset を検証し、同じ transaction で AssetVersion を `ready`、Asset の currentVersion = v1 / status = `active`、Asset revision increment、`stagingPath = null` へ更新して一度に commit する。新規 candidate の `ready` 化と current version 切替の間に永続化された中間状態を作らない。staging file の物理削除はこの DB commit 後に行い、再実行可能な cleanup とする。
+7. staged file の検証・thumbnail・technical metadata 処理に失敗した場合は AssetVersion の `error` と error detail を記録し、初期 Asset は `error`、currentVersion は null のまま検索 candidate に含めない。activation transaction が rollback した場合、またはその commit 前に process が落ちた場合は AssetVersion を `processing`、`stagingPath` を保持したままにし、worker の再起動後に再列挙する。managed media が先に存在しても checksum で再利用または cleanup できる idempotent な扱いとし、未参照 final / staging file は orphan 診断の対象にする。
+
+同一 checksum の重複登録は警告し、既存素材を返すか別 metadata として登録するかを人間に選ばせる。Asset の metadata、status、current version activation は `expectedRevision` と比較し、成功時だけ Asset revision を増やす。stale mutation は別 tab の変更を上書きせず conflict として返す。
+
+file replacement は次の lifecycle とする。
+
+1. multipart metadata を早期検証し、upload limit を適用しながら file を staging へ stream する。staged bytes の sniffed MIME、実ファイル形式、checksum、per-kind size / technical metadata を検証してから managed media の配置を準備する。kind が既存 Asset と一致しない場合は reject し、kind 変更は別 Asset の create とする。staged source は最終 transaction の commit まで保持する。
+2. `/replace` の request に含まれる `expectedRevision` と現在の Asset revision を比較する。一致した同じ write transaction で次の version number を確保し、AssetVersion row を `processing` で insert する。この row に、受付時点の Asset revision を `baseRevision`、想定した旧 currentVersion を `baseCurrentVersion`、`StagedUploadRecord.fileRelativePath` を `stagingPath` として保存する。directory locator の `stagingRelativePath` は保存せず、`stagingPath` は例えば `staging/{uploadId}/upload.bin` の staged file staging root 相対値とする。worker の再起動後に `(assetId, version)` から復元できるようにする。旧 current version の media と thumbnail は変更しない。
+3. 次 version number の計算（例えば `MAX(version) + 1`）と `(assetId, version)` の AssetVersion insert は必ず同一 transaction で行う。transaction 外で number だけを予約してはならず、composite primary key の unique conflict が発生した場合は insert を含む transaction 全体を retry する。
+4. worker は candidate の persisted `baseRevision` / `baseCurrentVersion` / `stagingPath` を読み、staged file の extension / MIME / 実ファイル形式、checksum、technical metadata、thumbnail を処理する。worker の再起動後も request の in-memory state に依存せず、`stagingPath` が存在する限り同じ candidate を再開できるようにする。
+5. managed file と全 technical metadata が揃ったら、candidate を `processing` のまま SQLite activation transaction へ進める。candidate が新規に `ready` になる前に、activation に必要な managed file の checksum と metadata を確定する。
+6. activation transaction では candidate が `processing` であること、現在の Asset `revision` が `baseRevision` と一致すること、現在の `currentVersion` が `baseCurrentVersion` と一致することを確認する。すべて一致した場合だけ同じ transaction で candidate を `ready`、currentVersion を candidate、Asset revision を increment、`stagingPath = null` へ更新する。Asset status は active のままなら active、inactive のままなら inactive とする。この commit 後にだけ staged file を cleanup し、ready candidate が current でない永続状態を作らない。
+7. processing / validation / thumbnail の失敗は candidate の `error` または失敗 detail を history に残し、旧 current version、Asset status、既存 project snapshot を維持する。activation transaction の revision conflict は同じ transaction 内で `REPLACEMENT_REVISION_CONFLICT` として candidate を `error` にし、自動再 activation は行わない。activation transaction が rollback した場合、または commit 前に process が落ちた場合は candidate を `processing` のまま `stagingPath` とともに残し、worker が再列挙して retry する。再試行は新しい `/replace` でも行える。
+
+candidate version、旧 version、managed file、thumbnail、history は通常 UI から物理削除しない。クラッシュで残った staging / final の未参照ファイルは orphan として診断するが、自動 purge は AL-00 の対象外とする。
 
 ### 10.6 プロジェクトへの取り込み
 
-1. 対象素材が `active` であることを確認する。
+1. 対象 Asset が `active` であり、picker が返した version が Asset の明示的な currentVersion と一致することを確認する。
 2. 素材をプロジェクト内の一時パスへコピーする。
 3. コピー後の SHA-256 を DB の値と照合する。
 4. 最終パスへ移動する。
-5. `project.json` の assignment を revision 付きで保存する。
+5. `project.json` の assignment または EditPlan snapshot を project revision 付きで保存する。保存値は `assetId`、`assetVersion`、`assetChecksum`、`projectMediaPath` とする。
 6. JSON 保存に失敗した場合は、今回作成した未参照ファイルを取り除く。
 
-プロセス異常終了で残った未参照ファイルは、診断画面で orphan として検出する。自動削除はしない。
+取り込み後に Asset の metadata、status、currentVersion が更新されても、既存 `project.json` の snapshot を自動更新しない。プロセス異常終了で残った未参照ファイルは、診断画面で orphan として検出する。自動削除はしない。
 
 ## 11. バックエンド API
 
@@ -2331,13 +2418,27 @@ POST   /api/assets
 GET    /api/assets
 GET    /api/assets/{assetId}
 PUT    /api/assets/{assetId}
+POST   /api/assets/{assetId}/replace
 POST   /api/assets/{assetId}/deactivate
+POST   /api/assets/{assetId}/activate
 POST   /api/projects/{projectId}/visual-suggestions
 PUT    /api/projects/{projectId}/visual-assignments
 POST   /api/projects/{projectId}/visuals/approve
 ```
 
-ここで扱う `visual-suggestions`、Asset Search、`visual-assignments` は現場動画・写真・帳票スキャン用の generic domain である。AI suggestion backend、Asset Service、検索 schema、`VisualAssignment` data は CV-04 / CV-05 で削除しない。キャラクターの variant picker はこの API 群へ混在させず、speaker に binding された CharacterVisualSet の active variant を対象にする。
+`/api/assets` は workspace Asset library の API であり、`video`、`bgm`、`photo`、`document_scan`、`sound_effect` の全 kind を扱う。`POST /api/assets` は multipart initial upload、`GET /api/assets` は keyword / tag / kind / department / system / status / paging による list/search、`GET /api/assets/{assetId}` は current version と version history の detail を返す。inactive Asset は通常の picker / search candidate から除外する。
+
+`PUT /api/assets/{assetId}` は title、description、confidentiality、department、system、tagIds だけを更新し、`expectedRevision` を必須として成功時に Asset revision を増やす。kind、checksum、size、duration、width、height、page count、MIME、extension、thumbnail path など file-derived fields の更新は拒否する。
+
+`POST /api/assets/{assetId}/replace` は同じ kind の multipart file と必須の `expectedRevision` を受け付ける。受付時に `expectedRevision` と Asset revision が一致した場合、その時点の revision / currentVersion と staging locator を candidate の `baseRevision` / `baseCurrentVersion` / `stagingPath` として AssetVersion row へ永続化する。`stagingPath` は staging root 相対値（例: `staging/{uploadId}/upload.bin`）とし、worker が再起動後に `(assetId, version)` から staged file を解決できるようにする。candidate は `processing → ready | error` の version status を持つが、replacement candidate の `processing → ready` と currentVersion activation は同一 SQLite transaction で commit し、ready だが current ではない中間状態を永続化しない。
+
+非同期 worker の work item は Asset `status` ではなく `AssetVersion.status = processing` の `(assetId, version)` を基準に列挙する。したがって親 Asset が `active` / `inactive` の replacement candidate も処理対象であり、processing service は親 Asset の status だけを理由に `skipped` を返さない。worker は persisted `baseRevision` / `baseCurrentVersion` を再起動後も読み込む。
+
+activation transaction は candidate が `processing` であること、現在の Asset revision と `baseRevision` の一致、現在の currentVersion と `baseCurrentVersion` の一致、managed file / technical metadata / thumbnail の準備完了を確認し、成功時だけ同じ transaction 内で candidate を `ready`、Asset revision を increment、currentVersion を candidate、`stagingPath` を null へ更新する。processing / validation の失敗は candidate error として旧 currentVersion と Asset status を維持する。revision conflict はその transaction 内で candidate を `error`（`REPLACEMENT_REVISION_CONFLICT`）として旧 currentVersion を維持し、自動再 activation は行わない。activation transaction の rollback / commit 前の crash では candidate は `processing` と persisted `stagingPath` のまま残り、worker が再列挙する。次 version number の確保と AssetVersion insert は同一 transaction で行い、`(assetId, version)` の unique conflict 時は transaction 全体を retry する。
+
+`POST /api/assets/{assetId}/deactivate` と `/activate` は `expectedRevision` 付きの soft delete / reactivate とし、`DELETE /api/assets/{assetId}` は提供しない。status の変更は managed media、thumbnail、version history、既存 project snapshot を物理削除・更新しない。inactive Asset の replacement activation は inactive のままとする。
+
+ここで扱う `visual-suggestions`、Asset Search、`visual-assignments` は現場動画・写真・帳票スキャン用の generic domain である。AI suggestion backend、Asset Service、検索 schema、`VisualAssignment` data は CV-04 / CV-05 で削除しない。キャラクターの variant picker はこの API 群へ混在させず、speaker に binding された CharacterVisualSet の active variant を対象にする。Asset library CRUD UI は `/assets` の別画面で提供し、ScriptPage の media pane と統合しない。
 
 VP-01 の `PUT /api/projects/{projectId}/visual-assignments` は既存 assignment の asset snapshot、`startLineId` / `endLineId`、display 設定を維持したまま、video display の `playbackCues` を保存・更新する。API は cue の line range、video-only kind、state transition、重複、deterministic order を検証し、photo / `document_scan` へ cue を受け付けない。新しい media entity や別の Asset Search API は追加しない。
 
@@ -2494,7 +2595,11 @@ ED-08 完了前の compile 経路では、既存 `RenderManifest 2.2.0` の gene
 `/character-visuals` はプロジェクトに依存しないワークスペース共通の登録・管理画面である。サイドバーから開き、一覧、作成、基本情報編集、完全な variant の作成、既存 file slot の差し替え、status 更新を行う。全表情・全ポーズの一括登録は要求しない。未登録 variant は未登録として表示し、variant 作成フォームでは `single-image` の `single`、`mouth-pair` の `closed` / `open` を揃えるまで登録操作を完了できない。必須 slot 欠落や形式不正はフォームの validation として表示するが、不完全な variant は DB や管理領域へ保存しない。既存の完成 variant は complete file set 単位で差し替えでき、必須 slot の削除は行わない。`mentor` / `learner` の役割付与、プロジェクトへの自動紐付け、`ScriptLine.expression` との mapping はこの画面の責務に含めない。
 `/projects/{projectId}/characters` は、`project.json` の VOICEVOX 話者と `CharacterVisualSet` の binding、および workspace SQLite の現在の snapshot を組み合わせた確認画面である。`visualId === characterId` を前提にせず、binding がない場合は「未設定」と表示する。catalog が inactive、missing、別 visual の参照を返した場合は自動代替せず validation error とする。
 
-WebUI は SQLite、`library/character-visuals/`、ローカルファイルシステムを直接操作しない。Character Visual API が返す metadata と管理された画像 URL だけを使用する。
+`/assets` は workspace 共通 Asset の管理画面である。`video`、`bgm`、`photo`、`document_scan`、`sound_effect` の全 kind を一覧・search・filter・paging し、素材追加、detail / thumbnail / technical metadata 表示、metadata 編集、file 差し替え、利用停止、再有効化を提供する。metadata 編集項目は title、description、confidentiality、department、system、tagIds に限定し、kind と file-derived fields は read-only とする。
+
+通常の削除操作は「利用停止」と表示し、`active ↔ inactive` だけを変更する。inactive Asset は新規 candidate から除外するが、managed media、thumbnail、version history、既存 project snapshot は削除・更新しない。file replacement は同じ `assetId` の version candidate として表示し、candidate が processing / error の間は旧 currentVersion と Asset 本体の status を維持する。candidate の metadata と managed file が揃った後だけ、`expectedRevision` を確認する finalization transaction で `ready` 化と currentVersion 切替を同時に行う。処理状態、error detail、current version と version history を UI から確認できるようにする。
+
+WebUI は SQLite、`library/character-visuals/`、`library/media/`、ローカルファイルシステムを直接操作しない。Character Visual API と Asset API が返す metadata、managed media URL、thumbnail URL だけを使用する。
 
 `/screen-templates` は workspace SQLite の active / inactive template を一覧表示し、作成・status 変更・revision を表示する。`/screen-templates/{templateId}` は 1920 × 1080 canvas を表示し、dialogue window 1、section title 1、speaker-1 / speaker-2 の character visual 2、primary content slot 1 の固定 element を editor で扱う。drag、resize handle、rotation handle、numeric geometry input、dialogue / section title の font size、character visual の `flipX`、keyboard 操作を提供する。固定 element の追加・削除、任意 React component、custom CSS、animation / keyframe は提供しない。
 
@@ -2746,6 +2851,16 @@ SQLite にはキー入力単位ではなく、保存、構成案の承認、レ�
 - photo / `document_scan` が cue を持たず、range 中に static-visible display を維持すること
 - `EditPlan` の role / placement validation、最初のセクション直前 cutin の拒否、intro / outro 最大 1 件、同一境界 order
 - 選択・差し替え時だけ active Asset を要求し、snapshot 後は project 内ファイルの存在・checksum・実形式だけで出力検証すること
+- Asset metadata の編集許可項目（title / description / confidentiality / department / system / tagIds）と、kind / file-derived technical metadata の編集拒否
+- Asset `revision` と `expectedRevision` による metadata、activate / deactivate、currentVersion activation の stale write 拒否と成功時の revision increment
+- Asset の `currentVersion` が最大 version number や latest row の順序から推測されず、initial `currentVersion = null`、明示 current version、version status (`processing` / `ready` / `error`) を保持すること
+- worker の work item が Asset `status` ではなく `AssetVersion.status = processing` の `(assetId, version)` から列挙され、active / inactive Asset の replacement candidate も処理されること。processing service が親 Asset status だけで `skipped` にしないこと
+- replacement candidate に `baseRevision` / `baseCurrentVersion` が受付時点で永続化され、worker 再起動後もその値で activation guard を行うこと。revision conflict が `REPLACEMENT_REVISION_CONFLICT` の candidate error となり、自動再 activation されないこと
+- replacement candidate の `processing → ready` と currentVersion activation が同じ SQLite transaction で commit され、ready 化後・activation 前の crash で非 current の ready candidate が残らないこと。transaction rollback / process crash では candidate が processing のまま再列挙されること
+- `stagingPath` が `StagedUploadRecord.fileRelativePath` から AssetVersion へ永続化され、directory locator の `stagingRelativePath` と混同せず、`staging/{uploadId}/upload.bin` のような staged file locator を worker 再起動後に解決できること。success commit 後だけ staging cleanup すること
+- replacement の next version reservation と AssetVersion insert が同一 transaction で行われ、`(assetId, version)` unique conflict 時に transaction 全体が retry されること
+- replacement candidate の processing / validation / thumbnail / error が旧 current version、Asset status、既存 project snapshot を変更せず、ready candidate の成功時だけ currentVersion を切り替えること
+- inactive Asset が新規 picker / search candidate から除外され、既存 project snapshot は library mutation で変更されないこと。Asset row、managed media、thumbnail、version history の通常 UI からの物理削除を拒否すること
 - `1.1.0 → 1.2.0` migration が旧 BGM を復元せず、sectionId・旧 path・旧 volume を `logs/migration-log.jsonl` へ永続化すること
 - `1.3.0 → 1.4.0` migration が section の `screenTemplateId` を維持し、line override を削除し、section を分割せず、多数決で template を変更せず、`lineId` / old template ID / section template ID / `migrationId` を migration log へ記録すること
 - `1.3.0 → 1.4.0` migration 後の `ScriptLine` に `screenTemplateId` がなく、section template だけで全 line の resolved layout を決定できること
@@ -2759,6 +2874,12 @@ SQLite にはキー入力単位ではなく、保存、構成案の承認、レ�
 - project revision 競合
 - Markdown と hash の一体保存
 - 素材コピーと project update の成功、ロールバック
+- 全 5 Asset kind の initial upload、kind-specific validation、thumbnail / technical metadata processing、processing / error の状態保持
+- Asset replacement の staged file、candidate version、旧 current version 維持、ready 後の revision-aware atomic activation、activation failure / revision conflict の rollback
+- Asset metadata / status mutation の expectedRevision conflict、inactive candidate exclusion、version history / current version detail
+- Asset が active / inactive のまま replacement candidate を worker が拾うこと、worker 再起動後に persisted base revision / current version で stale activation を拒否すること、revision conflict candidate の error history
+- ready 化と activation の間の crash / SQLite rollback 後に candidate が processing のまま再実行され、ready だが non-current の candidate が残らないこと。staging locator が HTTP request 終了後・worker 再起動後も解決できること
+- 同時 replace の version reservation が composite key conflict を起こしても transaction retry で別 version を確保し、同じ Asset に duplicate version を作らないこと
 - SQLite migration と P2-01 の 2 visual / 6 variant / 10 PNG seed の idempotency
 - project schema version bump と migration が `1.0.0` / `1.1.0` の意味を暗黙変更せず、`1.1.0 → 1.2.0` で旧 placeholder を空状態へ移し、旧 BGM を `edit.sectionBgms` へ推測復元せず、sectionId・path・volume を `logs/migration-log.jsonl` へ永続化すること
 - キャラクタービジュアルの staged file、atomic rename、checksum 検証、SQLite transaction、compensating cleanup、orphan 診断
@@ -2792,16 +2913,18 @@ SQLite にはキー入力単位ではなく、保存、構成案の承認、レ�
 5. 2 キャラクター、複数セリフの台本作成と、セリフカードからのキャラクタービジュアル・音声制作
 6. 台本・ビジュアルの承認操作なしで制作を続け、stale/missing validation を確認する
 7. 固有名詞登録と読み上げ解決
-8. 動画、写真、帳票の 3 種類の素材登録と割り当て、および効果音素材の登録
-9. 編集画面で登録済み MP4 の intro / cutin / outro と MP3 BGM を選び、section card を固定したまま video element card だけを並べ替える
-10. fixture WAV と編集 Asset snapshot から validation を通した現行 `RenderManifest 2.4.0` 生成、および VP-02 の playback cue input から `RenderManifest 2.5.0` 生成
-11. `/screen-templates` で `screen-template-standard` と active / inactive template を確認し、実素材を一時 preview として選択する
-12. template editor で geometry、rotation、font size、`flipX` を保存し、1.4.0 project の section-only selection および 2.4.0 manifest fields を確認する。VP-02 では line へ template ID を保存せず、2.5.0 manifest の parent section reference と video playback state を確認する
-13. compact line card の 4 行表示、編集時 expand、音声調整 modal、section header の selector を確認し、persistent state change line の full preview と通常 line の dialogue-only preview を比較する
-14. 片方の character を意図的に画面外へ配置し、editor、line-card preview、`RenderManifest 2.4.0` / `2.5.0`、Web Player、Remotion の代表フレームで同じ composition clipping を確認する。VP-02 の video fixture では pause 中の frame 保持、video audio 停止、speech / BGM / sound effect 継続、resume source position を確認する
-15. 全 5 element の geometry、rotation、font size、`flipX` を変更してから template-level の「デフォルトに戻す」を実行し、canonical seed への復帰、metadata / preview state の保持、個別 reset control 不在を確認する
-16. 代表フレームの画像比較
-17. 短い MP4 とサムネイルの生成
+8. 動画、BGM、写真、帳票、効果音の全 5 kind を `/assets` へ登録し、kind label、technical metadata、thumbnail、processing / error state を確認する
+9. `/assets` で title / description / confidentiality / department / system / tagIds を編集し、kind / checksum / duration / width / height / MIME などを編集できないこと、利用停止・再有効化で inactive candidate が検索から外れることを確認する
+10. `/assets` で同じ Asset の file replacement を実行し、candidate processing 中に旧 current version が表示され、失敗時は旧 version / status / history が維持され、成功時だけ currentVersion が切り替わることを確認する。stale revision では切替されないことも確認する
+11. 編集画面で登録済み MP4 の intro / cutin / outro と MP3 BGM を選び、section card を固定したまま video element card だけを並べ替える
+12. fixture WAV と編集 Asset snapshot から validation を通した現行 `RenderManifest 2.4.0` 生成、および VP-02 の playback cue input から `RenderManifest 2.5.0` 生成
+13. `/screen-templates` で `screen-template-standard` と active / inactive template を確認し、実素材を一時 preview として選択する
+14. template editor で geometry、rotation、font size、`flipX` を保存し、1.4.0 project の section-only selection および 2.4.0 manifest fields を確認する。VP-02 では line へ template ID を保存せず、2.5.0 manifest の parent section reference と video playback state を確認する
+15. compact line card の 4 行表示、編集時 expand、音声調整 modal、section header の selector を確認し、persistent state change line の full preview と通常 line の dialogue-only preview を比較する
+16. 片方の character を意図的に画面外へ配置し、editor、line-card preview、`RenderManifest 2.4.0` / `2.5.0`、Web Player、Remotion の代表フレームで同じ composition clipping を確認する。VP-02 の video fixture では pause 中の frame 保持、video audio 停止、speech / BGM / sound effect 継続、resume source position を確認する
+17. 全 5 element の geometry、rotation、font size、`flipX` を変更してから template-level の「デフォルトに戻す」を実行し、canonical seed への復帰、metadata / preview state の保持、個別 reset control 不在を確認する
+18. 代表フレームの画像比較
+19. 短い MP4 とサムネイルの生成
 
 ## 20. MVP 開発時の実装順序（履歴）
 
@@ -3026,4 +3149,21 @@ Issue #151（VP-00）は `doc/doc.md` と本書だけを更新する docs-only I
 | VP-01 | `VideoProject 1.4.0 → 1.5.0` migration。既存 video display へ `playbackCues: []` を追加し、写真・帳票へ cue を追加しない。cue range、state transition、deterministic order、implicit initial play / final end を保存時・出力前に検証する。 |
 | VP-02 | pause / resume と natural source end を解決済み render contract へ追加する `RenderManifest 2.5.0` boundary。2.4.0 parser / cache / run log の意味を変更せず、resolved media state、cue boundary、source-end boundary、playing branch の source trim pair、paused / ended branch の一点 `sourceFrame` を WebUI preview と Remotion で共有する。 |
 
-実装順序は `VP-01 → VP-02` とする。ScriptPage の media pane は compact line card の右側へ配置し、current state から操作可否を決める。full preview の判定は action 名の比較ではなく、cue 解決後の `PersistentScreenState` が前 line と異なるかで決める。line 内任意 millisecond cue、waveform / NLE timeline、reverse、scrubbing、transition、speed keyframe、automatic slide generation、dedicated presentation parser、Asset library CRUD UI は VP-00〜VP-02 の対象外とする。
+実装順序は `VP-01 → VP-02` とする。ScriptPage の media pane は compact line card の右側へ配置し、current state から操作可否を決める。full preview の判定は action 名の比較ではなく、cue 解決後の `PersistentScreenState` が前 line と異なるかで決める。line 内任意 millisecond cue、waveform / NLE timeline、reverse、scrubbing、transition、speed keyframe、automatic slide generation、dedicated presentation parser は VP-00〜VP-02 の対象外とする。Asset library の管理 CRUD は ScriptPage に混在させず、AL-00 の `/assets` 境界で扱う。
+
+## 27. AL-00 の Asset library 実装境界
+
+Issue #155（AL-00）は `doc/doc.md` と本書だけを更新する docs-only の仕様改訂である。以下は後続実装の契約であり、AL-00 の作業ではコード、schema、migration、API、React UI、worker、compiler、Remotion、テストコードを変更しない。
+
+| 領域 | 実装契約 |
+|---|---|
+| Asset kind | `video`、`bgm`、`photo`、`document_scan`、`sound_effect` を共通 `/assets` で管理する。kind-specific format / MIME / sniffing / limit / technical metadata validation を維持する。 |
+| metadata | title、description、confidentiality、department、system、tagIds だけを編集する。kind、checksum、size、duration、width、height、page count、MIME、extension、thumbnail path は file-derived read-only fields とする。 |
+| soft delete | 通常の削除は `active → inactive`。再有効化は `inactive → active`。inactive は新規 picker / search candidate から除外し、row / managed media / thumbnail / version history は物理削除しない。 |
+| revision | metadata、activate / deactivate、current version activation は `expectedRevision` を検証し、成功時だけ revision を増やす。replacement candidate には受付時点の `baseRevision` と `baseCurrentVersion` を永続化し、worker は finalization transaction 内で現在値と照合する。stale write / revision conflict は変更なしで拒否し、replacement candidate は同じ transaction で `REPLACEMENT_REVISION_CONFLICT` の `error` として残す。 |
+| current version | Asset に `currentVersion: number | null` を持たせ、version status `processing` / `ready` / `error` と error history を保持する。最大 version number や latest row の並び順を current の根拠にしない。 |
+| worker queue | work item は `AssetVersion.status = processing` の `(assetId, version)` を基準に列挙する。initial upload の `Asset.status = processing` は queue の正本ではなく、`active` / `inactive` Asset の replacement candidate も同じ worker で処理する。processing service は親 Asset status だけを理由に candidate を `skipped` にしない。AssetVersion の `stagingPath` は `staging/{uploadId}/upload.bin` のような staging root 相対 locator として永続化し、worker 再起動後も staged file を解決する。 |
+| safe replacement | 同じ `assetId` の次 version candidate を staging / processing し、validation、checksum、technical metadata、thumbnail、managed file が揃った candidate を、`processing → ready` と current 切替を同じ SQLite transaction で commit する。ready だが non-current の新規 candidate を永続化せず、rollback / crash では processing と stagingPath を残して再列挙する。次 version number の確保と AssetVersion insert も同一 transaction で行い、`(assetId, version)` unique conflict 時は transaction 全体を retry する。失敗・revision conflict・transaction failure では旧 current version と Asset status を維持する。 |
+| snapshot boundary | library metadata / status / version mutation は既存 generic `VisualAssignment` と EditPlan の project snapshot を自動更新しない。新規選択・再選択時だけ active current version を `assetVersion` として取り込む。 |
+
+後続 implementation は initial upload、metadata update、replace、activate / deactivate、list/search/detail、paging、processing/error UI、version history を API と `/assets` へ接続する。`DELETE /api/assets/{assetId}`、Asset kind 変更、version rollback UI、immutable version diff viewer、tag dictionary CRUD、bulk upload、folder import、cloud storage、physical purge / orphan GC は対象外とする。
