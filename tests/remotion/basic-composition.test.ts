@@ -4,7 +4,11 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { bundle } from "@remotion/bundler";
-import { renderStill, selectComposition } from "@remotion/renderer";
+import {
+  renderMedia,
+  renderStill,
+  selectComposition
+} from "@remotion/renderer";
 import sharp from "sharp";
 import { describe, expect, it, afterAll, beforeAll } from "vitest";
 
@@ -17,7 +21,8 @@ import {
 } from "../../src/remotion/audio.js";
 import {
   renderManifestSchema,
-  type RenderManifest
+  type RenderManifest,
+  type VisualPlaybackCue
 } from "../../src/schema/index.js";
 import { browserExecutable as resolveBrowserExecutable } from "../../src/app/rendering/remotion-mp4-renderer.js";
 import {
@@ -59,6 +64,90 @@ const inputProps = renderManifestRenderingFixture as unknown as Record<
   unknown
 >;
 
+type RenderVideoVisual = Extract<
+  RenderManifest["visuals"][number],
+  { kind: "video" }
+>;
+
+function playbackCueRenderingFixture(): RenderManifest {
+  const manifest = structuredClone(
+    renderManifestRenderingFixture
+  ) as RenderManifest;
+  const sourceVisual = manifest.visuals.find(
+    (visual): visual is RenderVideoVisual =>
+      visual.id === "visual-intro-video" && visual.kind === "video"
+  );
+  if (sourceVisual === undefined) {
+    throw new Error("playback cue rendering fixture video is missing");
+  }
+
+  const playbackCues: VisualPlaybackCue[] = [
+    { lineId: "intro-mentor-1", edge: "after", action: "pause" },
+    { lineId: "intro-learner-1", edge: "before", action: "resume" }
+  ];
+  const display = sourceVisual.display;
+  const commonDisplay = {
+    kind: display.kind,
+    outerFrame: display.outerFrame,
+    contentClip: display.contentClip,
+    fit: display.fit,
+    crop: display.crop,
+    annotations: display.annotations,
+    startMs: display.startMs,
+    endMs: display.endMs,
+    playbackRate: display.playbackRate,
+    playbackCues
+  };
+  const segments: RenderVideoVisual[] = [
+    {
+      ...sourceVisual,
+      id: "visual-cue-playing-before",
+      segmentIndex: 0,
+      from: 60,
+      durationInFrames: 4,
+      display: {
+        ...commonDisplay,
+        volume: display.volume,
+        playbackState: "playing",
+        sourceTrimBeforeFrame: 0,
+        sourceTrimAfterFrame: 4
+      }
+    },
+    {
+      ...sourceVisual,
+      id: "visual-cue-paused",
+      segmentIndex: 1,
+      from: 64,
+      durationInFrames: 3,
+      display: {
+        ...commonDisplay,
+        volume: 0,
+        playbackState: "paused",
+        sourceFrame: 4
+      }
+    },
+    {
+      ...sourceVisual,
+      id: "visual-cue-playing-after",
+      segmentIndex: 2,
+      from: 67,
+      durationInFrames: 4,
+      display: {
+        ...commonDisplay,
+        volume: display.volume,
+        playbackState: "playing",
+        sourceTrimBeforeFrame: 4,
+        sourceTrimAfterFrame: 8
+      }
+    }
+  ];
+  manifest.visuals = [
+    ...manifest.visuals.filter((visual) => visual.id !== sourceVisual.id),
+    ...segments
+  ].sort((left, right) => left.from - right.from);
+  return renderManifestSchema.parse(manifest);
+}
+
 async function preparePublicDirectory(): Promise<string> {
   const root = await mkdtemp(path.join(os.tmpdir(), "subdub-remotion-"));
   const temporaryPublicDir = path.join(root, "public");
@@ -96,6 +185,20 @@ async function preparePublicDirectory(): Promise<string> {
     path.join(repositoryRoot, "tests", "fixtures", "media", "effect-2s.wav"),
     path.join(mediaDir, "effect-2s.wav")
   );
+  const audioDir = path.join(temporaryPublicDir, "audio");
+  await mkdir(audioDir, { recursive: true });
+  for (const speechFile of [
+    "speech-intro-mentor.wav",
+    "speech-intro-learner.wav",
+    "speech-main-mentor.wav",
+    "speech-main-learner.wav",
+    "speech-outro-mentor.wav"
+  ]) {
+    await cp(
+      path.join(repositoryRoot, "tests", "fixtures", "media", "effect-1s.wav"),
+      path.join(audioDir, speechFile)
+    );
+  }
   testRoot = root;
   return temporaryPublicDir;
 }
@@ -138,6 +241,46 @@ async function renderFixtureFrame(
     logLevel: "error"
   });
   return readFile(output);
+}
+
+async function renderFixtureMp4(
+  props: Record<string, unknown>,
+  name: string,
+  frameRange: [number, number]
+): Promise<string> {
+  if (bundleDirectory === undefined || outputDirectory === undefined) {
+    throw new Error("Remotion bundle has not been initialized");
+  }
+  const selectedComposition =
+    props === inputProps
+      ? composition
+      : await selectComposition({
+          serveUrl: bundleDirectory,
+          id: "BasicRemotionComposition",
+          inputProps: props,
+          browserExecutable
+        });
+  if (selectedComposition === undefined) {
+    throw new Error("Remotion composition could not be selected");
+  }
+
+  const output = path.join(outputDirectory, `${name}.mp4`);
+  await renderMedia({
+    serveUrl: bundleDirectory,
+    composition: selectedComposition,
+    inputProps: props,
+    browserExecutable,
+    frameRange,
+    outputLocation: output,
+    overwrite: true,
+    codec: "h264",
+    pixelFormat: "yuv420p",
+    audioCodec: "aac",
+    sampleRate: 48_000,
+    muted: true,
+    logLevel: "error"
+  });
+  return output;
 }
 
 async function imageStats(buffer: Buffer): Promise<{
@@ -602,6 +745,59 @@ describe("basic Remotion composition", () => {
         bottom: 0.95
       })
     ).toBe(0);
+  }, 180_000);
+
+  it("keeps the paused representative frame stable and resumes continuously", async () => {
+    const playbackManifest = playbackCueRenderingFixture();
+    const playbackProps = playbackManifest as unknown as Record<
+      string,
+      unknown
+    >;
+    const pausedFirst = await renderFixtureFrame(
+      64,
+      "playback-paused-first",
+      playbackProps
+    );
+    const pausedSecond = await renderFixtureFrame(
+      65,
+      "playback-paused-second",
+      playbackProps
+    );
+    const resumedFirst = await renderFixtureFrame(
+      67,
+      "playback-resumed-first",
+      playbackProps
+    );
+    const resumedSecond = await renderFixtureFrame(
+      68,
+      "playback-resumed-second",
+      playbackProps
+    );
+    const mediaRegion = {
+      left: 0.3,
+      right: 0.7,
+      top: 0.25,
+      bottom: 0.65
+    };
+
+    expect(
+      await differentPixelsInRegion(pausedFirst, pausedSecond, mediaRegion)
+    ).toBe(0);
+    expect(
+      await differentPixelsInRegion(pausedFirst, resumedFirst, mediaRegion)
+    ).toBe(0);
+    expect(
+      await differentPixelsInRegion(resumedFirst, resumedSecond, mediaRegion)
+    ).toBeGreaterThan(0);
+
+    const mp4Path = await renderFixtureMp4(
+      playbackProps,
+      "playback-pause-resume-smoke",
+      [60, 70]
+    );
+    const mp4 = await readFile(mp4Path);
+    expect(mp4.length).toBeGreaterThan(1_000);
+    expect(mp4.subarray(4, 8).toString("ascii")).toBe("ftyp");
   }, 180_000);
 
   it("renders registered insert videos instead of placeholder screens", async () => {
