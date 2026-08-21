@@ -824,9 +824,40 @@ describe("ScreenTemplate workflow browser E2E", () => {
         const firstLineCard = page.locator(
           '.script-line-card[aria-label="セリフ main-mentor-1"]'
         );
+        const introLineCard = page.locator(
+          '.script-line-card[aria-label="セリフ intro-mentor-1"]'
+        );
         expect(await lineCard.textContent()).toContain(
           "内容を確認してから登録します。"
         );
+        const introMediaPane = introLineCard.locator(".script-line-media-pane");
+        await introMediaPane.waitFor({ state: "visible" });
+        expect(await introMediaPane.textContent()).toContain(
+          "playing（再生中）"
+        );
+        expect(
+          await introMediaPane.getByRole("button", { name: "一時停止" }).count()
+        ).toBe(1);
+        expect(
+          await introMediaPane
+            .getByRole("button", { name: "一時停止" })
+            .isDisabled()
+        ).toBe(true);
+        expect(
+          await introMediaPane.getByRole("button", { name: "再開" }).count()
+        ).toBe(0);
+        expect(
+          await lineCard
+            .locator(".script-line-media-pane")
+            .getByRole("button", { name: "一時停止" })
+            .count()
+        ).toBe(0);
+        expect(
+          await lineCard
+            .locator(".script-line-media-pane")
+            .getByRole("button", { name: "再開" })
+            .count()
+        ).toBe(0);
         expect(
           await firstLineCard
             .locator(

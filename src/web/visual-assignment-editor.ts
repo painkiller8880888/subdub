@@ -1,15 +1,44 @@
 import type {
   AssetDetail,
   AssetListItem,
+  ScriptSection,
   DisplayV15,
   StaticAnnotation,
-  VisualAssignment
+  VisualAssignment,
+  VisualPlaybackCue
 } from "../schema/index.js";
 
 export type VisualAsset = Pick<
   AssetDetail | AssetListItem,
   "assetId" | "kind" | "durationMs" | "pageCount"
 >;
+
+export type SelectableGenericVisualAsset = AssetListItem & {
+  readonly version: number;
+  readonly checksum: string;
+  readonly mimeType: string;
+};
+
+export function isSelectableGenericVisualAsset(
+  asset: AssetListItem
+): asset is SelectableGenericVisualAsset {
+  if (
+    asset.status !== "active" ||
+    !["video", "photo", "document_scan"].includes(asset.kind) ||
+    asset.version === null ||
+    asset.checksum === null ||
+    asset.mimeType === null
+  ) {
+    return false;
+  }
+  if (asset.kind === "video") {
+    return asset.durationMs !== null && asset.durationMs > 0;
+  }
+  if (asset.kind === "document_scan") {
+    return asset.pageCount !== null && asset.pageCount > 0;
+  }
+  return true;
+}
 
 export type DefaultDisplayResult =
   | { readonly display: DisplayV15; readonly reason?: undefined }
@@ -76,6 +105,120 @@ export function defaultDisplayForAsset(
   return {
     display: undefined,
     reason: "効果音はビジュアルへ割り当てできません。"
+  };
+}
+
+function copySharedDisplaySettings(
+  current: VisualAssignment["display"],
+  next: DisplayV15
+): DisplayV15 {
+  return {
+    ...next,
+    fit: current.fit,
+    crop: { ...current.crop },
+    scale: current.scale,
+    position: { ...current.position },
+    prioritizeVisual: current.prioritizeVisual,
+    annotations: current.annotations.map((annotation) => ({ ...annotation })),
+    displayCoordinateSpace: current.displayCoordinateSpace
+  } as DisplayV15;
+}
+
+/**
+ * Build the complete display snapshot used by the atomic replacement path.
+ * Video-to-video replacements retain cues and compatible presentation
+ * settings, while kind changes deliberately start from the new kind's
+ * defaults so stale kind-specific state cannot be carried across.
+ */
+export function replacementDisplayForAsset(
+  current: VisualAssignment,
+  asset: VisualAsset
+): DefaultDisplayResult {
+  const nextResult = defaultDisplayForAsset(asset);
+  if (nextResult.display === undefined) {
+    return nextResult;
+  }
+
+  const next = copySharedDisplaySettings(current.display, nextResult.display);
+  if (
+    current.display.kind === "video" &&
+    next.kind === "video" &&
+    current.display.kind === next.kind
+  ) {
+    return {
+      display: {
+        ...next,
+        playbackRate: current.display.playbackRate,
+        volume: current.display.volume,
+        playbackCues: current.display.playbackCues.map((cue) => ({ ...cue }))
+      }
+    };
+  }
+
+  return { display: next };
+}
+
+export function addVisualPlaybackCue(
+  assignment: VisualAssignment,
+  lineId: string,
+  action: VisualPlaybackCue["action"]
+): VisualAssignment {
+  if (assignment.display.kind !== "video") {
+    return assignment;
+  }
+  const boundaryExists = assignment.display.playbackCues.some(
+    (cue) => cue.lineId === lineId && cue.edge === "before"
+  );
+  if (boundaryExists) {
+    return assignment;
+  }
+  return {
+    ...assignment,
+    display: {
+      ...assignment.display,
+      playbackCues: [
+        ...assignment.display.playbackCues,
+        { lineId, edge: "before", action }
+      ]
+    }
+  };
+}
+
+export function playbackCuesOutsideRange(
+  assignment: VisualAssignment,
+  section: Pick<ScriptSection, "lines">,
+  endLineId: string
+): readonly VisualPlaybackCue[] {
+  if (assignment.display.kind !== "video") {
+    return [];
+  }
+  const endIndex = section.lines.findIndex((line) => line.id === endLineId);
+  return assignment.display.playbackCues.filter((cue) => {
+    const cueIndex = section.lines.findIndex((line) => line.id === cue.lineId);
+    return endIndex < 0 || cueIndex < 0 || cueIndex > endIndex;
+  });
+}
+
+export function removePlaybackCuesOutsideRange(
+  assignment: VisualAssignment,
+  section: Pick<ScriptSection, "lines">,
+  endLineId: string
+): VisualAssignment {
+  if (assignment.display.kind !== "video") {
+    return { ...assignment, endLineId };
+  }
+  const outside = new Set(
+    playbackCuesOutsideRange(assignment, section, endLineId)
+  );
+  return {
+    ...assignment,
+    endLineId,
+    display: {
+      ...assignment.display,
+      playbackCues: assignment.display.playbackCues.filter(
+        (cue) => !outside.has(cue)
+      )
+    }
   };
 }
 

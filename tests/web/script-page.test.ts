@@ -30,6 +30,22 @@ describe("ScriptPage workflow navigation", () => {
     expect(source).not.toContain('className="script-line-fields"');
   });
 
+  it("connects the line media pane to shared visual assignment actions", async () => {
+    const [pageSource, paneSource] = await Promise.all([
+      fs.readFile("src/web/ScriptPage.tsx", "utf8"),
+      fs.readFile("src/web/ScriptMediaPane.tsx", "utf8")
+    ]);
+
+    expect(pageSource).toContain("<ScriptMediaPane");
+    expect(pageSource).toContain("resolveScriptLinePreviewStates");
+    expect(pageSource).toContain("expectedRevision: currentProject.revision");
+    expect(pageSource).toContain("removePlaybackCuesOutsideRange");
+    expect(paneSource).toContain("素材を表示 / 再生開始");
+    expect(paneSource).toContain("一時停止");
+    expect(paneSource).toContain("再開");
+    expect(paneSource).toContain("OS pathは入力できません");
+  });
+
   it("uses a modal boundary for detailed voice adjustment", async () => {
     const source = await fs.readFile(
       "src/web/VoiceAdjustmentEditor.tsx",
