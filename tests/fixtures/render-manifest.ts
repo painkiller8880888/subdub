@@ -597,14 +597,13 @@ function toV25FixtureLine(
 export const renderManifestFixture: RenderManifest = {
   ...manifestHeader,
   manifestVersion: "2.5.0",
-  sectionLayouts: renderManifestFixtureV24.sectionLayouts.map((layout) => {
-    const prioritizedLine = renderManifestFixtureV24.lines.find(
-      (line) => line.sectionId === layout.sectionId && lineHasPriority(line)
-    );
-    return prioritizedLine === undefined
-      ? layout
-      : { ...layout, resolvedLayout: prioritizedLine.resolvedLayout };
-  }),
+  sectionLayouts: renderManifestFixtureV24.sectionLayouts,
+  layoutIntervals: renderManifestFixtureV24.lines.map((line) => ({
+    sectionId: line.sectionId,
+    from: line.from,
+    durationInFrames: line.durationInFrames,
+    resolvedLayout: line.resolvedLayout
+  })),
   lines: renderManifestFixtureV24.lines.map(toV25FixtureLine),
   visuals: renderManifestFixtureV24.visuals.map(toV25FixtureVisual),
   backgrounds: legacyBackgrounds,

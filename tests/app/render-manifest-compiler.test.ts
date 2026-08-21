@@ -338,6 +338,67 @@ describe("compileRenderManifest", () => {
     expect(diagnosticCodes(result)).toContain("VISUAL_PLAYBACK_CUE_INVALID");
   });
 
+  it("keeps prioritizeVisual geometry inside its assignment line interval", () => {
+    const project = structuredClone(videoProjectFixture) as VideoProject;
+    const section = project.script.sections[0];
+    const assignment = project.visuals.assignments[0];
+    const firstLine = section?.lines[0];
+    const secondLine = section?.lines[1];
+    if (
+      section === undefined ||
+      assignment?.display.kind !== "video" ||
+      firstLine === undefined ||
+      secondLine === undefined
+    ) {
+      throw new Error("priority layout fixture is incomplete");
+    }
+
+    const thirdLine = { ...secondLine, id: "intro-learner-2" };
+    const fourthLine = { ...secondLine, id: "intro-learner-3" };
+    section.lines = [firstLine, secondLine, thirdLine, fourthLine];
+    assignment.startLineId = secondLine.id;
+    assignment.endLineId = thirdLine.id;
+    assignment.display.prioritizeVisual = true;
+
+    const result = compileRenderManifest(createRenderManifestInput(project));
+    expect(result.success).toBe(true);
+    if (!result.success) {
+      return;
+    }
+
+    const widthForLine = (lineId: string): number | undefined => {
+      const line = result.manifest.lines.find(
+        (candidate) => candidate.id === lineId
+      );
+      if (line === undefined) {
+        return undefined;
+      }
+      const interval = result.manifest.layoutIntervals.find(
+        (candidate) =>
+          candidate.sectionId === line.sectionId &&
+          candidate.from === line.from &&
+          candidate.durationInFrames === line.durationInFrames
+      );
+      return interval?.resolvedLayout.elements.find(
+        (element) =>
+          element.type === "character-visual" && element.slot === "speaker-1"
+      )?.transform.rect.width;
+    };
+
+    expect(widthForLine(firstLine.id)).toBeCloseTo(0.25);
+    expect(widthForLine(secondLine.id)).toBeCloseTo(0.25 * 0.72);
+    expect(widthForLine(thirdLine.id)).toBeCloseTo(0.25 * 0.72);
+    expect(widthForLine(fourthLine.id)).toBeCloseTo(0.25);
+    expect(
+      result.manifest.sectionLayouts
+        .find((layout) => layout.sectionId === section.id)
+        ?.resolvedLayout.elements.find(
+          (element) =>
+            element.type === "character-visual" && element.slot === "speaker-1"
+        )?.transform.rect.width
+    ).toBeCloseTo(0.25);
+  });
+
   it("resolves explicit character selections and compiles all timeline inputs", () => {
     const result = compileRenderManifest(validInput());
 
@@ -707,7 +768,7 @@ describe("compileRenderManifest", () => {
     expect(visual.display.sourceTrimAfterFrame).toBeCloseTo(4.4);
   });
 
-  it("bakes coordinate space, priority geometry, section titles, and freshness into 2.5.0", () => {
+  it("bakes coordinate space, section titles, and freshness into 2.5.0", () => {
     const legacy = compileRenderManifest(validInput());
     expect(legacy.success).toBe(true);
     if (!legacy.success) {
@@ -729,7 +790,7 @@ describe("compileRenderManifest", () => {
         (element) =>
           element.type === "character-visual" && element.slot === "speaker-1"
       )?.transform.rect.width
-    ).toBeCloseTo(0.25 * 0.72);
+    ).toBeCloseTo(0.25);
     expect(legacy.manifest.sectionLayouts[0]?.sectionTitle).toBe(
       videoProjectFixture.script.sections[0]?.name
     );
