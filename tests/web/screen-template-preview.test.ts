@@ -508,7 +508,7 @@ describe("script ScreenTemplate preview resolution", () => {
     });
   });
 
-  it("makes an end-line change a full preview trigger after the affected line", () => {
+  it("makes an end-line change a full preview trigger on the affected line", () => {
     const template = createStandardScreenTemplate(TIMESTAMP);
     const section = createSection();
     const assignment = createVideoAssignment(
@@ -536,8 +536,12 @@ describe("script ScreenTemplate preview resolution", () => {
       "dialogue-only"
     );
     expect(after.get(previewLineKey(section.id, "line-two"))?.mode).toBe(
-      "dialogue-only"
+      "full-screen"
     );
+    expect(
+      after.get(previewLineKey(section.id, "line-two"))?.persistentScreenState
+        .visualBoundaryTransitions
+    ).toEqual([{ assignmentId: assignment.id, action: "end" }]);
     expect(after.get(previewLineKey(section.id, "line-three"))?.mode).toBe(
       "full-screen"
     );
@@ -603,7 +607,7 @@ describe("script ScreenTemplate preview resolution", () => {
       "full-screen"
     );
     expect(states.get(previewLineKey(section.id, "line-two"))?.mode).toBe(
-      "dialogue-only"
+      "full-screen"
     );
     expect(states.get(previewLineKey(section.id, "line-three"))?.mode).toBe(
       "full-screen"

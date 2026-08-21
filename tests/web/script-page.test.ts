@@ -40,9 +40,14 @@ describe("ScriptPage workflow navigation", () => {
     expect(pageSource).toContain("resolveScriptLinePreviewStates");
     expect(pageSource).toContain("expectedRevision: currentProject.revision");
     expect(pageSource).toContain("removePlaybackCuesOutsideRange");
+    expect(pageSource).toContain("mediaKindChangeConfirmation");
+    expect(pageSource).toContain("ScriptMediaDialog");
     expect(paneSource).toContain("素材を表示 / 再生開始");
     expect(paneSource).toContain("一時停止");
     expect(paneSource).toContain("再開");
+    expect(paneSource).toContain("boundaryCueDisabled");
+    expect(paneSource).toContain("次のセリフ以降で指定してください");
+    expect(paneSource).toContain("mediaDialogFocusableSelector");
     expect(paneSource).toContain("OS pathは入力できません");
   });
 

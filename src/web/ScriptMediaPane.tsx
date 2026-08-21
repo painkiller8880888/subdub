@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 
 import type {
   AssetDetail,
@@ -19,6 +19,103 @@ import {
 } from "./screen-template-preview";
 
 export type ScriptMediaPickerAction = "start" | "replace";
+
+const mediaDialogFocusableSelector =
+  'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])';
+
+export type ScriptMediaDialogProps = Readonly<{
+  titleId: string;
+  describedById?: string;
+  className?: string;
+  onClose: () => void;
+  children: ReactNode;
+}>;
+
+export function ScriptMediaDialog({
+  titleId,
+  describedById,
+  className = "script-media-picker",
+  onClose,
+  children
+}: ScriptMediaDialogProps) {
+  const dialogRef = useRef<HTMLElement>(null);
+  const openerRef = useRef<HTMLElement | null>(null);
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+
+  useEffect(() => {
+    const activeElement = document.activeElement;
+    openerRef.current =
+      activeElement instanceof HTMLElement ? activeElement : null;
+    const dialog = dialogRef.current;
+    const firstControl = dialog?.querySelector<HTMLElement>(
+      mediaDialogFocusableSelector
+    );
+    (firstControl ?? dialog)?.focus();
+
+    const handleKeyDown = (event: KeyboardEvent): void => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        onCloseRef.current();
+        return;
+      }
+      if (event.key !== "Tab") {
+        return;
+      }
+
+      const currentDialog = dialogRef.current;
+      if (currentDialog === null) {
+        return;
+      }
+      const controls = Array.from(
+        currentDialog.querySelectorAll<HTMLElement>(
+          mediaDialogFocusableSelector
+        )
+      );
+      if (controls.length === 0) {
+        event.preventDefault();
+        currentDialog.focus();
+        return;
+      }
+
+      const active = document.activeElement;
+      const currentIndex = controls.indexOf(active as HTMLElement);
+      if (event.shiftKey) {
+        if (currentIndex <= 0) {
+          event.preventDefault();
+          controls.at(-1)?.focus();
+        }
+      } else if (currentIndex < 0 || currentIndex === controls.length - 1) {
+        event.preventDefault();
+        controls[0]?.focus();
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      if (openerRef.current?.isConnected === true) {
+        openerRef.current.focus();
+      }
+    };
+  }, []);
+
+  return (
+    <div className="script-media-picker-overlay">
+      <section
+        ref={dialogRef}
+        aria-describedby={describedById}
+        aria-labelledby={titleId}
+        aria-modal="true"
+        className={className}
+        role="dialog"
+        tabIndex={-1}
+      >
+        {children}
+      </section>
+    </div>
+  );
+}
 
 function mediaKindLabel(kind: AssetListItem["kind"]): string {
   switch (kind) {
@@ -241,6 +338,13 @@ export function ScriptMediaPane({
   const actionDisabled = isPending || hasPlaybackConflict;
   const pauseAtStartDisabled =
     lifecycle === "playing" && assignment.startLineId === line.id;
+  const boundaryCue =
+    assignment.display.kind === "video"
+      ? assignment.display.playbackCues.find(
+          (cue) => cue.lineId === line.id && cue.edge === "before"
+        )
+      : undefined;
+  const boundaryCueDisabled = boundaryCue !== undefined;
   const endDisabled = actionDisabled || assignment.endLineId === line.id;
   const assetTitle = asset?.title ?? assignment.assetId;
 
@@ -296,16 +400,29 @@ export function ScriptMediaPane({
           開始行のBEFOREは暗黙の再生開始境界のため、ここでは一時停止できません。
         </p>
       ) : null}
+      {boundaryCueDisabled ? (
+        <p className="status-message" role="status">
+          このセリフのBEFOREには既存の
+          {boundaryCue.action === "pause" ? "一時停止" : "再開"}
+          cueがあります。
+          {boundaryCue.action === "pause" ? "再開" : "一時停止"}
+          は次のセリフ以降で指定してください。
+        </p>
+      ) : null}
 
       <div className="script-media-actions">
         {lifecycle === "playing" ? (
           <button
             className="button button-small"
-            disabled={actionDisabled || pauseAtStartDisabled}
+            disabled={
+              actionDisabled || pauseAtStartDisabled || boundaryCueDisabled
+            }
             title={
               pauseAtStartDisabled
                 ? "開始行のBEFOREでは一時停止できません"
-                : undefined
+                : boundaryCueDisabled
+                  ? "このセリフのBEFOREには既存cueがあるため、次のセリフ以降で指定してください"
+                  : undefined
             }
             type="button"
             onClick={() => onPause(assignment.id)}
@@ -316,7 +433,12 @@ export function ScriptMediaPane({
         {lifecycle === "paused" ? (
           <button
             className="button button-small"
-            disabled={actionDisabled}
+            disabled={actionDisabled || boundaryCueDisabled}
+            title={
+              boundaryCueDisabled
+                ? "このセリフのBEFOREには既存cueがあるため、次のセリフ以降で指定してください"
+                : undefined
+            }
             type="button"
             onClick={() => onResume(assignment.id)}
           >
@@ -389,126 +511,99 @@ export function ScriptMediaAssetPicker({
   onClose,
   onSelect
 }: ScriptMediaAssetPickerProps) {
-  const dialogRef = useRef<HTMLElement>(null);
-  const openerRef = useRef<HTMLElement | null>(null);
-  const onCloseRef = useRef(onClose);
-  onCloseRef.current = onClose;
   const titleId = `script-media-picker-title-${lineId}`;
   const candidates = items
     .filter(isSelectableGenericVisualAsset)
     .sort((left, right) => left.title.localeCompare(right.title, "ja"));
 
-  useEffect(() => {
-    openerRef.current = document.activeElement as HTMLElement | null;
-    const firstControl =
-      dialogRef.current?.querySelector<HTMLElement>("input, button");
-    firstControl?.focus();
-    const handleKeyDown = (event: KeyboardEvent): void => {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        onCloseRef.current();
-      }
-    };
-    window.addEventListener("keydown", handleKeyDown);
-    return () => {
-      window.removeEventListener("keydown", handleKeyDown);
-      openerRef.current?.focus();
-    };
-  }, []);
-
   return (
-    <div className="script-media-picker-overlay">
-      <section
-        ref={dialogRef}
-        aria-describedby={`${titleId}-description`}
-        aria-labelledby={titleId}
-        aria-modal="true"
-        className="script-media-picker"
-        role="dialog"
-      >
-        <header className="script-media-picker-header">
-          <div>
-            <p className="eyebrow">登録済み素材から選択</p>
-            <h2 id={titleId}>
-              {action === "start" ? "表示素材を選択" : "表示素材を差し替え"}
-            </h2>
-            <p id={`${titleId}-description`}>
-              video / photo / document_scan の active
-              Assetだけを候補にしています。OS pathは入力できません。
-            </p>
-          </div>
-          <button
-            className="button button-small"
-            disabled={disabled}
-            type="button"
-            onClick={onClose}
-          >
-            閉じる
-          </button>
-        </header>
-
-        <div className="form-field script-media-picker-search">
-          <label htmlFor={`${titleId}-search`}>素材を検索</label>
-          <input
-            autoFocus
-            id={`${titleId}-search`}
-            value={search}
-            onChange={(event) => onSearch(event.target.value)}
-          />
+    <ScriptMediaDialog
+      describedById={`${titleId}-description`}
+      onClose={onClose}
+      titleId={titleId}
+    >
+      <header className="script-media-picker-header">
+        <div>
+          <p className="eyebrow">登録済み素材から選択</p>
+          <h2 id={titleId}>
+            {action === "start" ? "表示素材を選択" : "表示素材を差し替え"}
+          </h2>
+          <p id={`${titleId}-description`}>
+            video / photo / document_scan の active
+            Assetだけを候補にしています。OS pathは入力できません。
+          </p>
         </div>
+        <button
+          className="button button-small"
+          disabled={disabled}
+          type="button"
+          onClick={onClose}
+        >
+          閉じる
+        </button>
+      </header>
 
-        {isPending ? (
-          <p className="status-message" role="status">
-            素材候補を読み込んでいます…
-          </p>
-        ) : error !== null ? (
-          <section className="message-panel message-panel-error" role="alert">
-            <h3>素材候補を取得できません</h3>
-            <p>{pickerErrorMessage(error)}</p>
-          </section>
-        ) : candidates.length === 0 ? (
-          <p className="status-message">
-            条件に一致する利用可能な表示素材がありません。
-          </p>
-        ) : (
-          <ul className="script-media-picker-list">
-            {candidates.map((asset) => (
-              <li key={`${asset.assetId}-${asset.version}`}>
-                {asset.thumbnailPaths[0] !== undefined ? (
-                  <img
-                    alt={`${asset.title}のサムネイル`}
-                    className="script-media-picker-thumbnail"
-                    src={thumbnailUrl(asset.assetId, 0, asset.version)}
-                  />
-                ) : (
-                  <div className="script-media-picker-thumbnail script-media-picker-thumbnail-empty">
-                    プレビューなし
-                  </div>
-                )}
-                <div className="script-media-picker-asset-info">
-                  <strong>{asset.title}</strong>
-                  <span>{mediaKindLabel(asset.kind)}</span>
-                  <span>
-                    {asset.kind === "video"
-                      ? `動画 ${formatDuration(asset.durationMs)}`
-                      : asset.kind === "document_scan"
-                        ? `ページ数 ${asset.pageCount}`
-                        : "写真"}
-                  </span>
+      <div className="form-field script-media-picker-search">
+        <label htmlFor={`${titleId}-search`}>素材を検索</label>
+        <input
+          autoFocus
+          id={`${titleId}-search`}
+          value={search}
+          onChange={(event) => onSearch(event.target.value)}
+        />
+      </div>
+
+      {isPending ? (
+        <p className="status-message" role="status">
+          素材候補を読み込んでいます…
+        </p>
+      ) : error !== null ? (
+        <section className="message-panel message-panel-error" role="alert">
+          <h3>素材候補を取得できません</h3>
+          <p>{pickerErrorMessage(error)}</p>
+        </section>
+      ) : candidates.length === 0 ? (
+        <p className="status-message">
+          条件に一致する利用可能な表示素材がありません。
+        </p>
+      ) : (
+        <ul className="script-media-picker-list">
+          {candidates.map((asset) => (
+            <li key={`${asset.assetId}-${asset.version}`}>
+              {asset.thumbnailPaths[0] !== undefined ? (
+                <img
+                  alt={`${asset.title}のサムネイル`}
+                  className="script-media-picker-thumbnail"
+                  src={thumbnailUrl(asset.assetId, 0, asset.version)}
+                />
+              ) : (
+                <div className="script-media-picker-thumbnail script-media-picker-thumbnail-empty">
+                  プレビューなし
                 </div>
-                <button
-                  className="button button-small button-primary"
-                  disabled={disabled}
-                  type="button"
-                  onClick={() => onSelect(asset)}
-                >
-                  この素材を選択
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
-    </div>
+              )}
+              <div className="script-media-picker-asset-info">
+                <strong>{asset.title}</strong>
+                <span>{mediaKindLabel(asset.kind)}</span>
+                <span>
+                  {asset.kind === "video"
+                    ? `動画 ${formatDuration(asset.durationMs)}`
+                    : asset.kind === "document_scan"
+                      ? `ページ数 ${asset.pageCount}`
+                      : "写真"}
+                </span>
+              </div>
+              <button
+                className="button button-small button-primary"
+                disabled={disabled}
+                type="button"
+                onClick={() => onSelect(asset)}
+              >
+                この素材を選択
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </ScriptMediaDialog>
   );
 }

@@ -329,6 +329,11 @@ export type PersistentVisualPresentationState = Readonly<{
   playbackIssues: readonly PersistentVisualPlaybackIssue[];
 }>;
 
+export type PersistentVisualBoundaryTransition = Readonly<{
+  assignmentId: string;
+  action: "end";
+}>;
+
 export type PersistentScreenState = Readonly<{
   sectionId: string;
   screenTemplateIdentity: Readonly<{
@@ -338,6 +343,7 @@ export type PersistentScreenState = Readonly<{
   }>;
   templateStatus: ResolvedScriptScreenTemplate["status"];
   backgroundIdentity: string;
+  visualBoundaryTransitions: readonly PersistentVisualBoundaryTransition[];
   visualPresentationState: readonly PersistentVisualPresentationState[];
 }>;
 
@@ -464,6 +470,15 @@ export function resolvePersistentScreenState({
     },
     templateStatus: resolvedTemplate.status,
     backgroundIdentity: stableSerialize(section.background),
+    visualBoundaryTransitions:
+      resolvedLineId === undefined
+        ? []
+        : assignments
+            .filter((assignment) => assignment.endLineId === resolvedLineId)
+            .map((assignment) => ({
+              assignmentId: assignment.id,
+              action: "end" as const
+            })),
     visualPresentationState: assignments.map((assignment) => {
       const assetKey = screenPreviewAssetKey(assignment);
       const contentPreview = resolveContentPreview(

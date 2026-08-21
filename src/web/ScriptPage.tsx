@@ -82,6 +82,7 @@ import { VoiceAdjustmentEditor } from "./VoiceAdjustmentEditor";
 import { visualAssignmentsPath } from "./VisualAssignmentsPage";
 import {
   ScriptMediaAssetPicker,
+  ScriptMediaDialog,
   ScriptMediaPane,
   type ScriptMediaPickerAction
 } from "./ScriptMediaPane";
@@ -96,7 +97,8 @@ import {
   nextVisualAssignmentId,
   playbackCuesOutsideRange,
   removePlaybackCuesOutsideRange,
-  replacementDisplayForAsset
+  replacementDisplayForAsset,
+  type SelectableGenericVisualAsset
 } from "./visual-assignment-editor";
 import {
   previewLineKey,
@@ -802,6 +804,13 @@ type MediaRangeConfirmation = Readonly<{
   outsideCues: readonly VisualPlaybackCue[];
 }>;
 
+type MediaKindChangeConfirmation = Readonly<{
+  assignmentId: string;
+  asset: SelectableGenericVisualAsset;
+  fromKind: VisualAssignment["display"]["kind"];
+  toKind: VisualAssignment["display"]["kind"];
+}>;
+
 type MediaMutationInput =
   | {
       kind: "create";
@@ -818,6 +827,19 @@ type MediaMutationInput =
     };
 
 const scriptMediaAssetKinds = ["video", "photo", "document_scan"] as const;
+
+function visualDisplayKindLabel(
+  kind: VisualAssignment["display"]["kind"]
+): string {
+  switch (kind) {
+    case "video":
+      return "動画";
+    case "photo":
+      return "写真";
+    case "document_scan":
+      return "帳票スキャン";
+  }
+}
 
 export function ScriptPage() {
   const { projectId } = useParams<{ projectId: string }>();
@@ -865,6 +887,8 @@ export function ScriptPage() {
   const [mediaError, setMediaError] = useState<unknown>(null);
   const [mediaRangeConfirmation, setMediaRangeConfirmation] =
     useState<MediaRangeConfirmation | null>(null);
+  const [mediaKindChangeConfirmation, setMediaKindChangeConfirmation] =
+    useState<MediaKindChangeConfirmation | null>(null);
   const [mediaActionPending, setMediaActionPending] = useState(false);
   const projectIdRef = useRef(projectId ?? "");
   const projectGenerationRef = useRef(0);
@@ -1118,6 +1142,7 @@ export function ScriptPage() {
     setMediaPickerSearch("");
     setMediaError(null);
     setMediaRangeConfirmation(null);
+    setMediaKindChangeConfirmation(null);
     coordinator.reset();
   }, [coordinator, projectId]);
 
@@ -1535,6 +1560,7 @@ export function ScriptPage() {
       );
       if (isCurrent) {
         setMediaRangeConfirmation(null);
+        setMediaKindChangeConfirmation(null);
       }
       return isCurrent;
     } catch (error) {
@@ -1696,6 +1722,58 @@ export function ScriptPage() {
     }
   }
 
+  async function confirmMediaKindChange(): Promise<void> {
+    const confirmation = mediaKindChangeConfirmation;
+    if (confirmation === null || !beginMediaAction()) {
+      return;
+    }
+    try {
+      const currentProject = await flushBeforeMediaMutation(
+        "台本を保存できないため、表示素材を差し替えできません。"
+      );
+      if (currentProject === undefined) {
+        return;
+      }
+      const currentAssignment = currentProject.visuals.assignments.find(
+        (assignment) => assignment.id === confirmation.assignmentId
+      );
+      if (currentAssignment === undefined) {
+        setMediaError(new Error("差し替え対象の表示素材を解決できません。"));
+        return;
+      }
+      if (currentAssignment.display.kind !== confirmation.fromKind) {
+        setMediaError(
+          new Error(
+            "差し替え対象の素材が更新されています。画面を再読み込みしてください。"
+          )
+        );
+        return;
+      }
+      const displayResult = replacementDisplayForAsset(
+        currentAssignment,
+        confirmation.asset
+      );
+      if (
+        displayResult.display === undefined ||
+        displayResult.display.kind !== confirmation.toKind
+      ) {
+        setMediaError(
+          new Error(
+            "差し替え用の表示設定を再作成できません。素材を選び直してください。"
+          )
+        );
+        return;
+      }
+      await saveMediaAssignment(currentProject, {
+        ...currentAssignment,
+        assetId: confirmation.asset.assetId,
+        display: displayResult.display
+      });
+    } finally {
+      endMediaAction();
+    }
+  }
+
   async function selectMediaAsset(asset: AssetListItem): Promise<void> {
     const picker = mediaPicker;
     if (picker === null || !isSelectableGenericVisualAsset(asset)) {
@@ -1821,6 +1899,18 @@ export function ScriptPage() {
         assetId: asset.assetId,
         display: displayResult.display
       };
+      if (currentAssignment.display.kind !== displayResult.display.kind) {
+        setMediaKindChangeConfirmation({
+          assignmentId: currentAssignment.id,
+          asset,
+          fromKind: currentAssignment.display.kind,
+          toKind: displayResult.display.kind
+        });
+        setMediaPicker(null);
+        setMediaPickerSearch("");
+        setMediaError(null);
+        return;
+      }
       const saved = await saveMediaAssignment(currentProject, assignment);
       if (saved) {
         setMediaPicker(null);
@@ -2482,46 +2572,98 @@ export function ScriptPage() {
       </section>
 
       {mediaRangeConfirmation !== null ? (
-        <div className="script-media-picker-overlay">
-          <section
-            aria-labelledby="script-media-range-confirm-title"
-            aria-modal="true"
-            className="script-media-confirm-dialog"
-            role="dialog"
-          >
-            <h2 id="script-media-range-confirm-title">
-              終了位置を短縮してcueを削除しますか？
-            </h2>
+        <ScriptMediaDialog
+          className="script-media-confirm-dialog"
+          describedById="script-media-range-confirm-description"
+          onClose={() => {
+            if (!mediaMutationPending) {
+              setMediaRangeConfirmation(null);
+            }
+          }}
+          titleId="script-media-range-confirm-title"
+        >
+          <h2 id="script-media-range-confirm-title">
+            終了位置を短縮してcueを削除しますか？
+          </h2>
+          <p id="script-media-range-confirm-description">
+            終了位置を現在のセリフへ変更すると、次のcueが新しい範囲の外になります。削除と終了位置の変更を同じ保存操作で行います。
+          </p>
+          <ul>
+            {mediaRangeConfirmation.outsideCues.map((cue) => (
+              <li key={`${cue.lineId}-${cue.edge}-${cue.action}`}>
+                {cue.lineId} / {cue.edge} / {cue.action}
+              </li>
+            ))}
+          </ul>
+          <div className="script-media-confirm-actions">
+            <button
+              className="button"
+              disabled={mediaMutationPending}
+              type="button"
+              onClick={() => setMediaRangeConfirmation(null)}
+            >
+              キャンセル
+            </button>
+            <button
+              className="button button-primary"
+              disabled={mediaMutationPending}
+              type="button"
+              onClick={() => void confirmEndMedia()}
+            >
+              {mediaMutationPending ? "保存中…" : "cueを削除して終了"}
+            </button>
+          </div>
+        </ScriptMediaDialog>
+      ) : null}
+
+      {mediaKindChangeConfirmation !== null ? (
+        <ScriptMediaDialog
+          className="script-media-confirm-dialog"
+          describedById="script-media-kind-change-confirm-description"
+          onClose={() => {
+            if (!mediaMutationPending) {
+              setMediaKindChangeConfirmation(null);
+            }
+          }}
+          titleId="script-media-kind-change-confirm-title"
+        >
+          <h2 id="script-media-kind-change-confirm-title">
+            素材の種類を変更して差し替えますか？
+          </h2>
+          <p id="script-media-kind-change-confirm-description">
+            {visualDisplayKindLabel(mediaKindChangeConfirmation.fromKind)}から
+            {visualDisplayKindLabel(mediaKindChangeConfirmation.toKind)}
+            へ変更します。
+          </p>
+          {mediaKindChangeConfirmation.fromKind === "video" ? (
             <p>
-              終了位置を現在のセリフへ変更すると、次のcueが新しい範囲の外になります。削除と終了位置の変更を同じ保存操作で行います。
+              動画固有の再生範囲・再生速度・音量とpause/resume
+              cueが削除されます。この変更は承認後に一度の保存操作で実行されます。
             </p>
-            <ul>
-              {mediaRangeConfirmation.outsideCues.map((cue) => (
-                <li key={`${cue.lineId}-${cue.edge}-${cue.action}`}>
-                  {cue.lineId} / {cue.edge} / {cue.action}
-                </li>
-              ))}
-            </ul>
-            <div className="script-media-confirm-actions">
-              <button
-                className="button"
-                disabled={mediaMutationPending}
-                type="button"
-                onClick={() => setMediaRangeConfirmation(null)}
-              >
-                キャンセル
-              </button>
-              <button
-                className="button button-primary"
-                disabled={mediaMutationPending}
-                type="button"
-                onClick={() => void confirmEndMedia()}
-              >
-                {mediaMutationPending ? "保存中…" : "cueを削除して終了"}
-              </button>
-            </div>
-          </section>
-        </div>
+          ) : (
+            <p>
+              差し替え後の素材は新しい種類の初期表示設定で作成されます。この変更は承認後に一度の保存操作で実行されます。
+            </p>
+          )}
+          <div className="script-media-confirm-actions">
+            <button
+              className="button"
+              disabled={mediaMutationPending}
+              type="button"
+              onClick={() => setMediaKindChangeConfirmation(null)}
+            >
+              キャンセル
+            </button>
+            <button
+              className="button button-primary"
+              disabled={mediaMutationPending}
+              type="button"
+              onClick={() => void confirmMediaKindChange()}
+            >
+              {mediaMutationPending ? "保存中…" : "確認して差し替え"}
+            </button>
+          </div>
+        </ScriptMediaDialog>
       ) : null}
 
       {mediaPicker !== null ? (
