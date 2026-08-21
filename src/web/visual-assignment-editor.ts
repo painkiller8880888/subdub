@@ -1,15 +1,44 @@
 import type {
   AssetDetail,
   AssetListItem,
+  ScriptSection,
   DisplayV15,
   StaticAnnotation,
-  VisualAssignment
+  VisualAssignment,
+  VisualPlaybackCue
 } from "../schema/index.js";
 
 export type VisualAsset = Pick<
   AssetDetail | AssetListItem,
   "assetId" | "kind" | "durationMs" | "pageCount"
 >;
+
+export type SelectableGenericVisualAsset = AssetListItem & {
+  readonly version: number;
+  readonly checksum: string;
+  readonly mimeType: string;
+};
+
+export function isSelectableGenericVisualAsset(
+  asset: AssetListItem
+): asset is SelectableGenericVisualAsset {
+  if (
+    asset.status !== "active" ||
+    !["video", "photo", "document_scan"].includes(asset.kind) ||
+    asset.version === null ||
+    asset.checksum === null ||
+    asset.mimeType === null
+  ) {
+    return false;
+  }
+  if (asset.kind === "video") {
+    return asset.durationMs !== null && asset.durationMs > 0;
+  }
+  if (asset.kind === "document_scan") {
+    return asset.pageCount !== null && asset.pageCount > 0;
+  }
+  return true;
+}
 
 export type DefaultDisplayResult =
   | { readonly display: DisplayV15; readonly reason?: undefined }
@@ -76,6 +105,163 @@ export function defaultDisplayForAsset(
   return {
     display: undefined,
     reason: "効果音はビジュアルへ割り当てできません。"
+  };
+}
+
+function copySharedDisplaySettings(
+  current: VisualAssignment["display"],
+  next: DisplayV15
+): DisplayV15 {
+  return {
+    ...next,
+    fit: current.fit,
+    crop: { ...current.crop },
+    scale: current.scale,
+    position: { ...current.position },
+    prioritizeVisual: current.prioritizeVisual,
+    annotations: current.annotations.map((annotation) => ({ ...annotation })),
+    displayCoordinateSpace: current.displayCoordinateSpace
+  } as DisplayV15;
+}
+
+/**
+ * Build the complete display snapshot used by the atomic replacement path.
+ * Same-kind replacements retain compatible kind-specific settings when the
+ * new asset can represent them. Kind changes deliberately start from the new
+ * kind's defaults so stale kind-specific state cannot be carried across.
+ */
+export function replacementDisplayForAsset(
+  current: VisualAssignment,
+  asset: VisualAsset
+): DefaultDisplayResult {
+  const nextResult = defaultDisplayForAsset(asset);
+  if (nextResult.display === undefined) {
+    return nextResult;
+  }
+
+  const next = copySharedDisplaySettings(current.display, nextResult.display);
+  if (
+    current.display.kind === "video" &&
+    next.kind === "video" &&
+    current.display.kind === next.kind
+  ) {
+    if (asset.kind !== "video" || asset.durationMs === null) {
+      return {
+        display: undefined,
+        reason:
+          "新しい動画の尺を取得できないため、既存の再生範囲を引き継げません。"
+      };
+    }
+    if (
+      current.display.startMs >= current.display.endMs ||
+      current.display.endMs > asset.durationMs
+    ) {
+      return {
+        display: undefined,
+        reason: `既存の動画トリム（${current.display.startMs}〜${current.display.endMs}ms）を新しい動画の尺（${asset.durationMs}ms）へ引き継げません。十分な尺の素材を選択してください。`
+      };
+    }
+    return {
+      display: {
+        ...next,
+        startMs: current.display.startMs,
+        endMs: current.display.endMs,
+        playbackRate: current.display.playbackRate,
+        volume: current.display.volume,
+        playbackCues: current.display.playbackCues.map((cue) => ({ ...cue }))
+      }
+    };
+  }
+
+  if (
+    current.display.kind === "document_scan" &&
+    next.kind === "document_scan"
+  ) {
+    if (asset.kind !== "document_scan" || asset.pageCount === null) {
+      return {
+        display: undefined,
+        reason:
+          "新しい帳票のページ数を取得できないため、表示ページを引き継げません。"
+      };
+    }
+    if (current.display.page > asset.pageCount) {
+      return {
+        display: undefined,
+        reason: `既存の${current.display.page}ページ目を、${asset.pageCount}ページの帳票へ引き継げません。十分なページ数の素材を選択してください。`
+      };
+    }
+    return {
+      display: {
+        ...next,
+        page: current.display.page
+      }
+    };
+  }
+
+  return { display: next };
+}
+
+export function addVisualPlaybackCue(
+  assignment: VisualAssignment,
+  lineId: string,
+  action: VisualPlaybackCue["action"]
+): VisualAssignment {
+  if (assignment.display.kind !== "video") {
+    return assignment;
+  }
+  const boundaryExists = assignment.display.playbackCues.some(
+    (cue) => cue.lineId === lineId && cue.edge === "before"
+  );
+  if (boundaryExists) {
+    return assignment;
+  }
+  return {
+    ...assignment,
+    display: {
+      ...assignment.display,
+      playbackCues: [
+        ...assignment.display.playbackCues,
+        { lineId, edge: "before", action }
+      ]
+    }
+  };
+}
+
+export function playbackCuesOutsideRange(
+  assignment: VisualAssignment,
+  section: Pick<ScriptSection, "lines">,
+  endLineId: string
+): readonly VisualPlaybackCue[] {
+  if (assignment.display.kind !== "video") {
+    return [];
+  }
+  const endIndex = section.lines.findIndex((line) => line.id === endLineId);
+  return assignment.display.playbackCues.filter((cue) => {
+    const cueIndex = section.lines.findIndex((line) => line.id === cue.lineId);
+    return endIndex < 0 || cueIndex < 0 || cueIndex > endIndex;
+  });
+}
+
+export function removePlaybackCuesOutsideRange(
+  assignment: VisualAssignment,
+  section: Pick<ScriptSection, "lines">,
+  endLineId: string
+): VisualAssignment {
+  if (assignment.display.kind !== "video") {
+    return { ...assignment, endLineId };
+  }
+  const outside = new Set(
+    playbackCuesOutsideRange(assignment, section, endLineId)
+  );
+  return {
+    ...assignment,
+    endLineId,
+    display: {
+      ...assignment.display,
+      playbackCues: assignment.display.playbackCues.filter(
+        (cue) => !outside.has(cue)
+      )
+    }
   };
 }
 

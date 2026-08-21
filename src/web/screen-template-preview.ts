@@ -14,6 +14,7 @@ import type {
   ScreenLayoutPreview
 } from "../remotion/screen-template-layout";
 import { sortByStartThenInputIndex } from "../timeline/visual-ranges.js";
+import { resolveVisualPlaybackState } from "../timeline/visual-playback.js";
 import { characterVisualFileUrl } from "./character-visual-picker";
 import { createProjectManifestAssetUrlResolver } from "./preview-asset-url";
 
@@ -305,13 +306,17 @@ export function resolveScriptLineScreenPreview({
 export type PreviewMode = "full-screen" | "dialogue-only";
 
 /**
- * The current VisualAssignment model has no lifecycle field yet. `show` is
- * the read-model value for an assignment that is active on the current line;
- * future cue resolution can replace it with playing/paused/ended without
- * changing the comparison rule below.
+ * This is the line-boundary lifecycle read model used by ScriptPage and the
+ * shared preview comparison. It intentionally describes the resolved state,
+ * rather than exposing raw cue actions as UI state.
  */
 export type PersistentVisualLifecycle =
-  "hidden" | "show" | "playing" | "paused" | "ended";
+  "hidden" | "static-visible" | "playing" | "paused" | "ended";
+
+export type PersistentVisualPlaybackIssue = Readonly<{
+  code: string;
+  message: string;
+}>;
 
 export type PersistentVisualPresentationState = Readonly<{
   assignmentId: string;
@@ -321,6 +326,12 @@ export type PersistentVisualPresentationState = Readonly<{
   lifecycle: PersistentVisualLifecycle;
   display: VisualAssignment["display"];
   assetResolution: "loading" | "resolved" | "unresolved";
+  playbackIssues: readonly PersistentVisualPlaybackIssue[];
+}>;
+
+export type PersistentVisualBoundaryTransition = Readonly<{
+  assignmentId: string;
+  action: "end";
 }>;
 
 export type PersistentScreenState = Readonly<{
@@ -332,6 +343,7 @@ export type PersistentScreenState = Readonly<{
   }>;
   templateStatus: ResolvedScriptScreenTemplate["status"];
   backgroundIdentity: string;
+  visualBoundaryTransitions: readonly PersistentVisualBoundaryTransition[];
   visualPresentationState: readonly PersistentVisualPresentationState[];
 }>;
 
@@ -423,18 +435,32 @@ export function previewLineKey(sectionId: string, lineId: string): string {
 
 export function resolvePersistentScreenState({
   section,
+  lineId,
   resolvedTemplate,
   assignments,
   assets,
   assetLoadingKeys = new Set()
 }: {
-  readonly section: Pick<ScriptSection, "id" | "background">;
+  readonly section: Pick<ScriptSection, "id" | "background"> & {
+    readonly lines?: readonly Pick<ScriptLine, "id">[];
+  };
+  readonly lineId?: string;
   readonly resolvedTemplate: ResolvedScriptScreenTemplate;
   readonly assignments: readonly VisualAssignment[];
   readonly assets: ReadonlyMap<string, AssetDetail | undefined>;
   readonly assetLoadingKeys?: ReadonlySet<string>;
 }): PersistentScreenState {
   const template = resolvedTemplate.template;
+  const sectionLines = section.lines ?? [];
+  const resolvedLineId = lineId ?? sectionLines[0]?.id;
+  const playbackScript = {
+    sections: [
+      {
+        id: section.id,
+        lines: sectionLines.map((line) => ({ id: line.id }))
+      }
+    ]
+  };
   return {
     sectionId: section.id,
     screenTemplateIdentity: {
@@ -444,24 +470,50 @@ export function resolvePersistentScreenState({
     },
     templateStatus: resolvedTemplate.status,
     backgroundIdentity: stableSerialize(section.background),
+    visualBoundaryTransitions:
+      resolvedLineId === undefined
+        ? []
+        : assignments
+            .filter((assignment) => assignment.endLineId === resolvedLineId)
+            .map((assignment) => ({
+              assignmentId: assignment.id,
+              action: "end" as const
+            })),
     visualPresentationState: assignments.map((assignment) => {
       const assetKey = screenPreviewAssetKey(assignment);
       const contentPreview = resolveContentPreview(
         assignment,
         assets.get(assetKey)
       );
+      const playbackResolution =
+        assignment.display.kind === "video" && resolvedLineId !== undefined
+          ? resolveVisualPlaybackState({
+              assignment,
+              script: playbackScript,
+              boundary: { lineId: resolvedLineId, edge: "before" }
+            })
+          : undefined;
+      const lifecycle: PersistentVisualLifecycle =
+        assignment.display.kind === "video"
+          ? (playbackResolution?.playbackState ?? "hidden")
+          : "static-visible";
       return {
         assignmentId: assignment.id,
         assetId: assignment.assetId,
         assetChecksum: assignment.assetChecksum,
         projectMediaPath: assignment.projectMediaPath,
-        lifecycle: "show",
+        lifecycle,
         display: assignment.display,
         assetResolution: assetLoadingKeys.has(assetKey)
           ? "loading"
           : contentPreview.src === null
             ? "unresolved"
-            : "resolved"
+            : "resolved",
+        playbackIssues:
+          playbackResolution?.issues?.map(({ code, message }) => ({
+            code,
+            message
+          })) ?? []
       };
     })
   };
@@ -513,6 +565,7 @@ export function resolveScriptLinePreviewStates({
       );
       const persistentScreenState = resolvePersistentScreenState({
         section,
+        lineId: line.id,
         resolvedTemplate,
         assignments: lineAssignments,
         assets,

@@ -18,7 +18,8 @@ import type {
   AssetListItem,
   CharacterVisualCatalogSnapshot,
   ScreenTemplate,
-  VideoProject
+  VideoProject,
+  VisualAssignment
 } from "../../src/schema/index.js";
 import type {
   ScreenTemplateDetail,
@@ -27,7 +28,6 @@ import type {
   VoiceGenerationStatusData
 } from "../../src/schema/api.js";
 import { legacyCharacterVariantCatalog } from "../../src/app/character-visuals/character-visual-seed.js";
-import { createStandardScreenTemplate } from "../../src/app/screen-templates/screen-template-seed.js";
 import { screenLayoutElementBounds } from "../../src/remotion/screen-template-layout.js";
 import {
   createVoicevoxAudioQueryFixture,
@@ -54,6 +54,7 @@ type WorkflowState = {
     script: VideoProject["script"];
     expectedRevision: number;
   }>;
+  assetCatalog?: readonly AssetDetail[];
   templateDetailRequests: number;
 };
 
@@ -235,6 +236,53 @@ function listItem(detail: AssetDetail): AssetListItem {
   };
 }
 
+function createMediaWorkflowProjectFixture(): VideoProject {
+  const project = createScreenTemplateProjectFixture();
+  const main = project.script.sections.find(
+    (section) => section.id === "section-main"
+  );
+  if (main === undefined) {
+    throw new Error("media workflow main section is missing");
+  }
+  const finalLine = main.lines.at(-1);
+  if (finalLine === undefined) {
+    throw new Error("media workflow final line is missing");
+  }
+  main.lines = [
+    ...main.lines,
+    {
+      ...finalLine,
+      id: "main-learner-2",
+      speakerId: "character-learner",
+      spokenText: "これで操作は完了なのだ。",
+      subtitleText: "これで操作は完了です。",
+      characterVariantId: "character-learner-speak-normal-v1"
+    }
+  ];
+  project.visuals.assignments = project.visuals.assignments.filter(
+    (assignment) => assignment.id !== "visual-main-photo"
+  );
+  return project;
+}
+
+function createMediaReplacementAsset(project: VideoProject): AssetDetail {
+  const videoAssignment = project.visuals.assignments.find(
+    (assignment) => assignment.display.kind === "video"
+  );
+  if (videoAssignment === undefined) {
+    throw new Error("media workflow video assignment is missing");
+  }
+  return {
+    ...assetForAssignment({
+      ...videoAssignment,
+      id: "media-replacement-source",
+      assetId: "asset-media-replacement",
+      assetChecksum: "b".repeat(64)
+    }),
+    title: "差し替え用動画"
+  };
+}
+
 function voiceStatus(project: VideoProject): VoiceGenerationStatusData {
   return {
     available: true,
@@ -292,6 +340,9 @@ async function installApiRoutes(
       return [detail.assetId, detail];
     })
   );
+  for (const detail of state.assetCatalog ?? []) {
+    assets.set(detail.assetId, detail);
+  }
 
   await page.route("**/api/**", async (route) => {
     const request = route.request();
@@ -432,7 +483,18 @@ async function installApiRoutes(
       return;
     }
     if (request.method() === "GET" && pathname === "/api/assets") {
-      const items = [...assets.values()].map(listItem);
+      const requestedKind = url.searchParams.get("kind");
+      const searchQuery = url.searchParams.get("q")?.toLocaleLowerCase();
+      const items = [...assets.values()]
+        .filter(
+          (asset) =>
+            (requestedKind === null || asset.kind === requestedKind) &&
+            (searchQuery === undefined ||
+              searchQuery.length === 0 ||
+              asset.assetId.toLocaleLowerCase().includes(searchQuery) ||
+              asset.title.toLocaleLowerCase().includes(searchQuery))
+        )
+        .map(listItem);
       await route.fulfill({
         status: 200,
         contentType: "application/json",
@@ -445,6 +507,77 @@ async function installApiRoutes(
             hasNextPage: false
           },
           revision: 0
+        })
+      });
+      return;
+    }
+    const visualAssignmentMatch = pathname.match(
+      new RegExp(
+        `^/api/projects/${projectId}/visual-assignments(?:/([^/]+))?$`,
+        "u"
+      )
+    );
+    if (request.method() === "PUT" && visualAssignmentMatch !== null) {
+      const assignmentIdFromPath = visualAssignmentMatch[1]
+        ? decodeURIComponent(visualAssignmentMatch[1])
+        : undefined;
+      const body = JSON.parse(request.postData() ?? "{}") as {
+        assignment: Pick<
+          VisualAssignment,
+          "id" | "startLineId" | "endLineId" | "assetId" | "display"
+        >;
+        expectedRevision: number;
+      };
+      const asset = assets.get(body.assignment.assetId);
+      if (asset?.checksum === null || asset === undefined) {
+        await route.fulfill(errorResponse(404, "visual asset missing"));
+        return;
+      }
+      const assignment: VisualAssignment = {
+        ...body.assignment,
+        assetChecksum: asset.checksum,
+        projectMediaPath: `media/${asset.assetId}.${
+          asset.kind === "video"
+            ? "mp4"
+            : asset.kind === "document_scan"
+              ? "pdf"
+              : "png"
+        }`
+      };
+      const currentAssignments = state.project.visuals.assignments;
+      const existingIndex = currentAssignments.findIndex(
+        (candidate) => candidate.id === body.assignment.id
+      );
+      if (assignmentIdFromPath === undefined && existingIndex >= 0) {
+        await route.fulfill(
+          errorResponse(409, "visual assignment already exists")
+        );
+        return;
+      }
+      if (
+        assignmentIdFromPath !== undefined &&
+        (assignmentIdFromPath !== body.assignment.id || existingIndex < 0)
+      ) {
+        await route.fulfill(errorResponse(404, "visual assignment missing"));
+        return;
+      }
+      const assignments =
+        existingIndex < 0
+          ? [...currentAssignments, assignment]
+          : currentAssignments.map((candidate, index) =>
+              index === existingIndex ? assignment : candidate
+            );
+      state.project = {
+        ...state.project,
+        revision: state.project.revision + 1,
+        visuals: { ...state.project.visuals, assignments }
+      };
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          data: state.project,
+          revision: state.project.revision
         })
       });
       return;
@@ -558,7 +691,10 @@ describe("ScreenTemplate workflow browser E2E", () => {
     return { context, page, state };
   }
 
-  async function openScript(): Promise<{
+  async function openScript(
+    project = createScreenTemplateProjectFixture(),
+    assetCatalog: readonly AssetDetail[] = []
+  ): Promise<{
     context: BrowserContext;
     page: Page;
     state: WorkflowState;
@@ -572,9 +708,10 @@ describe("ScreenTemplate workflow browser E2E", () => {
           template
         ])
       ),
-      project: createScreenTemplateProjectFixture(),
+      project,
       templateSaves: [],
       scriptSaves: [],
+      assetCatalog,
       templateDetailRequests: 0
     };
     await installApiRoutes(page, state);
@@ -824,9 +961,40 @@ describe("ScreenTemplate workflow browser E2E", () => {
         const firstLineCard = page.locator(
           '.script-line-card[aria-label="セリフ main-mentor-1"]'
         );
+        const introLineCard = page.locator(
+          '.script-line-card[aria-label="セリフ intro-mentor-1"]'
+        );
         expect(await lineCard.textContent()).toContain(
           "内容を確認してから登録します。"
         );
+        const introMediaPane = introLineCard.locator(".script-line-media-pane");
+        await introMediaPane.waitFor({ state: "visible" });
+        expect(await introMediaPane.textContent()).toContain(
+          "playing（再生中）"
+        );
+        expect(
+          await introMediaPane.getByRole("button", { name: "一時停止" }).count()
+        ).toBe(1);
+        expect(
+          await introMediaPane
+            .getByRole("button", { name: "一時停止" })
+            .isDisabled()
+        ).toBe(true);
+        expect(
+          await introMediaPane.getByRole("button", { name: "再開" }).count()
+        ).toBe(0);
+        expect(
+          await lineCard
+            .locator(".script-line-media-pane")
+            .getByRole("button", { name: "一時停止" })
+            .count()
+        ).toBe(0);
+        expect(
+          await lineCard
+            .locator(".script-line-media-pane")
+            .getByRole("button", { name: "再開" })
+            .count()
+        ).toBe(0);
         expect(
           await firstLineCard
             .locator(
@@ -847,36 +1015,32 @@ describe("ScreenTemplate workflow browser E2E", () => {
         expect(
           await lineCard.locator(".script-line-card-dialogue-preview").count()
         ).toBe(1);
-        const standardCompactLineCard = page.locator(
-          '.script-line-card[aria-label="セリフ intro-learner-1"]'
-        );
-        const standardCompactPreview = standardCompactLineCard.locator(
+        const alternateCompactPreview = lineCard.locator(
           ".script-line-card-dialogue-preview"
         );
-        await standardCompactPreview.waitFor({ state: "visible" });
-        const standardCompactBox = await standardCompactPreview.boundingBox();
-        if (standardCompactBox === null) {
-          throw new Error("standard compact preview bounds are missing");
+        await alternateCompactPreview.waitFor({ state: "visible" });
+        const alternateCompactBox = await alternateCompactPreview.boundingBox();
+        if (alternateCompactBox === null) {
+          throw new Error("alternate compact preview bounds are missing");
         }
-        const standardTemplate = createStandardScreenTemplate(
-          SCREEN_TEMPLATE_FIXTURE_TIMESTAMP
-        );
-        const standardDialogueElement = standardTemplate.elements.find(
+        const alternateTemplate =
+          createStandardAndAlternateTemplateSnapshot()[1]!;
+        const alternateDialogueElement = alternateTemplate.elements.find(
           (element) => element.type === "dialogue-window"
         );
-        if (standardDialogueElement === undefined) {
-          throw new Error("standard dialogue element is missing");
+        if (alternateDialogueElement === undefined) {
+          throw new Error("alternate dialogue element is missing");
         }
-        const standardDialogueBounds = screenLayoutElementBounds(
-          standardDialogueElement,
-          standardTemplate.canvasWidth,
-          standardTemplate.canvasHeight
+        const alternateDialogueBounds = screenLayoutElementBounds(
+          alternateDialogueElement,
+          alternateTemplate.canvasWidth,
+          alternateTemplate.canvasHeight
         );
-        const standardDialogueAspectRatio =
-          (standardDialogueBounds.width * standardTemplate.canvasWidth) /
-          (standardDialogueBounds.height * standardTemplate.canvasHeight);
-        const standardCompactTypography = await standardCompactPreview.evaluate(
-          (element) => {
+        const alternateDialogueAspectRatio =
+          (alternateDialogueBounds.width * alternateTemplate.canvasWidth) /
+          (alternateDialogueBounds.height * alternateTemplate.canvasHeight);
+        const alternateCompactTypography =
+          await alternateCompactPreview.evaluate((element) => {
             const browserElement = element as unknown as BrowserElement;
             const canvas = browserElement.querySelector(
               ".screen-layout-dialogue-only-canvas"
@@ -886,7 +1050,7 @@ describe("ScreenTemplate workflow browser E2E", () => {
             );
             const view = browserElement.ownerDocument.defaultView;
             if (canvas === null || dialogue === null || view === null) {
-              throw new Error("standard compact dialogue markup is missing");
+              throw new Error("alternate compact dialogue markup is missing");
             }
             const dialogueStyle = view.getComputedStyle(dialogue);
             return {
@@ -896,18 +1060,17 @@ describe("ScreenTemplate workflow browser E2E", () => {
                 .getComputedStyle(canvas)
                 .getPropertyValue("container-type")
             };
-          }
-        );
+          });
         expect(
-          standardCompactBox.width / standardCompactBox.height
-        ).toBeCloseTo(standardDialogueAspectRatio, 2);
-        expect(standardCompactTypography.innerContainerType).toBe(
+          alternateCompactBox.width / alternateCompactBox.height
+        ).toBeCloseTo(alternateDialogueAspectRatio, 2);
+        expect(alternateCompactTypography.innerContainerType).toBe(
           "inline-size"
         );
-        expect(standardCompactTypography.fontSize).toBeCloseTo(
-          (standardCompactTypography.canvasWidth *
-            standardDialogueElement.fontSize) /
-            standardTemplate.canvasWidth,
+        expect(alternateCompactTypography.fontSize).toBeCloseTo(
+          (alternateCompactTypography.canvasWidth *
+            alternateDialogueElement.fontSize) /
+            alternateTemplate.canvasWidth,
           1
         );
         expect(
@@ -1082,6 +1245,147 @@ describe("ScreenTemplate workflow browser E2E", () => {
                 .activeElement === element
           )
         ).toBe(true);
+      } finally {
+        await context.close();
+      }
+    }
+  );
+
+  it(
+    "persists the media pane start, pause, resume, end, replace, and reload flow",
+    { timeout: 60_000 },
+    async () => {
+      const mediaProject = createMediaWorkflowProjectFixture();
+      const replacementAsset = createMediaReplacementAsset(mediaProject);
+      const { context, page, state } = await openScript(mediaProject, [
+        replacementAsset
+      ]);
+      try {
+        const startLineCard = page.locator(
+          '.script-line-card[aria-label="セリフ main-mentor-1"]'
+        );
+        const pauseLineCard = page.locator(
+          '.script-line-card[aria-label="セリフ main-learner-1"]'
+        );
+        const resumeEndLineCard = page.locator(
+          '.script-line-card[aria-label="セリフ main-mentor-2"]'
+        );
+        const waitForVisualSave = () =>
+          page.waitForResponse(
+            (response) =>
+              response.request().method() === "PUT" &&
+              new URL(response.url()).pathname.startsWith(
+                `/api/projects/${projectId}/visual-assignments`
+              )
+          );
+
+        await startLineCard
+          .getByRole("button", { name: "素材を表示 / 再生開始" })
+          .click();
+        const startPicker = page.getByRole("dialog", {
+          name: "表示素材を選択"
+        });
+        await startPicker.waitFor({ state: "visible" });
+        const startItem = startPicker.locator("li").filter({
+          hasText: "visual-intro-video browser asset"
+        });
+        const startSave = waitForVisualSave();
+        await startItem.getByRole("button", { name: "この素材を選択" }).click();
+        await startSave;
+        const createdAssignment = state.project.visuals.assignments.find(
+          (assignment) => assignment.startLineId === "main-mentor-1"
+        );
+        if (createdAssignment === undefined) {
+          throw new Error("media workflow assignment was not created");
+        }
+        expect(createdAssignment).toMatchObject({
+          endLineId: "main-learner-2",
+          display: { kind: "video", playbackCues: [] }
+        });
+
+        const pauseSave = waitForVisualSave();
+        await pauseLineCard.getByRole("button", { name: "一時停止" }).click();
+        await pauseSave;
+        expect(
+          state.project.visuals.assignments.find(
+            (assignment) => assignment.id === createdAssignment.id
+          )?.display
+        ).toMatchObject({
+          playbackCues: [
+            { lineId: "main-learner-1", edge: "before", action: "pause" }
+          ]
+        });
+
+        const resumeSave = waitForVisualSave();
+        await resumeEndLineCard.getByRole("button", { name: "再開" }).click();
+        await resumeSave;
+        expect(
+          state.project.visuals.assignments.find(
+            (assignment) => assignment.id === createdAssignment.id
+          )?.display
+        ).toMatchObject({
+          playbackCues: [
+            { lineId: "main-learner-1", edge: "before", action: "pause" },
+            { lineId: "main-mentor-2", edge: "before", action: "resume" }
+          ]
+        });
+
+        const endSave = waitForVisualSave();
+        await resumeEndLineCard.getByRole("button", { name: "終了" }).click();
+        await endSave;
+        expect(
+          state.project.visuals.assignments.find(
+            (assignment) => assignment.id === createdAssignment.id
+          )
+        ).toMatchObject({ endLineId: "main-mentor-2" });
+
+        await resumeEndLineCard
+          .getByRole("button", { name: "素材を変更" })
+          .click();
+        const picker = page.getByRole("dialog", {
+          name: "表示素材を差し替え"
+        });
+        await picker.waitFor({ state: "visible" });
+        const replacementItem = picker.locator("li").filter({
+          hasText: replacementAsset.title
+        });
+        const replaceSave = waitForVisualSave();
+        await replacementItem
+          .getByRole("button", { name: "この素材を選択" })
+          .click();
+        await replaceSave;
+        expect(
+          state.project.visuals.assignments.find(
+            (assignment) => assignment.id === createdAssignment.id
+          )
+        ).toMatchObject({
+          assetId: replacementAsset.assetId,
+          endLineId: "main-mentor-2"
+        });
+
+        await page.reload({ waitUntil: "domcontentloaded" });
+        await page.locator("#section-main-screen-template").waitFor({
+          state: "visible"
+        });
+        const reloadedPane = resumeEndLineCard.locator(
+          ".script-line-media-pane"
+        );
+        await reloadedPane.waitFor({ state: "visible" });
+        expect(await reloadedPane.textContent()).toContain(
+          replacementAsset.title
+        );
+        expect(await reloadedPane.textContent()).toContain("playing（再生中）");
+        expect(
+          state.project.visuals.assignments.find(
+            (assignment) => assignment.id === createdAssignment.id
+          )?.display
+        ).toMatchObject({
+          kind: "video",
+          playbackCues: [
+            { lineId: "main-learner-1", edge: "before", action: "pause" },
+            { lineId: "main-mentor-2", edge: "before", action: "resume" }
+          ]
+        });
       } finally {
         await context.close();
       }

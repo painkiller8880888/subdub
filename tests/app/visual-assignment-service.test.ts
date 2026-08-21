@@ -22,6 +22,7 @@ import { initializeWorkspaceDatabase } from "../../src/db/initialize.js";
 import {
   videoProjectSchema,
   type AssetDetail,
+  type DisplayV15,
   type VideoProject
 } from "../../src/schema/index.js";
 import { videoProjectFixture } from "../fixtures/video-project.js";
@@ -1015,6 +1016,134 @@ describe("VisualAssignmentService", () => {
     expect(removed.revision).toBe(3);
     expect(removed.data.visuals.assignments).toEqual([]);
     expect(await fs.readFile(destination)).toEqual(beforeRemove);
+  });
+
+  it("atomically replaces an assignment asset and keeps the backend-owned snapshot", async () => {
+    const context = await setup();
+    const replacementBytes = Buffer.from("replacement video bytes", "utf8");
+    const replacementAsset = createAsset(
+      {
+        assetId: "asset-replacement-video",
+        version: 2,
+        kind: "video",
+        mimeType: "video/mp4",
+        libraryMediaPath: "media/asset-replacement-video/v2.mp4",
+        durationMs: 5000
+      },
+      replacementBytes
+    );
+    const replacementSource = path.join(
+      context.libraryRoot,
+      replacementAsset.libraryMediaPath
+    );
+    await fs.mkdir(path.dirname(replacementSource), { recursive: true });
+    await fs.writeFile(replacementSource, replacementBytes);
+    const assets = new Map([
+      [context.asset.assetId, context.asset],
+      [replacementAsset.assetId, replacementAsset]
+    ]);
+    const replacementService = new VisualAssignmentService({
+      repository: context.repository,
+      assetRepository: {
+        findAssetDetail: (assetId) => assets.get(assetId)
+      },
+      workspaceRoot: context.workspaceRoot,
+      libraryRoot: context.libraryRoot,
+      createId: () => "replacement-file-id"
+    });
+
+    const assigned = await context.service.assign(PROJECT_ID, {
+      expectedRevision: 0,
+      assignment: createAssignment()
+    });
+    const current = assigned.data.visuals.assignments[0];
+    if (current === undefined) {
+      throw new Error("assignment was not created");
+    }
+    const videoDisplay = {
+      ...clone(videoProjectFixture.visuals.assignments[0].display),
+      displayCoordinateSpace: current.display.displayCoordinateSpace
+    } as DisplayV15;
+    if (videoDisplay.kind !== "video") {
+      throw new Error("video fixture assignment was not a video");
+    }
+    videoDisplay.endMs = replacementAsset.durationMs ?? 0;
+
+    const updated = await replacementService.update(PROJECT_ID, current.id, {
+      expectedRevision: assigned.revision,
+      assignment: {
+        id: current.id,
+        startLineId: current.startLineId,
+        endLineId: current.endLineId,
+        assetId: replacementAsset.assetId,
+        display: videoDisplay
+      }
+    });
+
+    const saved = updated.data.visuals.assignments[0];
+    expect(saved).toMatchObject({
+      id: current.id,
+      assetId: replacementAsset.assetId,
+      assetChecksum: replacementAsset.checksum,
+      projectMediaPath: "media/visuals/asset-replacement-video/v2.mp4",
+      display: { kind: "video", endMs: 5000 }
+    });
+    expect(
+      await fs.readFile(
+        path.join(
+          context.projectRoot,
+          "media",
+          "visuals",
+          "asset-replacement-video",
+          "v2.mp4"
+        )
+      )
+    ).toEqual(replacementBytes);
+    expect(await fs.readFile(await finalPath(context.projectRoot))).toEqual(
+      context.bytes
+    );
+  });
+
+  it("keeps the old assignment when the replacement asset cannot be resolved", async () => {
+    const context = await setup();
+    const assigned = await context.service.assign(PROJECT_ID, {
+      expectedRevision: 0,
+      assignment: createAssignment()
+    });
+    const current = assigned.data.visuals.assignments[0];
+    if (current === undefined) {
+      throw new Error("assignment was not created");
+    }
+    const before = await fs.readFile(context.projectFile);
+    const replacementService = new VisualAssignmentService({
+      repository: context.repository,
+      assetRepository: {
+        findAssetDetail: (assetId) =>
+          assetId === current.assetId ? context.asset : undefined
+      },
+      workspaceRoot: context.workspaceRoot,
+      libraryRoot: context.libraryRoot,
+      createId: () => "replacement-file-id"
+    });
+
+    await expectError(
+      () =>
+        replacementService.update(PROJECT_ID, current.id, {
+          expectedRevision: assigned.revision,
+          assignment: {
+            id: current.id,
+            startLineId: current.startLineId,
+            endLineId: current.endLineId,
+            assetId: "missing-replacement",
+            display: current.display
+          }
+        }),
+      VISUAL_ASSIGNMENT_ERROR_CODE.assetNotFound
+    );
+    expect(await fs.readFile(context.projectFile)).toEqual(before);
+    expect(await fs.readFile(await finalPath(context.projectRoot))).toEqual(
+      context.bytes
+    );
   });
 
   it("saves video pause/resume cues and rejects range shortening without deleting them", async () => {
