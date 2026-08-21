@@ -25,6 +25,8 @@ import {
   characterOverflowScreenTransformSchema,
   screenTransformSchema
 } from "./screen-template.js";
+import { visualPlaybackCueSchema } from "./visual-playback.js";
+import { mediaMillisecondsToFrames } from "../media-frame.js";
 
 export const sourceAssetChecksumSchema = strictObject({
   path: relativePosixPathSchema,
@@ -860,6 +862,18 @@ export const renderSectionLayoutSchema = strictObject({
   resolvedLayout: resolvedScreenLayoutSchema
 });
 
+/**
+ * Render-time layout changes are kept separately from the section template
+ * snapshot. This preserves policies such as prioritizeVisual without adding
+ * line-level template metadata back to RenderManifest 2.5.
+ */
+export const renderLayoutIntervalSchema = strictObject({
+  sectionId: idSchema,
+  from: nonNegativeIntegerSchema,
+  durationInFrames: positiveIntegerSchema,
+  resolvedLayout: resolvedScreenLayoutSchema
+});
+
 const renderManifestV24BaseSchema = strictObject({
   manifestVersion: z.literal("2.4.0"),
   sourceProjectHash: sha256Schema,
@@ -1250,13 +1264,611 @@ export const renderManifestV24Schema = renderManifestV24BaseSchema.superRefine(
   }
 );
 
-/** Current production manifest schema. 2.3.0 remains available explicitly as
- * renderManifestV23Schema for legacy parsing and cache invalidation. */
-export const renderManifestSchema = renderManifestV24Schema;
+const renderResolvedVideoDisplayV25CommonSchema = strictObject({
+  ...renderResolvedDisplayBaseSchema,
+  kind: z.literal("video"),
+  startMs: nonNegativeIntegerSchema,
+  endMs: nonNegativeIntegerSchema,
+  playbackRate: positiveNumberSchema,
+  volume: unitIntervalSchema,
+  playbackCues: z.array(visualPlaybackCueSchema)
+});
+
+const renderResolvedVideoDisplayV25PlayingSchema =
+  renderResolvedVideoDisplayV25CommonSchema.extend({
+    playbackState: z.literal("playing"),
+    sourceTrimBeforeFrame: finiteNumberSchema.nonnegative(),
+    sourceTrimAfterFrame: finiteNumberSchema.nonnegative()
+  }).superRefine((display, ctx) => {
+    if (display.sourceTrimAfterFrame <= display.sourceTrimBeforeFrame) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["sourceTrimAfterFrame"],
+        message:
+          "sourceTrimAfterFrame must be greater than sourceTrimBeforeFrame"
+      });
+    }
+  });
+
+const renderResolvedVideoDisplayV25PausedSchema =
+  renderResolvedVideoDisplayV25CommonSchema.extend({
+    playbackState: z.literal("paused"),
+    sourceFrame: finiteNumberSchema.nonnegative(),
+    volume: z.literal(0)
+  });
+
+const renderResolvedVideoDisplayV25EndedSchema =
+  renderResolvedVideoDisplayV25CommonSchema.extend({
+    playbackState: z.literal("ended"),
+    sourceFrame: finiteNumberSchema.nonnegative(),
+    volume: z.literal(0)
+  });
+
+export const renderResolvedVideoDisplayV25Schema = z.discriminatedUnion(
+  "playbackState",
+  [
+    renderResolvedVideoDisplayV25PlayingSchema,
+    renderResolvedVideoDisplayV25PausedSchema,
+    renderResolvedVideoDisplayV25EndedSchema
+  ]
+);
+
+export const renderLineV25Schema = renderLineSchema;
+
+const renderVisualV25Fields = {
+  id: idSchema,
+  sourceAssignmentId: idSchema,
+  segmentIndex: nonNegativeIntegerSchema,
+  segmentStartLineId: idSchema,
+  segmentEndLineId: idSchema,
+  sectionId: idSchema,
+  templateRevision: positiveIntegerSchema,
+  templateHash: sha256Schema,
+  from: nonNegativeIntegerSchema,
+  durationInFrames: positiveIntegerSchema,
+  src: relativePosixPathSchema
+};
+
+const renderVideoV25Schema = strictObject({
+  ...renderVisualV25Fields,
+  kind: z.literal("video"),
+  display: renderResolvedVideoDisplayV25Schema
+});
+
+const renderPhotoV25Schema = strictObject({
+  ...renderVisualV25Fields,
+  kind: z.literal("photo"),
+  display: renderResolvedImageDisplaySchema
+});
+
+const renderDocumentScanV25Schema = strictObject({
+  ...renderVisualV25Fields,
+  kind: z.literal("document_scan"),
+  display: renderResolvedDocumentDisplaySchema
+});
+
+export const renderVisualV25Schema = z.discriminatedUnion("kind", [
+  renderVideoV25Schema,
+  renderPhotoV25Schema,
+  renderDocumentScanV25Schema
+]);
+
+const renderManifestV25BaseSchema = strictObject({
+  manifestVersion: z.literal("2.5.0"),
+  sourceProjectHash: sha256Schema,
+  compilerInputHash: sha256Schema,
+  characterCatalogVersion: z.string().min(1),
+  characterMappingVersion: z.string().min(1),
+  characters: z.array(renderCharacterSchema),
+  characterVariants: z.array(renderCharacterVariantSchema),
+  sourceAssetChecksums: z.array(sourceAssetChecksumSchema),
+  fps: positiveIntegerSchema,
+  width: positiveIntegerSchema,
+  height: positiveIntegerSchema,
+  durationInFrames: positiveIntegerSchema,
+  sectionLayouts: z.array(renderSectionLayoutSchema),
+  layoutIntervals: z.array(renderLayoutIntervalSchema),
+  lines: z.array(renderLineV25Schema),
+  visuals: z.array(renderVisualV25Schema),
+  backgrounds: z.array(renderBackgroundSchema),
+  audioTracks: z.array(renderAudioTrackSchema),
+  soundEffects: z.array(renderSoundEffectSchema),
+  inserts: z.array(renderInsertSchema)
+});
+
+export const renderManifestV25Schema = renderManifestV25BaseSchema.superRefine(
+  (manifest, ctx) => {
+    const renderCharacterIds = new Set(
+      manifest.characters.map((character) => character.characterId)
+    );
+    addDuplicateIssues(
+      manifest.sourceAssetChecksums.map((asset, index) => ({
+        value: asset.path,
+        path: ["sourceAssetChecksums", index, "path"]
+      })),
+      ctx,
+      "source asset path"
+    );
+    addDuplicateIssues(
+      manifest.characters.map((character, index) => ({
+        value: character.characterId,
+        path: ["characters", index, "characterId"]
+      })),
+      ctx,
+      "render character id"
+    );
+    addDuplicateIssues(
+      manifest.characterVariants.map((variant, index) => ({
+        value: `${variant.visualId}\u0000${variant.variantId}`,
+        path: ["characterVariants", index, "variantId"]
+      })),
+      ctx,
+      "render character variant visualId/variantId"
+    );
+    addDuplicateIssues(
+      manifest.lines.map((line, index) => ({
+        value: line.id,
+        path: ["lines", index, "id"]
+      })),
+      ctx,
+      "render line id"
+    );
+    addDuplicateIssues(
+      manifest.visuals.map((visual, index) => ({
+        value: visual.id,
+        path: ["visuals", index, "id"]
+      })),
+      ctx,
+      "render visual segment id"
+    );
+    addDuplicateIssues(
+      manifest.sectionLayouts.map((layout, index) => ({
+        value: layout.sectionId,
+        path: ["sectionLayouts", index, "sectionId"]
+      })),
+      ctx,
+      "section layout sectionId"
+    );
+    addDuplicateIssues(
+      manifest.audioTracks.map((track, index) => ({
+        value: track.id,
+        path: ["audioTracks", index, "id"]
+      })),
+      ctx,
+      "render audio track id"
+    );
+    addDuplicateIssues(
+      manifest.soundEffects.map((effect, index) => ({
+        value: effect.id,
+        path: ["soundEffects", index, "id"]
+      })),
+      ctx,
+      "render sound effect id"
+    );
+    addDuplicateIssues(
+      manifest.inserts.map((insert, index) => ({
+        value: insert.id,
+        path: ["inserts", index, "id"]
+      })),
+      ctx,
+      "render insert id"
+    );
+
+    for (const [index, layout] of manifest.sectionLayouts.entries()) {
+      validateResolvedLayout(
+        layout.resolvedLayout,
+        ["sectionLayouts", index, "resolvedLayout"],
+        ctx
+      );
+      for (const [elementIndex, element] of layout.resolvedLayout.elements.entries()) {
+        if (
+          element.type === "character-visual" &&
+          (element.characterId.length === 0 ||
+            !renderCharacterIds.has(element.characterId))
+        ) {
+          addIssue(
+            ctx,
+            [
+              "sectionLayouts",
+              index,
+              "resolvedLayout",
+              "elements",
+              elementIndex,
+              "characterId"
+            ],
+            "character visual characterId must reference a render character"
+          );
+        }
+      }
+    }
+
+    const sectionLayoutIds = new Set(
+      manifest.sectionLayouts.map((layout) => layout.sectionId)
+    );
+    const lineById = new Map(manifest.lines.map((line) => [line.id, line]));
+    const characterById = new Map(
+      manifest.characters.map((character) => [character.characterId, character])
+    );
+    const variantByKey = new Map(
+      manifest.characterVariants.map((variant) => [
+        `${variant.visualId}\u0000${variant.variantId}`,
+        variant
+      ])
+    );
+
+    for (const [index, interval] of manifest.layoutIntervals.entries()) {
+      if (!sectionLayoutIds.has(interval.sectionId)) {
+        addIssue(
+          ctx,
+          ["layoutIntervals", index, "sectionId"],
+          "layout interval sectionId must reference a section layout"
+        );
+      }
+      validateResolvedLayout(
+        interval.resolvedLayout,
+        ["layoutIntervals", index, "resolvedLayout"],
+        ctx
+      );
+      for (const [elementIndex, element] of interval.resolvedLayout.elements.entries()) {
+        if (
+          element.type === "character-visual" &&
+          (element.characterId.length === 0 ||
+            !renderCharacterIds.has(element.characterId))
+        ) {
+          addIssue(
+            ctx,
+            [
+              "layoutIntervals",
+              index,
+              "resolvedLayout",
+              "elements",
+              elementIndex,
+              "characterId"
+            ],
+            "character visual characterId must reference a render character"
+          );
+        }
+      }
+    }
+
+    for (const [index, variant] of manifest.characterVariants.entries()) {
+      if (
+        !manifest.characters.some(
+          (character) => character.visualId === variant.visualId
+        )
+      ) {
+        addIssue(
+          ctx,
+          ["characterVariants", index, "visualId"],
+          "character variant visualId must reference a render character visual"
+        );
+      }
+    }
+    for (const [index, character] of manifest.characters.entries()) {
+      if (
+        !variantByKey.has(
+          `${character.visualId}\u0000${character.idleVariantId}`
+        )
+      ) {
+        addIssue(
+          ctx,
+          ["characters", index, "idleVariantId"],
+          "idleVariantId must reference a variant in the character visual"
+        );
+      }
+    }
+    for (const [index, line] of manifest.lines.entries()) {
+      if (!sectionLayoutIds.has(line.sectionId)) {
+        addIssue(
+          ctx,
+          ["lines", index, "sectionId"],
+          "line sectionId must reference a section layout"
+        );
+      }
+      if (
+        line.speechFrom + line.speechDurationInFrames >
+        line.durationInFrames
+      ) {
+        addIssue(
+          ctx,
+          ["lines", index, "speechDurationInFrames"],
+          "speech interval must fit within the line interval"
+        );
+      }
+      const speaker = characterById.get(line.speakerId);
+      if (speaker === undefined) {
+        addIssue(
+          ctx,
+          ["lines", index, "speakerId"],
+          "speakerId must reference a render character"
+        );
+      } else if (
+        !variantByKey.has(`${speaker.visualId}\u0000${line.characterVariantId}`)
+      ) {
+        addIssue(
+          ctx,
+          ["lines", index, "characterVariantId"],
+          "characterVariantId must reference a variant in the speaker visual"
+        );
+      }
+    }
+
+    const sectionIds = new Set(manifest.lines.map((line) => line.sectionId));
+    const seenBackgroundSections = new Set<string>();
+    for (const [index, background] of manifest.backgrounds.entries()) {
+      if (!sectionIds.has(background.sectionId)) {
+        addIssue(
+          ctx,
+          ["backgrounds", index, "sectionId"],
+          "background sectionId must reference a section present in lines"
+        );
+      }
+      if (seenBackgroundSections.has(background.sectionId)) {
+        addIssue(
+          ctx,
+          ["backgrounds", index, "sectionId"],
+          "a section can have at most one background"
+        );
+      }
+      seenBackgroundSections.add(background.sectionId);
+    }
+
+    const seenAudioSections = new Set<string>();
+    for (const [index, track] of manifest.audioTracks.entries()) {
+      if (!sectionIds.has(track.sectionId)) {
+        addIssue(
+          ctx,
+          ["audioTracks", index, "sectionId"],
+          "audio track sectionId must reference a section present in lines"
+        );
+      }
+      if (seenAudioSections.has(track.sectionId)) {
+        addIssue(
+          ctx,
+          ["audioTracks", index, "sectionId"],
+          "a section can have at most one audio track"
+        );
+      }
+      seenAudioSections.add(track.sectionId);
+      for (const [insertIndex, insert] of manifest.inserts.entries()) {
+        if (
+          track.from < insert.from + insert.durationInFrames &&
+          insert.from < track.from + track.durationInFrames
+        ) {
+          addIssue(
+            ctx,
+            ["audioTracks", index, "from"],
+            `audio track must not overlap video insert at index ${insertIndex}`
+          );
+        }
+      }
+    }
+
+    for (const [index, effect] of manifest.soundEffects.entries()) {
+      if (!lineById.has(effect.lineId)) {
+        addIssue(
+          ctx,
+          ["soundEffects", index, "lineId"],
+          "sound effect lineId must reference a render line"
+        );
+      }
+    }
+
+    const introInserts = manifest.inserts.filter(
+      (insert) => insert.role === "intro"
+    );
+    const outroInserts = manifest.inserts.filter(
+      (insert) => insert.role === "outro"
+    );
+    if (introInserts.length > 1) {
+      addIssue(ctx, ["inserts"], "at most one intro insert is allowed");
+    }
+    if (outroInserts.length > 1) {
+      addIssue(ctx, ["inserts"], "at most one outro insert is allowed");
+    }
+    if (introInserts.length === 1) {
+      const introIndex = manifest.inserts.findIndex(
+        (insert) => insert.role === "intro"
+      );
+      if (introInserts[0]?.from !== 0) {
+        addIssue(
+          ctx,
+          ["inserts", introIndex, "from"],
+          "intro insert must start at frame 0"
+        );
+      }
+    }
+    if (outroInserts.length === 1) {
+      const outroIndex = manifest.inserts.findIndex(
+        (insert) => insert.role === "outro"
+      );
+      const outro = outroInserts[0];
+      if (
+        outro !== undefined &&
+        outro.from + outro.durationInFrames !== manifest.durationInFrames
+      ) {
+        addIssue(
+          ctx,
+          ["inserts", outroIndex, "from"],
+          "outro insert must end at the manifest duration"
+        );
+      }
+    }
+
+    const visualSegmentKeys = new Set<string>();
+    for (const [index, visual] of manifest.visuals.entries()) {
+      const startLine = lineById.get(visual.segmentStartLineId);
+      const endLine = lineById.get(visual.segmentEndLineId);
+      if (startLine === undefined) {
+        addIssue(
+          ctx,
+          ["visuals", index, "segmentStartLineId"],
+          "segment start line must reference a render line"
+        );
+      }
+      if (endLine === undefined) {
+        addIssue(
+          ctx,
+          ["visuals", index, "segmentEndLineId"],
+          "segment end line must reference a render line"
+        );
+      }
+      if (startLine !== undefined && startLine.sectionId !== visual.sectionId) {
+        addIssue(
+          ctx,
+          ["visuals", index, "sectionId"],
+          "visual sectionId must match its segment start line"
+        );
+      }
+      if (endLine !== undefined && endLine.sectionId !== visual.sectionId) {
+        addIssue(
+          ctx,
+          ["visuals", index, "sectionId"],
+          "visual sectionId must match its segment end line"
+        );
+      }
+      const sectionLayout = manifest.sectionLayouts.find(
+        (layout) => layout.sectionId === visual.sectionId
+      );
+      if (sectionLayout === undefined) {
+        addIssue(
+          ctx,
+          ["visuals", index, "sectionId"],
+          "visual sectionId must reference a section layout"
+        );
+      } else if (
+        visual.templateRevision !== sectionLayout.templateRevision ||
+        visual.templateHash !== sectionLayout.templateHash
+      ) {
+        addIssue(
+          ctx,
+          ["visuals", index, "templateRevision"],
+          "visual template snapshot must match its section layout"
+        );
+      }
+      const segmentKey = `${visual.sourceAssignmentId}\u0000${visual.segmentIndex}`;
+      if (visualSegmentKeys.has(segmentKey)) {
+        addIssue(
+          ctx,
+          ["visuals", index, "segmentIndex"],
+          "segmentIndex must be unique within a source assignment"
+        );
+      }
+      visualSegmentKeys.add(segmentKey);
+      if (visual.display.kind === "video") {
+        const sourceStartFrame = mediaMillisecondsToFrames(
+          visual.display.startMs,
+          manifest.fps
+        );
+        const sourceEndFrame = mediaMillisecondsToFrames(
+          visual.display.endMs,
+          manifest.fps
+        );
+        if (sourceEndFrame <= sourceStartFrame) {
+          addIssue(
+            ctx,
+            ["visuals", index, "display", "endMs"],
+            "video source range must contain at least one source frame"
+          );
+        }
+        if (
+          visual.display.playbackState === "playing" &&
+          visual.display.sourceTrimAfterFrame <=
+            visual.display.sourceTrimBeforeFrame
+        ) {
+          addIssue(
+            ctx,
+            ["visuals", index, "display", "sourceTrimAfterFrame"],
+            "video segment source trim range must be positive"
+          );
+        }
+        if (
+          visual.display.playbackState === "playing" &&
+          visual.display.sourceTrimBeforeFrame < sourceStartFrame
+        ) {
+          addIssue(
+            ctx,
+            ["visuals", index, "display", "sourceTrimBeforeFrame"],
+            "playing sourceTrimBeforeFrame must be within the video source range"
+          );
+        }
+        if (
+          visual.display.playbackState === "playing" &&
+          visual.display.sourceTrimAfterFrame > sourceEndFrame
+        ) {
+          addIssue(
+            ctx,
+            ["visuals", index, "display", "sourceTrimAfterFrame"],
+            "playing sourceTrimAfterFrame must be within the video source range"
+          );
+        }
+        if (
+          visual.display.playbackState === "paused" &&
+          (visual.display.sourceFrame < sourceStartFrame ||
+            visual.display.sourceFrame >= sourceEndFrame)
+        ) {
+          addIssue(
+            ctx,
+            ["visuals", index, "display", "sourceFrame"],
+            "paused sourceFrame must be within the video source range"
+          );
+        }
+        if (
+          visual.display.playbackState === "ended" &&
+          visual.display.sourceFrame !== sourceEndFrame - 1
+        ) {
+          addIssue(
+            ctx,
+            ["visuals", index, "display", "sourceFrame"],
+            "ended sourceFrame must be the final frame of the video source range"
+          );
+        }
+        if (
+          visual.display.playbackState !== "playing" &&
+          visual.display.volume !== 0
+        ) {
+          addIssue(
+            ctx,
+            ["visuals", index, "display", "volume"],
+            "paused and ended video segments must have zero volume"
+          );
+        }
+      }
+    }
+
+    validateTimelineOrder(manifest.lines, "lines", ctx);
+    validateTimelineOrder(manifest.visuals, "visuals", ctx);
+    validateTimelineOrder(manifest.backgrounds, "backgrounds", ctx);
+    validateTimelineOrder(manifest.audioTracks, "audioTracks", ctx);
+    validateTimelineOrder(manifest.soundEffects, "soundEffects", ctx);
+    validateTimelineOrder(manifest.inserts, "inserts", ctx);
+    validateTimelineOrder(manifest.layoutIntervals, "layoutIntervals", ctx);
+    validateTimelineNoOverlap(manifest.lines, "lines", ctx);
+    validateTimelineNoOverlap(manifest.inserts, "inserts", ctx);
+    validateTimelineNoOverlap(manifest.layoutIntervals, "layoutIntervals", ctx);
+    validateTimelineBounds(manifest.lines, "lines", manifest.durationInFrames, ctx);
+    validateTimelineBounds(manifest.visuals, "visuals", manifest.durationInFrames, ctx);
+    validateTimelineBounds(manifest.backgrounds, "backgrounds", manifest.durationInFrames, ctx);
+    validateTimelineBounds(manifest.audioTracks, "audioTracks", manifest.durationInFrames, ctx);
+    validateTimelineBounds(manifest.soundEffects, "soundEffects", manifest.durationInFrames, ctx);
+    validateTimelineBounds(manifest.inserts, "inserts", manifest.durationInFrames, ctx);
+    validateTimelineBounds(
+      manifest.layoutIntervals,
+      "layoutIntervals",
+      manifest.durationInFrames,
+      ctx
+    );
+  }
+);
+
+/** Current production manifest schema. V24 remains available explicitly for
+ * compatibility parsing and tests that exercise the frozen contract. */
+export const renderManifestSchema = renderManifestV25Schema;
 
 export type SourceAssetChecksum = z.infer<typeof sourceAssetChecksumSchema>;
 export type RenderLineV23 = z.infer<typeof renderLineSchema>;
-export type RenderLine = z.infer<typeof renderLineV24Schema>;
+export type RenderLineV24 = z.infer<typeof renderLineV24Schema>;
+export type RenderLine = z.infer<typeof renderLineV25Schema>;
 export type RenderCharacter = z.infer<typeof renderCharacterSchema>;
 export type RenderCharacterVariant = z.infer<
   typeof renderCharacterVariantSchema
@@ -1268,7 +1880,7 @@ export type RenderVideoDisplayV23 = z.infer<
   typeof renderVideoDisplayV23Schema
 >;
 export type RenderVisualV23 = z.infer<typeof renderVisualSchema>;
-export type RenderVisual = z.infer<typeof renderVisualV24Schema>;
+export type RenderVisual = z.infer<typeof renderVisualV25Schema>;
 export type RenderBackground = z.infer<typeof renderBackgroundSchema>;
 export type RenderAudioTrack = z.infer<typeof renderAudioTrackSchema>;
 export type RenderSoundEffect = z.infer<typeof renderSoundEffectSchema>;
@@ -1277,6 +1889,12 @@ export type RenderVideoInsert = z.infer<typeof renderVideoInsertSchema>;
 export type RenderManifest = z.infer<typeof renderManifestSchema>;
 export type RenderManifestV23 = z.infer<typeof renderManifestV23Schema>;
 export type RenderManifestV24 = z.infer<typeof renderManifestV24Schema>;
+export type RenderLineV25 = z.infer<typeof renderLineV25Schema>;
+export type RenderResolvedVideoDisplayV25 = z.infer<
+  typeof renderResolvedVideoDisplayV25Schema
+>;
+export type RenderVisualV25 = z.infer<typeof renderVisualV25Schema>;
+export type RenderManifestV25 = z.infer<typeof renderManifestV25Schema>;
 export type ResolvedScreenElement = z.infer<typeof resolvedScreenElementSchema>;
 export type ResolvedScreenLayout = z.infer<typeof resolvedScreenLayoutSchema>;
 export type RenderContentClip = z.infer<typeof renderContentClipSchema>;
@@ -1285,6 +1903,7 @@ export type RenderResolvedVisualDisplay = z.infer<
 >;
 export type RenderVisualV24 = z.infer<typeof renderVisualV24Schema>;
 export type RenderSectionLayout = z.infer<typeof renderSectionLayoutSchema>;
+export type RenderLayoutInterval = z.infer<typeof renderLayoutIntervalSchema>;
 export type LegacyRenderManifestV22 = z.infer<
   typeof legacyRenderManifestV22Schema
 >;

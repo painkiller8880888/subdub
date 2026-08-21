@@ -67,9 +67,15 @@ export function selectActiveScreenLayout(
   frame: number,
   lines: readonly RenderLine[]
 ): ResolvedScreenLayout | undefined {
+  const layoutInterval = selectActiveItem(manifest.layoutIntervals, frame);
+  if (layoutInterval !== undefined) {
+    return layoutInterval.resolvedLayout;
+  }
   const line = lines[0];
   if (line !== undefined) {
-    return line.resolvedLayout;
+    return manifest.sectionLayouts.find(
+      (layout) => layout.sectionId === line.sectionId
+    )?.resolvedLayout;
   }
   const background = selectActiveBackground(manifest, frame);
   return manifest.sectionLayouts.find(
