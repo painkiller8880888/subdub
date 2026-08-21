@@ -224,6 +224,17 @@ describe("visual assignment editor helpers", () => {
       "intro-learner-1",
       "pause"
     );
+    if (withCue.display.kind !== "video") {
+      throw new Error("video cue assignment was not a video");
+    }
+    const trimmed = {
+      ...withCue,
+      display: {
+        ...withCue.display,
+        startMs: 500,
+        endMs: 2_000
+      }
+    };
     const submittedTwice = addVisualPlaybackCue(
       withCue,
       "intro-learner-1",
@@ -238,7 +249,7 @@ describe("visual assignment editor helpers", () => {
     });
     expect(submittedTwice.display).toEqual(withCue.display);
 
-    const replacement = replacementDisplayForAsset(withCue, {
+    const replacement = replacementDisplayForAsset(trimmed, {
       assetId: "asset-video-replacement",
       kind: "video",
       durationMs: 5000,
@@ -250,9 +261,8 @@ describe("visual assignment editor helpers", () => {
     ) {
       throw new Error("video replacement display was not created");
     }
-    if (withCue.display.kind !== "video") {
-      throw new Error("video cue assignment was not a video");
-    }
+    expect(replacement.display.startMs).toBe(500);
+    expect(replacement.display.endMs).toBe(2_000);
     expect(replacement.display.playbackRate).toBe(
       currentVideoDisplay.playbackRate
     );
@@ -281,6 +291,52 @@ describe("visual assignment editor helpers", () => {
     });
     expect(replacement.display).toMatchObject({ kind: "photo" });
     expect(replacement.display).not.toHaveProperty("playbackCues");
+  });
+
+  it("rejects same-kind replacements that cannot preserve the current range or page", () => {
+    const videoAssignment = clone(
+      videoProjectFixture.visuals.assignments[0]
+    ) as VisualAssignment;
+    if (videoAssignment.display.kind !== "video") {
+      throw new Error("video fixture assignment was not a video");
+    }
+    videoAssignment.display.startMs = 1_000;
+    videoAssignment.display.endMs = 4_000;
+    const tooShortVideo = replacementDisplayForAsset(videoAssignment, {
+      assetId: "asset-short-video",
+      kind: "video",
+      durationMs: 3_000,
+      pageCount: null
+    });
+    expect(tooShortVideo.display).toBeUndefined();
+    expect(tooShortVideo.reason).toContain("既存の動画トリム");
+
+    const documentAssignment = clone(
+      videoProjectFixture.visuals.assignments[2]
+    ) as VisualAssignment;
+    if (documentAssignment.display.kind !== "document_scan") {
+      throw new Error("document fixture assignment was not a document");
+    }
+    documentAssignment.display.page = 2;
+    const replacementDocument = replacementDisplayForAsset(documentAssignment, {
+      assetId: "asset-document-replacement",
+      kind: "document_scan",
+      durationMs: null,
+      pageCount: 3
+    });
+    expect(replacementDocument.display).toMatchObject({
+      kind: "document_scan",
+      page: 2
+    });
+
+    const tooFewPages = replacementDisplayForAsset(documentAssignment, {
+      assetId: "asset-short-document",
+      kind: "document_scan",
+      durationMs: null,
+      pageCount: 1
+    });
+    expect(tooFewPages.display).toBeUndefined();
+    expect(tooFewPages.reason).toContain("既存の2ページ目");
   });
 
   it("reports and removes cues outside an explicitly shortened range", () => {
