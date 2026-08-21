@@ -27,7 +27,6 @@ import type {
   VoiceGenerationStatusData
 } from "../../src/schema/api.js";
 import { legacyCharacterVariantCatalog } from "../../src/app/character-visuals/character-visual-seed.js";
-import { createStandardScreenTemplate } from "../../src/app/screen-templates/screen-template-seed.js";
 import { screenLayoutElementBounds } from "../../src/remotion/screen-template-layout.js";
 import {
   createVoicevoxAudioQueryFixture,
@@ -878,36 +877,32 @@ describe("ScreenTemplate workflow browser E2E", () => {
         expect(
           await lineCard.locator(".script-line-card-dialogue-preview").count()
         ).toBe(1);
-        const standardCompactLineCard = page.locator(
-          '.script-line-card[aria-label="セリフ intro-learner-1"]'
-        );
-        const standardCompactPreview = standardCompactLineCard.locator(
+        const alternateCompactPreview = lineCard.locator(
           ".script-line-card-dialogue-preview"
         );
-        await standardCompactPreview.waitFor({ state: "visible" });
-        const standardCompactBox = await standardCompactPreview.boundingBox();
-        if (standardCompactBox === null) {
-          throw new Error("standard compact preview bounds are missing");
+        await alternateCompactPreview.waitFor({ state: "visible" });
+        const alternateCompactBox = await alternateCompactPreview.boundingBox();
+        if (alternateCompactBox === null) {
+          throw new Error("alternate compact preview bounds are missing");
         }
-        const standardTemplate = createStandardScreenTemplate(
-          SCREEN_TEMPLATE_FIXTURE_TIMESTAMP
-        );
-        const standardDialogueElement = standardTemplate.elements.find(
+        const alternateTemplate =
+          createStandardAndAlternateTemplateSnapshot()[1]!;
+        const alternateDialogueElement = alternateTemplate.elements.find(
           (element) => element.type === "dialogue-window"
         );
-        if (standardDialogueElement === undefined) {
-          throw new Error("standard dialogue element is missing");
+        if (alternateDialogueElement === undefined) {
+          throw new Error("alternate dialogue element is missing");
         }
-        const standardDialogueBounds = screenLayoutElementBounds(
-          standardDialogueElement,
-          standardTemplate.canvasWidth,
-          standardTemplate.canvasHeight
+        const alternateDialogueBounds = screenLayoutElementBounds(
+          alternateDialogueElement,
+          alternateTemplate.canvasWidth,
+          alternateTemplate.canvasHeight
         );
-        const standardDialogueAspectRatio =
-          (standardDialogueBounds.width * standardTemplate.canvasWidth) /
-          (standardDialogueBounds.height * standardTemplate.canvasHeight);
-        const standardCompactTypography = await standardCompactPreview.evaluate(
-          (element) => {
+        const alternateDialogueAspectRatio =
+          (alternateDialogueBounds.width * alternateTemplate.canvasWidth) /
+          (alternateDialogueBounds.height * alternateTemplate.canvasHeight);
+        const alternateCompactTypography =
+          await alternateCompactPreview.evaluate((element) => {
             const browserElement = element as unknown as BrowserElement;
             const canvas = browserElement.querySelector(
               ".screen-layout-dialogue-only-canvas"
@@ -917,7 +912,7 @@ describe("ScreenTemplate workflow browser E2E", () => {
             );
             const view = browserElement.ownerDocument.defaultView;
             if (canvas === null || dialogue === null || view === null) {
-              throw new Error("standard compact dialogue markup is missing");
+              throw new Error("alternate compact dialogue markup is missing");
             }
             const dialogueStyle = view.getComputedStyle(dialogue);
             return {
@@ -927,18 +922,17 @@ describe("ScreenTemplate workflow browser E2E", () => {
                 .getComputedStyle(canvas)
                 .getPropertyValue("container-type")
             };
-          }
-        );
+          });
         expect(
-          standardCompactBox.width / standardCompactBox.height
-        ).toBeCloseTo(standardDialogueAspectRatio, 2);
-        expect(standardCompactTypography.innerContainerType).toBe(
+          alternateCompactBox.width / alternateCompactBox.height
+        ).toBeCloseTo(alternateDialogueAspectRatio, 2);
+        expect(alternateCompactTypography.innerContainerType).toBe(
           "inline-size"
         );
-        expect(standardCompactTypography.fontSize).toBeCloseTo(
-          (standardCompactTypography.canvasWidth *
-            standardDialogueElement.fontSize) /
-            standardTemplate.canvasWidth,
+        expect(alternateCompactTypography.fontSize).toBeCloseTo(
+          (alternateCompactTypography.canvasWidth *
+            alternateDialogueElement.fontSize) /
+            alternateTemplate.canvasWidth,
           1
         );
         expect(
