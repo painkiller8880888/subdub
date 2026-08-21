@@ -9,8 +9,10 @@ import {
 } from "../../src/assets/character-asset-manifest.js";
 import {
   compileRenderManifest,
+  compileRenderManifestV24,
   serializeRenderManifest,
-  type RenderManifestAssetMetadata
+  type RenderManifestAssetMetadata,
+  type RenderManifestCompileResult
 } from "../../src/app/rendering/render-manifest-compiler.js";
 import { createRenderManifestInput } from "../fixtures/render-manifest-input.js";
 import { videoProjectFixture } from "../fixtures/video-project.js";
@@ -21,7 +23,7 @@ import { mediaMillisecondsToFrames } from "../../src/media-frame.js";
 
 const validInput = createRenderManifestInput;
 
-function diagnosticCodes(result: ReturnType<typeof compileRenderManifest>) {
+function diagnosticCodes<T>(result: RenderManifestCompileResult<T>) {
   if (result.success) {
     return [];
   }
@@ -226,7 +228,7 @@ describe("compileRenderManifest", () => {
     );
   });
 
-  it("rejects non-empty playback cues until RenderManifest 2.5.0 exists", () => {
+  it("keeps the frozen 2.4 compiler unable to represent non-empty playback cues", () => {
     const project = structuredClone(videoProjectFixture) as VideoProject;
     const assignment = project.visuals.assignments[0];
     if (assignment === undefined || assignment.display.kind !== "video") {
@@ -237,7 +239,7 @@ describe("compileRenderManifest", () => {
       { lineId: "intro-learner-1", edge: "after", action: "resume" }
     ];
 
-    const result = compileRenderManifest(validInput(project));
+    const result = compileRenderManifestV24(validInput(project));
 
     expect(result.success).toBe(false);
     expect(diagnosticCodes(result)).toContain(
@@ -255,6 +257,87 @@ describe("compileRenderManifest", () => {
     }
   });
 
+  it("resolves pause and resume cues into source-continuous V25 segments", () => {
+    const project = structuredClone(videoProjectFixture) as VideoProject;
+    const section = project.script.sections[0];
+    const assignment = project.visuals.assignments[0];
+    const firstLine = section?.lines[0];
+    const secondLine = section?.lines[1];
+    const thirdLine =
+      secondLine === undefined
+        ? undefined
+        : { ...secondLine, id: "intro-learner-2" };
+    if (
+      section === undefined ||
+      assignment?.display.kind !== "video" ||
+      firstLine === undefined ||
+      secondLine === undefined ||
+      thirdLine === undefined
+    ) {
+      throw new Error("cue fixture is incomplete");
+    }
+    section.lines = [...section.lines, thirdLine];
+    assignment.endLineId = thirdLine.id;
+    assignment.display.playbackCues = [
+      { lineId: firstLine.id, edge: "after", action: "pause" },
+      { lineId: thirdLine.id, edge: "before", action: "resume" }
+    ];
+
+    const result = compileRenderManifest(createRenderManifestInput(project));
+    expect(result.success).toBe(true);
+    if (!result.success) {
+      return;
+    }
+
+    const segments = result.manifest.visuals.filter(
+      (visual) => visual.sourceAssignmentId === assignment.id
+    );
+    expect(result.manifest.manifestVersion).toBe("2.5.0");
+    expect(
+      segments.map((segment) =>
+        segment.kind === "video" ? segment.display.playbackState : segment.kind
+      )
+    ).toEqual(["playing", "paused", "playing"]);
+    const paused = segments[1];
+    const resumed = segments[2];
+    if (
+      paused?.kind !== "video" ||
+      resumed?.kind !== "video" ||
+      paused.display.playbackState !== "paused" ||
+      resumed.display.playbackState !== "playing"
+    ) {
+      throw new Error("pause/resume segments were not resolved");
+    }
+    expect(paused.display.volume).toBe(0);
+    expect(paused.display.sourceFrame).toBe(
+      resumed.display.sourceTrimBeforeFrame
+    );
+    expect(paused.display.playbackCues).toEqual(
+      assignment.display.playbackCues
+    );
+    expect(resumed.display.sourceTrimAfterFrame).toBeGreaterThan(
+      resumed.display.sourceTrimBeforeFrame
+    );
+  });
+
+  it("rejects cues that occur after the implicit natural source end", () => {
+    const project = structuredClone(videoProjectFixture) as VideoProject;
+    const section = project.script.sections[0];
+    const assignment = project.visuals.assignments[0];
+    const secondLine = section?.lines[1];
+    if (assignment?.display.kind !== "video" || secondLine === undefined) {
+      throw new Error("source-end cue fixture is incomplete");
+    }
+    assignment.display.endMs = 500;
+    assignment.display.playbackCues = [
+      { lineId: secondLine.id, edge: "before", action: "pause" }
+    ];
+
+    const result = compileRenderManifest(createRenderManifestInput(project));
+    expect(result.success).toBe(false);
+    expect(diagnosticCodes(result)).toContain("VISUAL_PLAYBACK_CUE_INVALID");
+  });
+
   it("resolves explicit character selections and compiles all timeline inputs", () => {
     const result = compileRenderManifest(validInput());
 
@@ -263,7 +346,7 @@ describe("compileRenderManifest", () => {
       return;
     }
 
-    expect(result.manifest.manifestVersion).toBe("2.4.0");
+    expect(result.manifest.manifestVersion).toBe("2.5.0");
     expect(result.manifest.characterCatalogVersion).toBe(
       CHARACTER_VARIANT_CATALOG_VERSION
     );
@@ -414,7 +497,7 @@ describe("compileRenderManifest", () => {
     );
   });
 
-  it("keeps one visual segment when line template boundaries are removed", () => {
+  it("adds source-end boundaries without using line-template differences", () => {
     const project = structuredClone(videoProjectFixture) as VideoProject;
     const introSection = project.script.sections[0];
     if (introSection === undefined || introSection.lines[1] === undefined) {
@@ -445,18 +528,22 @@ describe("compileRenderManifest", () => {
     const segments = result.manifest.visuals.filter(
       (visual) => visual.sourceAssignmentId === assignment.id
     );
-    expect(segments).toHaveLength(1);
+    expect(segments.length).toBeGreaterThan(1);
     expect(segments[0]).toMatchObject({
       segmentIndex: 0,
       segmentStartLineId: introSection.lines[0]!.id,
-      segmentEndLineId: thirdLine.id,
-      screenTemplateId: "screen-template-standard"
+      sectionId: introSection.id
     });
 
     const visual = segments[0];
-    if (visual?.kind !== "video" || visual.display.kind !== "video") {
+    if (
+      visual?.kind !== "video" ||
+      visual.display.kind !== "video" ||
+      visual.display.playbackState !== "playing"
+    ) {
       throw new Error("fixture visual must remain a video");
     }
+    expect(visual.display.playbackState).toBe("playing");
     expect(visual.display.sourceTrimBeforeFrame).toBe(0);
     expect(visual.display.sourceTrimAfterFrame).toBeGreaterThan(
       visual.display.sourceTrimBeforeFrame
@@ -481,7 +568,10 @@ describe("compileRenderManifest", () => {
     const visual = result.manifest.visuals.find(
       (candidate) => candidate.sourceAssignmentId === assignment.id
     );
-    if (visual?.display.kind !== "video") {
+    if (
+      visual?.display.kind !== "video" ||
+      visual.display.playbackState !== "playing"
+    ) {
       throw new Error("compiled visual must be a video");
     }
 
@@ -497,37 +587,58 @@ describe("compileRenderManifest", () => {
     const { videoSegments } = compileTemplateBoundaryVideoSegments(1);
     expect(videoSegments).toHaveLength(1);
 
-    const sourceStartFrame = videoSegments[0]!.display.sourceTrimBeforeFrame;
+    const firstDisplay = videoSegments[0]!.display;
+    if (firstDisplay.playbackState !== "playing") {
+      throw new Error("fixture video segment must be playing");
+    }
+    const sourceStartFrame = firstDisplay.sourceTrimBeforeFrame;
     expect(
-      videoSegments.map((segment) => segment.display.sourceTrimBeforeFrame)
+      videoSegments.map((segment) => {
+        if (segment.display.playbackState !== "playing") {
+          throw new Error("fixture video segment must be playing");
+        }
+        return segment.display.sourceTrimBeforeFrame;
+      })
     ).toEqual([sourceStartFrame]);
-    expect(videoSegments[0]!.display.sourceTrimAfterFrame).toBeGreaterThan(
-      sourceStartFrame
-    );
+    expect(firstDisplay.sourceTrimAfterFrame).toBeGreaterThan(sourceStartFrame);
     expect(videoSegments[0]!.display.startMs).toBe(0);
     expect(videoSegments[0]!.display.endMs).toBe(3_000);
   });
 
-  it("keeps one unsplit video segment at a non-1 playback rate", () => {
+  it("splits a non-1 playback-rate video at natural source end", () => {
     const { videoSegments } = compileTemplateBoundaryVideoSegments(1.25);
-    const sourceStartFrame = videoSegments[0]!.display.sourceTrimBeforeFrame;
+    const playingSegment = videoSegments.find(
+      (segment) => segment.display.playbackState === "playing"
+    );
+    const endedSegment = videoSegments.find(
+      (segment) => segment.display.playbackState === "ended"
+    );
 
-    expect(videoSegments).toHaveLength(1);
-    expect(videoSegments[0]!.display.sourceTrimBeforeFrame).toBe(
-      sourceStartFrame
-    );
-    expect(videoSegments[0]!.display.sourceTrimAfterFrame).toBeGreaterThan(
-      sourceStartFrame
-    );
-    expect(videoSegments[0]!.display.startMs).toBe(0);
-    expect(videoSegments[0]!.display.endMs).toBe(3_000);
+    expect(playingSegment).toBeDefined();
+    expect(endedSegment).toBeDefined();
+    if (
+      playingSegment?.display.playbackState !== "playing" ||
+      endedSegment?.display.playbackState !== "ended"
+    ) {
+      return;
+    }
+    expect(playingSegment.display.sourceTrimBeforeFrame).toBe(0);
+    expect(playingSegment.display.sourceTrimAfterFrame).toBeGreaterThan(0);
+    expect(endedSegment.display.sourceFrame).toBe(89);
+    expect(endedSegment.display.volume).toBe(0);
+    expect(playingSegment.display.startMs).toBe(0);
+    expect(playingSegment.display.endMs).toBe(3_000);
   });
 
   it("accepts a positive fractional source range below one frame", () => {
     const { videoSegments } = compileTemplateBoundaryVideoSegments(0.2);
+    const firstDisplay = videoSegments[0]!.display;
+    if (firstDisplay.playbackState !== "playing") {
+      throw new Error("fixture video segment must be playing");
+    }
 
-    expect(videoSegments[0]!.display.sourceTrimBeforeFrame).toBe(0);
-    expect(videoSegments[0]!.display.sourceTrimAfterFrame).toBeCloseTo(14.6);
+    expect(firstDisplay.sourceTrimBeforeFrame).toBe(0);
+    expect(firstDisplay.sourceTrimAfterFrame).toBeCloseTo(14.6);
     expect(videoSegments).toHaveLength(1);
     expect(videoSegments[0]!.display.startMs).toBe(0);
     expect(videoSegments[0]!.display.endMs).toBe(3_000);
@@ -581,7 +692,10 @@ describe("compileRenderManifest", () => {
     const visual = result.manifest.visuals.find(
       (candidate) => candidate.sourceAssignmentId === assignment.id
     );
-    if (visual?.display.kind !== "video") {
+    if (
+      visual?.display.kind !== "video" ||
+      visual.display.playbackState !== "playing"
+    ) {
       throw new Error("compiled visual must be a video");
     }
 
@@ -593,7 +707,7 @@ describe("compileRenderManifest", () => {
     expect(visual.display.sourceTrimAfterFrame).toBeCloseTo(4.4);
   });
 
-  it("bakes coordinate space, priority geometry, section titles, and freshness into 2.4.0", () => {
+  it("bakes coordinate space, priority geometry, section titles, and freshness into 2.5.0", () => {
     const legacy = compileRenderManifest(validInput());
     expect(legacy.success).toBe(true);
     if (!legacy.success) {
@@ -611,7 +725,7 @@ describe("compileRenderManifest", () => {
       height: expect.closeTo(0.62)
     });
     expect(
-      legacy.manifest.lines[0]!.resolvedLayout.elements.find(
+      legacy.manifest.sectionLayouts[0]!.resolvedLayout.elements.find(
         (element) =>
           element.type === "character-visual" && element.slot === "speaker-1"
       )?.transform.rect.width
