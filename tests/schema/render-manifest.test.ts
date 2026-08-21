@@ -228,7 +228,10 @@ describe("renderManifestSchema", () => {
   it("validates resolved video trim ranges independently of legacy milliseconds", () => {
     const validFractionalRange = clone(renderManifestFixture);
     const validDisplay = validFractionalRange.visuals[0]?.display;
-    if (validDisplay?.kind !== "video") {
+    if (
+      validDisplay?.kind !== "video" ||
+      validDisplay.playbackState !== "playing"
+    ) {
       throw new Error("fixture must contain a video display");
     }
     validDisplay.endMs = validDisplay.startMs;
@@ -240,7 +243,10 @@ describe("renderManifestSchema", () => {
 
     const invalidSourceRange = clone(renderManifestFixture);
     const invalidDisplay = invalidSourceRange.visuals[0]?.display;
-    if (invalidDisplay?.kind !== "video") {
+    if (
+      invalidDisplay?.kind !== "video" ||
+      invalidDisplay.playbackState !== "playing"
+    ) {
       throw new Error("fixture must contain a video display");
     }
     invalidDisplay.sourceTrimAfterFrame =

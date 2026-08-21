@@ -19,6 +19,7 @@ import {
 import {
   idSchema,
   relativePosixPathSchema,
+  renderManifestV24Schema,
   renderManifestSchema,
   sha256Schema,
   characterVisualCatalogSnapshotSchema,
@@ -30,10 +31,15 @@ import {
   type RenderCharacter,
   type RenderCharacterVariant,
   type RenderLine,
+  type RenderLineV24,
   type RenderManifest,
+  type RenderManifestV24,
+  type RenderManifestV25,
+  type RenderResolvedVideoDisplayV25,
   type RenderInsert,
   type RenderSoundEffect,
-  type RenderVisual,
+  type RenderVisualV24,
+  type RenderVisualV25,
   type ScreenTemplate,
   videoProjectSchema
 } from "../../schema/index.js";
@@ -55,8 +61,11 @@ import {
   mediaMillisecondsToFrames,
   presentationFramesToMediaPosition
 } from "../../media-frame.js";
+import { validateVisualPlaybackSequence } from "../../timeline/visual-playback.js";
+import type { VisualPlaybackCue } from "../../schema/visual-playback.js";
 
-export const RENDER_MANIFEST_VERSION = "2.4.0" as const;
+export const RENDER_MANIFEST_VERSION = "2.5.0" as const;
+export const RENDER_MANIFEST_V24_VERSION = "2.4.0" as const;
 
 export const renderManifestAssetMetadataSchema = z
   .object({
@@ -130,6 +139,8 @@ export const RENDER_MANIFEST_ERROR_CODE = {
   screenLayoutMissing: "RESOLVED_SCREEN_LAYOUT_MISSING",
   screenLayoutCharacterMissing: "RESOLVED_SCREEN_LAYOUT_CHARACTER_MISSING",
   visualPlaybackCuesUnsupported: "VISUAL_PLAYBACK_CUES_UNSUPPORTED",
+  visualPlaybackCueInvalid: "VISUAL_PLAYBACK_CUE_INVALID",
+  visualSourceRangeInvalid: "VISUAL_SOURCE_RANGE_INVALID",
   visualSegmentRangeInvalid: "VISUAL_SEGMENT_RANGE_INVALID",
   manifestSchema: "RENDER_MANIFEST_SCHEMA_INVALID"
 } as const;
@@ -190,10 +201,10 @@ export type RenderManifestCompilerInput = {
   readonly screenTemplates?: unknown;
 };
 
-export type RenderManifestCompileSuccess = {
+export type RenderManifestCompileSuccess<TManifest = RenderManifest> = {
   readonly success: true;
   readonly ok: true;
-  readonly manifest: RenderManifest;
+  readonly manifest: TManifest;
   readonly diagnostics: readonly [];
   readonly errors: readonly [];
   readonly warnings: readonly RenderManifestWarning[];
@@ -208,8 +219,8 @@ export type RenderManifestCompileFailure = {
   readonly warnings: readonly RenderManifestWarning[];
 };
 
-export type RenderManifestCompileResult =
-  RenderManifestCompileSuccess | RenderManifestCompileFailure;
+export type RenderManifestCompileResult<TManifest = RenderManifest> =
+  RenderManifestCompileSuccess<TManifest> | RenderManifestCompileFailure;
 
 type JsonValue =
   null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
@@ -1148,11 +1159,11 @@ function buildVisualSegments({
   characters,
   fps,
   diagnostics
-}: VisualSegmentBuildInput): RenderVisual[] {
+}: VisualSegmentBuildInput): RenderVisualV24[] {
   const assignmentById = new Map(
     project.visuals.assignments.map((assignment) => [assignment.id, assignment])
   );
-  const segments: Array<{ value: RenderVisual; inputIndex: number }> = [];
+  const segments: Array<{ value: RenderVisualV24; inputIndex: number }> = [];
 
   for (const [assignmentIndex, range] of visualRanges.entries()) {
     const assignment = assignmentById.get(range.id);
@@ -1298,7 +1309,7 @@ function buildVisualSegments({
         kind: assignment.display.kind,
         src: assignment.projectMediaPath,
         display
-      } as RenderVisual
+      } as RenderVisualV24
     });
   }
 
@@ -1424,7 +1435,225 @@ function orderedBackground(
   };
 }
 
-function orderedManifest(manifest: RenderManifest): RenderManifest {
+function orderedManifestV24(manifest: RenderManifestV24): RenderManifestV24 {
+  return {
+    manifestVersion: manifest.manifestVersion,
+    sourceProjectHash: manifest.sourceProjectHash,
+    compilerInputHash: manifest.compilerInputHash,
+    characterCatalogVersion: manifest.characterCatalogVersion,
+    characterMappingVersion: manifest.characterMappingVersion,
+    characters: manifest.characters.map((character): RenderCharacter => ({
+      characterId: character.characterId,
+      visualId: character.visualId,
+      displayName: character.displayName,
+      themeColorToken: character.themeColorToken,
+      lipSyncPeriodFrames: character.lipSyncPeriodFrames,
+      idleVariantId: character.idleVariantId
+    })),
+    characterVariants: manifest.characterVariants.map(
+      (variant): RenderCharacterVariant =>
+        variant.renderType === "single-image"
+          ? {
+              variantId: variant.variantId,
+              visualId: variant.visualId,
+              renderType: variant.renderType,
+              files: {
+                single: {
+                  path: variant.files.single.path,
+                  sha256: variant.files.single.sha256
+                }
+              }
+            }
+          : {
+              variantId: variant.variantId,
+              visualId: variant.visualId,
+              renderType: variant.renderType,
+              files: {
+                closed: {
+                  path: variant.files.closed.path,
+                  sha256: variant.files.closed.sha256
+                },
+                open: {
+                  path: variant.files.open.path,
+                  sha256: variant.files.open.sha256
+                }
+              }
+            }
+    ),
+    sourceAssetChecksums: manifest.sourceAssetChecksums.map((asset) => ({
+      path: asset.path,
+      sha256: asset.sha256
+    })),
+    fps: manifest.fps,
+    width: manifest.width,
+    height: manifest.height,
+    durationInFrames: manifest.durationInFrames,
+    sectionLayouts: manifest.sectionLayouts.map(
+      (layout): RenderSectionLayout => ({
+        sectionId: layout.sectionId,
+        sectionTitle: layout.sectionTitle,
+        templateId: layout.templateId,
+        templateRevision: layout.templateRevision,
+        templateHash: layout.templateHash,
+        resolvedLayout: orderedResolvedLayout(layout.resolvedLayout)
+      })
+    ),
+    lines: manifest.lines.map((line): RenderLineV24 => ({
+      id: line.id,
+      sectionId: line.sectionId,
+      from: line.from,
+      durationInFrames: line.durationInFrames,
+      speechFrom: line.speechFrom,
+      speechDurationInFrames: line.speechDurationInFrames,
+      audioPath: line.audioPath,
+      subtitleText: line.subtitleText,
+      speakerId: line.speakerId,
+      expression: line.expression,
+      characterVariantId: line.characterVariantId,
+      screenTemplateId: line.screenTemplateId,
+      templateRevision: line.templateRevision,
+      templateHash: line.templateHash,
+      resolvedLayout: orderedResolvedLayout(line.resolvedLayout)
+    })),
+    visuals: manifest.visuals.map((visual): RenderVisualV24 => {
+      if (visual.kind === "video") {
+        return {
+          id: visual.id,
+          sourceAssignmentId: visual.sourceAssignmentId,
+          segmentIndex: visual.segmentIndex,
+          segmentStartLineId: visual.segmentStartLineId,
+          segmentEndLineId: visual.segmentEndLineId,
+          screenTemplateId: visual.screenTemplateId,
+          templateRevision: visual.templateRevision,
+          templateHash: visual.templateHash,
+          from: visual.from,
+          durationInFrames: visual.durationInFrames,
+          src: visual.src,
+          kind: visual.kind,
+          display: orderedResolvedDisplay(visual.display) as Extract<
+            RenderVisualV24,
+            { kind: "video" }
+          >["display"]
+        };
+      }
+      if (visual.kind === "photo") {
+        return {
+          id: visual.id,
+          sourceAssignmentId: visual.sourceAssignmentId,
+          segmentIndex: visual.segmentIndex,
+          segmentStartLineId: visual.segmentStartLineId,
+          segmentEndLineId: visual.segmentEndLineId,
+          screenTemplateId: visual.screenTemplateId,
+          templateRevision: visual.templateRevision,
+          templateHash: visual.templateHash,
+          from: visual.from,
+          durationInFrames: visual.durationInFrames,
+          src: visual.src,
+          kind: visual.kind,
+          display: orderedResolvedDisplay(visual.display) as Extract<
+            RenderVisualV24,
+            { kind: "photo" }
+          >["display"]
+        };
+      }
+      return {
+        id: visual.id,
+        sourceAssignmentId: visual.sourceAssignmentId,
+        segmentIndex: visual.segmentIndex,
+        segmentStartLineId: visual.segmentStartLineId,
+        segmentEndLineId: visual.segmentEndLineId,
+        screenTemplateId: visual.screenTemplateId,
+        templateRevision: visual.templateRevision,
+        templateHash: visual.templateHash,
+        from: visual.from,
+        durationInFrames: visual.durationInFrames,
+        src: visual.src,
+        kind: visual.kind,
+        display: orderedResolvedDisplay(visual.display) as Extract<
+          RenderVisualV24,
+          { kind: "document_scan" }
+        >["display"]
+      };
+    }),
+    backgrounds: manifest.backgrounds.map((background): RenderBackground => ({
+      sectionId: background.sectionId,
+      from: background.from,
+      durationInFrames: background.durationInFrames,
+      background: orderedBackground(background.background)
+    })),
+    audioTracks: manifest.audioTracks.map((track) => ({
+      id: track.id,
+      sectionId: track.sectionId,
+      from: track.from,
+      durationInFrames: track.durationInFrames,
+      src: track.src,
+      volume: track.volume,
+      loop: track.loop
+    })),
+    soundEffects: manifest.soundEffects.map((effect): RenderSoundEffect => ({
+      id: effect.id,
+      lineId: effect.lineId,
+      category: effect.category,
+      from: effect.from,
+      durationInFrames: effect.durationInFrames,
+      src: effect.src,
+      volume: effect.volume
+    })),
+    inserts: manifest.inserts.map((insert): RenderInsert => ({
+      id: insert.id,
+      role: insert.role,
+      from: insert.from,
+      durationInFrames: insert.durationInFrames,
+      src: insert.src,
+      volume: insert.volume
+    }))
+  };
+}
+
+function orderedResolvedDisplayV25Video(
+  display: RenderResolvedVideoDisplayV25
+): RenderResolvedVideoDisplayV25 {
+  const common = {
+    kind: display.kind,
+    outerFrame: orderedScreenTransform(display.outerFrame),
+    contentClip: {
+      transform: orderedScreenTransform(display.contentClip.transform),
+      enabled: display.contentClip.enabled
+    },
+    fit: display.fit,
+    crop: display.crop,
+    annotations: display.annotations,
+    startMs: display.startMs,
+    endMs: display.endMs,
+    playbackRate: display.playbackRate,
+    volume: display.volume,
+    playbackCues: display.playbackCues
+  };
+  if (display.playbackState === "playing") {
+    return {
+      ...common,
+      playbackState: display.playbackState,
+      sourceTrimBeforeFrame: display.sourceTrimBeforeFrame,
+      sourceTrimAfterFrame: display.sourceTrimAfterFrame
+    };
+  }
+  if (display.playbackState === "paused") {
+    return {
+      ...common,
+      volume: 0,
+      playbackState: "paused",
+      sourceFrame: display.sourceFrame
+    };
+  }
+  return {
+    ...common,
+    volume: 0,
+    playbackState: "ended",
+    sourceFrame: display.sourceFrame
+  };
+}
+
+function orderedManifest(manifest: RenderManifestV25): RenderManifestV25 {
   return {
     manifestVersion: manifest.manifestVersion,
     sourceProjectHash: manifest.sourceProjectHash,
@@ -1498,71 +1727,67 @@ function orderedManifest(manifest: RenderManifest): RenderManifest {
       subtitleText: line.subtitleText,
       speakerId: line.speakerId,
       expression: line.expression,
-      characterVariantId: line.characterVariantId,
-      screenTemplateId: line.screenTemplateId,
-      templateRevision: line.templateRevision,
-      templateHash: line.templateHash,
-      resolvedLayout: orderedResolvedLayout(line.resolvedLayout)
+      characterVariantId: line.characterVariantId
     })),
-    visuals: manifest.visuals.map((visual): RenderVisual => {
-      if (visual.kind === "video") {
-        return {
-          id: visual.id,
-          sourceAssignmentId: visual.sourceAssignmentId,
-          segmentIndex: visual.segmentIndex,
-          segmentStartLineId: visual.segmentStartLineId,
-          segmentEndLineId: visual.segmentEndLineId,
-          screenTemplateId: visual.screenTemplateId,
-          templateRevision: visual.templateRevision,
-          templateHash: visual.templateHash,
-          from: visual.from,
-          durationInFrames: visual.durationInFrames,
-          src: visual.src,
-          kind: visual.kind,
-          display: orderedResolvedDisplay(visual.display) as Extract<
-            RenderVisual,
-            { kind: "video" }
-          >["display"]
-        };
-      }
-      if (visual.kind === "photo") {
-        return {
-          id: visual.id,
-          sourceAssignmentId: visual.sourceAssignmentId,
-          segmentIndex: visual.segmentIndex,
-          segmentStartLineId: visual.segmentStartLineId,
-          segmentEndLineId: visual.segmentEndLineId,
-          screenTemplateId: visual.screenTemplateId,
-          templateRevision: visual.templateRevision,
-          templateHash: visual.templateHash,
-          from: visual.from,
-          durationInFrames: visual.durationInFrames,
-          src: visual.src,
-          kind: visual.kind,
-          display: orderedResolvedDisplay(visual.display) as Extract<
-            RenderVisual,
-            { kind: "photo" }
-          >["display"]
-        };
-      }
-      return {
+    visuals: manifest.visuals.map((visual): RenderVisualV25 => {
+      const common = {
         id: visual.id,
         sourceAssignmentId: visual.sourceAssignmentId,
         segmentIndex: visual.segmentIndex,
         segmentStartLineId: visual.segmentStartLineId,
         segmentEndLineId: visual.segmentEndLineId,
-        screenTemplateId: visual.screenTemplateId,
+        sectionId: visual.sectionId,
         templateRevision: visual.templateRevision,
         templateHash: visual.templateHash,
         from: visual.from,
         durationInFrames: visual.durationInFrames,
         src: visual.src,
-        kind: visual.kind,
-        display: orderedResolvedDisplay(visual.display) as Extract<
-          RenderVisual,
-          { kind: "document_scan" }
-        >["display"]
+        kind: visual.kind
       };
+      if (visual.kind === "video") {
+        return {
+          ...common,
+          kind: visual.kind,
+          display: orderedResolvedDisplayV25Video(visual.display)
+        } as RenderVisualV25;
+      }
+      if (visual.kind === "photo") {
+        return {
+          ...common,
+          kind: visual.kind,
+          display: {
+            kind: visual.display.kind,
+            outerFrame: orderedScreenTransform(visual.display.outerFrame),
+            contentClip: {
+              transform: orderedScreenTransform(
+                visual.display.contentClip.transform
+              ),
+              enabled: visual.display.contentClip.enabled
+            },
+            fit: visual.display.fit,
+            crop: visual.display.crop,
+            annotations: visual.display.annotations
+          }
+        } as RenderVisualV25;
+      }
+      return {
+        ...common,
+        kind: visual.kind,
+        display: {
+          kind: visual.display.kind,
+          outerFrame: orderedScreenTransform(visual.display.outerFrame),
+          contentClip: {
+            transform: orderedScreenTransform(
+              visual.display.contentClip.transform
+            ),
+            enabled: visual.display.contentClip.enabled
+          },
+          fit: visual.display.fit,
+          crop: visual.display.crop,
+          annotations: visual.display.annotations,
+          page: visual.display.page
+        }
+      } as RenderVisualV25;
     }),
     backgrounds: manifest.backgrounds.map((background): RenderBackground => ({
       sectionId: background.sectionId,
@@ -1604,6 +1829,11 @@ export function serializeRenderManifest(manifest: unknown): string {
   return `${JSON.stringify(orderedManifest(parsed), null, 2)}\n`;
 }
 
+export function serializeRenderManifestV24(manifest: unknown): string {
+  const parsed = renderManifestV24Schema.parse(manifest);
+  return `${JSON.stringify(orderedManifestV24(parsed), null, 2)}\n`;
+}
+
 function failure(
   diagnostics: readonly RenderManifestDiagnostic[],
   warnings: readonly RenderManifestWarning[] = []
@@ -1626,14 +1856,14 @@ function failure(
   };
 }
 
-function success(
-  manifest: RenderManifest,
+function successV24(
+  manifest: RenderManifestV24,
   warnings: readonly RenderManifestWarning[]
-): RenderManifestCompileSuccess {
+): RenderManifestCompileSuccess<RenderManifestV24> {
   return {
     success: true,
     ok: true,
-    manifest: orderedManifest(manifest),
+    manifest: orderedManifestV24(manifest),
     diagnostics: [],
     errors: [],
     warnings: warnings.map((warning) => ({
@@ -1644,9 +1874,9 @@ function success(
   };
 }
 
-export function compileRenderManifest(
+export function compileRenderManifestV24(
   input: RenderManifestCompilerInput
-): RenderManifestCompileResult {
+): RenderManifestCompileResult<RenderManifestV24> {
   const diagnostics: RenderManifestDiagnostic[] = [];
   const projectRaw = input.project ?? input.videoProject;
   const audioRaw = input.audioIndex ?? input.audio;
@@ -2512,7 +2742,7 @@ export function compileRenderManifest(
       };
     }
   );
-  const renderLines: RenderLine[] = lineEntries.map((entry) => {
+  const renderLines: RenderLineV24[] = lineEntries.map((entry) => {
     const baseRange = lineRangeById.get(entry.line.id);
     if (baseRange === undefined) {
       throw new Error(`line range is missing: ${entry.line.id}`);
@@ -2744,7 +2974,7 @@ export function compileRenderManifest(
       )
   );
   const manifest = {
-    manifestVersion: RENDER_MANIFEST_VERSION,
+    manifestVersion: RENDER_MANIFEST_V24_VERSION,
     sourceProjectHash,
     compilerInputHash,
     characterCatalogVersion,
@@ -2764,7 +2994,7 @@ export function compileRenderManifest(
     soundEffects: renderSoundEffects,
     inserts: renderInserts
   };
-  const manifestResult = renderManifestSchema.safeParse(manifest);
+  const manifestResult = renderManifestV24Schema.safeParse(manifest);
   if (!manifestResult.success) {
     addZodDiagnostics(
       diagnostics,
@@ -2777,7 +3007,544 @@ export function compileRenderManifest(
   if (diagnostics.length > 0) {
     return failure(diagnostics, warnings);
   }
-  return success(manifestResult.data, warnings);
+  return successV24(manifestResult.data, warnings);
+}
+
+type V25PlaybackState = "playing" | "paused" | "ended";
+
+type PlaybackFrameSample = Readonly<{
+  readonly frame: number;
+  readonly state: V25PlaybackState;
+  readonly sourceFrame: number;
+}>;
+
+function playbackScriptForProject(project: z.infer<typeof videoProjectSchema>) {
+  return {
+    sections: project.script.sections.map((section) => ({
+      id: section.id,
+      lines: section.lines.map((line) => ({ id: line.id }))
+    }))
+  };
+}
+
+function v25SectionLayouts(
+  project: z.infer<typeof videoProjectSchema>,
+  baseManifest: RenderManifestV24
+): RenderSectionLayout[] {
+  const lineEntries = project.script.sections.flatMap((section) =>
+    section.lines.map((line, lineIndex) => ({
+      sectionId: section.id,
+      lineId: line.id,
+      lineIndex
+    }))
+  );
+  const entryByLineId = new Map(
+    lineEntries.map((entry) => [entry.lineId, entry])
+  );
+  const prioritizedLineIds = new Set<string>();
+
+  for (const assignment of project.visuals.assignments) {
+    if (!assignment.display.prioritizeVisual) {
+      continue;
+    }
+    const start = entryByLineId.get(assignment.startLineId);
+    const end = entryByLineId.get(assignment.endLineId);
+    if (
+      start === undefined ||
+      end === undefined ||
+      start.sectionId !== end.sectionId
+    ) {
+      continue;
+    }
+    for (const entry of lineEntries) {
+      if (
+        entry.sectionId === start.sectionId &&
+        entry.lineIndex >= start.lineIndex &&
+        entry.lineIndex <= end.lineIndex
+      ) {
+        prioritizedLineIds.add(entry.lineId);
+      }
+    }
+  }
+
+  return baseManifest.sectionLayouts.map((layout) => {
+    const prioritizedLine = baseManifest.lines.find(
+      (line) =>
+        line.sectionId === layout.sectionId && prioritizedLineIds.has(line.id)
+    );
+    return prioritizedLine === undefined
+      ? layout
+      : { ...layout, resolvedLayout: prioritizedLine.resolvedLayout };
+  });
+}
+
+function projectWithoutPlaybackCues(
+  project: z.infer<typeof videoProjectSchema>
+): z.infer<typeof videoProjectSchema> {
+  return {
+    ...project,
+    visuals: {
+      ...project.visuals,
+      assignments: project.visuals.assignments.map((assignment) => ({
+        ...assignment,
+        display:
+          assignment.display.kind === "video"
+            ? { ...assignment.display, playbackCues: [] }
+            : assignment.display
+      }))
+    }
+  };
+}
+
+function validateV25PlaybackCues(
+  project: z.infer<typeof videoProjectSchema>,
+  diagnostics: RenderManifestDiagnostic[]
+): boolean {
+  const script = playbackScriptForProject(project);
+  let valid = true;
+  for (const [
+    assignmentIndex,
+    assignment
+  ] of project.visuals.assignments.entries()) {
+    const result = validateVisualPlaybackSequence(assignment, script);
+    if (result.success) {
+      continue;
+    }
+    valid = false;
+    for (const issue of result.issues) {
+      addDiagnostic(
+        diagnostics,
+        RENDER_MANIFEST_ERROR_CODE.visualPlaybackCueInvalid,
+        ["visuals", "assignments", assignmentIndex, ...issue.path],
+        issue.message,
+        {
+          assignmentId: assignment.id,
+          sectionId: project.script.sections.find((section) =>
+            section.lines.some((line) => line.id === assignment.startLineId)
+          )?.id
+        }
+      );
+    }
+  }
+  return valid;
+}
+
+function cueFrame(
+  cue: VisualPlaybackCue,
+  lineById: ReadonlyMap<string, RenderLineV24>
+): number | undefined {
+  const line = lineById.get(cue.lineId);
+  if (line === undefined) {
+    return undefined;
+  }
+  return cue.edge === "before" ? line.from : line.from + line.durationInFrames;
+}
+
+function lineAtFrame(
+  lines: readonly RenderLineV24[],
+  frame: number
+): RenderLineV24 | undefined {
+  return lines.find(
+    (line) => frame >= line.from && frame < line.from + line.durationInFrames
+  );
+}
+
+function buildV25VideoSegments(
+  assignment: z.infer<
+    typeof videoProjectSchema
+  >["visuals"]["assignments"][number],
+  baseVisual: Extract<RenderVisualV24, { kind: "video" }>,
+  baseLines: readonly RenderLineV24[],
+  script: ReturnType<typeof playbackScriptForProject>,
+  fps: number,
+  assignmentIndex: number,
+  baseCompilerInputHash: string,
+  diagnostics: RenderManifestDiagnostic[]
+): RenderVisualV25[] {
+  const validation = validateVisualPlaybackSequence(assignment, script);
+  if (!validation.success) {
+    return [];
+  }
+
+  const display = baseVisual.display;
+  const sourceStartFrame = mediaMillisecondsToFrames(display.startMs, fps);
+  const sourceEndFrame = mediaMillisecondsToFrames(display.endMs, fps);
+  if (sourceEndFrame <= sourceStartFrame) {
+    addDiagnostic(
+      diagnostics,
+      RENDER_MANIFEST_ERROR_CODE.visualSourceRangeInvalid,
+      ["visuals", "assignments", assignmentIndex, "display"],
+      "video source range must contain at least one source frame",
+      {
+        assignmentId: assignment.id,
+        assetPath: assignment.projectMediaPath
+      }
+    );
+    return [];
+  }
+
+  const lineById = new Map(baseLines.map((line) => [line.id, line]));
+  const cuesByFrame = new Map<number, VisualPlaybackCue[]>();
+  for (const cue of validation.orderedCues) {
+    const frame = cueFrame(cue, lineById);
+    if (frame === undefined) {
+      continue;
+    }
+    const cues = cuesByFrame.get(frame) ?? [];
+    cues.push(cue);
+    cuesByFrame.set(frame, cues);
+  }
+
+  const samples: PlaybackFrameSample[] = [];
+  let state: V25PlaybackState = "playing";
+  let sourceFrame = sourceStartFrame;
+  const from = baseVisual.from;
+  const to = baseVisual.from + baseVisual.durationInFrames;
+  let ended = false;
+
+  for (let frame = from; frame < to; frame += 1) {
+    const cues = cuesByFrame.get(frame) ?? [];
+    if (!ended && sourceFrame >= sourceEndFrame) {
+      ended = true;
+      state = "ended";
+    }
+
+    if (ended) {
+      if (cues.length > 0) {
+        addDiagnostic(
+          diagnostics,
+          RENDER_MANIFEST_ERROR_CODE.visualPlaybackCueInvalid,
+          [
+            "visuals",
+            "assignments",
+            assignmentIndex,
+            "display",
+            "playbackCues"
+          ],
+          "playback cue is invalid after the video source has ended",
+          {
+            assignmentId: assignment.id,
+            assetPath: assignment.projectMediaPath
+          }
+        );
+      }
+    } else {
+      for (const cue of cues) {
+        state = cue.action === "pause" ? "paused" : "playing";
+      }
+    }
+
+    samples.push({ frame, state, sourceFrame });
+    if (state === "playing") {
+      sourceFrame += display.playbackRate;
+    }
+  }
+
+  const endCues = cuesByFrame.get(to) ?? [];
+  if (endCues.length > 0 && sourceFrame >= sourceEndFrame) {
+    addDiagnostic(
+      diagnostics,
+      RENDER_MANIFEST_ERROR_CODE.visualPlaybackCueInvalid,
+      ["visuals", "assignments", assignmentIndex, "display", "playbackCues"],
+      "playback cue is invalid after the video source has ended",
+      {
+        assignmentId: assignment.id,
+        assetPath: assignment.projectMediaPath
+      }
+    );
+  }
+
+  if (samples.length === 0) {
+    return [];
+  }
+
+  const segments: RenderVisualV25[] = [];
+  let runStart = 0;
+  for (let index = 1; index <= samples.length; index += 1) {
+    const previous = samples[index - 1];
+    const next = samples[index];
+    if (next !== undefined && next.state === previous.state) {
+      continue;
+    }
+
+    const runSamples = samples.slice(runStart, index);
+    const runFrom = runSamples[0]!.frame;
+    const runTo = runSamples.at(-1)!.frame + 1;
+    const startLine = lineAtFrame(baseLines, runFrom) ?? baseLines[0];
+    const endLine = lineAtFrame(baseLines, runTo - 1) ?? baseLines.at(-1);
+    if (startLine === undefined || endLine === undefined) {
+      addDiagnostic(
+        diagnostics,
+        RENDER_MANIFEST_ERROR_CODE.visualSegmentRangeInvalid,
+        ["visuals", "assignments", assignmentIndex],
+        "resolved video segment line range is missing",
+        { assignmentId: assignment.id, assetPath: assignment.projectMediaPath }
+      );
+      runStart = index;
+      continue;
+    }
+
+    const playbackState = previous.state;
+    const firstSourceFrame = runSamples[0]!.sourceFrame;
+    const baseDisplay = {
+      kind: "video" as const,
+      outerFrame: display.outerFrame,
+      contentClip: display.contentClip,
+      fit: display.fit,
+      crop: display.crop,
+      annotations: display.annotations,
+      startMs: display.startMs,
+      endMs: display.endMs,
+      playbackRate: display.playbackRate,
+      playbackCues: [...validation.orderedCues]
+    };
+    const resolvedDisplay: Extract<
+      RenderVisualV25,
+      { kind: "video" }
+    >["display"] =
+      playbackState === "playing"
+        ? {
+            ...baseDisplay,
+            volume: display.volume,
+            playbackState: "playing",
+            sourceTrimBeforeFrame: firstSourceFrame,
+            sourceTrimAfterFrame: Math.min(
+              sourceEndFrame,
+              firstSourceFrame + runSamples.length * display.playbackRate
+            )
+          }
+        : playbackState === "paused"
+          ? {
+              ...baseDisplay,
+              volume: 0,
+              playbackState: "paused",
+              sourceFrame: firstSourceFrame
+            }
+          : {
+              ...baseDisplay,
+              volume: 0,
+              playbackState: "ended",
+              sourceFrame: sourceEndFrame - 1
+            };
+    const segmentIndex = segments.length;
+    const segmentIdentity =
+      resolvedDisplay.playbackState === "playing"
+        ? {
+            manifestVersion: RENDER_MANIFEST_VERSION,
+            baseCompilerInputHash,
+            sourceAssignmentId: assignment.id,
+            segmentIndex,
+            from: runFrom,
+            durationInFrames: runTo - runFrom,
+            segmentStartLineId: startLine.id,
+            segmentEndLineId: endLine.id,
+            sectionId: startLine.sectionId,
+            playbackState: resolvedDisplay.playbackState,
+            playbackCues: validation.orderedCues,
+            sourceStartFrame,
+            sourceEndFrame,
+            sourceTrimBeforeFrame: resolvedDisplay.sourceTrimBeforeFrame,
+            sourceTrimAfterFrame: resolvedDisplay.sourceTrimAfterFrame
+          }
+        : {
+            manifestVersion: RENDER_MANIFEST_VERSION,
+            baseCompilerInputHash,
+            sourceAssignmentId: assignment.id,
+            segmentIndex,
+            from: runFrom,
+            durationInFrames: runTo - runFrom,
+            segmentStartLineId: startLine.id,
+            segmentEndLineId: endLine.id,
+            sectionId: startLine.sectionId,
+            playbackState: resolvedDisplay.playbackState,
+            playbackCues: validation.orderedCues,
+            sourceStartFrame,
+            sourceEndFrame,
+            sourceFrame: resolvedDisplay.sourceFrame
+          };
+    segments.push({
+      id: `visual-${sha256CanonicalJson(segmentIdentity)}`,
+      sourceAssignmentId: assignment.id,
+      segmentIndex,
+      segmentStartLineId: startLine.id,
+      segmentEndLineId: endLine.id,
+      sectionId: startLine.sectionId,
+      templateRevision: baseVisual.templateRevision,
+      templateHash: baseVisual.templateHash,
+      from: runFrom,
+      durationInFrames: runTo - runFrom,
+      src: baseVisual.src,
+      kind: "video",
+      display: resolvedDisplay
+    } as RenderVisualV25);
+    runStart = index;
+  }
+  return segments;
+}
+
+function toV25Visual(
+  assignment: z.infer<
+    typeof videoProjectSchema
+  >["visuals"]["assignments"][number],
+  baseVisual: RenderVisualV24,
+  baseLines: readonly RenderLineV24[],
+  script: ReturnType<typeof playbackScriptForProject>,
+  fps: number,
+  assignmentIndex: number,
+  baseCompilerInputHash: string,
+  diagnostics: RenderManifestDiagnostic[]
+): RenderVisualV25[] {
+  if (baseVisual.kind === "video") {
+    return buildV25VideoSegments(
+      assignment,
+      baseVisual,
+      baseLines,
+      script,
+      fps,
+      assignmentIndex,
+      baseCompilerInputHash,
+      diagnostics
+    );
+  }
+  const startLine = baseLines.find(
+    (line) => line.id === baseVisual.segmentStartLineId
+  );
+  return [
+    {
+      id: baseVisual.id,
+      sourceAssignmentId: baseVisual.sourceAssignmentId,
+      segmentIndex: baseVisual.segmentIndex,
+      segmentStartLineId: baseVisual.segmentStartLineId,
+      segmentEndLineId: baseVisual.segmentEndLineId,
+      sectionId: startLine?.sectionId ?? assignment.startLineId,
+      templateRevision: baseVisual.templateRevision,
+      templateHash: baseVisual.templateHash,
+      from: baseVisual.from,
+      durationInFrames: baseVisual.durationInFrames,
+      src: baseVisual.src,
+      kind: baseVisual.kind,
+      display: baseVisual.display
+    } as RenderVisualV25
+  ];
+}
+
+function successV25(
+  manifest: RenderManifestV25,
+  warnings: readonly RenderManifestWarning[]
+): RenderManifestCompileSuccess<RenderManifestV25> {
+  return {
+    success: true,
+    ok: true,
+    manifest: orderedManifest(manifest),
+    diagnostics: [],
+    errors: [],
+    warnings: warnings.map((warning) => ({
+      ...warning,
+      soundEffectIds: [...warning.soundEffectIds],
+      lineIds: [...warning.lineIds]
+    }))
+  };
+}
+
+export function compileRenderManifest(
+  input: RenderManifestCompilerInput
+): RenderManifestCompileResult<RenderManifestV25> {
+  const projectResult = videoProjectSchema.safeParse(
+    input.project ?? input.videoProject
+  );
+  if (!projectResult.success) {
+    return compileRenderManifestV24(
+      input
+    ) as RenderManifestCompileResult<RenderManifestV25>;
+  }
+
+  const diagnostics: RenderManifestDiagnostic[] = [];
+  if (!validateV25PlaybackCues(projectResult.data, diagnostics)) {
+    return failure(diagnostics);
+  }
+
+  const baseResult = compileRenderManifestV24({
+    ...input,
+    project: projectWithoutPlaybackCues(projectResult.data)
+  });
+  if (!baseResult.success) {
+    return baseResult as RenderManifestCompileResult<RenderManifestV25>;
+  }
+
+  const baseManifest = baseResult.manifest;
+  const sectionLayouts = v25SectionLayouts(projectResult.data, baseManifest);
+  const playbackScript = playbackScriptForProject(projectResult.data);
+  const assignmentById = new Map(
+    projectResult.data.visuals.assignments.map((assignment) => [
+      assignment.id,
+      assignment
+    ])
+  );
+  const visualValues = baseManifest.visuals.flatMap((baseVisual) => {
+    const assignment = assignmentById.get(baseVisual.sourceAssignmentId);
+    if (assignment === undefined) {
+      return [];
+    }
+    return toV25Visual(
+      assignment,
+      baseVisual,
+      baseManifest.lines,
+      playbackScript,
+      baseManifest.fps,
+      projectResult.data.visuals.assignments.findIndex(
+        (candidate) => candidate.id === assignment.id
+      ),
+      baseManifest.compilerInputHash,
+      diagnostics
+    );
+  });
+
+  if (diagnostics.length > 0) {
+    return failure(diagnostics, baseResult.warnings);
+  }
+
+  const lines: RenderLine[] = baseManifest.lines.map((line) => ({
+    id: line.id,
+    sectionId: line.sectionId,
+    from: line.from,
+    durationInFrames: line.durationInFrames,
+    speechFrom: line.speechFrom,
+    speechDurationInFrames: line.speechDurationInFrames,
+    audioPath: line.audioPath,
+    subtitleText: line.subtitleText,
+    speakerId: line.speakerId,
+    expression: line.expression,
+    characterVariantId: line.characterVariantId
+  }));
+  const sourceProjectHash = sha256CanonicalJson(projectResult.data);
+  const compilerInputHash = sha256CanonicalJson({
+    manifestVersion: RENDER_MANIFEST_VERSION,
+    baseCompilerInputHash: baseManifest.compilerInputHash,
+    sourceProjectHash,
+    sectionLayouts,
+    project: projectResult.data,
+    visualSegments: visualValues
+  });
+  const manifest = {
+    ...baseManifest,
+    manifestVersion: RENDER_MANIFEST_VERSION,
+    sourceProjectHash,
+    compilerInputHash,
+    sectionLayouts,
+    lines,
+    visuals: visualValues
+  } satisfies RenderManifestV25;
+  const manifestResult = renderManifestSchema.safeParse(manifest);
+  if (!manifestResult.success) {
+    addZodDiagnostics(
+      diagnostics,
+      RENDER_MANIFEST_ERROR_CODE.manifestSchema,
+      manifestResult.error,
+      []
+    );
+    return failure(diagnostics, baseResult.warnings);
+  }
+  return successV25(manifestResult.data, baseResult.warnings);
 }
 
 export class RenderManifestCompiler {

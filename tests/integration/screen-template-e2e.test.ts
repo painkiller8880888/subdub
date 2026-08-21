@@ -6,6 +6,7 @@ import { migrateVideoProjectWithDiagnostics } from "../../src/app/projects/video
 import { validateVideoProjectScreenTemplateReferences } from "../../src/app/projects/screen-template-selection.js";
 import {
   compileRenderManifest,
+  compileRenderManifestV24,
   type RenderManifestCompilerInput
 } from "../../src/app/rendering/render-manifest-compiler.js";
 import { screenTemplateContentHash } from "../../src/app/screen-templates/screen-template-hash.js";
@@ -131,6 +132,16 @@ function compileRepresentativeProject(
     screenTemplateCatalogSnapshot: templates
   });
   return compileRenderManifest(input);
+}
+
+function compileRepresentativeProjectV24(
+  project: VideoProject = createScreenTemplateProjectFixture(),
+  templates: readonly ScreenTemplate[] = createStandardAndAlternateTemplateSnapshot()
+) {
+  const input = createRenderManifestInput(project, {
+    screenTemplateCatalogSnapshot: templates
+  });
+  return compileRenderManifestV24(input);
 }
 
 describe("ScreenTemplate cross-layer acceptance fixture", () => {
@@ -439,7 +450,7 @@ describe("ScreenTemplate cross-layer acceptance fixture", () => {
 
   it("compiles one v2.4 manifest for web and MP4 geometry across template boundaries", () => {
     const project = createScreenTemplateProjectFixture();
-    const result = compileRepresentativeProject(project);
+    const result = compileRepresentativeProjectV24(project);
     expect(result.success).toBe(true);
     if (!result.success) {
       return;
@@ -519,7 +530,7 @@ describe("ScreenTemplate cross-layer acceptance fixture", () => {
     });
     expect(screenTemplateValidationReport(overflowTemplate).errors).toEqual([]);
 
-    const result = compileRepresentativeProject(project, [
+    const result = compileRepresentativeProjectV24(project, [
       standard,
       overflowTemplate
     ]);

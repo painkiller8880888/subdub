@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 
-import { Img, OffthreadVideo, useCurrentFrame } from "remotion";
+import { Freeze, Img, OffthreadVideo } from "remotion";
 
 import type { RenderVisual } from "../schema/index";
 import {
@@ -20,22 +20,36 @@ export function VideoVisual({
   visual: RenderVideo;
   assetUrlResolver?: ManifestAssetUrlResolver;
 }): ReactNode {
-  useCurrentFrame();
-  return (
-    <MediaFrame display={visual.display}>
+  const playback = visual.display;
+  const video =
+    playback.playbackState === "playing" ? (
       <OffthreadVideo
         src={resolveManifestAssetUrl(visual.src, assetUrlResolver)}
-        trimBefore={visual.display.sourceTrimBeforeFrame}
-        trimAfter={visual.display.sourceTrimAfterFrame}
-        playbackRate={visual.display.playbackRate}
-        volume={visual.display.volume}
+        trimBefore={playback.sourceTrimBeforeFrame}
+        trimAfter={playback.sourceTrimAfterFrame}
+        playbackRate={playback.playbackRate}
+        volume={playback.volume}
         style={{
           ...mediaAssetStyle,
-          objectFit: visual.display.fit
+          objectFit: playback.fit
         }}
       />
-    </MediaFrame>
-  );
+    ) : (
+      <Freeze frame={0}>
+        <OffthreadVideo
+          src={resolveManifestAssetUrl(visual.src, assetUrlResolver)}
+          trimBefore={playback.sourceFrame}
+          trimAfter={playback.sourceFrame + 1}
+          playbackRate={1}
+          volume={0}
+          style={{
+            ...mediaAssetStyle,
+            objectFit: playback.fit
+          }}
+        />
+      </Freeze>
+    );
+  return <MediaFrame display={visual.display}>{video}</MediaFrame>;
 }
 
 export function PhotoVisual({

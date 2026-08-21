@@ -69,7 +69,9 @@ export function selectActiveScreenLayout(
 ): ResolvedScreenLayout | undefined {
   const line = lines[0];
   if (line !== undefined) {
-    return line.resolvedLayout;
+    return manifest.sectionLayouts.find(
+      (layout) => layout.sectionId === line.sectionId
+    )?.resolvedLayout;
   }
   const background = selectActiveBackground(manifest, frame);
   return manifest.sectionLayouts.find(
