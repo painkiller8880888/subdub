@@ -296,8 +296,12 @@ export class AssetProcessingService {
         await this.fileStore.removeBestEffort(versionRecord.libraryMediaPath);
       }
       const processingError = toProcessingError(error);
-      await this.recordFailure(assetId, version, processingError);
-      if (versionRecord.stagingPath !== null) {
+      const failureRecorded = await this.recordFailure(
+        assetId,
+        version,
+        processingError
+      );
+      if (failureRecorded && versionRecord.stagingPath !== null) {
         await this.fileStore.removeBestEffort(versionRecord.stagingPath);
       }
       return { status: "failed" };
@@ -312,20 +316,24 @@ export class AssetProcessingService {
     assetId: string,
     version: number,
     error: AssetProcessingError
-  ): Promise<void> {
+  ): Promise<boolean> {
     try {
-      this.repository.markProcessingFailed({
-        assetId,
-        version,
-        errorCode: error.code,
-        errorMessage: error.message,
-        updatedAt: this.now().toISOString()
-      });
+      this.repository.transaction((repository) =>
+        repository.markProcessingFailed({
+          assetId,
+          version,
+          errorCode: error.code,
+          errorMessage: error.message,
+          updatedAt: this.now().toISOString()
+        })
+      );
+      return true;
     } catch (recordError) {
       console.error(
         `failed to persist processing failure for asset ${assetId}`,
         recordError
       );
+      return false;
     }
   }
 }

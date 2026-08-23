@@ -302,6 +302,60 @@ describe("asset processing service", () => {
     ).toBeUndefined();
   });
 
+  it("rolls back both initial failure updates when the asset update fails", async () => {
+    await createService({
+      video: new AssetProcessingError("PROCESSING_METADATA_FAILED")
+    });
+    await registerProcessingAsset(
+      "asset-failure-rollback",
+      "video",
+      "clip.mp4",
+      "mp4"
+    );
+    db!.connection
+      .prepare(
+        `
+        CREATE TRIGGER fail_initial_asset_error_update
+        BEFORE UPDATE OF status ON assets
+        WHEN OLD.asset_id = 'asset-failure-rollback'
+          AND NEW.status = 'error'
+        BEGIN
+          SELECT RAISE(ABORT, 'injected asset update failure');
+        END;
+      `
+      )
+      .run();
+    const consoleError = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
+
+    try {
+      await expect(
+        service.processAsset("asset-failure-rollback", 1)
+      ).resolves.toEqual({ status: "failed" });
+
+      expect(repository.findAsset("asset-failure-rollback")).toMatchObject({
+        status: "processing",
+        currentVersion: null,
+        errorCode: null
+      });
+      expect(
+        repository.findAssetVersion("asset-failure-rollback", 1)
+      ).toMatchObject({
+        status: "processing",
+        errorCode: null,
+        errorMessage: null
+      });
+      expect(repository.findProcessingAssetKeys()).toContainEqual({
+        assetId: "asset-failure-rollback",
+        version: 1
+      });
+      expect(consoleError).toHaveBeenCalled();
+    } finally {
+      consoleError.mockRestore();
+    }
+  });
+
   it("maps a missing media file to PROCESSING_MEDIA_NOT_FOUND", async () => {
     await createService({
       video: processed(

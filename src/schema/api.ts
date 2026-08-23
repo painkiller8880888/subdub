@@ -41,7 +41,6 @@ import {
   assetKindSchema,
   assetStatusSchema,
   assetTagDictionaryEntrySchema,
-  assetTagStatusSchema,
   assetReplacementReceiptSchema,
   assetUploadReceiptSchema,
   normalizeAssetOptionalField,
@@ -1084,7 +1083,7 @@ export const assetReplacementResponseSchema = strictObject({
 });
 
 export const assetTagDictionaryQuerySchema = strictObject({
-  status: assetTagStatusSchema.optional().default("active")
+  status: z.literal("active").optional().default("active")
 });
 
 export const assetTagDictionaryResponseSchema = strictObject({

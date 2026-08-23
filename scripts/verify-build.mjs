@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -9,6 +9,14 @@ const workspaceRoot = await mkdtemp(
   path.join(tmpdir(), "subdub-build-verify-")
 );
 const staticRoot = fileURLToPath(new URL("../dist/web/", import.meta.url));
+const migrationJournal = JSON.parse(
+  await readFile(
+    new URL("../dist/db/migrations/meta/_journal.json", import.meta.url),
+    "utf8"
+  )
+);
+assert.ok(Array.isArray(migrationJournal.entries));
+const expectedMigrationCount = migrationJournal.entries.length;
 
 try {
   const first = await initializeServer({ workspaceRoot, staticRoot });
@@ -16,7 +24,7 @@ try {
     .prepare("SELECT hash, created_at FROM __drizzle_migrations")
     .all();
 
-  assert.equal(firstHistory.length, 12);
+  assert.equal(firstHistory.length, expectedMigrationCount);
   assert.equal(first.database.connection.open, true);
 
   const projectsPage = await first.app.inject({

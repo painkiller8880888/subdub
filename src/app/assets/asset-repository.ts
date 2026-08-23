@@ -1040,7 +1040,7 @@ export class AssetRepository {
         )
         .run();
       if (version.baseCurrentVersion === null) {
-        this.database
+        const result = this.database
           .update(assets)
           .set({
             status: "error",
@@ -1057,6 +1057,9 @@ export class AssetRepository {
             )
           )
           .run();
+        if ((result.changes ?? 0) === 0) {
+          throw new AssetProcessingRaceError();
+        }
       }
       return true;
     });

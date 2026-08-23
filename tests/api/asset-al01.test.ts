@@ -193,4 +193,16 @@ describe("AL-01 asset management API", () => {
       "ASSET_REVISION_CONFLICT"
     );
   });
+
+  it("rejects inactive tag dictionary queries", async () => {
+    const response = await app.inject({
+      method: "GET",
+      url: "/api/asset-tags?status=inactive"
+    });
+
+    expect(response.statusCode).toBe(422);
+    expect(apiErrorResponseSchema.parse(response.json()).error.code).toBe(
+      "REQUEST_VALIDATION_FAILED"
+    );
+  });
 });
