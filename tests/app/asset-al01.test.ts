@@ -1,10 +1,15 @@
 import { promises as fs } from "node:fs";
 import { tmpdir } from "node:os";
+import { Readable } from "node:stream";
 import * as path from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { AssetRevisionConflictError } from "../../src/app/assets/asset-errors.js";
+import {
+  AssetRevisionConflictError,
+  AssetVersionNotReadyError
+} from "../../src/app/assets/asset-errors.js";
+import { AssetProcessingError } from "../../src/app/assets/asset-processing-errors.js";
 import { NodeAssetFileStore } from "../../src/app/assets/asset-file-store.js";
 import { AssetProcessingService } from "../../src/app/assets/asset-processing-service.js";
 import { AssetRepository } from "../../src/app/assets/asset-repository.js";
@@ -98,6 +103,56 @@ describe("AL-01 asset revision and replacement lifecycle", () => {
     return { repository, service, fileStore };
   }
 
+  async function reserveReplacement(
+    service: AssetService,
+    expectedRevision: number
+  ) {
+    const staged = await service.stageUpload({
+      stream: Readable.from([pngBytes]),
+      mimeType: "image/png",
+      filename: "replacement.png"
+    });
+    try {
+      return await service.commitReplacement(
+        "asset-1",
+        { expectedRevision: String(expectedRevision) },
+        staged
+      );
+    } catch (error) {
+      await service.discardStaged(staged);
+      throw error;
+    }
+  }
+
+  function successfulPhotoProcessingPort(): AssetMediaProcessingPort {
+    return {
+      async processMedia() {
+        return {
+          metadata: {
+            width: 1,
+            height: 1,
+            durationMs: null,
+            pageCount: null
+          },
+          thumbnails: [pngBytes]
+        };
+      }
+    };
+  }
+
+  function createProcessingService(
+    repository: AssetRepository,
+    fileStore: NodeAssetFileStore,
+    processingPort: AssetMediaProcessingPort
+  ): AssetProcessingService {
+    return new AssetProcessingService({
+      repository,
+      fileStore,
+      processingPort,
+      now: () => new Date(NOW)
+    });
+  }
+
   it("updates metadata and tags atomically, then guards stale revisions", async () => {
     const { repository, service } = await createFixture();
 
@@ -156,17 +211,7 @@ describe("AL-01 asset revision and replacement lifecycle", () => {
 
   it("keeps v1 current while a replacement is processing, then switches atomically", async () => {
     const { repository, service, fileStore } = await createFixture();
-    const staged = await service.stageUpload({
-      stream: (await import("node:stream")).Readable.from([pngBytes]),
-      mimeType: "image/png",
-      filename: "replacement.png"
-    });
-
-    const receipt = await service.commitReplacement(
-      "asset-1",
-      { expectedRevision: "1" },
-      staged
-    );
+    const receipt = await reserveReplacement(service, 1);
     expect(receipt).toMatchObject({
       assetId: "asset-1",
       version: 2,
@@ -179,32 +224,11 @@ describe("AL-01 asset revision and replacement lifecycle", () => {
       /^staging\//
     );
 
-    const processingService = new AssetProcessingService({
+    const processingService = createProcessingService(
       repository,
       fileStore,
-      processingPort: {
-        async processMedia(): Promise<{
-          metadata: {
-            width: number;
-            height: number;
-            durationMs: null;
-            pageCount: null;
-          };
-          thumbnails: Buffer[];
-        }> {
-          return {
-            metadata: {
-              width: 1,
-              height: 1,
-              durationMs: null,
-              pageCount: null
-            },
-            thumbnails: [pngBytes]
-          };
-        }
-      } satisfies AssetMediaProcessingPort,
-      now: () => new Date(NOW)
-    });
+      successfulPhotoProcessingPort()
+    );
     await expect(processingService.processAsset("asset-1", 2)).resolves.toEqual(
       {
         status: "processed"
@@ -225,5 +249,127 @@ describe("AL-01 asset revision and replacement lifecycle", () => {
     await expect(
       fs.access(fileStore.resolvePath("media/asset-1/v2.png"))
     ).resolves.toBeUndefined();
+  });
+
+  it("keeps v1 current and records a candidate error when replacement processing fails", async () => {
+    const { repository, service, fileStore } = await createFixture();
+    await reserveReplacement(service, 1);
+
+    const processingService = createProcessingService(repository, fileStore, {
+      async processMedia() {
+        throw new AssetProcessingError("PROCESSING_METADATA_FAILED");
+      }
+    });
+    await expect(processingService.processAsset("asset-1", 2)).resolves.toEqual(
+      { status: "failed" }
+    );
+
+    expect(repository.findAsset("asset-1")).toMatchObject({
+      status: "active",
+      revision: 2,
+      currentVersion: 1
+    });
+    expect(repository.findAssetVersion("asset-1", 2)).toMatchObject({
+      status: "error",
+      errorCode: "PROCESSING_METADATA_FAILED",
+      stagingPath: null
+    });
+    expect(
+      repository
+        .findAssetDetail("asset-1")
+        ?.versionHistory?.find((version) => version.version === 2)
+    ).toMatchObject({
+      status: "error",
+      errorCode: "PROCESSING_METADATA_FAILED"
+    });
+    await expect(
+      fs.access(fileStore.resolvePath("media/asset-1/v1.png"))
+    ).resolves.toBeUndefined();
+    await expect(
+      fs.access(fileStore.resolvePath("media/asset-1/v2.png"))
+    ).rejects.toThrow();
+  });
+
+  it("keeps an inactive asset inactive after a successful replacement", async () => {
+    const { repository, service, fileStore } = await createFixture();
+    service.updateStatus("asset-1", { expectedRevision: 1 }, "inactive");
+    await reserveReplacement(service, 2);
+
+    const processingService = createProcessingService(
+      repository,
+      fileStore,
+      successfulPhotoProcessingPort()
+    );
+    await expect(processingService.processAsset("asset-1", 2)).resolves.toEqual(
+      { status: "processed" }
+    );
+
+    expect(repository.findAsset("asset-1")).toMatchObject({
+      status: "inactive",
+      revision: 4,
+      currentVersion: 2
+    });
+    expect(repository.findAssetVersion("asset-1", 2)?.status).toBe("ready");
+  });
+
+  it("rejects a stale replacement without creating another version row", async () => {
+    const { repository, service } = await createFixture();
+    await reserveReplacement(service, 1);
+
+    await expect(reserveReplacement(service, 1)).rejects.toBeInstanceOf(
+      AssetRevisionConflictError
+    );
+    expect(repository.findAsset("asset-1")).toMatchObject({
+      revision: 2,
+      currentVersion: 1
+    });
+    expect(repository.findAssetVersion("asset-1", 2)?.status).toBe(
+      "processing"
+    );
+    expect(repository.findAssetVersion("asset-1", 3)).toBeUndefined();
+  });
+
+  it("records a replacement revision conflict and removes the unpublishable candidate", async () => {
+    const { repository, service, fileStore } = await createFixture();
+    await reserveReplacement(service, 1);
+    service.updateMetadata("asset-1", {
+      expectedRevision: 2,
+      title: "更新後タイトル",
+      description: "更新後説明",
+      confidentiality: "internal",
+      department: null,
+      system: null,
+      tagIds: []
+    });
+
+    const processingService = createProcessingService(
+      repository,
+      fileStore,
+      successfulPhotoProcessingPort()
+    );
+    await expect(processingService.processAsset("asset-1", 2)).resolves.toEqual(
+      { status: "failed" }
+    );
+
+    expect(repository.findAsset("asset-1")).toMatchObject({
+      status: "active",
+      revision: 3,
+      currentVersion: 1,
+      title: "更新後タイトル"
+    });
+    expect(repository.findAssetVersion("asset-1", 2)).toMatchObject({
+      status: "error",
+      errorCode: "REPLACEMENT_REVISION_CONFLICT",
+      stagingPath: null
+    });
+    await expect(
+      fs.access(fileStore.resolvePath("media/asset-1/v1.png"))
+    ).resolves.toBeUndefined();
+    await expect(
+      fs.access(fileStore.resolvePath("media/asset-1/v2.png"))
+    ).rejects.toThrow();
+    expect(() => service.getMediaPath("asset-1", 2)).toThrow(
+      AssetVersionNotReadyError
+    );
   });
 });

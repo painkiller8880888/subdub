@@ -171,6 +171,32 @@ describe("AL-01 asset management API", () => {
       currentVersion: 1,
       status: "processing"
     });
+
+    const staleMultipart = buildMultipartBody([
+      { name: "expectedRevision", value: "4" },
+      {
+        name: "file",
+        filename: "stale-replacement.png",
+        mimeType: "image/png",
+        data: pngBytes
+      }
+    ]);
+    const staleReplacement = await app.inject({
+      method: "POST",
+      url: "/api/assets/asset-api/replace",
+      payload: staleMultipart.body,
+      headers: { "content-type": staleMultipart.contentType }
+    });
+    expect(staleReplacement.statusCode).toBe(409);
+    expect(
+      apiErrorResponseSchema.parse(staleReplacement.json()).error.code
+    ).toBe("ASSET_REVISION_CONFLICT");
+
+    const missingCandidate = await app.inject({
+      method: "GET",
+      url: "/api/assets/asset-api?version=3"
+    });
+    expect(missingCandidate.statusCode).toBe(404);
   });
 
   it("returns a conflict without changing metadata", async () => {
