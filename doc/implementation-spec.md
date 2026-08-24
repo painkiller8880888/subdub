@@ -114,6 +114,8 @@ SW-00 で定めた product target は section-only ScreenTemplate である。`V
 
 SW-02 の `1.4.0` target `/projects/{projectId}/script` の通常表示は、本文 3 行 + 操作 1 行の 4 行 compact line card とする。1 行目は line ID、speaker selector、character physical variant、音声再生、音声再生成、音声調整、2 行目は `subtitleText`、3 行目は `spokenText` / よみがな、4 行目は上へ移動・下へ移動・複製・削除を置く。subtitle / 読み上げ用表示は通常時に compact な 1 行とし、選択・編集時だけ入力領域へ expand する。音声調整の詳細パラメータは card 内へ常時展開せず modal / dialog で扱う。
 
+上記は SW-02 実装時点の baseline として履歴に保持する。現行の ScriptPage visible contract は、後発の SW-04（#169）が定義する metadata / controls block、speaker name-only、compact visual / voice controls、詳細設定 modal、素材 pane の preview / minimal actions を優先する。
+
 SW-03 の target preview mode は pure helper / read model で決定する。section の先頭 line、section template または background の境界、generic visual の show / hide / play / pause / resume / end など persistent canvas state が変化する line、およびその表示設定が境界から変化する line は full screen preview とする。persistent canvas state が前 line と同じ通常 line は dialogue / subtitle 領域だけの compact preview とする。subtitleText、spokenText / よみがな、speaker、character physical variant、voice parameter、音声 current / stale state だけの変化は full preview trigger にしない。
 
 full / compact preview は同じ ScreenTemplate resolver / renderer の解決結果を使用し、compact preview 専用の geometry や CSS 座標を実装しない。概念的な判定は `persistentScreenState(line N - 1) != persistentScreenState(line N)` とし、最初の section line は常に full preview とする。generic `VisualAssignment` 自体は維持し、`VideoProject 1.4.0` では line-level template override の廃止を理由に同一 section 内の line 境界で segment 化しない。表示素材 cue の state boundary は #151 の read model へ統合する。
@@ -154,9 +156,9 @@ VP-02 の resolved video display は `playbackState: "playing" | "paused" | "end
 
 VP-01 は `VideoProject 1.4.0 → 1.5.0` を導入し、既存 video assignment を `playbackCues: []` として migration する。VP-02 は pause / resume と natural source end を解決済み render contract へ追加するため `RenderManifest 2.5.0` を導入し、2.4.0 の意味を変更しない。2.5.0 は cue を resolved media state へ固定し、playing branch は source trim pair、paused / ended branch は一点の `sourceFrame` を持つ。WebUI preview と Remotion は同じ結果を描画する。
 
-現行 ScriptPage では VP-03（#154）が #149 の compact line card の右側へ media pane を実装済みであり、assignment / asset title / kind、lifecycle state（hidden / playing / paused / ended / static-visible）、表示・再生開始、一時停止、再開、終了、asset 選択・差し替え導線を表示する。これは UI の lifecycle read model であり、V25 の serialized video segment state は playing / paused / ended に限定する。source end 到達後は lifecycle を `ended` として表示するが、source frame / time の詳細は表示せず、pause / resume 操作も提供しない。操作可否は resolved state から決定し、不正な cue sequence を UI から作らせない。#150 の `PersistentScreenState` へは action 名ではなく cue と source-end を解決した media state を渡し、前 line と state が異なる場合だけ full preview とする。
+現行 ScriptPage では VP-03（#154）の media pane を SW-04（#169）の表示契約で扱う。素材挿入済みの visible UI は preview と状態に応じた操作だけとし、video の playing / paused ではそれぞれ `[一時停止]` / `[再開]`、共通の `[停止] [変更]` を表示する。video の ended では最終描画フレームまたは thumbnail preview と `[停止] [変更]` だけを表示し、pause / resume は表示しない。photo / `document_scan` では `[停止] [変更]`、未挿入では `[素材を挿入]` だけを表示する。assignment、lifecycle、cue の read model と操作可否は保持するが、状態説明や technical metadata の文章を pane に常設しない。V25 の serialized video segment state は playing / paused / ended に限定し、`PersistentScreenState` へは action 名ではなく cue と source-end を解決した media state を渡す。
 
-対象外は line 内任意 millisecond cue、waveform / NLE timeline、reverse playback、scrubbing keyframe、video transition effects、speed keyframe、automatic / AI slide generation、dedicated presentation parser である。Asset library CRUD UI は VP-03 の ScriptPage media pane（VP-00〜VP-02 の cue semantics を表示する UI）に含めず、1.8 と 27 の AL-00 境界で定義する。
+対象外は line 内任意 millisecond cue、waveform / NLE timeline、reverse playback、scrubbing keyframe、video transition effects、speed keyframe、automatic / AI slide generation、dedicated presentation parser である。Asset library CRUD UI は VP-03 の ScriptPage media pane（VP-00〜VP-02 の cue semantics を接続する UI）に含めず、1.8 と 27 の AL-00 境界で定義する。
 
 ### 1.7.1 Issue #171 による ScriptPage の右ペイン境界
 
@@ -166,6 +168,63 @@ VP-01 は `VideoProject 1.4.0 → 1.5.0` を導入し、既存 video assignment 
 - **VP-03 line-card media cue pane（現行標準 UI／実装済み）**: #154 で追加された compact line card 右側の UI。current generic `VisualAssignment`、active な managed Asset の選択、video playback state、pause / resume / end cue 操作、asset replacement を扱う。Asset picker の明示的な選択・差し替えは選択 `assetVersion` を mutation へ渡し、同じ stable `assetId` でも選択 version の checksum / `projectMediaPath` を project snapshot へ反映する。cue 編集や表示変更だけでは live Asset の current version へ自動 upgrade しない。
 
 `VP-00〜VP-02` は cue / resolver / render contract の共有仕様であり、`VP-03` はそれを ScriptPage の line-card UI へ接続する実装境界である。VP-00〜VP-02 の「後続」「追加する」は仕様作成時点の設計・実装境界を示す履歴であり、現行実装で VP-03 が未実装という意味ではない。将来 target として読むべき記述は、target / 後続実装であることを明示した箇所に限る。
+
+### 1.7.2 Issue #169 / SW-04 による ScriptPage の表示密度と素材操作仕様
+
+Issue #169（SW-04）は `doc/doc.md` と本書だけを更新する docs-only の仕様改訂である。コード、CSS、schema、migration、API、React UI、compiler、Remotion、テストコードはこの Issue では変更しない。本節は、SW-02 の compact line card と VP-03 の media pane に対する現在の表示契約を上書きして定義する。
+
+#### ScriptPage 固有の幅
+
+- `/projects/{projectId}/script` の usable content pane だけを、デスクトップ標準で最大 `1500px` まで利用できるようにする。
+- `1500px` は ScriptPage 固有の上限であり、`.page-shell` など共通レイアウトや、企画、構成案、編集、出力、素材管理、ScreenTemplate の width policy を変更しない。
+- 狭い viewport では responsive に縮小し、`1500px` を minimum width にしない。ページの horizontal overflow を作らない。
+- 実ブラウザで十分な viewport を用意し、content pane が約 `1500px` を利用できることを測定する。
+
+#### セリフカードと Script / voice editor
+
+通常のカードは、metadata / controls block を第1行として数える4行構成を唯一の基準とする。
+
+```text
+1行目（metadata / controls）
+  ID subline:      セリフID | script-line-...
+  control subline: [話者] [ビジュアルを変更] [音声状態] [再生] [再生成] [音声調整]
+
+2行目
+  [字幕] subtitleText
+
+3行目
+  [VOICEVOX 読み上げ] spokenText
+
+4行目
+  [詳細設定]                                      [上へ移動] [下へ移動] [複製] [削除]
+```
+
+`[VOICEVOX 読み上げ]` は visible label であり、`spokenText` は保存される読み上げ用 field である。`よみがな` を visible label として表示しない。
+
+- ID subline は1行で表示し、長い ID は layout を壊さない truncation と accessible な full value を許可する。
+- speaker selector の visible label は project character の name だけとする。`mentor` / `learner` / `teacher` などの role はデータとして維持するが、selector text へ併記しない。`speakerId`、VOICEVOX binding、保存 semantics は変更しない。
+- 通常カードに current character variant の大きな preview、label、`renderType` block を常設しない。「ビジュアルを変更」から開く picker 内で preview、label、`renderType`、tags、selected state を確認する。`characterVariantId`、speaker binding、missing / inactive validation は変更しない。
+- 音声は compact な status indicator と `[再生] [再生成] [音声調整]` だけを通常の control subline に置く。native `<audio controls>` は通常カードに表示せず、current audio がない場合は再生ボタンを disabled 等で操作不能にする。voice status、freshness、generation semantics は変更しない。
+- `[詳細設定]` は4行目から modal / dialog を開き、`expression`、`pauseBeforeMs`、`pauseAfterMs` を編集する。保存、autosave、revision、validation semantics は維持し、keyboard 操作、Escape close、focus restore を満たす。
+- `subtitleText` と `spokenText` / よみがなの通常時の compact 1行表示と edit-time expand は変更しない。
+
+#### 素材挿入 pane の visible UI
+
+line に対応する generic `VisualAssignment` / playback control pane は、素材が挿入済みなら preview と次の操作だけを基本表示とする。
+
+```text
+video playing:  [ video / thumbnail preview ]  [一時停止] [停止] [変更]
+video paused:   [ paused frame / thumbnail ]   [再開] [停止] [変更]
+video ended:    [ last frame / thumbnail preview ] [停止] [変更]
+photo / document_scan: [ image preview ]       [停止] [変更]
+未挿入:                                      [素材を挿入]
+```
+
+video が natural source end に到達した場合は `ended` とし、assignment が残っている間は最終描画フレームを preview として保持する。この状態では pause / resume を無効とし、`[停止] [変更]` だけを扱う。常設しないものは、素材の表示期間・assignment range・cue semantics の説明、playing / paused / ended / static-visible などの状態説明、注意書き・補足・ヒント、range / start / end の説明ラベル、通常時の warning paragraph / panel、asset title / kind / technical metadata を文章で並べる summary である。`[停止]` は既存の assignment / cue semantics に従って current line 境界で表示・再生を終了する操作であり、Asset や project data の hard delete ではない。`[変更]` は既存の安全な asset replace / assignment edit path を使用する。
+
+素材欄から visible warning を外しても validation、conflict detection、revision safety は削除しない。不正な action は生成せず disabled にする。mutation failure、revision conflict、range-shortening confirmation などユーザー判断が必要な feedback は modal / dialog、page-level feedback、toast など素材欄外の surface で扱う。状態と button の accessible name は `aria-label` などで保持し、説明文を pane 内へ増やさない。
+
+`PersistentScreenState`、`VisualAssignment` range、video pause / resume cue、static media の start / end、full / compact preview trigger、project snapshot、`RenderManifest 2.5.0`、Web preview / Remotion の semantics は変更しない。version bump、Zod schema / migration、Asset CRUD、assignment / cue data model、arbitrary timeline / waveform、ScreenTemplate geometry、VOICEVOX adjustment format、他フェーズの width 拡張は対象外とする。受入時には実ブラウザで約 `1500px` の content pane、4行カード、簡潔な素材 pane、non-overflow を確認し、参照画像と同等の情報密度でスクリーンショットを残す。
 
 ### 1.8 Issue #155 / AL-00 の Asset library 管理仕様
 
@@ -2597,7 +2656,7 @@ ED-08 完了前の compile 経路では、既存 `RenderManifest 2.2.0` の gene
 
 ルーティング表現は採用フレームワークに合わせて変更してよいが、画面責務は維持する。
 
-`/projects/{projectId}/script` はセクションと compact line card を中心とする 1 ペインの台本画面である。各カードの「ビジュアルを変更」から modal picker を開き、speaker に project 上で binding された `CharacterVisualSet` の active variant だけを表示する。`project.json` の binding / line reference と、バックエンドが解決した `CharacterVisualCatalogSnapshot` を組み合わせ、選択結果をカード内へ統合する。画像読込失敗時は管理された配信 URL と対象 ID を表示し、DB に登録されていない物理素材を表示しない。台本、generic 素材 assignment、音声状態、section の template selection は同じ `project.json` の revision と自動保存で扱い、ワークスペース共通の visual metadata / ScreenTemplate 定義は `project.json` へ保存しない。VP-03 の line-card media cue pane はこの line card の右側で current generic `VisualAssignment`、managed Asset、playback state、cue 操作、明示的な asset replacement を扱う。
+`/projects/{projectId}/script` はセクションと compact line card を中心とする 1 ペインの台本画面であり、usable content pane の上限は SW-04（#169）により `1500px` とする。各カードの「ビジュアルを変更」から modal picker を開き、speaker に project 上で binding された `CharacterVisualSet` の active variant だけを表示する。`project.json` の binding / line reference と、バックエンドが解決した `CharacterVisualCatalogSnapshot` を組み合わせ、選択結果を扱う。通常カードには大きな variant preview / label / `renderType` block を常設せず、picker 内で確認する。画像読込失敗時は管理された配信 URL と対象 ID を表示し、DB に登録されていない物理素材を表示しない。台本、generic 素材 assignment、音声状態、section の template selection は同じ `project.json` の revision と自動保存で扱い、ワークスペース共通の visual metadata / ScreenTemplate 定義は `project.json` へ保存しない。VP-03 の line-card media cue pane はこの line card の右側で current generic `VisualAssignment`、managed Asset、playback state、cue 操作、明示的な asset replacement を扱うが、visible UI は SW-04 の preview / minimal actions に限定する。
 
 `/projects/{projectId}/edit` は独立した編集画面である。`script.sections` から導出した section card の順番と内容を読み取り専用で表示し、編集対象の video element card と BGM を追加で表示する。未編集状態では section card だけを表示する。
 
@@ -2634,9 +2693,9 @@ editor のサイドバーは active な CharacterVisualSet / variant と、必�
 
 - 1 ペイン: セクションとセリフカードを主役にする。プレビュー、保存状態、validation は補助表示として統合してよい。
 - 各セクション見出し: 台本の背景、セクション情報、音声状態の確認。BGM の編集は `/projects/{projectId}/edit` で行う
-- セリフカード: 本文 3 行 + 操作 1 行の 4 行 compact layout。1 行目は ID、話者、character physical variant、音声再生、音声再生成、音声調整、2 行目は `subtitleText`、3 行目は `spokenText` / よみがな、4 行目は上へ移動、下へ移動、複製、削除
+- セリフカード: metadata / controls block を第1行として数える4行 compact layout。1 行目は ID subline と control subline（speaker name-only、`ビジュアルを変更`、compact voice status、再生、再生成、音声調整）、2 行目は `subtitleText`、3 行目は visible label `[VOICEVOX 読み上げ]` と保存 field `spokenText`、4 行目は `詳細設定` と上へ移動、下へ移動、複製、削除。visible label に `よみがな` は使用しない
 - subtitle / 読み上げ表示は通常時に compact な 1 行とし、選択・編集時だけ input area へ expand する。音声調整の詳細は card 内へ常時展開せず modal / dialog で編集する。
-- 「ビジュアルを変更」modal picker: speaker に binding された `CharacterVisualSet` の active variant だけを表示し、preview、label、renderType、tags、選択中状態を表示する。`mouth-pair` は `closed` / `open` を表示する。
+- 「ビジュアルを変更」modal picker: speaker に binding された `CharacterVisualSet` の active variant だけを表示し、preview、label、renderType、tags、選択中状態を表示する。通常カードにはこれらを常設せず、`mouth-pair` は `closed` / `open` を picker 内で表示する。
 - picker のタグ: 未指定では全 active variant を表示し、指定時は一致数の多い順へ移動するだけ。不一致を除外せず、同点は catalog snapshot の元順序を維持する。
 - 話者付きテキストの一括貼り付けと機械的なカード分割
 - `spokenText` に登録用語が含まれる場合、解決後読み上げと適用用語を表示
@@ -2645,8 +2704,8 @@ editor のサイドバーは active な CharacterVisualSet / variant と、必�
 - 既存の section template 参照が missing / inactive になった場合は別 template へ自動代替せず、section header に validation と修正導線を表示する。
 - section の先頭 line、section template / background の境界、generic visual の persistent canvas state が変化する line では full screen preview を表示する。それ以外の line は dialogue / subtitle 領域だけの compact preview とする。subtitle、spokenText、speaker、character variant、voice parameter、音声 current / stale state だけの変化は full preview の trigger にしない。
 - preview mode は `persistentScreenState` の pure helper / read model で決定する。full / compact preview は同じ resolver / renderer の結果を使い、compact preview 専用の geometry や CSS 座標を再実装しない。
-- VP-03（#154）の media pane は compact line card の右側へ置き、current assignment / asset title / kind、lifecycle state（hidden / playing / paused / ended / static-visible）、表示・再生開始、一時停止、再開、終了、asset 選択 / 差し替え導線を表示する。これは VP-00〜VP-02 の cue semantics を表示する UI の lifecycle read model であり、V25 の serialized video segment state は playing / paused / ended に限定する。source end 到達後は lifecycle を `ended` として表示するが、source frame / time の詳細は表示せず、pause / resume 操作も提供しない。操作の enabled / disabled は resolved state から決め、UI から不正な cue sequence を作らせない。
-- media pane の action 名を `PersistentScreenState` の full preview 判定へ直接渡さない。`VisualPlaybackCue` と source-end boundary を line order + edge order で解決した media state を渡し、前 line と state が変わった場合だけ full preview とする。video paused / ended 中も resolved media state と renderer は frame を保持するが、media pane は source frame / time を表示しない。ended 後は pause / resume 操作を提供せず、photo / `document_scan` は static-visible として扱う。
+- VP-03（#154）の media pane は compact line card の右側へ置き、current assignment、managed Asset、lifecycle state、表示・再生開始、一時停止、再開、終了、asset 選択 / 差し替えを扱う。ただし visible UI は SW-04 により、video playing=`[一時停止] [停止] [変更]`、paused=`[再開] [停止] [変更]`、ended=`[last frame / thumbnail preview] [停止] [変更]`（pause / resume なし）、photo / `document_scan`=`[停止] [変更]`、未挿入=`[素材を挿入]` と preview だけにする。asset title / kind / technical metadata、range / cue / lifecycle の説明、通常時の warning paragraph は表示しない。source end 到達後の操作可否は resolved state から決め、不正な cue sequence を UI から作らせない。
+- media pane の action 名を `PersistentScreenState` の full preview 判定へ直接渡さない。`VisualPlaybackCue` と source-end boundary を line order + edge order で解決した media state を渡し、前 line と state が変わった場合だけ full preview とする。video paused / ended 中も resolved media state と renderer は frame を保持するが、media pane は source frame / time を表示しない。mutation failure、revision conflict、range-shortening confirmation 等の feedback は pane 外の modal / page feedback / toast で扱う。ended 後は pause / resume 操作を提供せず、photo / `document_scan` は static-visible として扱う。
 
 現在の標準 `/script` 画面には、CV-05 が除去した legacy right pane の現在の編集対象、制作 ビジュアル候補、AI ビジュアル候補 UI、手順3-3 素材検索、素材検索結果、素材制作・表示設定カードを置かない。AI visual suggestion、Asset Search、generic `VisualAssignment` は backend とデータを維持し、必要なら別画面または補助導線で再利用する。この「置かない」は VP-03 の line-card media cue pane を除外しない。
 
@@ -2845,6 +2904,8 @@ SQLite にはキー入力単位ではなく、保存、構成案の承認、レ�
 - template editor の contained element の clamp、character の drag / resize / rotation / numeric input / keyboard による partial overflow、overflow 状態の interaction recovery、実素材 preview の一時 state と template data 非保存
 - template-level の「デフォルトに戻す」が 1 個だけ存在し、canonical seed default を使って全 element の rect / rotation / font size / `flipX` を一括復元すること、metadata / preview state を保持すること、個別 reset control を追加しないこと
 - SW-02 の 1.4.0 target の compact line card が本文 3 行 + 操作 1 行で表示され、subtitle / spokenText の edit-time expand と音声調整 modal / dialog、section header だけの template selector を持つこと。1.3.0 の既存 line override を migration 前に破棄しないこと、1.4.0 line card に template selector / inherit badge / line override reset を置かないこと
+- SW-04（#169）の current ScriptPage が、usable content pane の最大 `1500px`、ID / control subline を持つ metadata / controls 第1行、speaker name-only、compact visual / voice controls、`詳細設定` modal、通常4行 card を満たすこと。native audio controls、通常カードの大きな variant preview / label / renderType block を表示しないこと
+- SW-04 の media pane が、video playing / paused / ended、static photo / `document_scan`、未挿入の各 state で preview と最小 action だけを表示し、ended は最終描画フレームまたは thumbnail preview と `[停止] [変更]` だけで pause / resume を表示しないこと、説明文、状態説明、range / cue labels、asset metadata summary、常設 warning を表示しないこと。停止が hard delete ではなく既存 assignment / cue semantics に従うこと、feedback が pane 外へ出ること、accessible name が保持されること
 - `persistentScreenState` の pure helper / read model が section 先頭、section / background 境界、generic visual の persistent lifecycle / display change だけを full-screen preview にし、subtitle、spokenText、speaker、character variant、voice parameter、音声 current / stale state だけの変更を dialogue-only preview にすること
 - `mentor` / `learner` や project ID を登録時の必須入力にしないこと
 - `CharacterVisualBinding` が `project.json` に保存され、SQLite の CharacterVisualSet に project binding が追加されないこと
@@ -2929,11 +2990,12 @@ SQLite にはキー入力単位ではなく、保存、構成案の承認、レ�
 12. fixture WAV と編集 Asset snapshot から validation を通した現行 `RenderManifest 2.4.0` 生成、および VP-02 の playback cue input から `RenderManifest 2.5.0` 生成
 13. `/screen-templates` で `screen-template-standard` と active / inactive template を確認し、実素材を一時 preview として選択する
 14. template editor で geometry、rotation、font size、`flipX` を保存し、1.4.0 project の section-only selection および 2.4.0 manifest fields を確認する。VP-02 では line へ template ID を保存せず、2.5.0 manifest の parent section reference と video playback state を確認する
-15. compact line card の 4 行表示、編集時 expand、音声調整 modal、section header の selector を確認し、persistent state change line の full preview と通常 line の dialogue-only preview を比較する
-16. 片方の character を意図的に画面外へ配置し、editor、line-card preview、`RenderManifest 2.4.0` / `2.5.0`、Web Player、Remotion の代表フレームで同じ composition clipping を確認する。VP-02 の video fixture では pause 中の frame 保持、video audio 停止、speech / BGM / sound effect 継続、resume source position を確認する
-17. 全 5 element の geometry、rotation、font size、`flipX` を変更してから template-level の「デフォルトに戻す」を実行し、canonical seed への復帰、metadata / preview state の保持、個別 reset control 不在を確認する
-18. 代表フレームの画像比較
-19. 短い MP4 とサムネイルの生成
+15. compact line card の4行表示、ID / control subline、speaker name-only、visual / voice compact controls、詳細設定 modal、section header の selector を確認し、persistent state change line の full preview と通常 line の dialogue-only preview を比較する
+16. 十分な desktop viewport の実ブラウザで ScriptPage の usable content pane が約 `1500px` になり、他フェーズの width policy を変えず、4行カードと media pane が horizontal overflow なしで表示されることを測定する。video playing / paused / ended、static media、未挿入の media pane が preview と最小 action だけになっていることを確認し、ended では最終描画フレームまたは thumbnail preview と `[停止] [変更]` だけが表示されることも確認して、参照画像と同等の情報密度のスクリーンショットを保存する
+17. 片方の character を意図的に画面外へ配置し、editor、line-card preview、`RenderManifest 2.4.0` / `2.5.0`、Web Player、Remotion の代表フレームで同じ composition clipping を確認する。VP-02 の video fixture では pause 中の frame 保持、video audio 停止、speech / BGM / sound effect 継続、resume source position を確認する
+18. 全 5 element の geometry、rotation、font size、`flipX` を変更してから template-level の「デフォルトに戻す」を実行し、canonical seed への復帰、metadata / preview state の保持、個別 reset control 不在を確認する
+19. 代表フレームの画像比較
+20. 短い MP4 とサムネイルの生成
 
 ## 20. MVP 開発時の実装順序（履歴）
 
@@ -3160,7 +3222,7 @@ Issue #151（VP-00）は `doc/doc.md` と本書だけを更新する docs-only I
 
 `VP-01 → VP-02` は cue / render contract の基盤を導入する順序である。ScriptPage の media pane は VP-03（#154）で compact line card の右側へ実装済みであり、current state から操作可否を決める。full preview の判定は action 名の比較ではなく、cue 解決後の `PersistentScreenState` が前 line と異なるかで決める。line 内任意 millisecond cue、waveform / NLE timeline、reverse、scrubbing、transition、speed keyframe、automatic slide generation、dedicated presentation parser は VP-00〜VP-02 の対象外とする。Asset library の管理 CRUD は ScriptPage に混在させず、AL-00 の `/assets` 境界で扱う。
 
-VP-03 は #154 の ScriptPage UI 実装境界であり、現行 baseline に含まれる。ここでいう media pane は VP-00〜VP-02 の cue semantics を line card へ表示する pane であり、CV-05 が除去した legacy right pane（候補、検索、検索結果、素材制作・表示設定カード）とは別物である。VP-00〜VP-02 の「後続」「追加する」という記述は仕様作成時点の履歴・設計境界として残し、VP-03 の実装済み状態と矛盾しないように読む。
+VP-03 は #154 の ScriptPage UI 実装境界であり、現行 baseline に含まれる。ここでいう media pane は VP-00〜VP-02 の cue semantics を line card へ接続する pane であり、CV-05 が除去した legacy right pane（候補、検索、検索結果、素材制作・表示設定カード）とは別物である。SW-04（#169）は VP-03 の visible UI を preview と状態に応じた pause / resume / stop / change、または empty の insert に限定し、説明文と常設 warning を pane 外へ出す。VP-00〜VP-02 の「後続」「追加する」という記述は仕様作成時点の履歴・設計境界として残し、VP-03 の実装済み状態と矛盾しないように読む。
 
 ## 27. AL-00 の Asset library 実装境界
 
@@ -3178,3 +3240,16 @@ Issue #155（AL-00）は `doc/doc.md` と本書だけを更新する docs-only �
 | snapshot boundary | library metadata / status / version mutation は既存 generic `VisualAssignment` と EditPlan の project snapshot を自動更新しない。新規選択・再選択時だけ active current version を `assetVersion` として取り込む。 |
 
 後続 implementation は initial upload、metadata update、replace、activate / deactivate、list/search/detail、paging、processing/error UI、version history を API と `/assets` へ接続する。`DELETE /api/assets/{assetId}`、Asset kind 変更、version rollback UI、immutable version diff viewer、tag dictionary CRUD、bulk upload、folder import、cloud storage、physical purge / orphan GC は対象外とする。
+
+## 28. SW-04（Issue #169）の ScriptPage 密度・素材 pane 実装境界
+
+Issue #169 は `doc/doc.md` と本書だけを更新する docs-only の仕様改訂である。後続実装は `/projects/{projectId}/script` 固有の usable content pane を最大 `1500px` とし、他フェーズの width policy、schema / migration、API、VisualAssignment / cue data model、ScreenTemplate geometry、VOICEVOX adjustment format、preview / RenderManifest / Remotion semantics を変更しない。狭い viewport では縮小し、horizontal overflow を作らない。
+
+| 領域 | 実装契約 |
+|---|---|
+| line card | metadata / controls block を第1行として数える4行構成。ID subline、speaker name-only、`[ビジュアルを変更]`、compact voice status / actions、subtitle、visible label `[VOICEVOX 読み上げ]` と保存 field `spokenText`、`[詳細設定]` と line actions を配置する。visible label に `よみがな` は使用しない。subtitle / spokenText は edit-time だけ expand し、詳細設定は keyboard / Escape / focus restore を備えた modal / dialog とする。 |
+| character visual | 通常カードに preview / label / `renderType` block を常設せず、speaker-bound active variant の preview、label、renderType、tags、selected state は picker 内で確認する。 |
+| voice | native audio controls を通常カードへ置かず、音声なしは再生 disabled 等で表す。voice status / freshness / generation semantics は維持する。 |
+| media pane | 挿入済み video は playing=`[一時停止] [停止] [変更]`、paused=`[再開] [停止] [変更]`、ended=`[last frame / thumbnail preview] [停止] [変更]`（pause / resume なし）、static media は `[停止] [変更]`、未挿入は `[素材を挿入]`。ended は assignment が残っている間、最終描画フレームを preview として保持する。preview 以外の説明文、状態説明、range / start / end labels、metadata summary、常設 warning は表示しない。 |
+| feedback | invalid action は生成せず disabled。mutation failure、revision conflict、range-shortening confirmation 等は modal / dialog、page-level feedback、toast など pane 外で扱い、accessible name は aria-label 等で保持する。 |
+| acceptance | 実ブラウザで約 `1500px` の content pane、4行 card、minimal media pane、non-overflow を測定し、参照画像と同等の情報密度をスクリーンショットで確認する。 |
