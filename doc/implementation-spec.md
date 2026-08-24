@@ -33,7 +33,7 @@ Issue #87 以降、`/projects/{projectId}/script` を台本・ビジュアル・
 
 ### 1.2 Issue #97 / CV-04 による現在仕様の更新
 
-Issue #97 を本書の正本となる設計判断として扱い、キャラクタービジュアルの標準選択経路を人間の明示選択へ変更した。この方針は CV-05（Issue #98）で実装済みである。`/projects/{projectId}/script` はセクションとセリフカードを中心とする 1 ペイン構成とし、現在の右ペインにあった「現在の編集対象」「制作 ビジュアル候補」「AI によるビジュアル候補 UI」「手順3-3 素材検索」「素材検索結果」「素材制作・表示設定カード」は標準台本画面に置かない。
+Issue #97 を本書の正本となる設計判断として扱い、キャラクタービジュアルの標準選択経路を人間の明示選択へ変更した。この方針は CV-05（Issue #98）で実装済みである。`/projects/{projectId}/script` はセクションとセリフカードを中心とする 1 ペイン構成とし、CV-05 が除去した legacy right pane にあった「現在の編集対象」「制作 ビジュアル候補」「AI によるビジュアル候補 UI」「手順3-3 素材検索」「素材検索結果」「素材制作・表示設定カード」は標準台本画面に置かない。
 
 除去するのは制作画面の主要 UI であり、機能・データの削除ではない。AI visual suggestion の backend、visual suggestion API / service / schema / log、現場動画・写真・帳票用 Asset Search、generic `VisualAssignment` と Asset Service は維持する。これらはキャラクタービジュアルの標準選択経路とは別の補助機能・別ドメインとして扱う。
 
@@ -154,9 +154,18 @@ VP-02 の resolved video display は `playbackState: "playing" | "paused" | "end
 
 VP-01 は `VideoProject 1.4.0 → 1.5.0` を導入し、既存 video assignment を `playbackCues: []` として migration する。VP-02 は pause / resume と natural source end を解決済み render contract へ追加するため `RenderManifest 2.5.0` を導入し、2.4.0 の意味を変更しない。2.5.0 は cue を resolved media state へ固定し、playing branch は source trim pair、paused / ended branch は一点の `sourceFrame` を持つ。WebUI preview と Remotion は同じ結果を描画する。
 
-後続 ScriptPage では #149 の compact line card の右側へ media pane を追加し、assignment / asset title / kind、lifecycle state（hidden / playing / paused / ended / static-visible）、表示・再生開始、一時停止、再開、終了、asset 選択・差し替え導線を表示する。これは UI の lifecycle read model であり、V25 の serialized video segment state は playing / paused / ended に限定する。source end 到達後は ended と `lastDrawableSourceFrame` を表示し、pause / resume button を disabled にする。操作可否は resolved state から決定し、不正な cue sequence を UI から作らせない。#150 の `PersistentScreenState` へは action 名ではなく cue と source-end を解決した media state を渡し、前 line と state が異なる場合だけ full preview とする。
+現行 ScriptPage では VP-03（#154）が #149 の compact line card の右側へ media pane を実装済みであり、assignment / asset title / kind、lifecycle state（hidden / playing / paused / ended / static-visible）、表示・再生開始、一時停止、再開、終了、asset 選択・差し替え導線を表示する。これは UI の lifecycle read model であり、V25 の serialized video segment state は playing / paused / ended に限定する。source end 到達後は ended と `lastDrawableSourceFrame` を表示し、pause / resume button を disabled にする。操作可否は resolved state から決定し、不正な cue sequence を UI から作らせない。#150 の `PersistentScreenState` へは action 名ではなく cue と source-end を解決した media state を渡し、前 line と state が異なる場合だけ full preview とする。
 
-対象外は line 内任意 millisecond cue、waveform / NLE timeline、reverse playback、scrubbing keyframe、video transition effects、speed keyframe、automatic / AI slide generation、dedicated presentation parser である。Asset library CRUD UI は VP-00〜VP-02 の ScriptPage media pane に含めず、1.8 と 27 の AL-00 境界で定義する。
+対象外は line 内任意 millisecond cue、waveform / NLE timeline、reverse playback、scrubbing keyframe、video transition effects、speed keyframe、automatic / AI slide generation、dedicated presentation parser である。Asset library CRUD UI は VP-03 の ScriptPage media pane（VP-00〜VP-02 の cue semantics を表示する UI）に含めず、1.8 と 27 の AL-00 境界で定義する。
+
+### 1.7.1 Issue #171 による ScriptPage の右ペイン境界
+
+「右ペイン」という表現は、次の二つの UI を分けて扱う。
+
+- **Legacy CV-05 right pane（標準 ScriptPage から削除済み）**: 現在の編集対象、制作・AI ビジュアル候補、手順3-3 素材検索、素材検索結果、素材制作・表示設定カードを含む旧 UI。generic Asset Search、AI suggestion、`VisualAssignment` の backend・schema・保存データを維持しても、この pane を標準 `/projects/{projectId}/script` に戻さない。
+- **VP-03 line-card media cue pane（現行標準 UI／実装済み）**: #154 で追加された compact line card 右側の UI。current generic `VisualAssignment`、active な managed Asset の選択、video playback state、pause / resume / end cue 操作、asset replacement を扱う。Asset picker の明示的な選択・差し替えは選択 `assetVersion` を mutation へ渡し、同じ stable `assetId` でも選択 version の checksum / `projectMediaPath` を project snapshot へ反映する。cue 編集や表示変更だけでは live Asset の current version へ自動 upgrade しない。
+
+`VP-00〜VP-02` は cue / resolver / render contract の共有仕様であり、`VP-03` はそれを ScriptPage の line-card UI へ接続する実装境界である。VP-00〜VP-02 の「後続」「追加する」は仕様作成時点の設計・実装境界を示す履歴であり、現行実装で VP-03 が未実装という意味ではない。将来 target として読むべき記述は、target / 後続実装であることを明示した箇所に限る。
 
 ### 1.8 Issue #155 / AL-00 の Asset library 管理仕様
 
@@ -2346,7 +2355,7 @@ POST   /api/projects/{projectId}/script/approve
 
 AI 生成 API はエンドポイントに対応する `taskKind` をサーバー側で確定し、リクエストの `modelId` は実行時上書きとして任意に受け取る。上書きがない場合はプロジェクト設定から上記の優先順で解決し、解決結果が `null` の場合は実行を拒否する。生成に失敗した場合、既存の構成案または台本を変更しない。
 
-構成案生成は任意の開始経路である。AI を使わない場合は WebUI の手入力開始操作から `PUT /api/projects/{projectId}/outline` で構成案を保存し、その後は AI 生成時と同じ編集・承認フローを使用する。台本の保存、現場素材用の generic 候補・Asset Search の利用、素材割り当て、音声生成は、台本承認を要求しない。generic 素材の UI は現在の標準 `/script` 右ペインを前提にせず、別画面または補助導線で扱う。キャラクタービジュアルの physical variant は別途 `project.json` の explicit reference を人間が選択する。
+構成案生成は任意の開始経路である。AI を使わない場合は WebUI の手入力開始操作から `PUT /api/projects/{projectId}/outline` で構成案を保存し、その後は AI 生成時と同じ編集・承認フローを使用する。台本の保存、現場素材用の generic 候補・Asset Search の利用、素材割り当て、音声生成は、台本承認を要求しない。generic 素材の検索 UI は CV-05 が除去した legacy `/script` right pane を前提にせず、別画面または補助導線で扱う。VP-03 の line-card media cue pane はこの除去対象とは別の現行標準 UI である。キャラクタービジュアルの physical variant は別途 `project.json` の explicit reference を人間が選択する。
 
 `script/approve` は旧クライアントおよび既存履歴との互換性のため残せるが、成功しても台本・ビジュアル・音声・出力の実行条件を変えない。通常の UI からは呼び出さず、保存後のレビュー結果または status 表示に限定して扱う。
 `visuals/approve` も同じ互換扱いとする。通常の UI からは呼び出さず、素材検索、候補表示、割り当て、差し替え、解除、音声操作、`RenderManifest`、プレビュー、レンダリングの前提にしない。
@@ -2558,7 +2567,7 @@ ED-08 完了前の compile 経路では、既存 `RenderManifest 2.2.0` の gene
 
 ![台本編集画面のUIコンセプト](./assets/webui-script-editor-concept.png)
 
-この画像は Issue #87 時点の台本編集画面の情報設計を確認するための履歴コンセプトであり、現在の最終レイアウトではない。CV-04 で方針を確定し、CV-05 でセクションとセリフカードを中心とする 1 ペイン構成へ移行した。画像にある右側のビジュアル設定・候補・素材検索・表示設定 UI は標準制作画面から除去済みである。画像内の人物、素材、具体的な配色、細かな文言は確定仕様に含めない。
+この画像は Issue #87 時点の台本編集画面の情報設計を確認するための履歴コンセプトであり、現在の最終レイアウトではない。CV-04 で方針を確定し、CV-05 でセクションとセリフカードを中心とする 1 ペイン構成へ移行した。画像にある CV-05 legacy right pane のビジュアル設定・候補・素材検索・表示設定 UI は標準制作画面から除去済みである。画像内の人物、素材、具体的な配色、細かな文言は確定仕様に含めない。VP-03 の line-card media cue pane はこの除去対象とは別の現行標準 UI である。
 
 生成条件は [`webui-script-editor-concept.prompt.md`](./legacy/webui-script-editor-concept.prompt.md) に保存する。
 
@@ -2588,7 +2597,7 @@ ED-08 完了前の compile 経路では、既存 `RenderManifest 2.2.0` の gene
 
 ルーティング表現は採用フレームワークに合わせて変更してよいが、画面責務は維持する。
 
-`/projects/{projectId}/script` はセクションと compact line card を中心とする 1 ペインの台本画面である。各カードの「ビジュアルを変更」から modal picker を開き、speaker に project 上で binding された `CharacterVisualSet` の active variant だけを表示する。`project.json` の binding / line reference と、バックエンドが解決した `CharacterVisualCatalogSnapshot` を組み合わせ、選択結果をカード内へ統合する。画像読込失敗時は管理された配信 URL と対象 ID を表示し、DB に登録されていない物理素材を表示しない。台本、generic 素材 assignment、音声状態、section の template selection は同じ `project.json` の revision と自動保存で扱い、ワークスペース共通の visual metadata / ScreenTemplate 定義は `project.json` へ保存しない。
+`/projects/{projectId}/script` はセクションと compact line card を中心とする 1 ペインの台本画面である。各カードの「ビジュアルを変更」から modal picker を開き、speaker に project 上で binding された `CharacterVisualSet` の active variant だけを表示する。`project.json` の binding / line reference と、バックエンドが解決した `CharacterVisualCatalogSnapshot` を組み合わせ、選択結果をカード内へ統合する。画像読込失敗時は管理された配信 URL と対象 ID を表示し、DB に登録されていない物理素材を表示しない。台本、generic 素材 assignment、音声状態、section の template selection は同じ `project.json` の revision と自動保存で扱い、ワークスペース共通の visual metadata / ScreenTemplate 定義は `project.json` へ保存しない。VP-03 の line-card media cue pane はこの line card の右側で current generic `VisualAssignment`、managed Asset、playback state、cue 操作、明示的な asset replacement を扱う。
 
 `/projects/{projectId}/edit` は独立した編集画面である。`script.sections` から導出した section card の順番と内容を読み取り専用で表示し、編集対象の video element card と BGM を追加で表示する。未編集状態では section card だけを表示する。
 
@@ -2621,7 +2630,7 @@ editor のサイドバーは active な CharacterVisualSet / variant と、必�
 
 ### 14.3 台本画面
 
-以下は #149 / #150 で実装された `VideoProject 1.4.0` / `RenderManifest 2.4.0` baseline `/script` 制作画面の基本責務であり、VP-01 / VP-02 で media pane と playback state を追加する。1.3.0 は line override を持つ compatibility input として migration でだけ扱う。CV-05 で実装済みの画面は、台本・ビジュアル・音声を別々の承認工程へ戻さない。`ScriptLine.expression` は論理表情として編集し、physical variant は explicit `characterVariantId` として人間が選択する。
+以下は #149 / #150 で実装された `VideoProject 1.4.0` / `RenderManifest 2.4.0` baseline `/script` 制作画面の基本責務である。VP-01 / VP-02 は cue / render contract の基盤を定義し、その UI 接続は VP-03（#154）で実装済みである。1.3.0 は line override を持つ compatibility input として migration でだけ扱う。CV-05 で実装済みの画面は、台本・ビジュアル・音声を別々の承認工程へ戻さない。`ScriptLine.expression` は論理表情として編集し、physical variant は explicit `characterVariantId` として人間が選択する。
 
 - 1 ペイン: セクションとセリフカードを主役にする。プレビュー、保存状態、validation は補助表示として統合してよい。
 - 各セクション見出し: 台本の背景、セクション情報、音声状態の確認。BGM の編集は `/projects/{projectId}/edit` で行う
@@ -2636,10 +2645,10 @@ editor のサイドバーは active な CharacterVisualSet / variant と、必�
 - 既存の section template 参照が missing / inactive になった場合は別 template へ自動代替せず、section header に validation と修正導線を表示する。
 - section の先頭 line、section template / background の境界、generic visual の persistent canvas state が変化する line では full screen preview を表示する。それ以外の line は dialogue / subtitle 領域だけの compact preview とする。subtitle、spokenText、speaker、character variant、voice parameter、音声 current / stale state だけの変化は full preview の trigger にしない。
 - preview mode は `persistentScreenState` の pure helper / read model で決定する。full / compact preview は同じ resolver / renderer の結果を使い、compact preview 専用の geometry や CSS 座標を再実装しない。
-- VP-01 / VP-02 の media pane は compact line card の右側へ置き、current assignment / asset title / kind、lifecycle state（hidden / playing / paused / ended / static-visible）、表示・再生開始、一時停止、再開、終了、asset 選択 / 差し替え導線を表示する。これは UI の lifecycle read model であり、V25 の serialized video segment state は playing / paused / ended に限定する。source end 到達後は ended を表示し、pause / resume button を disabled にする。操作の enabled / disabled は resolved state から決め、UI から不正な cue sequence を作らせない。
+- VP-03（#154）の media pane は compact line card の右側へ置き、current assignment / asset title / kind、lifecycle state（hidden / playing / paused / ended / static-visible）、表示・再生開始、一時停止、再開、終了、asset 選択 / 差し替え導線を表示する。これは VP-00〜VP-02 の cue semantics を表示する UI の lifecycle read model であり、V25 の serialized video segment state は playing / paused / ended に限定する。source end 到達後は ended を表示し、pause / resume button を disabled にする。操作の enabled / disabled は resolved state から決め、UI から不正な cue sequence を作らせない。
 - media pane の action 名を `PersistentScreenState` の full preview 判定へ直接渡さない。`VisualPlaybackCue` と source-end boundary を line order + edge order で解決した media state を渡し、前 line と state が変わった場合だけ full preview とする。video paused / ended 中も frame は保持し、ended 後の pause / resume は disabled とし、photo / `document_scan` は static-visible として扱う。
 
-現在の標準 `/script` 画面には、現在の編集対象、制作 ビジュアル候補、AI ビジュアル候補 UI、手順3-3 素材検索、素材検索結果、素材制作・表示設定カードを置かない。AI visual suggestion、Asset Search、generic `VisualAssignment` は backend とデータを維持し、必要なら別画面または補助導線で再利用する。
+現在の標準 `/script` 画面には、CV-05 が除去した legacy right pane の現在の編集対象、制作 ビジュアル候補、AI ビジュアル候補 UI、手順3-3 素材検索、素材検索結果、素材制作・表示設定カードを置かない。AI visual suggestion、Asset Search、generic `VisualAssignment` は backend とデータを維持し、必要なら別画面または補助導線で再利用する。この「置かない」は VP-03 の line-card media cue pane を除外しない。
 
 ### 14.4 編集画面とサムネイル
 
@@ -3149,7 +3158,9 @@ Issue #151（VP-00）は `doc/doc.md` と本書だけを更新する docs-only I
 | VP-01 | `VideoProject 1.4.0 → 1.5.0` migration。既存 video display へ `playbackCues: []` を追加し、写真・帳票へ cue を追加しない。cue range、state transition、deterministic order、implicit initial play / final end を保存時・出力前に検証する。 |
 | VP-02 | pause / resume と natural source end を解決済み render contract へ追加する `RenderManifest 2.5.0` boundary。2.4.0 parser / cache / run log の意味を変更せず、resolved media state、cue boundary、source-end boundary、playing branch の source trim pair、paused / ended branch の一点 `sourceFrame` を WebUI preview と Remotion で共有する。 |
 
-実装順序は `VP-01 → VP-02` とする。ScriptPage の media pane は compact line card の右側へ配置し、current state から操作可否を決める。full preview の判定は action 名の比較ではなく、cue 解決後の `PersistentScreenState` が前 line と異なるかで決める。line 内任意 millisecond cue、waveform / NLE timeline、reverse、scrubbing、transition、speed keyframe、automatic slide generation、dedicated presentation parser は VP-00〜VP-02 の対象外とする。Asset library の管理 CRUD は ScriptPage に混在させず、AL-00 の `/assets` 境界で扱う。
+`VP-01 → VP-02` は cue / render contract の基盤を導入する順序である。ScriptPage の media pane は VP-03（#154）で compact line card の右側へ実装済みであり、current state から操作可否を決める。full preview の判定は action 名の比較ではなく、cue 解決後の `PersistentScreenState` が前 line と異なるかで決める。line 内任意 millisecond cue、waveform / NLE timeline、reverse、scrubbing、transition、speed keyframe、automatic slide generation、dedicated presentation parser は VP-00〜VP-02 の対象外とする。Asset library の管理 CRUD は ScriptPage に混在させず、AL-00 の `/assets` 境界で扱う。
+
+VP-03 は #154 の ScriptPage UI 実装境界であり、現行 baseline に含まれる。ここでいう media pane は VP-00〜VP-02 の cue semantics を line card へ表示する pane であり、CV-05 が除去した legacy right pane（候補、検索、検索結果、素材制作・表示設定カード）とは別物である。VP-00〜VP-02 の「後続」「追加する」という記述は仕様作成時点の履歴・設計境界として残し、VP-03 の実装済み状態と矛盾しないように読む。
 
 ## 27. AL-00 の Asset library 実装境界
 
