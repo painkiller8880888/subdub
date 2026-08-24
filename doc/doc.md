@@ -113,7 +113,7 @@ VP-02 の resolved video display は、`playbackState: "playing" | "paused" | "e
 
 後続 version boundary は明示的に分ける。VP-01 は `VideoProject 1.4.0 → 1.5.0` を導入し、既存 video assignment の `playbackCues` を `[]` として migration する。VP-02 は pause / resume と natural source end を解決済み render contract へ追加するため `RenderManifest 2.5.0` を導入し、`RenderManifest 2.4.0` の parser、cache、run log の意味を変更しない。2.5.0 では cue を resolved media state へ固定し、playing branch は source trim pair、paused / ended branch は一点の `sourceFrame` を持つ。preview と Remotion は同じ結果を使う。
 
-現行 `/projects/{projectId}/script` では、VP-03（#154）の media pane を SW-04（#169）の表示契約で扱う。素材挿入済みの visible UI は preview と状態に応じた操作だけとし、video の playing / paused ではそれぞれ `[一時停止]` / `[再開]`、共通の `[停止] [変更]` を表示し、photo / `document_scan` では `[停止] [変更]`、未挿入では `[素材を挿入]` だけを表示する。assignment、lifecycle、cue の read model と操作可否は保持するが、状態説明や technical metadata の文章を pane に常設しない。V25 の serialized video segment state は playing / paused / ended に限定し、`PersistentScreenState` へは action 名ではなく cue と source-end を解決した media state を渡す。
+現行 `/projects/{projectId}/script` では、VP-03（#154）の media pane を SW-04（#169）の表示契約で扱う。素材挿入済みの visible UI は preview と状態に応じた操作だけとし、video の playing / paused / ended ではそれぞれ `[一時停止]` / `[再開]` / `[停止] [変更]`、natural source end 後の ended は最終描画フレーム preview と `[停止] [変更]` を表示し、pause / resume は表示しない。photo / `document_scan` では `[停止] [変更]`、未挿入では `[素材を挿入]` だけを表示する。assignment、lifecycle、cue の read model と操作可否は保持するが、状態説明や technical metadata の文章を pane に常設しない。V25 の serialized video segment state は playing / paused / ended に限定し、`PersistentScreenState` へは action 名ではなく cue と source-end を解決した media state を渡す。
 
 対象外は line 内任意 millisecond cue、waveform / NLE timeline、reverse playback、scrubbing keyframe、video transition、speed keyframe、automatic slide / AI slide generation、dedicated presentation parser である。Asset library CRUD UI は VP-03 の ScriptPage media pane（VP-00〜VP-02 の cue semantics を接続する UI）には含めず、次節の Issue #155（AL-00）で `/assets` のワークスペース管理画面として別に定義する。
 
@@ -150,7 +150,7 @@ Issue #169（SW-04）は `doc/doc.md` と `implementation-spec.md` だけを更�
   [字幕] subtitleText
 
 3行目
-  [読み上げ] spokenText / よみがな
+  [VOICEVOX 読み上げ] spokenText
 
 4行目
   [詳細設定]                                      [上へ移動] [下へ移動] [複製] [削除]
@@ -170,11 +170,12 @@ line に対応する generic `VisualAssignment` / playback control pane は、�
 ```text
 video playing:  [ video / thumbnail preview ]  [一時停止] [停止] [変更]
 video paused:   [ paused frame / thumbnail ]   [再開] [停止] [変更]
+video ended:    [ last frame / thumbnail preview ] [停止] [変更]
 photo / document_scan: [ image preview ]       [停止] [変更]
 未挿入:                                      [素材を挿入]
 ```
 
-常設しないものは、素材の表示期間・assignment range・cue semantics の説明、playing / paused / static-visible などの状態説明、注意書き・補足・ヒント、range / start / end の説明ラベル、通常時の warning paragraph / panel、asset title / kind / technical metadata を文章で並べる summary である。`[停止]` は既存の assignment / cue semantics に従って current line 境界で表示・再生を終了する操作であり、Asset や project data の hard delete ではない。`[変更]` は既存の安全な asset replace / assignment edit path を使用する。
+常設しないものは、素材の表示期間・assignment range・cue semantics の説明、playing / paused / ended / static-visible などの状態説明、注意書き・補足・ヒント、range / start / end の説明ラベル、通常時の warning paragraph / panel、asset title / kind / technical metadata を文章で並べる summary である。video の ended は natural source end 後も assignment が終了するまで最終描画フレームを保持する resolved state であり、visible UI は `[停止] [変更]` とし、pause / resume は表示しない。`[停止]` は既存の assignment / cue semantics に従って current line 境界で表示・再生を終了する操作であり、Asset や project data の hard delete ではない。`[変更]` は既存の安全な asset replace / assignment edit path を使用する。
 
 素材欄から visible warning を外しても validation、conflict detection、revision safety は削除しない。不正な action は生成せず disabled にする。mutation failure、revision conflict、range-shortening confirmation などユーザー判断が必要な feedback は modal / dialog、page-level feedback、toast など素材欄外の surface で扱う。状態と button の accessible name は `aria-label` などで保持し、説明文を pane 内へ増やさない。
 
@@ -969,9 +970,9 @@ AI に素材そのもの、完成スライド、図解を生成させない。AI
 
 source position が `sourceEndFrame` に到達または超過した最初の presentation frame boundary は implicit source-end → ended を先に適用する。assignment の表示時間が source duration を超えても invalid にせず、ended 後の pause / resume は無効とする。
 
-pause 中は pause 境界の source frame を保持し、source media time と video 内音声を進めない。line speech、BGM、sound effect 等の別 audio layer は進める。resume は同じ source position から継続し、`playbackRate` は playing interval の source-time accumulation にだけ適用する。photo / `document_scan` は cue を持たず、range 中は同じ static display を維持する。
+pause 中は pause 境界の source frame を保持し、source media time と video 内音声を進めない。line speech、BGM、sound effect 等の別 audio layer は進める。resume は同じ source position から継続し、`playbackRate` は playing interval の source-time accumulation にだけ適用する。source end 到達後は assignment の終了まで最終描画フレームを保持する `ended` state とし、pause / resume は無効である。photo / `document_scan` は cue を持たず、range 中は同じ static display を維持する。
 
-ScriptPage の media pane は SW-04（#169）の minimal UI contract に従う。video は playing 時に `[一時停止] [停止] [変更]`、paused 時に `[再開] [停止] [変更]`、photo / `document_scan` は `[停止] [変更]`、未挿入時は `[素材を挿入]` だけを表示する。preview は常設するが、assignment range、cue、playing / paused / static-visible の説明、asset metadata の文章、通常時の warning は pane 内へ表示しない。停止は assignment の current line 境界での表示・再生終了であり、素材削除ではない。
+ScriptPage の media pane は SW-04（#169）の minimal UI contract に従う。video は playing 時に `[一時停止] [停止] [変更]`、paused 時に `[再開] [停止] [変更]`、ended 時に最終描画フレーム preview と `[停止] [変更]`、photo / `document_scan` は `[停止] [変更]`、未挿入時は `[素材を挿入]` だけを表示する。ended では pause / resume を表示しない。preview は常設するが、assignment range、cue、playing / paused / ended / static-visible の説明、asset metadata の文章、通常時の warning は pane 内へ表示しない。停止は assignment の current line 境界での表示・再生終了であり、素材削除ではない。
 
 #### 6.4.4 確認と validation
 
@@ -1315,7 +1316,7 @@ SQLite は素材メタデータの検索と、複数プロジェクトを横断�
 - ScreenTemplate の 4 種類の固定 element（dialogue window、section title、2 character slots、primary content slot）について、移動、拡大縮小、回転、font size、`flipX` を編集・validation できる。
 - 現行 `VideoProject 1.4.0` の section `screenTemplateId` だけを `project.json` へ保存し、section 内の全 line に適用できる。`1.3.0` の nullable line override は migration input にだけ残す。
 - `/projects/{projectId}/script` の usable content pane だけを最大 `1500px` とし、他フェーズの width policy を変更せず、狭い viewport では縮小して horizontal overflow を作らない。
-- `/script` の line card を metadata / controls block を第1行として数える4行 compact 表示とし、ID subline、speaker name-only、ビジュアル変更、compact voice controls、subtitle、spokenText / よみがな、詳細設定と line actions を配置する。subtitle / 読み上げテキストは編集時だけ expand でき、詳細設定は modal / dialog で編集できる。
+- `/script` の line card を metadata / controls block を第1行として数える4行 compact 表示とし、ID subline、speaker name-only、ビジュアル変更、compact voice controls、subtitle、`[VOICEVOX 読み上げ]` と `spokenText`、詳細設定と line actions を配置する。`spokenText` は保存 field であり、visible label は「よみがな」としない。subtitle / 読み上げテキストは編集時だけ expand でき、詳細設定は modal / dialog で編集できる。
 - section の先頭、section / background の境界、または persistent canvas state が変化する line に full screen preview を表示し、それ以外は dialogue / subtitle の compact preview を表示できる。preview は shared resolver / layout component の表示領域だけを絞る。
 - 現行 `RenderManifest 2.4.0` に section ごとの `sectionTitle`、resolved layout、template revision / hash、font size、`flipX`、content slot、現行 line / visual resolved fields、generic visual の `RenderVisualV24.display` を固定する。VP-02 の `RenderManifest 2.5.0` では line は parent section layout を参照し、video の resolved playback state と branch-specific source state（playing の trim pair / paused の source end 前の `sourceFrame` / ended の `lastDrawableSourceFrame`）を追加して、`sourceEndFrame` を exclusive endpoint として別に扱い、Remotion が SQLite や raw display coordinate space を直接参照せずに描画できる。
 - 2 キャラクターの掛け合いを表現できる。
@@ -1332,7 +1333,7 @@ SQLite は素材メタデータの検索と、複数プロジェクトを横断�
 - generic Asset Search の別画面または補助導線から、人間が候補または手動検索結果を選び、1 セリフまたは連続セリフ範囲へ割り当てられる。これは CV-05 が除去した legacy `/projects/{projectId}/script` right pane を意味しない。VP-03 の line-card media cue pane は現行標準の別 UI として扱う。
 - 動画の使用区間、画像・帳票のページまたは切り抜き、拡大、位置、注釈を指定できる。
 - `VisualAssignment` の表示範囲を `startLineId` BEFORE / `endLineId` AFTER で解決し、video だけに line-boundary の pause / resume cue を保存・再生できる。pause 中は frame、source time、video 内音声を保持し、speech / BGM / sound effect は進める。photo / `document_scan` は static display のままとする。
-- ScriptPage の素材 pane は video playing / paused ではそれぞれ `[一時停止]` / `[再開]` と共通の `[停止] [変更]`、static media では `[停止] [変更]`、未挿入時は `[素材を挿入]` と preview だけを基本表示し、説明文、状態説明、常設 warning、asset metadata summary を pane 内へ常設しない。validation / revision conflict / confirmation の feedback は pane 外で扱う。
+- ScriptPage の素材 pane は video playing / paused ではそれぞれ `[一時停止]` / `[再開]` と共通の `[停止] [変更]`、ended では最終描画フレーム preview と `[停止] [変更]`、static media では `[停止] [変更]`、未挿入時は `[素材を挿入]` と preview だけを基本表示し、説明文、状態説明、常設 warning、asset metadata summary を pane 内へ常設しない。validation / revision conflict / confirmation の feedback は pane 外で扱う。
 - オープニング、エンディング、アイキャッチを挿入できる。
 - JSON をスキーマ検証できる。
 - 字幕やビジュアルのはみ出しを検証できる。
@@ -1505,7 +1506,7 @@ editor のサイドバーでは active な CharacterVisualSet / variant と必�
   ID subline: セリフ ID | script-line-...
   control subline: [話者] [ビジュアルを変更] [音声状態] [再生] [再生成] [音声調整]
 2 行目: [字幕] subtitleText（セリフ表示）
-3 行目: [読み上げ] spokenText / よみがな（読み上げ用表示）
+3 行目: [VOICEVOX 読み上げ] spokenText（読み上げ用 field）
 4 行目: [詳細設定]                              [上へ移動] [下へ移動] [複製] [削除]
 ```
 
@@ -1514,7 +1515,7 @@ editor のサイドバーでは active な CharacterVisualSet / variant と必�
 - 2・3 行目は通常時に compact な 1 行表示とし、選択・編集時だけ textarea 等の入力領域へ expand する。編集終了後は compact 表示へ戻す。
 - 音声は compact status indicator と `[再生] [再生成] [音声調整]` を置き、native `<audio controls>` は通常カードに表示しない。current audio がない場合は再生操作を disabled 等で表す。
 - `[詳細設定]` は modal / dialog を開き、`expression`、`pauseBeforeMs`、`pauseAfterMs` を編集する。keyboard 操作、Escape close、focus restore を満たし、保存・autosave・revision・validation semantics は変更しない。
-- 現場素材の generic assignment が存在する場合、media pane の visible UI は SW-04 の preview と状態に応じた `[一時停止]` / `[再開]`、`[停止]`、`[変更]` に限定し、説明文、状態説明、常設 warning、asset metadata summary を置かない。未挿入時は `[素材を挿入]` だけを表示する。
+- 現場素材の generic assignment が存在する場合、media pane の visible UI は SW-04 の preview と状態に応じた `[一時停止]` / `[再開]` / `[停止]` / `[変更]` に限定する。video ended は最終描画フレーム preview と `[停止] [変更]`、photo / `document_scan` は `[停止] [変更]`、未挿入時は `[素材を挿入]` だけを表示し、ended 中の pause / resume は表示しない。説明文、状態説明、常設 warning、asset metadata summary は置かない。
 
 読み上げテキストは、ひらがなだけでなくカタカナや読み方調整用の表記を入力する可能性があるため、UI 上では「よみがな」ではなく「VOICEVOX 読み上げ」と表記する。字幕プレビューには最終動画と同じ Remotion 字幕コンポーネントを使用し、改行、文字サイズ、はみ出しの判定を一致させる。
 
@@ -2165,10 +2166,10 @@ Issue #169 は `doc/doc.md` と `doc/implementation-spec.md` だけを更新す�
 
 | 領域 | 実装契約 |
 |---|---|
-| line card | metadata / controls block を第1行として数える4行構成。ID subline、speaker name-only、`[ビジュアルを変更]`、compact voice status / actions、subtitle、spokenText / よみがな、`[詳細設定]` と line actions を配置する。subtitle / spokenText は edit-time だけ expand し、詳細設定は keyboard / Escape / focus restore を備えた modal / dialog とする。 |
+| line card | metadata / controls block を第1行として数える4行構成。ID subline、speaker name-only、`[ビジュアルを変更]`、compact voice status / actions、subtitle、`[VOICEVOX 読み上げ]` と `spokenText`、`[詳細設定]` と line actions を配置する。`spokenText` は保存 field であり、visible label は「よみがな」としない。subtitle / spokenText は edit-time だけ expand し、詳細設定は keyboard / Escape / focus restore を備えた modal / dialog とする。 |
 | character visual | 通常カードに preview / label / `renderType` block を常設せず、speaker-bound active variant の preview、label、renderType、tags、selected state は picker 内で確認する。 |
 | voice | native audio controls を通常カードへ置かず、音声なしは再生 disabled 等で表す。voice status / freshness / generation semantics は維持する。 |
-| media pane | 挿入済み video は playing=`[一時停止] [停止] [変更]`、paused=`[再開] [停止] [変更]`、static media は `[停止] [変更]`、未挿入は `[素材を挿入]`。preview 以外の説明文、状態説明、range / start / end labels、metadata summary、常設 warning は表示しない。 |
+| media pane | 挿入済み video は playing=`[一時停止] [停止] [変更]`、paused=`[再開] [停止] [変更]`、ended=`[last frame / thumbnail preview] [停止] [変更]`、static media は `[停止] [変更]`、未挿入は `[素材を挿入]`。ended では pause / resume を表示しない。preview 以外の説明文、状態説明、range / start / end labels、metadata summary、常設 warning は表示しない。 |
 | feedback | invalid action は生成せず disabled。mutation failure、revision conflict、range-shortening confirmation 等は modal / dialog、page-level feedback、toast など pane 外で扱い、accessible name は aria-label 等で保持する。 |
 | acceptance | 実ブラウザで約 `1500px` の content pane、4行 card、minimal media pane、non-overflow を測定し、参照画像と同等の情報密度をスクリーンショットで確認する。 |
 
