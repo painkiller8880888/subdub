@@ -805,26 +805,10 @@ export class VisualAssignmentService {
         "The visual assignment does not exist."
       );
     }
-    if (request.assignment.assetId !== currentAssignment.assetId) {
-      throw visualAssignmentError(
-        VISUAL_ASSIGNMENT_ERROR_CODE.assignmentAssetReplacementUnsupported,
-        422,
-        "Replace an asset by creating a new assignment and removing the old one."
-      );
-    }
-
     const display = this.normalizeDisplay(
       request.assignment.display,
       currentAssignment.display.displayCoordinateSpace
     );
-    if (display.kind !== currentAssignment.display.kind) {
-      throw visualAssignmentError(
-        VISUAL_ASSIGNMENT_ERROR_CODE.displayKindMismatch,
-        422,
-        "The display kind does not match the existing assignment snapshot.",
-        [{ path: ["assignment", "display", "kind"], message: "kind mismatch" }]
-      );
-    }
     if (
       display.displayCoordinateSpace !==
       currentAssignment.display.displayCoordinateSpace
@@ -842,9 +826,29 @@ export class VisualAssignmentService {
         ]
       );
     }
-    if (!isSnapshotOnlyDisplayUpdate(currentAssignment.display, display)) {
+
+    const replacingAsset =
+      request.assignment.assetId !== currentAssignment.assetId ||
+      request.assetVersion !== undefined;
+    let placement: PlacementResult | undefined;
+    let placementProjectRoot: string | undefined;
+    let replacementImport:
+      | {
+          readonly sourcePath: string;
+          readonly projectPaths: ProjectPaths;
+          readonly checksum: string;
+        }
+      | undefined;
+    let snapshot = {
+      assetId: currentAssignment.assetId,
+      assetChecksum: currentAssignment.assetChecksum,
+      projectMediaPath: currentAssignment.projectMediaPath
+    };
+
+    if (replacingAsset) {
       const asset = this.assetRepository.findAssetDetail(
-        currentAssignment.assetId
+        request.assignment.assetId,
+        request.assetVersion
       );
       if (asset === undefined) {
         throw visualAssignmentError(
@@ -857,21 +861,65 @@ export class VisualAssignmentService {
       this.assertAssetUsable(asset, display.kind);
       this.assertDisplayWithinAsset(asset, display);
       const confirmedChecksum = this.assertChecksum(asset.checksum);
-      if (
-        normalizeChecksum(confirmedChecksum) !==
-        normalizeChecksum(currentAssignment.assetChecksum)
-      ) {
+      const extension = extensionForAsset(asset);
+      const projectRoot = await this.resolveProjectRoot(currentProject.metadata.id);
+      const sourcePath = await this.resolveLibrarySource(asset.libraryMediaPath);
+      const projectPaths = this.resolveProjectMediaPaths(
+        projectRoot,
+        asset,
+        extension
+      );
+      replacementImport = {
+        sourcePath,
+        projectPaths,
+        checksum: normalizeChecksum(confirmedChecksum)
+      };
+      snapshot = {
+        assetId: asset.assetId,
+        assetChecksum: confirmedChecksum,
+        projectMediaPath: projectPaths.projectMediaPath
+      };
+    } else {
+      if (display.kind !== currentAssignment.display.kind) {
         throw visualAssignmentError(
-          VISUAL_ASSIGNMENT_ERROR_CODE.checksumMismatch,
+          VISUAL_ASSIGNMENT_ERROR_CODE.displayKindMismatch,
           422,
-          "The current asset checksum no longer matches the assignment.",
-          [{ path: ["assignment", "assetChecksum"], message: "checksum mismatch" }]
+          "The display kind does not match the existing assignment snapshot.",
+          [{ path: ["assignment", "display", "kind"], message: "kind mismatch" }]
         );
+      }
+      if (!isSnapshotOnlyDisplayUpdate(currentAssignment.display, display)) {
+        const asset = this.assetRepository.findAssetDetail(
+          currentAssignment.assetId
+        );
+        if (asset === undefined) {
+          throw visualAssignmentError(
+            VISUAL_ASSIGNMENT_ERROR_CODE.assetNotFound,
+            404,
+            "The selected asset does not exist.",
+            [{ path: ["assignment", "assetId"], message: "asset not found" }]
+          );
+        }
+        this.assertAssetUsable(asset, display.kind);
+        this.assertDisplayWithinAsset(asset, display);
+        const confirmedChecksum = this.assertChecksum(asset.checksum);
+        if (
+          normalizeChecksum(confirmedChecksum) !==
+          normalizeChecksum(currentAssignment.assetChecksum)
+        ) {
+          throw visualAssignmentError(
+            VISUAL_ASSIGNMENT_ERROR_CODE.checksumMismatch,
+            422,
+            "The current asset checksum no longer matches the assignment.",
+            [{ path: ["assignment", "assetChecksum"], message: "checksum mismatch" }]
+          );
+        }
       }
     }
 
     const updatedAssignment: VisualAssignment = {
       ...currentAssignment,
+      ...snapshot,
       startLineId: request.assignment.startLineId,
       endLineId: request.assignment.endLineId,
       display
@@ -900,11 +948,34 @@ export class VisualAssignmentService {
         validationDetails(candidateResult.error.issues)
       );
     }
-    const saved = await repository.save(
-      candidateResult.data,
-      request.expectedRevision
-    );
-    return { data: saved, revision: saved.revision };
+    if (replacementImport !== undefined) {
+      placementProjectRoot = replacementImport.projectPaths.projectRoot;
+      placement = await this.placeFile(
+        replacementImport.sourcePath,
+        replacementImport.projectPaths,
+        replacementImport.checksum
+      );
+    }
+    try {
+      const saved = await repository.save(
+        candidateResult.data,
+        request.expectedRevision
+      );
+      return { data: saved, revision: saved.revision };
+    } catch (error) {
+      if (
+        placement?.createdFinalFile === true &&
+        placementProjectRoot !== undefined
+      ) {
+        await this.cleanupFinalFileIfUnreferenced(
+          repository,
+          placementProjectRoot,
+          placement.finalPath,
+          placement.projectMediaPath
+        );
+      }
+      throw error;
+    }
   }
 
   private async removeLocked(

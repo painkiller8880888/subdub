@@ -22,6 +22,7 @@ import type {
   VoiceLineGenerationStatus
 } from "../schema/api.js";
 import type {
+  AssetListItem,
   AssetDetail,
   CharacterVariant,
   CharacterVisualCatalogSnapshot,
@@ -29,7 +30,9 @@ import type {
   Script,
   ScriptLine,
   ScriptSection,
-  VideoProject
+  VideoProject,
+  VisualAssignment,
+  VisualPlaybackCue
 } from "../schema/index.js";
 import {
   ApiClientError,
@@ -40,10 +43,13 @@ import {
   fetchProjectVoiceStatus,
   fetchScreenTemplate,
   fetchScreenTemplates,
+  assignProjectVisual,
   generateAllProjectVoice,
   generateProjectVoice,
   initializeProjectScript,
-  saveProjectScript
+  searchAssets,
+  saveProjectScript,
+  updateProjectVisualAssignment
 } from "./lib/api-client";
 import {
   AutosaveCoordinator,
@@ -74,9 +80,26 @@ import { CharacterVisualPickerModal } from "./CharacterVisualPicker";
 import { characterVisualFileUrl } from "./character-visual-picker";
 import { VoiceAdjustmentEditor } from "./VoiceAdjustmentEditor";
 import { visualAssignmentsPath } from "./VisualAssignmentsPage";
+import {
+  ScriptMediaAssetPicker,
+  ScriptMediaDialog,
+  ScriptMediaPane,
+  type ScriptMediaPickerAction
+} from "./ScriptMediaPane";
 import { WorkflowIndicator } from "./WorkflowIndicator";
 import { ScreenLayoutFrame } from "../remotion/screen-template-layout";
 import { createProjectManifestAssetUrlResolver } from "./preview-asset-url";
+import {
+  addVisualPlaybackCue,
+  assignmentInput,
+  defaultDisplayForAsset,
+  isSelectableGenericVisualAsset,
+  nextVisualAssignmentId,
+  playbackCuesOutsideRange,
+  removePlaybackCuesOutsideRange,
+  replacementDisplayForAsset,
+  type SelectableGenericVisualAsset
+} from "./visual-assignment-editor";
 import {
   previewLineKey,
   projectAssetVersion,
@@ -313,6 +336,7 @@ function visualForLine(
 
 function ScriptLineCard({
   line,
+  section,
   sectionIndex,
   lineIndex,
   project,
@@ -325,14 +349,22 @@ function ScriptLineCard({
   voiceGenerationDisabled,
   voiceAvailable,
   projectId,
+  assets,
   onChange,
   onMove,
   onDuplicate,
   onDelete,
   onGenerateVoice,
-  onOpenPicker
+  onOpenPicker,
+  onStartMedia,
+  onPauseMedia,
+  onResumeMedia,
+  onEndMedia,
+  onReplaceMedia,
+  mediaMutationPending
 }: {
   readonly line: ScriptLine;
+  readonly section: Pick<ScriptSection, "id" | "lines">;
   readonly sectionIndex: number;
   readonly lineIndex: number;
   readonly project: VideoProject;
@@ -345,12 +377,19 @@ function ScriptLineCard({
   readonly voiceGenerationDisabled: boolean;
   readonly voiceAvailable: boolean;
   readonly projectId: string;
+  readonly assets: ReadonlyMap<string, AssetDetail | undefined>;
   readonly onChange: (update: Partial<ScriptLine>) => void;
   readonly onMove: (direction: "up" | "down") => void;
   readonly onDuplicate: () => void;
   readonly onDelete: () => void;
   readonly onGenerateVoice: () => void;
   readonly onOpenPicker: () => void;
+  readonly onStartMedia: () => void;
+  readonly onPauseMedia: (assignmentId: string) => void;
+  readonly onResumeMedia: (assignmentId: string) => void;
+  readonly onEndMedia: (assignmentId: string) => void;
+  readonly onReplaceMedia: (assignmentId: string) => void;
+  readonly mediaMutationPending: boolean;
 }) {
   const lineIssues = lineIssueText(issues, sectionIndex, lineIndex);
   const { character, visual, variant } = visualForLine(project, catalog, line);
@@ -701,6 +740,22 @@ function ScriptLineCard({
             </ul>
           ) : null}
         </div>
+
+        <ScriptMediaPane
+          assignments={previewState.assignments}
+          assets={assets}
+          isPending={mediaMutationPending}
+          line={line}
+          onEnd={onEndMedia}
+          onPause={onPauseMedia}
+          onReplace={onReplaceMedia}
+          onResume={onResumeMedia}
+          onStart={onStartMedia}
+          presentationStates={
+            previewState.persistentScreenState.visualPresentationState
+          }
+          section={section}
+        />
       </div>
     </article>
   );
@@ -730,6 +785,60 @@ function findLineLocation(
     }
   }
   return undefined;
+}
+
+type MediaLineReference = Readonly<{
+  sectionId: string;
+  lineId: string;
+}>;
+
+type MediaPickerState = Readonly<{
+  action: ScriptMediaPickerAction;
+  line: MediaLineReference;
+  assignmentId?: string;
+}>;
+
+type MediaRangeConfirmation = Readonly<{
+  assignmentId: string;
+  line: MediaLineReference;
+  outsideCues: readonly VisualPlaybackCue[];
+}>;
+
+type MediaKindChangeConfirmation = Readonly<{
+  assignmentId: string;
+  asset: SelectableGenericVisualAsset;
+  fromKind: VisualAssignment["display"]["kind"];
+  toKind: VisualAssignment["display"]["kind"];
+}>;
+
+type MediaMutationInput =
+  | {
+      kind: "create";
+      projectId: string;
+      projectGeneration: number;
+      input: Parameters<typeof assignProjectVisual>[1];
+    }
+  | {
+      kind: "update";
+      projectId: string;
+      assignmentId: string;
+      projectGeneration: number;
+      input: Parameters<typeof updateProjectVisualAssignment>[2];
+    };
+
+const scriptMediaAssetKinds = ["video", "photo", "document_scan"] as const;
+
+function visualDisplayKindLabel(
+  kind: VisualAssignment["display"]["kind"]
+): string {
+  switch (kind) {
+    case "video":
+      return "動画";
+    case "photo":
+      return "写真";
+    case "document_scan":
+      return "帳票スキャン";
+  }
 }
 
 export function ScriptPage() {
@@ -773,6 +882,14 @@ export function ScriptPage() {
   const [voiceError, setVoiceError] = useState<unknown>(null);
   const [pickerLineId, setPickerLineId] = useState<string | null>(null);
   const [pickerError, setPickerError] = useState<string | null>(null);
+  const [mediaPicker, setMediaPicker] = useState<MediaPickerState | null>(null);
+  const [mediaPickerSearch, setMediaPickerSearch] = useState("");
+  const [mediaError, setMediaError] = useState<unknown>(null);
+  const [mediaRangeConfirmation, setMediaRangeConfirmation] =
+    useState<MediaRangeConfirmation | null>(null);
+  const [mediaKindChangeConfirmation, setMediaKindChangeConfirmation] =
+    useState<MediaKindChangeConfirmation | null>(null);
+  const [mediaActionPending, setMediaActionPending] = useState(false);
   const projectIdRef = useRef(projectId ?? "");
   const projectGenerationRef = useRef(0);
   const revisionRef = useRef(0);
@@ -780,6 +897,7 @@ export function ScriptPage() {
   const lastSavedRef = useRef<Script | null>(null);
   const initializedForProjectRef = useRef<string | null>(null);
   const coordinatorRef = useRef<AutosaveCoordinator<Script> | null>(null);
+  const mediaActionPendingRef = useRef(false);
   const [coordinator, setCoordinator] =
     useState<AutosaveCoordinator<Script> | null>(null);
 
@@ -823,6 +941,21 @@ export function ScriptPage() {
       retry: false
     }))
   });
+  const mediaPickerQueries = useQueries({
+    queries: scriptMediaAssetKinds.map((kind) => ({
+      queryKey: ["assets", "script-media-picker", kind, mediaPickerSearch],
+      queryFn: () =>
+        searchAssets({
+          q: mediaPickerSearch,
+          kind,
+          status: "active",
+          page: 1,
+          pageSize: 100
+        }),
+      enabled: projectId !== undefined && mediaPicker !== null,
+      retry: false
+    }))
+  });
 
   const saveMutation = useMutation({
     mutationFn: ({
@@ -838,6 +971,33 @@ export function ScriptPage() {
   });
   const saveMutationRef = useRef(saveMutation);
   saveMutationRef.current = saveMutation;
+
+  const mediaMutation = useMutation({
+    mutationFn: (input: MediaMutationInput) =>
+      input.kind === "create"
+        ? assignProjectVisual(input.projectId, input.input)
+        : updateProjectVisualAssignment(
+            input.projectId,
+            input.assignmentId,
+            input.input
+          ),
+    onSuccess: (project, variables) => {
+      if (
+        !isProjectContextCurrent(
+          projectIdRef.current,
+          projectGenerationRef.current,
+          variables.projectId,
+          variables.projectGeneration
+        )
+      ) {
+        return;
+      }
+      updateMutationCaches(project);
+      revisionRef.current = project.revision;
+      setMediaError(null);
+    },
+    retry: false
+  });
 
   const generateVoiceMutation = useMutation({
     mutationFn: ({
@@ -978,6 +1138,11 @@ export function ScriptPage() {
     setVoiceError(null);
     setPickerLineId(null);
     setPickerError(null);
+    setMediaPicker(null);
+    setMediaPickerSearch("");
+    setMediaError(null);
+    setMediaRangeConfirmation(null);
+    setMediaKindChangeConfirmation(null);
     coordinator.reset();
   }, [coordinator, projectId]);
 
@@ -1296,6 +1461,476 @@ export function ScriptPage() {
     generateAllVoiceMutation.mutate(projectIdRef.current);
   }
 
+  function latestProject(): VideoProject | undefined {
+    return (
+      queryClient.getQueryData<VideoProject>([
+        "projects",
+        projectIdRef.current
+      ]) ?? projectQuery.data
+    );
+  }
+
+  function beginMediaAction(): boolean {
+    if (mediaActionPendingRef.current || mediaMutation.isPending) {
+      return false;
+    }
+    mediaActionPendingRef.current = true;
+    setMediaActionPending(true);
+    return true;
+  }
+
+  function endMediaAction(): void {
+    mediaActionPendingRef.current = false;
+    setMediaActionPending(false);
+  }
+
+  function closeMediaPicker(): void {
+    if (mediaActionPendingRef.current || mediaMutation.isPending) {
+      return;
+    }
+    setMediaPicker(null);
+    setMediaPickerSearch("");
+  }
+
+  function openMediaPicker(
+    line: MediaLineReference,
+    action: ScriptMediaPickerAction,
+    assignmentId?: string
+  ): void {
+    if (mediaActionPendingRef.current || mediaMutation.isPending) {
+      return;
+    }
+    setMediaError(null);
+    setMediaPickerSearch("");
+    setMediaPicker({ action, line, assignmentId });
+  }
+
+  async function flushBeforeMediaMutation(
+    errorMessage: string
+  ): Promise<VideoProject | undefined> {
+    const flushed = await coordinatorRef.current?.flush();
+    if (flushed !== true) {
+      setMediaError(new Error(errorMessage));
+      return undefined;
+    }
+    const currentProject = latestProject();
+    if (currentProject === undefined) {
+      setMediaError(
+        new Error("プロジェクトを読み込んでから操作してください。")
+      );
+      return undefined;
+    }
+    return currentProject;
+  }
+
+  function resolveMediaLineId(
+    currentProject: VideoProject,
+    line: MediaLineReference,
+    locator: ReturnType<typeof createScriptLineLocator>
+  ): string | undefined {
+    return locator === undefined
+      ? currentProject.script.sections
+          .find((section) => section.id === line.sectionId)
+          ?.lines.find((candidate) => candidate.id === line.lineId)?.id
+      : resolveScriptLineId(currentProject.script, locator);
+  }
+
+  async function saveMediaAssignment(
+    currentProject: VideoProject,
+    assignment: VisualAssignment,
+    assetVersion?: number
+  ): Promise<boolean> {
+    const requestProjectId = currentProject.metadata.id;
+    const requestGeneration = projectGenerationRef.current;
+    try {
+      await mediaMutation.mutateAsync({
+        kind: "update",
+        projectId: requestProjectId,
+        assignmentId: assignment.id,
+        projectGeneration: requestGeneration,
+        input: {
+          expectedRevision: currentProject.revision,
+          ...(assetVersion === undefined ? {} : { assetVersion }),
+          assignment: assignmentInput(assignment)
+        }
+      });
+      const isCurrent = isProjectContextCurrent(
+        projectIdRef.current,
+        projectGenerationRef.current,
+        requestProjectId,
+        requestGeneration
+      );
+      if (isCurrent) {
+        setMediaRangeConfirmation(null);
+        setMediaKindChangeConfirmation(null);
+      }
+      return isCurrent;
+    } catch (error) {
+      if (
+        isProjectContextCurrent(
+          projectIdRef.current,
+          projectGenerationRef.current,
+          requestProjectId,
+          requestGeneration
+        )
+      ) {
+        setMediaError(error);
+      }
+      return false;
+    }
+  }
+
+  async function updateMediaAssignment(
+    line: MediaLineReference,
+    assignmentId: string,
+    update: (
+      assignment: VisualAssignment,
+      resolvedLineId: string,
+      currentProject: VideoProject
+    ) => VisualAssignment
+  ): Promise<void> {
+    if (!beginMediaAction()) {
+      return;
+    }
+    try {
+      const draftScript = draftRef.current;
+      const locator =
+        draftScript === null
+          ? undefined
+          : createScriptLineLocator(draftScript, line.sectionId, line.lineId);
+      const currentProject = await flushBeforeMediaMutation(
+        "台本を保存できないため、表示素材を変更できません。"
+      );
+      if (currentProject === undefined) {
+        return;
+      }
+      const resolvedLineId = resolveMediaLineId(currentProject, line, locator);
+      const currentAssignment = currentProject.visuals.assignments.find(
+        (assignment) => assignment.id === assignmentId
+      );
+      if (resolvedLineId === undefined || currentAssignment === undefined) {
+        setMediaError(new Error("対象セリフまたは表示素材を解決できません。"));
+        return;
+      }
+      const nextAssignment = update(
+        currentAssignment,
+        resolvedLineId,
+        currentProject
+      );
+      await saveMediaAssignment(currentProject, nextAssignment);
+    } finally {
+      endMediaAction();
+    }
+  }
+
+  function pauseMedia(line: MediaLineReference, assignmentId: string): void {
+    void updateMediaAssignment(line, assignmentId, (assignment, lineId) =>
+      addVisualPlaybackCue(assignment, lineId, "pause")
+    );
+  }
+
+  function resumeMedia(line: MediaLineReference, assignmentId: string): void {
+    void updateMediaAssignment(line, assignmentId, (assignment, lineId) =>
+      addVisualPlaybackCue(assignment, lineId, "resume")
+    );
+  }
+
+  async function requestEndMedia(
+    line: MediaLineReference,
+    assignmentId: string
+  ): Promise<void> {
+    if (!beginMediaAction()) {
+      return;
+    }
+    try {
+      const draftScript = draftRef.current;
+      const locator =
+        draftScript === null
+          ? undefined
+          : createScriptLineLocator(draftScript, line.sectionId, line.lineId);
+      const currentProject = await flushBeforeMediaMutation(
+        "台本を保存できないため、素材の終了位置を変更できません。"
+      );
+      if (currentProject === undefined) {
+        return;
+      }
+      const resolvedLineId = resolveMediaLineId(currentProject, line, locator);
+      const currentAssignment = currentProject.visuals.assignments.find(
+        (assignment) => assignment.id === assignmentId
+      );
+      const section = currentProject.script.sections.find(
+        (candidate) => candidate.id === line.sectionId
+      );
+      if (
+        resolvedLineId === undefined ||
+        currentAssignment === undefined ||
+        section === undefined
+      ) {
+        setMediaError(new Error("対象セリフまたは表示素材を解決できません。"));
+        return;
+      }
+      const outsideCues = playbackCuesOutsideRange(
+        currentAssignment,
+        section,
+        resolvedLineId
+      );
+      if (outsideCues.length > 0) {
+        setMediaRangeConfirmation({
+          assignmentId,
+          line: { sectionId: section.id, lineId: resolvedLineId },
+          outsideCues
+        });
+        return;
+      }
+      await saveMediaAssignment(currentProject, {
+        ...currentAssignment,
+        endLineId: resolvedLineId
+      });
+    } finally {
+      endMediaAction();
+    }
+  }
+
+  async function confirmEndMedia(): Promise<void> {
+    const confirmation = mediaRangeConfirmation;
+    if (confirmation === null || !beginMediaAction()) {
+      return;
+    }
+    try {
+      const currentProject = await flushBeforeMediaMutation(
+        "台本を保存できないため、素材の終了位置を変更できません。"
+      );
+      if (currentProject === undefined) {
+        return;
+      }
+      const assignment = currentProject.visuals.assignments.find(
+        (candidate) => candidate.id === confirmation.assignmentId
+      );
+      const section = currentProject.script.sections.find(
+        (candidate) => candidate.id === confirmation.line.sectionId
+      );
+      if (assignment === undefined || section === undefined) {
+        setMediaError(new Error("終了対象の表示素材を解決できません。"));
+        return;
+      }
+      const next = removePlaybackCuesOutsideRange(
+        assignment,
+        section,
+        confirmation.line.lineId
+      );
+      await saveMediaAssignment(currentProject, next);
+    } finally {
+      endMediaAction();
+    }
+  }
+
+  async function confirmMediaKindChange(): Promise<void> {
+    const confirmation = mediaKindChangeConfirmation;
+    if (confirmation === null || !beginMediaAction()) {
+      return;
+    }
+    try {
+      const currentProject = await flushBeforeMediaMutation(
+        "台本を保存できないため、表示素材を差し替えできません。"
+      );
+      if (currentProject === undefined) {
+        return;
+      }
+      const currentAssignment = currentProject.visuals.assignments.find(
+        (assignment) => assignment.id === confirmation.assignmentId
+      );
+      if (currentAssignment === undefined) {
+        setMediaError(new Error("差し替え対象の表示素材を解決できません。"));
+        return;
+      }
+      if (currentAssignment.display.kind !== confirmation.fromKind) {
+        setMediaError(
+          new Error(
+            "差し替え対象の素材が更新されています。画面を再読み込みしてください。"
+          )
+        );
+        return;
+      }
+      const displayResult = replacementDisplayForAsset(
+        currentAssignment,
+        confirmation.asset
+      );
+      if (
+        displayResult.display === undefined ||
+        displayResult.display.kind !== confirmation.toKind
+      ) {
+        setMediaError(
+          new Error(
+            "差し替え用の表示設定を再作成できません。素材を選び直してください。"
+          )
+        );
+        return;
+      }
+      await saveMediaAssignment(
+        currentProject,
+        {
+          ...currentAssignment,
+          assetId: confirmation.asset.assetId,
+          display: displayResult.display
+        },
+        confirmation.asset.version
+      );
+    } finally {
+      endMediaAction();
+    }
+  }
+
+  async function selectMediaAsset(asset: AssetListItem): Promise<void> {
+    const picker = mediaPicker;
+    if (picker === null || !isSelectableGenericVisualAsset(asset)) {
+      return;
+    }
+    if (!beginMediaAction()) {
+      return;
+    }
+    try {
+      const draftScript = draftRef.current;
+      const locator =
+        draftScript === null
+          ? undefined
+          : createScriptLineLocator(
+              draftScript,
+              picker.line.sectionId,
+              picker.line.lineId
+            );
+      const currentProject = await flushBeforeMediaMutation(
+        "台本を保存できないため、素材を割り当てできません。"
+      );
+      if (currentProject === undefined) {
+        return;
+      }
+      const resolvedLineId = resolveMediaLineId(
+        currentProject,
+        picker.line,
+        locator
+      );
+      const section = currentProject.script.sections.find(
+        (candidate) => candidate.id === picker.line.sectionId
+      );
+      if (resolvedLineId === undefined || section === undefined) {
+        setMediaError(
+          new Error("対象セリフまたはセクションを解決できません。")
+        );
+        return;
+      }
+
+      let assignment: VisualAssignment;
+      if (picker.action === "start") {
+        const requestGeneration = projectGenerationRef.current;
+        const displayResult = defaultDisplayForAsset(asset);
+        const endLineId = section.lines.at(-1)?.id;
+        if (displayResult.display === undefined || endLineId === undefined) {
+          setMediaError(
+            new Error(
+              displayResult.reason ?? "素材の表示設定を作成できません。"
+            )
+          );
+          return;
+        }
+        assignment = {
+          id: nextVisualAssignmentId(currentProject.visuals.assignments),
+          startLineId: resolvedLineId,
+          endLineId,
+          assetId: asset.assetId,
+          assetChecksum: asset.checksum,
+          projectMediaPath: "media/pending-script-media",
+          display: displayResult.display
+        };
+        try {
+          await mediaMutation.mutateAsync({
+            kind: "create",
+            projectId: currentProject.metadata.id,
+            projectGeneration: requestGeneration,
+            input: {
+              expectedRevision: currentProject.revision,
+              assignment: assignmentInput(assignment)
+            }
+          });
+          if (
+            !isProjectContextCurrent(
+              projectIdRef.current,
+              projectGenerationRef.current,
+              currentProject.metadata.id,
+              requestGeneration
+            )
+          ) {
+            return;
+          }
+          setMediaPicker(null);
+          setMediaPickerSearch("");
+          setMediaError(null);
+        } catch (error) {
+          if (
+            isProjectContextCurrent(
+              projectIdRef.current,
+              projectGenerationRef.current,
+              currentProject.metadata.id,
+              requestGeneration
+            )
+          ) {
+            setMediaError(error);
+          }
+        }
+        return;
+      }
+
+      const currentAssignment = currentProject.visuals.assignments.find(
+        (candidate) => candidate.id === picker.assignmentId
+      );
+      if (currentAssignment === undefined) {
+        setMediaError(new Error("差し替え対象の表示素材を解決できません。"));
+        return;
+      }
+      const displayResult = replacementDisplayForAsset(
+        currentAssignment,
+        asset
+      );
+      if (displayResult.display === undefined) {
+        setMediaError(
+          new Error(
+            displayResult.reason ?? "差し替え用の表示設定を作成できません。"
+          )
+        );
+        return;
+      }
+      assignment = {
+        ...currentAssignment,
+        startLineId: currentAssignment.startLineId,
+        endLineId: currentAssignment.endLineId,
+        assetId: asset.assetId,
+        display: displayResult.display
+      };
+      if (currentAssignment.display.kind !== displayResult.display.kind) {
+        setMediaKindChangeConfirmation({
+          assignmentId: currentAssignment.id,
+          asset,
+          fromKind: currentAssignment.display.kind,
+          toKind: displayResult.display.kind
+        });
+        setMediaPicker(null);
+        setMediaPickerSearch("");
+        setMediaError(null);
+        return;
+      }
+      const saved = await saveMediaAssignment(
+        currentProject,
+        assignment,
+        asset.version
+      );
+      if (saved) {
+        setMediaPicker(null);
+        setMediaPickerSearch("");
+      }
+    } finally {
+      endMediaAction();
+    }
+  }
+
   const project = projectQuery.data;
   const catalog = catalogQuery.data;
   const activeTemplates = screenTemplatesQuery.data ?? [];
@@ -1318,6 +1953,14 @@ export function ScriptPage() {
       assetLoadingKeys.add(reference.key);
     }
   });
+  const mediaPickerItems = mediaPickerQueries.flatMap(
+    (query) => query.data?.items ?? []
+  );
+  const mediaPickerIsPending =
+    mediaPicker !== null && mediaPickerQueries.some((query) => query.isPending);
+  const mediaPickerError =
+    mediaPickerQueries.find((query) => query.isError)?.error ?? null;
+  const mediaMutationPending = mediaActionPending || mediaMutation.isPending;
   const isInitializing = initializeMutation.isPending;
   const isReadyToInitialize =
     project !== undefined && isScriptInitializationAllowed(project);
@@ -1573,6 +2216,24 @@ export function ScriptPage() {
           <p>{pickerError}</p>
         </section>
       ) : null}
+      {mediaError !== null ? (
+        <section className="message-panel message-panel-error" role="alert">
+          <h2>表示素材を変更できません</h2>
+          <p>
+            {getErrorMessage(
+              mediaError,
+              "入力中の台本と既存の表示素材は保持されています。"
+            )}
+          </p>
+          {errorDetails(mediaError).length > 0 ? (
+            <ul>
+              {errorDetails(mediaError).map((detail) => (
+                <li key={detail}>{detail}</li>
+              ))}
+            </ul>
+          ) : null}
+        </section>
+      ) : null}
       {autosaveState.status === "error" ? (
         <section className="message-panel message-panel-error" role="alert">
           <h2>保存できませんでした</h2>
@@ -1812,6 +2473,7 @@ export function ScriptPage() {
                         <ScriptLineCard
                           key={line.id}
                           line={line}
+                          section={section}
                           sectionIndex={sectionIndex}
                           lineIndex={lineIndex}
                           project={project}
@@ -1838,6 +2500,8 @@ export function ScriptPage() {
                             voiceStatusQuery.data?.available === true
                           }
                           projectId={project.metadata.id}
+                          assets={assets}
+                          mediaMutationPending={mediaMutationPending}
                           onChange={(update) =>
                             updateLine(sectionIndex, lineIndex, update)
                           }
@@ -1869,6 +2533,43 @@ export function ScriptPage() {
                             void generateVoiceLine(section.id, line.id)
                           }
                           onOpenPicker={() => openVisualPicker(line.id)}
+                          onStartMedia={() =>
+                            openMediaPicker(
+                              {
+                                sectionId: section.id,
+                                lineId: line.id
+                              },
+                              "start"
+                            )
+                          }
+                          onPauseMedia={(assignmentId) =>
+                            pauseMedia(
+                              { sectionId: section.id, lineId: line.id },
+                              assignmentId
+                            )
+                          }
+                          onResumeMedia={(assignmentId) =>
+                            resumeMedia(
+                              { sectionId: section.id, lineId: line.id },
+                              assignmentId
+                            )
+                          }
+                          onEndMedia={(assignmentId) =>
+                            void requestEndMedia(
+                              { sectionId: section.id, lineId: line.id },
+                              assignmentId
+                            )
+                          }
+                          onReplaceMedia={(assignmentId) =>
+                            openMediaPicker(
+                              {
+                                sectionId: section.id,
+                                lineId: line.id
+                              },
+                              "replace",
+                              assignmentId
+                            )
+                          }
                         />
                       );
                     })}
@@ -1879,6 +2580,116 @@ export function ScriptPage() {
           })}
         </section>
       </section>
+
+      {mediaRangeConfirmation !== null ? (
+        <ScriptMediaDialog
+          className="script-media-confirm-dialog"
+          describedById="script-media-range-confirm-description"
+          onClose={() => {
+            if (!mediaMutationPending) {
+              setMediaRangeConfirmation(null);
+            }
+          }}
+          titleId="script-media-range-confirm-title"
+        >
+          <h2 id="script-media-range-confirm-title">
+            終了位置を短縮してcueを削除しますか？
+          </h2>
+          <p id="script-media-range-confirm-description">
+            終了位置を現在のセリフへ変更すると、次のcueが新しい範囲の外になります。削除と終了位置の変更を同じ保存操作で行います。
+          </p>
+          <ul>
+            {mediaRangeConfirmation.outsideCues.map((cue) => (
+              <li key={`${cue.lineId}-${cue.edge}-${cue.action}`}>
+                {cue.lineId} / {cue.edge} / {cue.action}
+              </li>
+            ))}
+          </ul>
+          <div className="script-media-confirm-actions">
+            <button
+              className="button"
+              disabled={mediaMutationPending}
+              type="button"
+              onClick={() => setMediaRangeConfirmation(null)}
+            >
+              キャンセル
+            </button>
+            <button
+              className="button button-primary"
+              disabled={mediaMutationPending}
+              type="button"
+              onClick={() => void confirmEndMedia()}
+            >
+              {mediaMutationPending ? "保存中…" : "cueを削除して終了"}
+            </button>
+          </div>
+        </ScriptMediaDialog>
+      ) : null}
+
+      {mediaKindChangeConfirmation !== null ? (
+        <ScriptMediaDialog
+          className="script-media-confirm-dialog"
+          describedById="script-media-kind-change-confirm-description"
+          onClose={() => {
+            if (!mediaMutationPending) {
+              setMediaKindChangeConfirmation(null);
+            }
+          }}
+          titleId="script-media-kind-change-confirm-title"
+        >
+          <h2 id="script-media-kind-change-confirm-title">
+            素材の種類を変更して差し替えますか？
+          </h2>
+          <p id="script-media-kind-change-confirm-description">
+            {visualDisplayKindLabel(mediaKindChangeConfirmation.fromKind)}から
+            {visualDisplayKindLabel(mediaKindChangeConfirmation.toKind)}
+            へ変更します。
+          </p>
+          {mediaKindChangeConfirmation.fromKind === "video" ? (
+            <p>
+              動画固有の再生範囲・再生速度・音量とpause/resume
+              cueが削除されます。この変更は承認後に一度の保存操作で実行されます。
+            </p>
+          ) : (
+            <p>
+              差し替え後の素材は新しい種類の初期表示設定で作成されます。この変更は承認後に一度の保存操作で実行されます。
+            </p>
+          )}
+          <div className="script-media-confirm-actions">
+            <button
+              className="button"
+              disabled={mediaMutationPending}
+              type="button"
+              onClick={() => setMediaKindChangeConfirmation(null)}
+            >
+              キャンセル
+            </button>
+            <button
+              className="button button-primary"
+              disabled={mediaMutationPending}
+              type="button"
+              onClick={() => void confirmMediaKindChange()}
+            >
+              {mediaMutationPending ? "保存中…" : "確認して差し替え"}
+            </button>
+          </div>
+        </ScriptMediaDialog>
+      ) : null}
+
+      {mediaPicker !== null ? (
+        <ScriptMediaAssetPicker
+          action={mediaPicker.action}
+          disabled={mediaMutationPending}
+          error={mediaPickerError}
+          isPending={mediaPickerIsPending}
+          items={mediaPickerItems}
+          lineId={mediaPicker.line.lineId}
+          onClose={closeMediaPicker}
+          onSearch={setMediaPickerSearch}
+          onSelect={(asset) => void selectMediaAsset(asset)}
+          search={mediaPickerSearch}
+        />
+      ) : null}
 
       <CharacterVisualPickerModal
         visual={pickerSelection?.visual}

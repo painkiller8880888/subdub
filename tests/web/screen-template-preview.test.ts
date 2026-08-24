@@ -8,7 +8,8 @@ import type {
   ScriptLine,
   ScriptSection,
   ScreenTemplate,
-  VisualAssignment
+  VisualAssignment,
+  VisualPlaybackCue
 } from "../../src/schema/index.js";
 import { createDefaultScriptLine } from "../../src/web/script-editor.js";
 import {
@@ -73,6 +74,37 @@ function createAssignment(
       prioritizeVisual: true,
       annotations: [],
       page: 2,
+      displayCoordinateSpace: "content-slot-relative"
+    }
+  };
+}
+
+function createVideoAssignment(
+  id: string,
+  startLineId: string,
+  endLineId: string,
+  playbackCues: readonly VisualPlaybackCue[] = []
+): VisualAssignment {
+  return {
+    id,
+    startLineId,
+    endLineId,
+    assetId: "asset-video",
+    assetChecksum: CHECKSUM,
+    projectMediaPath: "media/visuals/asset-video/v1.mp4",
+    display: {
+      kind: "video",
+      fit: "contain",
+      crop: { x: 0, y: 0, width: 1, height: 1 },
+      scale: 1,
+      position: { x: 0.5, y: 0.5 },
+      prioritizeVisual: false,
+      annotations: [],
+      startMs: 0,
+      endMs: 3000,
+      playbackRate: 1,
+      volume: 0,
+      playbackCues: [...playbackCues],
       displayCoordinateSpace: "content-slot-relative"
     }
   };
@@ -401,6 +433,120 @@ describe("script ScreenTemplate preview resolution", () => {
     ).toBe("full-screen");
   });
 
+  it("resolves static and video lifecycle states from the shared cue resolver", () => {
+    const template = createStandardScreenTemplate(TIMESTAMP);
+    const section = createSection();
+    const resolvedTemplate = resolveScriptScreenTemplate(
+      section,
+      new Map([[template.templateId, template]])
+    );
+    const video = createVideoAssignment(
+      "video-assignment",
+      "line-one",
+      "line-three",
+      [{ lineId: "line-two", edge: "before", action: "pause" }]
+    );
+
+    const playing = resolvePersistentScreenState({
+      section,
+      lineId: "line-one",
+      resolvedTemplate,
+      assignments: [video],
+      assets: new Map()
+    });
+    const paused = resolvePersistentScreenState({
+      section,
+      lineId: "line-two",
+      resolvedTemplate,
+      assignments: [video],
+      assets: new Map()
+    });
+    const staticVisible = resolvePersistentScreenState({
+      section,
+      lineId: "line-two",
+      resolvedTemplate,
+      assignments: [createAssignment("static", "line-one", "line-three")],
+      assets: new Map()
+    });
+
+    expect(playing.visualPresentationState[0]?.lifecycle).toBe("playing");
+    expect(paused.visualPresentationState[0]?.lifecycle).toBe("paused");
+    expect(staticVisible.visualPresentationState[0]?.lifecycle).toBe(
+      "static-visible"
+    );
+    expect(playing.visualPresentationState[0]?.playbackIssues).toEqual([]);
+  });
+
+  it("exposes cue conflicts as an explicit persistent preview issue", () => {
+    const template = createStandardScreenTemplate(TIMESTAMP);
+    const section = createSection();
+    const resolvedTemplate = resolveScriptScreenTemplate(
+      section,
+      new Map([[template.templateId, template]])
+    );
+    const invalid = createVideoAssignment(
+      "invalid-video",
+      "line-one",
+      "line-three",
+      [
+        { lineId: "line-two", edge: "before", action: "pause" },
+        { lineId: "line-two", edge: "before", action: "resume" }
+      ]
+    );
+
+    const state = resolvePersistentScreenState({
+      section,
+      lineId: "line-two",
+      resolvedTemplate,
+      assignments: [invalid],
+      assets: new Map()
+    });
+
+    expect(state.visualPresentationState[0]).toMatchObject({
+      lifecycle: "hidden",
+      playbackIssues: [expect.objectContaining({ code: "cue-ambiguous" })]
+    });
+  });
+
+  it("makes an end-line change a full preview trigger on the affected line", () => {
+    const template = createStandardScreenTemplate(TIMESTAMP);
+    const section = createSection();
+    const assignment = createVideoAssignment(
+      "video-assignment",
+      "line-one",
+      "line-three"
+    );
+    const shortened = { ...assignment, endLineId: "line-two" };
+    const templates = new Map([[template.templateId, template]]);
+
+    const before = resolveScriptLinePreviewStates({
+      script: { sections: [section] },
+      templates,
+      assignments: [assignment],
+      assets: new Map()
+    });
+    const after = resolveScriptLinePreviewStates({
+      script: { sections: [section] },
+      templates,
+      assignments: [shortened],
+      assets: new Map()
+    });
+
+    expect(before.get(previewLineKey(section.id, "line-two"))?.mode).toBe(
+      "dialogue-only"
+    );
+    expect(after.get(previewLineKey(section.id, "line-two"))?.mode).toBe(
+      "full-screen"
+    );
+    expect(
+      after.get(previewLineKey(section.id, "line-two"))?.persistentScreenState
+        .visualBoundaryTransitions
+    ).toEqual([{ assignmentId: assignment.id, action: "end" }]);
+    expect(after.get(previewLineKey(section.id, "line-three"))?.mode).toBe(
+      "full-screen"
+    );
+  });
+
   it("does not include line text or character variant fields in persistent state", () => {
     const template = createStandardScreenTemplate(TIMESTAMP);
     const section = createSection();
@@ -461,7 +607,7 @@ describe("script ScreenTemplate preview resolution", () => {
       "full-screen"
     );
     expect(states.get(previewLineKey(section.id, "line-two"))?.mode).toBe(
-      "dialogue-only"
+      "full-screen"
     );
     expect(states.get(previewLineKey(section.id, "line-three"))?.mode).toBe(
       "full-screen"

@@ -820,6 +820,11 @@ export const visualAssignmentRequestSchema = strictObject({
 
 export const visualAssignmentUpdateRequestSchema = strictObject({
   expectedRevision: nonNegativeIntegerSchema,
+  /**
+   * An explicit picker selection can request a new snapshot version even when
+   * the stable assetId is unchanged.
+   */
+  assetVersion: positiveIntegerSchema.optional(),
   assignment: visualAssignmentInputSchema
 });
 
