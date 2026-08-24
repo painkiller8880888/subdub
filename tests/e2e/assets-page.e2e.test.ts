@@ -27,6 +27,8 @@ type AssetE2eState = {
   detailRequestsAfterCreate: number;
   replacementAccepted: boolean;
   metadataRevisions: number[];
+  metadataConflictOnce: boolean;
+  revision: number;
   title: string;
 };
 
@@ -46,7 +48,7 @@ function assetListItem(state: AssetE2eState) {
   const processing = state.lifecycle === "processing";
   return {
     assetId,
-    revision: state.lifecycle === "inactive" ? 4 : 3,
+    revision: state.revision,
     currentVersion: processing ? null : 1,
     version: 1,
     versionStatus: processing ? "processing" : "ready",
@@ -92,8 +94,7 @@ function assetDetail(state: AssetE2eState) {
     : null;
   return {
     assetId,
-    revision:
-      state.lifecycle === "inactive" ? 4 : state.replacementAccepted ? 3 : 2,
+    revision: state.revision,
     currentVersion,
     version: 1,
     versionStatus: processing ? "processing" : "ready",
@@ -185,6 +186,7 @@ async function installRoutes(page: Page, state: AssetE2eState): Promise<void> {
         state.detailRequestsAfterCreate += 1;
         if (state.detailRequestsAfterCreate > 1) {
           state.lifecycle = "active";
+          state.revision = 2;
         }
       }
       await route.fulfill(jsonResponse(assetDetail(state)));
@@ -193,6 +195,7 @@ async function installRoutes(page: Page, state: AssetE2eState): Promise<void> {
     if (request.method() === "POST" && pathname === "/api/assets") {
       state.lifecycle = "processing";
       state.detailRequestsAfterCreate = 0;
+      state.revision = 1;
       await route.fulfill(
         jsonResponse({
           assetId,
@@ -219,18 +222,38 @@ async function installRoutes(page: Page, state: AssetE2eState): Promise<void> {
         expectedRevision: number;
         title: string;
       };
+      if (state.metadataConflictOnce) {
+        state.metadataConflictOnce = false;
+        state.title = "外部更新";
+        state.revision += 1;
+        await route.fulfill({
+          status: 409,
+          contentType: "application/json",
+          body: JSON.stringify({
+            error: {
+              code: "ASSET_REVISION_CONFLICT",
+              message: "素材が別の内容へ更新されています。",
+              details: [],
+              requestId: "assets-page-e2e-conflict"
+            }
+          })
+        });
+        return;
+      }
       state.metadataRevisions.push(body.expectedRevision);
       state.title = body.title;
+      state.revision = body.expectedRevision + 1;
       await route.fulfill(jsonResponse(assetDetail(state)));
       return;
     }
     if (request.method() === "POST" && pathname.endsWith("/replace")) {
       state.replacementAccepted = true;
+      state.revision += 1;
       await route.fulfill(
         jsonResponse({
           assetId,
           version: 2,
-          revision: 3,
+          revision: state.revision,
           currentVersion: 1,
           kind: "video",
           status: "processing",
@@ -242,11 +265,13 @@ async function installRoutes(page: Page, state: AssetE2eState): Promise<void> {
     }
     if (request.method() === "POST" && pathname.endsWith("/deactivate")) {
       state.lifecycle = "inactive";
+      state.revision += 1;
       await route.fulfill(jsonResponse(assetDetail(state)));
       return;
     }
     if (request.method() === "POST" && pathname.endsWith("/activate")) {
       state.lifecycle = "active";
+      state.revision += 1;
       await route.fulfill(jsonResponse(assetDetail(state)));
       return;
     }
@@ -325,6 +350,8 @@ describe("AssetsPage browser E2E", () => {
         detailRequestsAfterCreate: 0,
         replacementAccepted: false,
         metadataRevisions: [],
+        metadataConflictOnce: false,
+        revision: 2,
         title: "E2E 素材"
       };
       await installRoutes(page, state);
@@ -398,6 +425,58 @@ describe("AssetsPage browser E2E", () => {
         await detailDialog
           .getByRole("button", { name: "利用停止" })
           .waitFor({ state: "visible" });
+      } finally {
+        await context.close();
+      }
+    }
+  );
+
+  it(
+    "resets the metadata form before retrying after a revision conflict",
+    { timeout: 30_000 },
+    async () => {
+      const context: BrowserContext = await browser.newContext();
+      const page = await context.newPage();
+      const state: AssetE2eState = {
+        lifecycle: "active",
+        detailRequestsAfterCreate: 0,
+        replacementAccepted: false,
+        metadataRevisions: [],
+        metadataConflictOnce: true,
+        revision: 2,
+        title: "E2E 素材"
+      };
+      await installRoutes(page, state);
+      try {
+        await page.goto(`${webUrl}/assets`, { waitUntil: "domcontentloaded" });
+        await page
+          .getByRole("button", { name: "E2E 素材の詳細を開く" })
+          .click();
+        const detailDialog = page.getByRole("dialog");
+        await detailDialog
+          .getByRole("button", { name: "編集" })
+          .waitFor({ state: "visible" });
+        await detailDialog.getByRole("button", { name: "編集" }).click();
+        const titleInput = detailDialog.locator("#asset-edit-title");
+        await titleInput.fill("自分の更新");
+        await detailDialog.getByRole("button", { name: "変更を保存" }).click();
+        await detailDialog
+          .getByText("編集内容は保存されていません")
+          .waitFor({ state: "visible" });
+
+        await detailDialog
+          .getByRole("button", { name: "最新の内容を表示" })
+          .click();
+        await page.waitForFunction(() => {
+          const input =
+            document.querySelector<HTMLInputElement>("#asset-edit-title");
+          return input?.value === "外部更新";
+        });
+        expect(await titleInput.inputValue()).toBe("外部更新");
+        await titleInput.fill("再入力後");
+        await detailDialog.getByRole("button", { name: "変更を保存" }).click();
+        expect(state.metadataRevisions).toEqual([3]);
+        await detailDialog.getByText("再入力後").waitFor({ state: "visible" });
       } finally {
         await context.close();
       }

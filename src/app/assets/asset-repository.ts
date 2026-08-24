@@ -29,6 +29,7 @@ import type {
 import {
   AssetError,
   AssetDatabaseError,
+  AssetInvalidFieldError,
   AssetInvalidStateError,
   AssetNotFoundError,
   AssetProcessingRaceError,
@@ -37,6 +38,16 @@ import {
   AssetVersionNotReadyError
 } from "./asset-errors.js";
 import { ASSET_FORMATS, type AssetFormat } from "./asset-formats.js";
+
+const SOUND_EFFECT_USAGE_TAGS = new Set(["confirm", "attention", "warning"]);
+
+function hasRequiredSoundEffectUsageTag(tags: readonly AssetTag[]): boolean {
+  return tags.some(
+    (tag) =>
+      SOUND_EFFECT_USAGE_TAGS.has(tag.canonicalName) ||
+      SOUND_EFFECT_USAGE_TAGS.has(tag.tagId)
+  );
+}
 
 export type AssetInsert = {
   assetId: string;
@@ -626,18 +637,20 @@ export class AssetRepository {
         return undefined;
       }
       const versionHistory = this.findAssetVersionSummaries(assetId);
-      const tagIds = this.findAssetTagIds(assetId);
-      const detailTags = this.findActiveTags(tagIds).map((tag) => ({
+      const linkedTagIds = this.findAssetTagIds(assetId);
+      const detailTags = this.findActiveTags(linkedTagIds).map((tag) => ({
         tagId: tag.tagId,
         axis: tag.axis,
         canonicalName: tag.canonicalName
       }));
+      const currentVersion = asset.currentVersion;
       const pendingVersion =
-        versionHistory.find(
-          (summary) =>
-            summary.version !== asset.currentVersion &&
-            summary.status !== "ready"
-        ) ?? null;
+        currentVersion === null
+          ? null
+          : (versionHistory.find(
+              (summary) =>
+                summary.version > currentVersion && summary.status !== "ready"
+            ) ?? null);
       return assetDetailSchema.parse({
         assetId: asset.assetId,
         revision: asset.revision,
@@ -648,7 +661,7 @@ export class AssetRepository {
         versions: versionHistory,
         pendingVersion,
         tags: detailTags,
-        tagIds,
+        tagIds: detailTags.map((tag) => tag.tagId),
         kind: asset.kind,
         title: asset.title,
         description: asset.description,
@@ -1159,6 +1172,17 @@ export class AssetRepository {
       if (values.tagIds.some((tagId) => !activeTagIds.has(tagId))) {
         throw new AssetTagNotFoundError();
       }
+      if (
+        asset.kind === "sound_effect" &&
+        !hasRequiredSoundEffectUsageTag(activeTags)
+      ) {
+        throw new AssetInvalidFieldError();
+      }
+
+      const linkedTagIds = this.findAssetTagIds(values.assetId);
+      const linkedActiveTagIds = this.findActiveTags(linkedTagIds).map(
+        (tag) => tag.tagId
+      );
 
       const nextRevision = asset.revision + 1;
       const result = this.database
@@ -1183,10 +1207,17 @@ export class AssetRepository {
         throw new AssetRevisionConflictError();
       }
 
-      this.database
-        .delete(assetTags)
-        .where(eq(assetTags.assetId, values.assetId))
-        .run();
+      if (linkedActiveTagIds.length > 0) {
+        this.database
+          .delete(assetTags)
+          .where(
+            and(
+              eq(assetTags.assetId, values.assetId),
+              inArray(assetTags.tagId, linkedActiveTagIds)
+            )
+          )
+          .run();
+      }
       if (values.tagIds.length > 0) {
         this.insertAssetTags(
           values.tagIds.map((tagId) => ({

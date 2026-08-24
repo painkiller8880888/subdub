@@ -237,7 +237,7 @@ function apiErrorMessage(error: unknown, fallback: string): string {
       case "ASSET_TAG_NOT_FOUND":
         return "選択したタグが利用できません。タグ一覧を更新して再試行してください。";
       case "ASSET_REVISION_CONFLICT":
-        return "別の画面で素材が更新されました。最新の内容を再取得しました。入力を確認して保存し直してください。";
+        return "別の画面で素材が更新されました。編集内容は保存されていません。最新の内容を表示してから、必要な変更を入力し直してください。";
       case "ASSET_VERSION_NOT_READY":
         return "利用可能なcurrent versionがありません。処理完了後に再試行してください。";
       default:
@@ -935,7 +935,7 @@ function AssetMetadataEditor({
   readonly tagsError: string | null;
   readonly onCancel: () => void;
   readonly onSaved: () => void;
-  readonly onConflict: () => Promise<void>;
+  readonly onConflict: () => Promise<AssetDetail | undefined>;
 }) {
   const [title, setTitle] = useState(detail.title);
   const [description, setDescription] = useState(detail.description);
@@ -945,8 +945,12 @@ function AssetMetadataEditor({
   const [department, setDepartment] = useState(detail.department ?? "");
   const [system, setSystem] = useState(detail.system ?? "");
   const [tagIds, setTagIds] = useState<string[]>(
-    detail.tagIds ?? detail.tags?.map((tag) => tag.tagId) ?? []
+    detail.tags?.map((tag) => tag.tagId) ?? detail.tagIds ?? []
   );
+  const [formRevision, setFormRevision] = useState(detail.revision ?? 1);
+  const [conflictResolutionMessage, setConflictResolutionMessage] = useState<
+    string | null
+  >(null);
   const mutation = useMutation({
     mutationFn: (input: AssetMetadataUpdateRequest) =>
       updateAssetMetadata(detail.assetId, input),
@@ -956,6 +960,38 @@ function AssetMetadataEditor({
   const errorMessage = mutation.isError
     ? apiErrorMessage(mutation.error, "素材情報を更新できませんでした。")
     : null;
+  const missingSoundEffectTag = !hasRequiredSoundEffectTag(
+    detail.kind,
+    tagIds,
+    tags
+  );
+
+  function resetForm(nextDetail: AssetDetail): void {
+    setTitle(nextDetail.title);
+    setDescription(nextDetail.description);
+    setConfidentiality(nextDetail.confidentiality);
+    setDepartment(nextDetail.department ?? "");
+    setSystem(nextDetail.system ?? "");
+    setTagIds(
+      nextDetail.tags?.map((tag) => tag.tagId) ?? nextDetail.tagIds ?? []
+    );
+    setFormRevision(nextDetail.revision ?? 1);
+  }
+
+  async function handleConflict(): Promise<void> {
+    const latest = await onConflict();
+    if (latest === undefined) {
+      setConflictResolutionMessage(
+        "最新の内容を取得できませんでした。再読み込みしてから、もう一度お試しください。"
+      );
+      return;
+    }
+    resetForm(latest);
+    mutation.reset();
+    setConflictResolutionMessage(
+      "最新の内容を読み込みました。必要な変更を入力し直してください。"
+    );
+  }
 
   function handleSubmit(event: FormEvent<HTMLFormElement>): void {
     event.preventDefault();
@@ -965,8 +1001,15 @@ function AssetMetadataEditor({
     if (title.trim().length === 0 || confidentiality.trim().length === 0) {
       return;
     }
+    if (missingSoundEffectTag) {
+      setConflictResolutionMessage(
+        "効果音には confirm / attention / warning のいずれかの利用タグが必要です。"
+      );
+      return;
+    }
+    setConflictResolutionMessage(null);
     mutation.mutate({
-      expectedRevision: detail.revision ?? 1,
+      expectedRevision: formRevision,
       title,
       description,
       confidentiality,
@@ -979,7 +1022,7 @@ function AssetMetadataEditor({
   return (
     <form className="asset-dialog-form" noValidate onSubmit={handleSubmit}>
       <p className="asset-form-note">
-        revision {detail.revision ?? 1} を確認して保存します。種類・current
+        revision {formRevision} を確認して保存します。種類・current
         version・技術情報は変更できません。
       </p>
       <AssetMetadataFields
@@ -999,6 +1042,12 @@ function AssetMetadataEditor({
         onTagIdsChange={setTagIds}
         onTitleChange={setTitle}
       />
+      {detail.kind === "sound_effect" && missingSoundEffectTag ? (
+        <p className="asset-form-warning" role="status">
+          効果音には confirm / attention / warning
+          のいずれかの利用タグが必要です。
+        </p>
+      ) : null}
       {tagsError !== null ? (
         <p className="form-error" role="alert">
           {tagsError}
@@ -1009,6 +1058,11 @@ function AssetMetadataEditor({
           {errorMessage}
         </p>
       ) : null}
+      {conflictResolutionMessage !== null ? (
+        <p className="asset-form-note" role="status">
+          {conflictResolutionMessage}
+        </p>
+      ) : null}
       {mutation.isError &&
       mutation.error instanceof ApiClientError &&
       mutation.error.code === "ASSET_REVISION_CONFLICT" ? (
@@ -1016,7 +1070,7 @@ function AssetMetadataEditor({
           className="button"
           type="button"
           onClick={() => {
-            void onConflict();
+            void handleConflict();
           }}
         >
           最新の内容を表示
@@ -1033,7 +1087,7 @@ function AssetMetadataEditor({
         </button>
         <button
           className="button button-primary"
-          disabled={mutation.isPending}
+          disabled={mutation.isPending || missingSoundEffectTag}
           type="submit"
         >
           {mutation.isPending ? "保存中…" : "変更を保存"}
@@ -1338,7 +1392,8 @@ function AssetDetailDialog({
                   detail={detail}
                   onCancel={() => setEditing(false)}
                   onConflict={async () => {
-                    await detailQuery.refetch();
+                    const result = await detailQuery.refetch();
+                    return result.isSuccess ? result.data : undefined;
                   }}
                   onSaved={async () => {
                     setEditing(false);
