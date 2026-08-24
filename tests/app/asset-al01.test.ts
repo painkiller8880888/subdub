@@ -282,6 +282,13 @@ describe("AL-01 asset revision and replacement lifecycle", () => {
       status: "error",
       errorCode: "PROCESSING_METADATA_FAILED"
     });
+    expect(repository.findAssetDetail("asset-1")?.pendingVersion).toMatchObject(
+      {
+        version: 2,
+        status: "error",
+        errorCode: "PROCESSING_METADATA_FAILED"
+      }
+    );
     await expect(
       fs.access(fileStore.resolvePath("media/asset-1/v1.png"))
     ).resolves.toBeUndefined();

@@ -37,9 +37,9 @@ import {
 import {
   assetDetailSchema,
   assetFormatSchema,
+  assetListStatusSchema,
   assetListResultSchema,
   assetKindSchema,
-  assetStatusSchema,
   assetTagDictionaryEntrySchema,
   assetReplacementReceiptSchema,
   assetUploadReceiptSchema,
@@ -1097,7 +1097,7 @@ export const assetListQuerySchema = strictObject({
   format: assetFormatSchema.optional(),
   department: z.string().transform(normalizeAssetOptionalField).optional(),
   system: z.string().transform(normalizeAssetOptionalField).optional(),
-  status: assetStatusSchema.optional(),
+  status: assetListStatusSchema.optional(),
   tagIds: assetTagIdsInputSchema,
   page: z.coerce.number().int().positive().optional().default(1),
   pageSize: z.coerce.number().int().positive().max(100).optional().default(24)

@@ -253,6 +253,22 @@ describe("asset upload API", () => {
         .parse(explicitStatusResponse.json())
         .data.items.map((item) => item.assetId)
     ).toEqual(["asset-error"]);
+
+    const allStatusResponse = await server.app.inject({
+      method: "GET",
+      url: "/api/assets?status=all&page=1&pageSize=20"
+    });
+    expect(
+      assetListResponseSchema
+        .parse(allStatusResponse.json())
+        .data.items.map((item) => item.assetId)
+    ).toEqual([
+      "asset-a",
+      "asset-b",
+      "asset-error",
+      "asset-inactive",
+      "asset-processing"
+    ]);
   });
 
   it("filters asset list results by kind", async () => {
@@ -774,10 +790,12 @@ describe("asset upload API", () => {
   });
 
   it("returns detail for a registered asset with relative thumbnail paths", async () => {
+    await insertTag("tag-detail");
     const uploadResponse = await upload([
       field("kind", "photo"),
       field("title", "取得テスト"),
       field("department", "部署"),
+      field("tagIds", "tag-detail"),
       file(pngBytes, "image/png", "shot.png")
     ]);
     expect(uploadResponse.statusCode).toBe(200);
@@ -797,7 +815,15 @@ describe("asset upload API", () => {
       status: "processing",
       checksum: null,
       sizeBytes: null,
-      thumbnailPaths: []
+      thumbnailPaths: [],
+      tagIds: ["tag-detail"],
+      tags: [
+        {
+          tagId: "tag-detail",
+          axis: "department",
+          canonicalName: "tag-detail"
+        }
+      ]
     });
     expect(detail.department).toBe("部署");
   });
