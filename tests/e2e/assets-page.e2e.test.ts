@@ -3,6 +3,7 @@ import { fileURLToPath } from "node:url";
 
 import {
   chromium,
+  expect as playwrightExpect,
   type Browser,
   type BrowserContext,
   type Page
@@ -467,12 +468,7 @@ describe("AssetsPage browser E2E", () => {
         await detailDialog
           .getByRole("button", { name: "最新の内容を表示" })
           .click();
-        await page.waitForFunction(() => {
-          const input =
-            document.querySelector<HTMLInputElement>("#asset-edit-title");
-          return input?.value === "外部更新";
-        });
-        expect(await titleInput.inputValue()).toBe("外部更新");
+        await playwrightExpect(titleInput).toHaveValue("外部更新");
         await titleInput.fill("再入力後");
         await detailDialog.getByRole("button", { name: "変更を保存" }).click();
         expect(state.metadataRevisions).toEqual([3]);
