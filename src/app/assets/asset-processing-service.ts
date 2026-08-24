@@ -187,20 +187,26 @@ export class AssetProcessingService {
     version: number
   ): Promise<AssetProcessingOutcome> {
     const asset = this.repository.findAsset(assetId);
-    if (asset === undefined || asset.status !== "processing") {
+    if (asset === undefined) {
       return { status: "skipped" };
     }
     const versionRecord = this.repository.findAssetVersion(assetId, version);
-    if (versionRecord === undefined) {
+    if (versionRecord === undefined || versionRecord.status !== "processing") {
       return { status: "skipped" };
     }
 
     let tempRoot: string | undefined;
     const placedThumbnailPaths: string[] = [];
+    let movedCandidateMedia = false;
     try {
-      const mediaPath = this.fileStore.resolvePath(
-        versionRecord.libraryMediaPath
-      );
+      const stagedPath = versionRecord.stagingPath;
+      const stagedExists =
+        stagedPath !== null && (await this.fileStore.pathExists(stagedPath));
+      const sourceRelativePath =
+        stagedExists && stagedPath !== null
+          ? stagedPath
+          : versionRecord.libraryMediaPath;
+      const mediaPath = this.fileStore.resolvePath(sourceRelativePath);
       const { checksum, sizeBytes } = await hashAndSize(mediaPath);
 
       const processed = await this.processingPort.processMedia({
@@ -227,8 +233,22 @@ export class AssetProcessingService {
         placedThumbnailPaths.push(finalPath);
       }
 
+      if (stagedExists && stagedPath !== null) {
+        if (
+          !(await this.fileStore.pathExists(versionRecord.libraryMediaPath))
+        ) {
+          await this.fileStore.moveToMedia(
+            stagedPath,
+            versionRecord.libraryMediaPath
+          );
+          movedCandidateMedia = true;
+        } else {
+          await this.fileStore.removeBestEffort(stagedPath);
+        }
+      }
+
       try {
-        this.repository.transaction((repository) =>
+        const activated = this.repository.transaction((repository) =>
           repository.markProcessingSucceeded({
             assetId,
             version,
@@ -242,8 +262,27 @@ export class AssetProcessingService {
             updatedAt: this.now().toISOString()
           })
         );
+        if (!activated) {
+          for (const placedPath of placedThumbnailPaths) {
+            await this.fileStore.removeBestEffort(placedPath);
+          }
+          if (movedCandidateMedia) {
+            await this.fileStore.removeBestEffort(
+              versionRecord.libraryMediaPath
+            );
+          }
+          return { status: "failed" };
+        }
       } catch (error) {
         if (error instanceof AssetProcessingRaceError) {
+          for (const placedPath of placedThumbnailPaths) {
+            await this.fileStore.removeBestEffort(placedPath);
+          }
+          if (movedCandidateMedia) {
+            await this.fileStore.removeBestEffort(
+              versionRecord.libraryMediaPath
+            );
+          }
           return { status: "skipped" };
         }
         throw error;
@@ -253,8 +292,18 @@ export class AssetProcessingService {
       for (const placedPath of placedThumbnailPaths) {
         await this.fileStore.removeBestEffort(placedPath);
       }
+      if (movedCandidateMedia) {
+        await this.fileStore.removeBestEffort(versionRecord.libraryMediaPath);
+      }
       const processingError = toProcessingError(error);
-      await this.recordFailure(assetId, processingError);
+      const failureRecorded = await this.recordFailure(
+        assetId,
+        version,
+        processingError
+      );
+      if (failureRecorded && versionRecord.stagingPath !== null) {
+        await this.fileStore.removeBestEffort(versionRecord.stagingPath);
+      }
       return { status: "failed" };
     } finally {
       if (tempRoot !== undefined) {
@@ -265,20 +314,26 @@ export class AssetProcessingService {
 
   private async recordFailure(
     assetId: string,
+    version: number,
     error: AssetProcessingError
-  ): Promise<void> {
+  ): Promise<boolean> {
     try {
-      this.repository.markProcessingFailed({
-        assetId,
-        errorCode: error.code,
-        errorMessage: error.message,
-        updatedAt: this.now().toISOString()
-      });
+      this.repository.transaction((repository) =>
+        repository.markProcessingFailed({
+          assetId,
+          version,
+          errorCode: error.code,
+          errorMessage: error.message,
+          updatedAt: this.now().toISOString()
+        })
+      );
+      return true;
     } catch (recordError) {
       console.error(
         `failed to persist processing failure for asset ${assetId}`,
         recordError
       );
+      return false;
     }
   }
 }

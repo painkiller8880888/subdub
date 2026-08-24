@@ -4,6 +4,9 @@ import * as path from "node:path";
 
 import {
   assetListQuerySchema,
+  assetMetadataUpdateRequestSchema,
+  assetReplacementFieldsSchema,
+  assetStatusChangeRequestSchema,
   assetUploadFieldsSchema
 } from "../../schema/api.js";
 import {
@@ -11,21 +14,25 @@ import {
   type AssetDetail,
   type AssetListResult,
   type AssetKind,
+  type AssetReplacementReceipt,
   type AssetUploadReceipt
 } from "../../schema/index.js";
 import {
   AssetFileEmptyError,
   AssetFileTooLargeError,
   AssetFormatMismatchError,
+  AssetInvalidStateError,
   AssetInvalidFieldError,
   AssetNotFoundError,
   AssetTagNotFoundError,
-  AssetUnsupportedFormatError
+  AssetUnsupportedFormatError,
+  AssetVersionNotReadyError
 } from "./asset-errors.js";
 import {
   ASSET_DETECTION_HEAD_BYTES,
   ASSET_FORMATS,
   ASSET_KIND_FORMATS,
+  type AssetFormatInfo,
   assetFormatForMimeType,
   detectAssetFormat
 } from "./asset-formats.js";
@@ -34,7 +41,11 @@ import {
   type AssetFileStore,
   type StagedUploadRecord
 } from "./asset-file-store.js";
-import { AssetRepository } from "./asset-repository.js";
+import {
+  AssetRepository,
+  type AssetMetadataUpdateValues,
+  type AssetStatusChangeValues
+} from "./asset-repository.js";
 import {
   DEFAULT_ASSET_UPLOAD_LIMITS,
   type AssetUploadLimits
@@ -136,6 +147,7 @@ export class AssetService {
     requestedVersion?: number
   ): string {
     const detail = this.findDetail(assetId, requestedVersion);
+    this.assertVersionReady(detail, requestedVersion);
     const thumbnailPath = detail.thumbnailPaths[thumbnailIndex];
     if (thumbnailPath === undefined) {
       throw new AssetNotFoundError();
@@ -145,12 +157,162 @@ export class AssetService {
 
   getMediaPath(assetId: string, requestedVersion?: number): string {
     const detail = this.findDetail(assetId, requestedVersion);
+    this.assertVersionReady(detail, requestedVersion);
     return this.fileStore.resolvePath(detail.libraryMediaPath);
+  }
+
+  private assertVersionReady(
+    detail: AssetDetail,
+    requestedVersion: number | undefined
+  ): void {
+    if (
+      detail.versionStatus !== undefined &&
+      detail.versionStatus !== "ready" &&
+      (detail.status === "processing" ||
+        detail.status === "error" ||
+        (detail.currentVersion !== undefined &&
+          detail.currentVersion !== null &&
+          detail.currentVersion !== detail.version))
+    ) {
+      throw new AssetVersionNotReadyError();
+    }
+    if (
+      requestedVersion === undefined &&
+      detail.currentVersion !== undefined &&
+      detail.currentVersion !== null &&
+      detail.currentVersion !== detail.version
+    ) {
+      throw new AssetVersionNotReadyError();
+    }
   }
 
   list(input: unknown): AssetListResult {
     const query = assetListQuerySchema.parse(input);
     return this.repository.list(query);
+  }
+
+  listActiveTags() {
+    return this.repository.findActiveTagDictionary();
+  }
+
+  updateMetadata(assetId: string, input: unknown): AssetDetail {
+    const request = assetMetadataUpdateRequestSchema.parse(input);
+    const values: AssetMetadataUpdateValues = {
+      assetId,
+      expectedRevision: request.expectedRevision,
+      title: request.title,
+      description: request.description,
+      confidentiality: request.confidentiality,
+      department: request.department ?? null,
+      system: request.system ?? null,
+      tagIds: request.tagIds,
+      updatedAt: this.now().toISOString()
+    };
+    this.repository.transaction((repository) =>
+      repository.updateMetadata(values)
+    );
+    return this.findDetail(assetId);
+  }
+
+  updateStatus(
+    assetId: string,
+    input: unknown,
+    status: "active" | "inactive"
+  ): AssetDetail {
+    const request = assetStatusChangeRequestSchema.parse(input);
+    const values: AssetStatusChangeValues = {
+      assetId,
+      expectedRevision: request.expectedRevision,
+      status,
+      updatedAt: this.now().toISOString()
+    };
+    this.repository.transaction((repository) =>
+      repository.changeStatus(values)
+    );
+    return this.findDetail(assetId);
+  }
+
+  private async validateStagedFile(
+    staged: StagedUpload,
+    kind: AssetKind
+  ): Promise<AssetFormatInfo> {
+    if (staged.bytes === 0) {
+      throw new AssetFileEmptyError();
+    }
+    if (
+      staged.filename !== undefined &&
+      staged.filename.length > this.limits.maxFileNameLength
+    ) {
+      throw new AssetInvalidFieldError();
+    }
+    if (staged.bytes > maxUploadBytesForKind(this.limits, kind)) {
+      throw new AssetFileTooLargeError();
+    }
+
+    const head = await this.fileStore.readHead(
+      staged.fileRelativePath,
+      ASSET_DETECTION_HEAD_BYTES
+    );
+    const detection = detectAssetFormat(head);
+    if (detection.status !== "matched") {
+      throw new AssetUnsupportedFormatError();
+    }
+    const declaredFormat = assetFormatForMimeType(staged.mimeType);
+    if (declaredFormat === undefined) {
+      throw new AssetUnsupportedFormatError();
+    }
+    if (!ASSET_KIND_FORMATS[kind].includes(declaredFormat)) {
+      throw new AssetFormatMismatchError();
+    }
+    if (!ASSET_KIND_FORMATS[kind].includes(detection.format)) {
+      throw new AssetFormatMismatchError();
+    }
+    if (declaredFormat !== detection.format) {
+      throw new AssetFormatMismatchError();
+    }
+    const format = ASSET_FORMATS[detection.format];
+    if (
+      !hasRequiredEditingAssetExtension(kind, staged.filename, format.extension)
+    ) {
+      throw new AssetFormatMismatchError();
+    }
+    return format;
+  }
+
+  async commitReplacement(
+    assetId: string,
+    fields: unknown,
+    staged: StagedUpload
+  ): Promise<AssetReplacementReceipt> {
+    const request = assetReplacementFieldsSchema.parse(fields);
+    const asset = this.repository.findAsset(assetId);
+    if (asset === undefined) {
+      throw new AssetNotFoundError();
+    }
+    if (asset.status !== "active" && asset.status !== "inactive") {
+      throw new AssetInvalidStateError();
+    }
+
+    const format = await this.validateStagedFile(staged, asset.kind);
+    const stagingPath = staged.fileRelativePath.split(path.sep).join("/");
+    const now = this.now().toISOString();
+    const reservation = this.repository.transaction((repository) =>
+      repository.reserveReplacement({
+        assetId,
+        expectedRevision: request.expectedRevision,
+        stagingPath,
+        libraryMediaPath: `media/${assetId}/v{version}.${format.extension}`,
+        mimeType: format.mimeType,
+        updatedAt: now
+      })
+    );
+    // The repository computes the version inside the write transaction. The
+    // path above is corrected to the reserved version before returning; the
+    // worker only uses it after the transaction has committed.
+    if (!reservation.version) {
+      throw new AssetInvalidStateError();
+    }
+    return reservation;
   }
 
   async commitUpload(
@@ -159,56 +321,10 @@ export class AssetService {
   ): Promise<AssetUploadReceipt> {
     const request = assetUploadFieldsSchema.parse(fields);
     const kind: AssetKind = request.kind;
-    const limits = this.limits;
 
     let movedMediaPath: string | undefined;
     try {
-      if (staged.bytes === 0) {
-        throw new AssetFileEmptyError();
-      }
-      if (
-        staged.filename !== undefined &&
-        staged.filename.length > limits.maxFileNameLength
-      ) {
-        throw new AssetInvalidFieldError();
-      }
-      if (staged.bytes > maxUploadBytesForKind(limits, kind)) {
-        throw new AssetFileTooLargeError();
-      }
-
-      const head = await this.fileStore.readHead(
-        staged.fileRelativePath,
-        ASSET_DETECTION_HEAD_BYTES
-      );
-      const detection = detectAssetFormat(head);
-      if (detection.status !== "matched") {
-        throw new AssetUnsupportedFormatError();
-      }
-
-      const declaredFormat = assetFormatForMimeType(staged.mimeType);
-      if (declaredFormat === undefined) {
-        throw new AssetUnsupportedFormatError();
-      }
-      if (!ASSET_KIND_FORMATS[kind].includes(declaredFormat)) {
-        throw new AssetFormatMismatchError();
-      }
-      if (!ASSET_KIND_FORMATS[kind].includes(detection.format)) {
-        throw new AssetFormatMismatchError();
-      }
-      if (declaredFormat !== detection.format) {
-        throw new AssetFormatMismatchError();
-      }
-
-      const format = ASSET_FORMATS[detection.format];
-      if (
-        !hasRequiredEditingAssetExtension(
-          kind,
-          staged.filename,
-          format.extension
-        )
-      ) {
-        throw new AssetFormatMismatchError();
-      }
+      const format = await this.validateStagedFile(staged, kind);
 
       const assetId = idSchema.parse(this.createId());
       const version = 1;
@@ -249,6 +365,8 @@ export class AssetService {
       this.repository.transaction((repository) => {
         repository.insertAsset({
           assetId,
+          revision: 1,
+          currentVersion: null,
           kind,
           title: request.title,
           description: request.description,
@@ -262,6 +380,10 @@ export class AssetService {
         repository.insertAssetVersion({
           assetId,
           version,
+          status: "processing",
+          baseRevision: 1,
+          baseCurrentVersion: null,
+          stagingPath: staged.fileRelativePath.split(path.sep).join("/"),
           libraryMediaPath: mediaRelativePath,
           mimeType: format.mimeType,
           createdAt: now,
@@ -277,6 +399,8 @@ export class AssetService {
       return {
         assetId,
         version,
+        revision: 1,
+        currentVersion: null,
         kind,
         title: request.title,
         description: request.description,

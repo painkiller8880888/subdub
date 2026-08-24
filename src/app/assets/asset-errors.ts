@@ -15,9 +15,12 @@ export type AssetErrorCode =
   | "ASSET_UPLOAD_INTERRUPTED"
   | "ASSET_STAGING_FAILED"
   | "ASSET_DATABASE_FAILED"
-  | "ASSET_NOT_FOUND";
+  | "ASSET_NOT_FOUND"
+  | "ASSET_REVISION_CONFLICT"
+  | "ASSET_VERSION_NOT_READY"
+  | "ASSET_INVALID_STATE";
 
-export type AssetErrorStatus = 400 | 404 | 413 | 422 | 500;
+export type AssetErrorStatus = 400 | 404 | 409 | 413 | 422 | 500;
 
 export class AssetError extends Error {
   readonly code: AssetErrorCode;
@@ -173,6 +176,39 @@ export class AssetNotFoundError extends AssetError {
   constructor() {
     super("ASSET_NOT_FOUND", 404, "素材が見つかりません。");
     this.name = "AssetNotFoundError";
+  }
+}
+
+export class AssetRevisionConflictError extends AssetError {
+  constructor() {
+    super(
+      "ASSET_REVISION_CONFLICT",
+      409,
+      "素材が別の内容へ更新されています。最新の素材を再取得してください。"
+    );
+    this.name = "AssetRevisionConflictError";
+  }
+}
+
+export class AssetVersionNotReadyError extends AssetError {
+  constructor() {
+    super(
+      "ASSET_VERSION_NOT_READY",
+      422,
+      "利用可能なcurrent versionがありません。処理完了後に再試行してください。"
+    );
+    this.name = "AssetVersionNotReadyError";
+  }
+}
+
+export class AssetInvalidStateError extends AssetError {
+  constructor() {
+    super(
+      "ASSET_INVALID_STATE",
+      422,
+      "素材の現在の状態ではこの操作を実行できません。"
+    );
+    this.name = "AssetInvalidStateError";
   }
 }
 

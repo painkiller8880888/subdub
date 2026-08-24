@@ -7,7 +7,9 @@ const PROCESSING_ERROR_MESSAGES: Record<AssetProcessingErrorCode, string> = {
     "メディアファイルが破損しているため解析できません。",
   PROCESSING_THUMBNAIL_FAILED: "サムネイルの生成に失敗しました。",
   PROCESSING_DATABASE_FAILED: "処理結果の保存に失敗しました。",
-  PROCESSING_INTERNAL_FAILED: "素材処理で予期しないエラーが発生しました。"
+  PROCESSING_INTERNAL_FAILED: "素材処理で予期しないエラーが発生しました。",
+  REPLACEMENT_REVISION_CONFLICT:
+    "差し替え受付後に素材が更新されたため、差し替えを適用できませんでした。"
 };
 
 // Error codes that indicate an unexpected local/system problem rather than a

@@ -12,6 +12,7 @@ import {
   SQLITE_BUSY_TIMEOUT_MS
 } from "../../src/db/connection.js";
 import { initializeWorkspaceDatabase } from "../../src/db/initialize.js";
+import { resolveMigrationFolder } from "../../src/db/paths.js";
 import { initializeServer } from "../../src/api/server.js";
 
 type MigrationDefinition = {
@@ -107,8 +108,11 @@ describe("workspace SQLite", () => {
 
     const first = await initializeWorkspaceDatabase({ workspaceRoot });
     const firstHistory = migrationHistory(first.connection);
+    const expectedMigrationCount = (
+      await readMigrationDefinitions(resolveMigrationFolder())
+    ).length;
     expect(first.migrationResult.applied).toBe(true);
-    expect(firstHistory).toHaveLength(12);
+    expect(firstHistory).toHaveLength(expectedMigrationCount);
     first.close();
 
     const second = await initializeWorkspaceDatabase({ workspaceRoot });

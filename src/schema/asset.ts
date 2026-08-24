@@ -35,6 +35,12 @@ export const assetStatusSchema = z.enum([
   "error"
 ]);
 
+export const assetVersionStatusSchema = z.enum([
+  "processing",
+  "ready",
+  "error"
+]);
+
 export const assetTagStatusSchema = z.enum(["active", "inactive"]);
 
 export const assetTagAxisSchema = z.enum([
@@ -69,6 +75,8 @@ export const assetTagAliasSchema = strictObject({
 export const assetUploadReceiptSchema = strictObject({
   assetId: idSchema,
   version: finiteNumberSchema.int().positive(),
+  revision: positiveIntegerSchema.optional(),
+  currentVersion: positiveIntegerSchema.nullable().optional(),
   kind: assetKindSchema,
   title: z.string().min(1),
   description: z.string(),
@@ -88,12 +96,29 @@ export const assetProcessingErrorCodeSchema = z.enum([
   "PROCESSING_MEDIA_CORRUPTED",
   "PROCESSING_THUMBNAIL_FAILED",
   "PROCESSING_DATABASE_FAILED",
-  "PROCESSING_INTERNAL_FAILED"
+  "PROCESSING_INTERNAL_FAILED",
+  "REPLACEMENT_REVISION_CONFLICT"
 ]);
+
+export const assetVersionSummarySchema = strictObject({
+  version: positiveIntegerSchema,
+  status: assetVersionStatusSchema,
+  checksum: sha256Schema.nullable(),
+  errorCode: assetProcessingErrorCodeSchema.nullable(),
+  errorMessage: z.string().nullable(),
+  createdAt: isoUtcDateTimeSchema,
+  updatedAt: isoUtcDateTimeSchema
+});
 
 export const assetDetailSchema = strictObject({
   assetId: idSchema,
+  revision: positiveIntegerSchema.optional(),
+  currentVersion: positiveIntegerSchema.nullable().optional(),
   version: finiteNumberSchema.int().positive(),
+  versionStatus: assetVersionStatusSchema.optional(),
+  versionHistory: z.array(assetVersionSummarySchema).optional(),
+  versions: z.array(assetVersionSummarySchema).optional(),
+  pendingVersion: assetVersionSummarySchema.nullable().optional(),
   kind: assetKindSchema,
   title: z.string().min(1),
   description: z.string(),
@@ -124,7 +149,10 @@ export const assetListTagSchema = strictObject({
 
 export const assetListItemSchema = strictObject({
   assetId: idSchema,
+  revision: positiveIntegerSchema.optional(),
+  currentVersion: positiveIntegerSchema.nullable().optional(),
   version: positiveIntegerSchema.nullable(),
+  versionStatus: assetVersionStatusSchema.optional(),
   kind: assetKindSchema,
   title: z.string().min(1),
   description: z.string(),
@@ -156,6 +184,32 @@ export const assetListResultSchema = strictObject({
   hasNextPage: z.boolean()
 });
 
+export const assetTagDictionaryEntrySchema = strictObject({
+  tagId: idSchema,
+  axis: assetTagAxisSchema,
+  canonicalName: z.string().min(1),
+  normalizedName: z.string().min(1).optional(),
+  aliases: z
+    .array(
+      strictObject({
+        alias: z.string().min(1),
+        normalizedAlias: z.string().min(1)
+      })
+    )
+    .optional()
+});
+
+export const assetReplacementReceiptSchema = strictObject({
+  assetId: idSchema,
+  version: positiveIntegerSchema,
+  revision: positiveIntegerSchema,
+  currentVersion: positiveIntegerSchema.nullable(),
+  kind: assetKindSchema,
+  status: z.literal("processing"),
+  createdAt: isoUtcDateTimeSchema,
+  updatedAt: isoUtcDateTimeSchema
+});
+
 export function normalizeAssetTextField(value: string): string {
   return value.normalize("NFC").trim();
 }
@@ -173,6 +227,7 @@ export function normalizeAssetSearchQuery(value: string): string | undefined {
 export type AssetKind = z.infer<typeof assetKindSchema>;
 export type AssetFormat = z.infer<typeof assetFormatSchema>;
 export type AssetStatus = z.infer<typeof assetStatusSchema>;
+export type AssetVersionStatus = z.infer<typeof assetVersionStatusSchema>;
 export type AssetTagStatus = z.infer<typeof assetTagStatusSchema>;
 export type AssetTagAxis = z.infer<typeof assetTagAxisSchema>;
 export type AssetTag = z.infer<typeof assetTagSchema>;
@@ -181,7 +236,14 @@ export type AssetUploadReceipt = z.infer<typeof assetUploadReceiptSchema>;
 export type AssetProcessingErrorCode = z.infer<
   typeof assetProcessingErrorCodeSchema
 >;
+export type AssetVersionSummary = z.infer<typeof assetVersionSummarySchema>;
 export type AssetDetail = z.infer<typeof assetDetailSchema>;
 export type AssetListTag = z.infer<typeof assetListTagSchema>;
 export type AssetListItem = z.infer<typeof assetListItemSchema>;
 export type AssetListResult = z.infer<typeof assetListResultSchema>;
+export type AssetTagDictionaryEntryResponse = z.infer<
+  typeof assetTagDictionaryEntrySchema
+>;
+export type AssetReplacementReceipt = z.infer<
+  typeof assetReplacementReceiptSchema
+>;

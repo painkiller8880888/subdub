@@ -25,6 +25,9 @@ import {
   assetThumbnailParamsSchema,
   assetListQuerySchema,
   assetListResponseSchema,
+  assetReplacementResponseSchema,
+  assetTagDictionaryQuerySchema,
+  assetTagDictionaryResponseSchema,
   assetUploadResponseSchema,
   assetVersionQuerySchema,
   createApiSuccessResponse
@@ -34,7 +37,17 @@ export type AssetServicePort = Pick<
   AssetService,
   "stageUpload" | "commitUpload" | "discardStaged" | "findDetail" | "list"
 > &
-  Partial<Pick<AssetService, "getMediaPath" | "getThumbnailPath">>;
+  Partial<
+    Pick<
+      AssetService,
+      | "getMediaPath"
+      | "getThumbnailPath"
+      | "updateMetadata"
+      | "updateStatus"
+      | "commitReplacement"
+      | "listActiveTags"
+    >
+  >;
 
 const allowedFieldNames = new Set([
   "kind",
@@ -190,6 +203,140 @@ export function registerAssetRoutes(
       throw toDomainError(error);
     }
   });
+
+  if (
+    assetService.updateMetadata !== undefined &&
+    assetService.updateStatus !== undefined
+  ) {
+    app.put<{
+      Params: { assetId: string };
+      Body: unknown;
+    }>("/api/assets/:assetId", async (request) => {
+      const params = assetIdParamsSchema.parse(request.params);
+      const detail = assetService.updateMetadata!(params.assetId, request.body);
+      return assetDetailResponseSchema.parse(
+        createApiSuccessResponse(detail, detail.revision ?? 1)
+      );
+    });
+
+    app.post<{
+      Params: { assetId: string };
+      Body: unknown;
+    }>("/api/assets/:assetId/deactivate", async (request) => {
+      const params = assetIdParamsSchema.parse(request.params);
+      const detail = assetService.updateStatus!(
+        params.assetId,
+        request.body,
+        "inactive"
+      );
+      return assetDetailResponseSchema.parse(
+        createApiSuccessResponse(detail, detail.revision ?? 1)
+      );
+    });
+
+    app.post<{
+      Params: { assetId: string };
+      Body: unknown;
+    }>("/api/assets/:assetId/activate", async (request) => {
+      const params = assetIdParamsSchema.parse(request.params);
+      const detail = assetService.updateStatus!(
+        params.assetId,
+        request.body,
+        "active"
+      );
+      return assetDetailResponseSchema.parse(
+        createApiSuccessResponse(detail, detail.revision ?? 1)
+      );
+    });
+  }
+
+  if (assetService.commitReplacement !== undefined) {
+    app.post<{
+      Params: { assetId: string };
+    }>("/api/assets/:assetId/replace", async (request) => {
+      const params = assetIdParamsSchema.parse(request.params);
+      const fields: Record<string, string | string[]> = {};
+      let staged: StagedUpload | undefined;
+      let fieldCount = 0;
+      let partCount = 0;
+      let fileCount = 0;
+
+      try {
+        for await (const part of request.parts({
+          limits: {
+            fileSize: limits.maxGlobalFileBytes,
+            files: limits.maxFileCount + 1,
+            fields: limits.maxFieldCount + 1,
+            parts: limits.maxPartCount + 1,
+            fieldNameSize: limits.maxFieldNameLength,
+            fieldSize: limits.maxFieldValueLength
+          }
+        })) {
+          partCount++;
+          if (partCount > limits.maxPartCount) {
+            throw new AssetTooManyPartsError();
+          }
+          if (part.type === "field") {
+            fieldCount++;
+            if (fieldCount > limits.maxFieldCount) {
+              throw new AssetTooManyFieldsError();
+            }
+            if (
+              part.fieldname !== "expectedRevision" ||
+              part.fieldnameTruncated ||
+              part.valueTruncated ||
+              Buffer.byteLength(String(part.value), "utf8") >
+                limits.maxFieldValueLength
+            ) {
+              throw new AssetInvalidFieldError();
+            }
+            accumulateField(fields, part.fieldname, String(part.value));
+          } else {
+            fileCount++;
+            if (fileCount > limits.maxFileCount) {
+              throw new AssetTooManyFilesError();
+            }
+            if (part.fieldname !== "file") {
+              throw new AssetInvalidFieldError();
+            }
+            if (staged !== undefined) {
+              throw new AssetTooManyFilesError();
+            }
+            staged = await assetService.stageUpload({
+              stream: part.file,
+              mimeType: part.mimetype,
+              filename: part.filename
+            });
+          }
+        }
+        if (staged === undefined) {
+          throw new AssetFileMissingError();
+        }
+        const receipt = await assetService.commitReplacement!(
+          params.assetId,
+          fields,
+          staged
+        );
+        return assetReplacementResponseSchema.parse(
+          createApiSuccessResponse(receipt, receipt.revision)
+        );
+      } catch (error) {
+        if (staged !== undefined) {
+          await assetService.discardStaged(staged);
+        }
+        throw toDomainError(error);
+      }
+    });
+  }
+
+  if (assetService.listActiveTags !== undefined) {
+    app.get("/api/asset-tags", async (request) => {
+      assetTagDictionaryQuerySchema.parse(request.query);
+      return assetTagDictionaryResponseSchema.parse({
+        data: assetService.listActiveTags!()
+      });
+    });
+  }
 
   app.get<{
     Params: { assetId: string };

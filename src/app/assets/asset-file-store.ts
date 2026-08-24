@@ -30,6 +30,7 @@ export type AssetFileStore = {
   stageUpload(uploadId: string, stream: Readable): Promise<StagedUploadRecord>;
   readHead(relativePath: string, byteCount: number): Promise<Buffer>;
   moveToMedia(relativePath: string, mediaRelativePath: string): Promise<void>;
+  pathExists(relativePath: string): Promise<boolean>;
   removeBestEffort(relativePath: string): Promise<void>;
   resolvePath(relativePath: string): string;
   writeFile(relativePath: string, data: Buffer): Promise<void>;
@@ -149,6 +150,15 @@ export class NodeAssetFileStore implements AssetFileStore {
         throw error;
       }
       throw new AssetStagingFailedError(error);
+    }
+  }
+
+  async pathExists(relativePath: string): Promise<boolean> {
+    try {
+      await stat(this.resolveSafe(relativePath));
+      return true;
+    } catch {
+      return false;
     }
   }
 

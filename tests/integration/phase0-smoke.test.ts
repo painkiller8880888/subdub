@@ -10,6 +10,7 @@ import {
 } from "../../src/api/server.js";
 import { ProjectRepository } from "../../src/app/projects/project-repository.js";
 import { initializeWorkspaceDatabase } from "../../src/db/initialize.js";
+import { resolveMigrationFolder } from "../../src/db/paths.js";
 import { SQLITE_BUSY_TIMEOUT_MS } from "../../src/db/connection.js";
 import {
   apiSuccessResponseSchema,
@@ -30,6 +31,16 @@ function migrationHistory(connection: {
     )
     .all()
     .map((row) => row as Record<string, unknown>);
+}
+
+async function expectedMigrationCount(): Promise<number> {
+  const journal = JSON.parse(
+    await fs.readFile(
+      path.join(resolveMigrationFolder(), "meta", "_journal.json"),
+      "utf8"
+    )
+  ) as { entries: unknown[] };
+  return journal.entries.length;
 }
 
 describe("Phase 0 integration smoke", () => {
@@ -77,7 +88,7 @@ describe("Phase 0 integration smoke", () => {
     try {
       firstHistory = migrationHistory(firstDatabase.connection);
       expect(firstDatabase.migrationResult.applied).toBe(true);
-      expect(firstHistory).toHaveLength(12);
+      expect(firstHistory).toHaveLength(await expectedMigrationCount());
       expect(
         firstDatabase.connection.pragma("foreign_keys", { simple: true })
       ).toBe(1);
