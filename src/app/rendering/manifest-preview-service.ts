@@ -376,13 +376,6 @@ export class ManifestPreviewService {
         hash: layout.templateHash
       });
     }
-    for (const line of manifest.lines) {
-      referencedTemplates.set(line.screenTemplateId, {
-        revision: line.templateRevision,
-        hash: line.templateHash
-      });
-    }
-
     for (const [templateId, expected] of referencedTemplates) {
       const current = this.screenTemplateCatalog.findById(templateId);
       if (current === undefined || current.status !== "active") {

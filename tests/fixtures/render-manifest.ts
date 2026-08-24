@@ -6,6 +6,7 @@ import { screenTemplateContentHash } from "../../src/app/screen-templates/screen
 import { createStandardScreenTemplate } from "../../src/app/screen-templates/screen-template-seed.js";
 import type {
   RenderManifest,
+  RenderManifestV24,
   RenderManifestV23,
   RenderVisualV23
 } from "../../src/schema/index.js";
@@ -446,7 +447,7 @@ function visualLineRange(visual: RenderVisualV23) {
 
 function resolvedFixtureVisual(
   visual: RenderVisualV23
-): RenderManifest["visuals"][number] {
+): RenderManifestV24["visuals"][number] {
   const lineRange = visualLineRange(visual);
   const firstLine = renderManifestFixtureV23.lines.find(
     (line) => line.id === lineRange.startLineId
@@ -475,7 +476,7 @@ function resolvedFixtureVisual(
       layout,
       { fps: renderManifestFixtureV23.fps }
     )
-  } as RenderManifest["visuals"][number];
+  } as RenderManifestV24["visuals"][number];
 }
 
 const {
@@ -488,7 +489,7 @@ const {
   ...manifestHeader
 } = renderManifestFixtureV23;
 
-export const renderManifestFixture: RenderManifest = {
+export const renderManifestFixtureV24: RenderManifestV24 = {
   ...manifestHeader,
   manifestVersion: "2.4.0",
   sectionLayouts: [
@@ -511,6 +512,100 @@ export const renderManifestFixture: RenderManifest = {
     resolvedLayout: resolvedLayoutForLine(line)
   })),
   visuals: legacyVisuals.map(resolvedFixtureVisual),
+  backgrounds: legacyBackgrounds,
+  audioTracks: legacyAudioTracks,
+  soundEffects: legacySoundEffects,
+  inserts: legacyInserts
+};
+
+function toV25FixtureVisual(
+  visual: RenderManifestV24["visuals"][number]
+): RenderManifest["visuals"][number] {
+  const sectionId = renderManifestFixtureV24.lines.find(
+    (line) => line.id === visual.segmentStartLineId
+  )?.sectionId;
+  if (sectionId === undefined) {
+    throw new Error(`fixture visual section is missing: ${visual.id}`);
+  }
+  if (visual.kind === "video") {
+    return {
+      id: visual.id,
+      sourceAssignmentId: visual.sourceAssignmentId,
+      segmentIndex: visual.segmentIndex,
+      segmentStartLineId: visual.segmentStartLineId,
+      segmentEndLineId: visual.segmentEndLineId,
+      sectionId,
+      templateRevision: visual.templateRevision,
+      templateHash: visual.templateHash,
+      from: visual.from,
+      durationInFrames: visual.durationInFrames,
+      src: visual.src,
+      kind: visual.kind,
+      display: {
+        kind: visual.display.kind,
+        outerFrame: visual.display.outerFrame,
+        contentClip: visual.display.contentClip,
+        fit: visual.display.fit,
+        crop: visual.display.crop,
+        annotations: visual.display.annotations,
+        startMs: visual.display.startMs,
+        endMs: visual.display.endMs,
+        playbackRate: visual.display.playbackRate,
+        volume: visual.display.volume,
+        playbackCues: [],
+        playbackState: "playing",
+        sourceTrimBeforeFrame: visual.display.sourceTrimBeforeFrame,
+        sourceTrimAfterFrame: visual.display.sourceTrimAfterFrame
+      }
+    };
+  }
+  return {
+    id: visual.id,
+    sourceAssignmentId: visual.sourceAssignmentId,
+    segmentIndex: visual.segmentIndex,
+    segmentStartLineId: visual.segmentStartLineId,
+    segmentEndLineId: visual.segmentEndLineId,
+    sectionId,
+    templateRevision: visual.templateRevision,
+    templateHash: visual.templateHash,
+    from: visual.from,
+    durationInFrames: visual.durationInFrames,
+    src: visual.src,
+    kind: visual.kind,
+    display: visual.display
+  } as RenderManifest["visuals"][number];
+}
+
+function toV25FixtureLine(
+  line: RenderManifestV24["lines"][number]
+): RenderManifest["lines"][number] {
+  return {
+    id: line.id,
+    sectionId: line.sectionId,
+    from: line.from,
+    durationInFrames: line.durationInFrames,
+    speechFrom: line.speechFrom,
+    speechDurationInFrames: line.speechDurationInFrames,
+    audioPath: line.audioPath,
+    subtitleText: line.subtitleText,
+    speakerId: line.speakerId,
+    expression: line.expression,
+    characterVariantId: line.characterVariantId
+  };
+}
+
+export const renderManifestFixture: RenderManifest = {
+  ...manifestHeader,
+  manifestVersion: "2.5.0",
+  sectionLayouts: renderManifestFixtureV24.sectionLayouts,
+  layoutIntervals: renderManifestFixtureV24.lines.map((line) => ({
+    sectionId: line.sectionId,
+    from: line.from,
+    durationInFrames: line.durationInFrames,
+    resolvedLayout: line.resolvedLayout
+  })),
+  lines: renderManifestFixtureV24.lines.map(toV25FixtureLine),
+  visuals: renderManifestFixtureV24.visuals.map(toV25FixtureVisual),
   backgrounds: legacyBackgrounds,
   audioTracks: legacyAudioTracks,
   soundEffects: legacySoundEffects,

@@ -3,6 +3,7 @@ import type { CSSProperties, ReactNode } from "react";
 import type {
   CommonDisplay,
   RenderResolvedVisualDisplay,
+  RenderResolvedVideoDisplayV25,
   StaticAnnotation
 } from "../schema/index";
 
@@ -158,7 +159,7 @@ export function mediaFrameStyle(display: CommonDisplay): CSSProperties {
 }
 
 export function resolvedMediaFrameStyle(
-  display: RenderResolvedVisualDisplay
+  display: RenderResolvedVisualDisplay | RenderResolvedVideoDisplayV25
 ): CSSProperties {
   const { rect } = display.outerFrame;
   return {
@@ -176,7 +177,9 @@ export function resolvedMediaFrameStyle(
   };
 }
 
-function resolvedContentClipPath(display: RenderResolvedVisualDisplay): string {
+function resolvedContentClipPath(
+  display: RenderResolvedVisualDisplay | RenderResolvedVideoDisplayV25
+): string {
   const { rect, rotationDeg } = display.contentClip.transform;
   const center = { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
   const corners = [
@@ -203,7 +206,7 @@ export function ResolvedMediaFrame({
   display,
   children
 }: {
-  display: RenderResolvedVisualDisplay;
+  display: RenderResolvedVisualDisplay | RenderResolvedVideoDisplayV25;
   children: ReactNode;
 }): ReactNode {
   const frame = (
@@ -232,7 +235,8 @@ export function MediaFrame({
   display,
   children
 }: {
-  display: CommonDisplay | RenderResolvedVisualDisplay;
+  display:
+    CommonDisplay | RenderResolvedVisualDisplay | RenderResolvedVideoDisplayV25;
   children: ReactNode;
 }): ReactNode {
   if ("outerFrame" in display) {
