@@ -5,9 +5,18 @@ import {
   aiRunExportQuerySchema,
   aiRunSearchQuerySchema,
   aiRunSearchResponseSchema,
-  assetVersionQuerySchema,
+  assetDetailResponseSchema,
+  assetMetadataUpdateRequestSchema,
+  assetReplacementFieldsSchema,
+  assetReplacementResponseSchema,
   assetListQuerySchema,
   assetListResponseSchema,
+  assetStatusChangeRequestSchema,
+  assetTagDictionaryQuerySchema,
+  assetTagDictionaryResponseSchema,
+  assetUploadFieldsSchema,
+  assetUploadResponseSchema,
+  assetVersionQuerySchema,
   characterVisualCatalogResponseSchema,
   characterVisualCreateRequestSchema,
   characterVisualResponseSchema,
@@ -53,7 +62,6 @@ import {
   visualAssignmentResponseSchema,
   visualAssignmentUpdateRequestSchema,
   visualApprovalRequestSchema,
-  assetDetailResponseSchema,
   visualSuggestionRequestSchema,
   visualSuggestionResponseSchema,
   visualSuggestionCandidateRejectRequestSchema,
@@ -119,11 +127,20 @@ import {
   type ManifestPreviewData,
   type CharacterVisualCreateRequest,
   type CharacterVisualUpdateRequest,
-  type CharacterVisualVariantMultipartRequest
+  type CharacterVisualVariantMultipartRequest,
+  type AssetMetadataUpdateRequest,
+  type AssetReplacementFields,
+  type AssetStatusChangeRequest,
+  type AssetUploadFields
 } from "../../schema/api.js";
 import type { TerminologyTerm } from "../../schema/terminology.js";
-import type { AssetListResult } from "../../schema/asset.js";
-import type { AssetDetail } from "../../schema/asset.js";
+import type {
+  AssetDetail,
+  AssetListResult,
+  AssetReplacementReceipt,
+  AssetTagDictionaryEntryResponse,
+  AssetUploadReceipt
+} from "../../schema/asset.js";
 import type { VideoProject } from "../../schema/video-project.js";
 import type {
   CharacterVisualCatalogSnapshot,
@@ -1123,6 +1140,123 @@ export async function fetchAsset(
   const response = await fetchApi(
     `/api/assets/${encodeURIComponent(assetId)}${queryString.length > 0 ? `?${queryString}` : ""}`,
     assetDetailResponseSchema
+  );
+  return response.data;
+}
+
+export type AssetUploadBlob = Blob & { readonly name?: string };
+
+function appendOptionalFormValue(
+  formData: FormData,
+  name: string,
+  value: string | undefined
+): void {
+  if (value !== undefined) {
+    formData.append(name, value);
+  }
+}
+
+export async function createAsset(
+  input: AssetUploadFields,
+  file: AssetUploadBlob
+): Promise<AssetUploadReceipt> {
+  const validatedInput = assetUploadFieldsSchema.parse(input);
+  const formData = new FormData();
+  formData.append("kind", validatedInput.kind);
+  formData.append("title", validatedInput.title);
+  formData.append("description", validatedInput.description);
+  appendOptionalFormValue(formData, "department", validatedInput.department);
+  appendOptionalFormValue(formData, "system", validatedInput.system);
+  appendOptionalFormValue(
+    formData,
+    "confidentiality",
+    validatedInput.confidentiality
+  );
+  for (const tagId of validatedInput.tagIds) {
+    formData.append("tagIds", tagId);
+  }
+  formData.append("file", file, file.name ?? "asset");
+
+  const response = await fetchApi("/api/assets", assetUploadResponseSchema, {
+    method: "POST",
+    body: formData
+  });
+  return response.data;
+}
+
+export async function updateAssetMetadata(
+  assetId: string,
+  input: AssetMetadataUpdateRequest
+): Promise<AssetDetail> {
+  const validatedInput = assetMetadataUpdateRequestSchema.parse(input);
+  const response = await fetchApi(
+    `/api/assets/${encodeURIComponent(assetId)}`,
+    assetDetailResponseSchema,
+    {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(validatedInput)
+    }
+  );
+  return response.data;
+}
+
+async function changeAssetStatus(
+  assetId: string,
+  action: "activate" | "deactivate",
+  input: AssetStatusChangeRequest
+): Promise<AssetDetail> {
+  const validatedInput = assetStatusChangeRequestSchema.parse(input);
+  const response = await fetchApi(
+    `/api/assets/${encodeURIComponent(assetId)}/${action}`,
+    assetDetailResponseSchema,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(validatedInput)
+    }
+  );
+  return response.data;
+}
+
+export async function deactivateAsset(
+  assetId: string,
+  expectedRevision: number
+): Promise<AssetDetail> {
+  return changeAssetStatus(assetId, "deactivate", { expectedRevision });
+}
+
+export async function activateAsset(
+  assetId: string,
+  expectedRevision: number
+): Promise<AssetDetail> {
+  return changeAssetStatus(assetId, "activate", { expectedRevision });
+}
+
+export async function replaceAsset(
+  assetId: string,
+  input: AssetReplacementFields,
+  file: AssetUploadBlob
+): Promise<AssetReplacementReceipt> {
+  const validatedInput = assetReplacementFieldsSchema.parse(input);
+  const formData = new FormData();
+  formData.append("expectedRevision", String(validatedInput.expectedRevision));
+  formData.append("file", file, file.name ?? "replacement");
+  const response = await fetchApi(
+    `/api/assets/${encodeURIComponent(assetId)}/replace`,
+    assetReplacementResponseSchema,
+    { method: "POST", body: formData }
+  );
+  return response.data;
+}
+
+export async function fetchAssetTags(): Promise<
+  AssetTagDictionaryEntryResponse[]
+> {
+  const query = assetTagDictionaryQuerySchema.parse({ status: "active" });
+  const response = await fetchApi(
+    `/api/asset-tags?status=${encodeURIComponent(query.status)}`,
+    assetTagDictionaryResponseSchema
   );
   return response.data;
 }

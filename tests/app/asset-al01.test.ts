@@ -3,9 +3,11 @@ import { tmpdir } from "node:os";
 import { Readable } from "node:stream";
 import * as path from "node:path";
 
+import { and, eq } from "drizzle-orm";
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
+  AssetInvalidFieldError,
   AssetRevisionConflictError,
   AssetVersionNotReadyError
 } from "../../src/app/assets/asset-errors.js";
@@ -16,7 +18,7 @@ import { AssetRepository } from "../../src/app/assets/asset-repository.js";
 import { AssetService } from "../../src/app/assets/asset-service.js";
 import type { AssetMediaProcessingPort } from "../../src/app/assets/processing/types.js";
 import { initializeWorkspaceDatabase } from "../../src/db/initialize.js";
-import { assetTags, tags } from "../../src/db/schema.js";
+import { assetTags, assets, assetVersions, tags } from "../../src/db/schema.js";
 import { pngBytes } from "../fixtures/asset-fixtures.js";
 
 const NOW = "2026-08-21T00:00:00.000Z";
@@ -189,6 +191,131 @@ describe("AL-01 asset revision and replacement lifecycle", () => {
     expect(repository.findAsset("asset-1")?.title).toBe("新タイトル");
   });
 
+  it("requires a sound_effect usage tag when metadata is edited", async () => {
+    const { repository, service } = await createFixture();
+    database!.database
+      .update(assets)
+      .set({ kind: "sound_effect" })
+      .where(eq(assets.assetId, "asset-1"))
+      .run();
+
+    await expect(
+      Promise.resolve().then(() =>
+        service.updateMetadata("asset-1", {
+          expectedRevision: 1,
+          title: "効果音",
+          description: "",
+          confidentiality: "internal",
+          department: null,
+          system: null,
+          tagIds: ["tag-a"]
+        })
+      )
+    ).rejects.toBeInstanceOf(AssetInvalidFieldError);
+
+    database!.database
+      .insert(tags)
+      .values({
+        tagId: "confirm",
+        axis: "action",
+        canonicalName: "confirm",
+        normalizedName: "confirm",
+        status: "active",
+        createdAt: NOW,
+        updatedAt: NOW
+      })
+      .run();
+    expect(
+      service.updateMetadata("asset-1", {
+        expectedRevision: 1,
+        title: "効果音",
+        description: "",
+        confidentiality: "internal",
+        department: null,
+        system: null,
+        tagIds: ["confirm"]
+      })
+    ).toMatchObject({ kind: "sound_effect", title: "効果音" });
+    expect(repository.findAssetTagIds("asset-1")).toEqual(["confirm"]);
+  });
+
+  it("returns active tag IDs for editing and preserves inactive tag links", async () => {
+    const { repository, service } = await createFixture();
+    database!.database
+      .insert(tags)
+      .values({
+        tagId: "tag-inactive",
+        axis: "department",
+        canonicalName: "停止タグ",
+        normalizedName: "停止タグ",
+        status: "inactive",
+        createdAt: NOW,
+        updatedAt: NOW
+      })
+      .run();
+    database!.database
+      .insert(assetTags)
+      .values({ assetId: "asset-1", tagId: "tag-inactive", createdAt: NOW })
+      .run();
+
+    expect(repository.findAssetDetail("asset-1")).toMatchObject({
+      tagIds: ["tag-a"],
+      tags: [
+        {
+          tagId: "tag-a"
+        }
+      ]
+    });
+
+    expect(
+      service.updateMetadata("asset-1", {
+        expectedRevision: 1,
+        title: "タグを保持した更新",
+        description: "旧説明",
+        confidentiality: "internal",
+        department: null,
+        system: null,
+        tagIds: ["tag-a"]
+      })
+    ).toMatchObject({ title: "タグを保持した更新", revision: 2 });
+    expect(repository.findAssetTagIds("asset-1")).toEqual([
+      "tag-a",
+      "tag-inactive"
+    ]);
+  });
+
+  it("does not report the initial version as a replacement candidate", async () => {
+    const { repository } = await createFixture();
+    database!.database
+      .update(assets)
+      .set({
+        currentVersion: null,
+        status: "error",
+        errorCode: "PROCESSING_METADATA_FAILED",
+        errorMessage: "初回処理に失敗しました。"
+      })
+      .where(eq(assets.assetId, "asset-1"))
+      .run();
+    database!.database
+      .update(assetVersions)
+      .set({
+        status: "error",
+        errorCode: "PROCESSING_METADATA_FAILED",
+        errorMessage: "初回処理に失敗しました。"
+      })
+      .where(
+        and(eq(assetVersions.assetId, "asset-1"), eq(assetVersions.version, 1))
+      )
+      .run();
+
+    expect(repository.findAssetDetail("asset-1")).toMatchObject({
+      currentVersion: null,
+      version: 1,
+      versionStatus: "error",
+      pendingVersion: null
+    });
+  });
+
   it("deactivates and reactivates without deleting the current version", async () => {
     const { repository, service } = await createFixture();
 
@@ -282,12 +409,58 @@ describe("AL-01 asset revision and replacement lifecycle", () => {
       status: "error",
       errorCode: "PROCESSING_METADATA_FAILED"
     });
+    expect(repository.findAssetDetail("asset-1")?.pendingVersion).toMatchObject(
+      {
+        version: 2,
+        status: "error",
+        errorCode: "PROCESSING_METADATA_FAILED"
+      }
+    );
     await expect(
       fs.access(fileStore.resolvePath("media/asset-1/v1.png"))
     ).resolves.toBeUndefined();
     await expect(
       fs.access(fileStore.resolvePath("media/asset-1/v2.png"))
     ).rejects.toThrow();
+  });
+
+  it("drops an old failed candidate after a newer replacement succeeds", async () => {
+    const { repository, service, fileStore } = await createFixture();
+    await reserveReplacement(service, 1);
+
+    const failingProcessingService = createProcessingService(
+      repository,
+      fileStore,
+      {
+        async processMedia() {
+          throw new AssetProcessingError("PROCESSING_METADATA_FAILED");
+        }
+      }
+    );
+    await expect(
+      failingProcessingService.processAsset("asset-1", 2)
+    ).resolves.toEqual({ status: "failed" });
+
+    await reserveReplacement(service, 2);
+    const successfulProcessingService = createProcessingService(
+      repository,
+      fileStore,
+      successfulPhotoProcessingPort()
+    );
+    await expect(
+      successfulProcessingService.processAsset("asset-1", 3)
+    ).resolves.toEqual({ status: "processed" });
+
+    expect(repository.findAsset("asset-1")).toMatchObject({
+      currentVersion: 3,
+      revision: 4
+    });
+    expect(repository.findAssetDetail("asset-1")?.pendingVersion).toBeNull();
+    expect(
+      repository
+        .findAssetDetail("asset-1")
+        ?.versionHistory?.find((version) => version.version === 2)
+    ).toMatchObject({ status: "error" });
   });
 
   it("keeps an inactive asset inactive after a successful replacement", async () => {

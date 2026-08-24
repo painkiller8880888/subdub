@@ -14,6 +14,7 @@ import {
   assetTagSchema,
   type AssetDetail,
   type AssetKind,
+  type AssetListStatus,
   type AssetListItem,
   type AssetListResult,
   type AssetStatus,
@@ -28,6 +29,7 @@ import type {
 import {
   AssetError,
   AssetDatabaseError,
+  AssetInvalidFieldError,
   AssetInvalidStateError,
   AssetNotFoundError,
   AssetProcessingRaceError,
@@ -36,6 +38,16 @@ import {
   AssetVersionNotReadyError
 } from "./asset-errors.js";
 import { ASSET_FORMATS, type AssetFormat } from "./asset-formats.js";
+
+const SOUND_EFFECT_USAGE_TAGS = new Set(["confirm", "attention", "warning"]);
+
+function hasRequiredSoundEffectUsageTag(tags: readonly AssetTag[]): boolean {
+  return tags.some(
+    (tag) =>
+      SOUND_EFFECT_USAGE_TAGS.has(tag.canonicalName) ||
+      SOUND_EFFECT_USAGE_TAGS.has(tag.tagId)
+  );
+}
 
 export type AssetInsert = {
   assetId: string;
@@ -183,7 +195,7 @@ export type AssetRepositoryListFilters = {
   readonly format?: AssetFormat;
   readonly department?: string;
   readonly system?: string;
-  readonly status: AssetStatus;
+  readonly status: AssetListStatus;
   readonly tagIds: readonly string[];
   readonly page: number;
   readonly pageSize: number;
@@ -249,7 +261,7 @@ type AssetRepositorySearchFilters = {
   readonly format?: AssetFormat;
   readonly department?: string;
   readonly system?: string;
-  readonly status: AssetStatus;
+  readonly status: AssetListStatus;
   readonly requiredTagIds: readonly string[];
   readonly excludedTagIds: readonly string[];
   readonly optionalTagIds: readonly string[];
@@ -625,9 +637,20 @@ export class AssetRepository {
         return undefined;
       }
       const versionHistory = this.findAssetVersionSummaries(assetId);
+      const linkedTagIds = this.findAssetTagIds(assetId);
+      const detailTags = this.findActiveTags(linkedTagIds).map((tag) => ({
+        tagId: tag.tagId,
+        axis: tag.axis,
+        canonicalName: tag.canonicalName
+      }));
+      const currentVersion = asset.currentVersion;
       const pendingVersion =
-        versionHistory.find((summary) => summary.status === "processing") ??
-        null;
+        currentVersion === null
+          ? null
+          : (versionHistory.find(
+              (summary) =>
+                summary.version > currentVersion && summary.status !== "ready"
+            ) ?? null);
       return assetDetailSchema.parse({
         assetId: asset.assetId,
         revision: asset.revision,
@@ -637,6 +660,8 @@ export class AssetRepository {
         versionHistory,
         versions: versionHistory,
         pendingVersion,
+        tags: detailTags,
+        tagIds: detailTags.map((tag) => tag.tagId),
         kind: asset.kind,
         title: asset.title,
         description: asset.description,
@@ -707,7 +732,10 @@ export class AssetRepository {
           values.map((value) => sql`${value}`),
           sql`, `
         );
-      const conditions: SQL[] = [sql`${assets.status} = ${filters.status}`];
+      const conditions: SQL[] =
+        filters.status === "all"
+          ? []
+          : [sql`${assets.status} = ${filters.status}`];
       if (filters.kinds !== undefined && filters.kinds.length > 0) {
         conditions.push(sql`${assets.kind} IN (${valueList(filters.kinds)})`);
       }
@@ -801,7 +829,8 @@ export class AssetRepository {
       }
       orderParts.push(sql`assets.updated_at DESC`, sql`assets.asset_id ASC`);
 
-      const where = sql.join(conditions, sql` AND `);
+      const where =
+        conditions.length === 0 ? sql`1 = 1` : sql.join(conditions, sql` AND `);
       const totalRow = this.database.get<{ total: number }>(sql`
         SELECT COUNT(*) AS total
         FROM assets
@@ -1143,6 +1172,17 @@ export class AssetRepository {
       if (values.tagIds.some((tagId) => !activeTagIds.has(tagId))) {
         throw new AssetTagNotFoundError();
       }
+      if (
+        asset.kind === "sound_effect" &&
+        !hasRequiredSoundEffectUsageTag(activeTags)
+      ) {
+        throw new AssetInvalidFieldError();
+      }
+
+      const linkedTagIds = this.findAssetTagIds(values.assetId);
+      const linkedActiveTagIds = this.findActiveTags(linkedTagIds).map(
+        (tag) => tag.tagId
+      );
 
       const nextRevision = asset.revision + 1;
       const result = this.database
@@ -1167,10 +1207,17 @@ export class AssetRepository {
         throw new AssetRevisionConflictError();
       }
 
-      this.database
-        .delete(assetTags)
-        .where(eq(assetTags.assetId, values.assetId))
-        .run();
+      if (linkedActiveTagIds.length > 0) {
+        this.database
+          .delete(assetTags)
+          .where(
+            and(
+              eq(assetTags.assetId, values.assetId),
+              inArray(assetTags.tagId, linkedActiveTagIds)
+            )
+          )
+          .run();
+      }
       if (values.tagIds.length > 0) {
         this.insertAssetTags(
           values.tagIds.map((tagId) => ({

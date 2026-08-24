@@ -35,6 +35,15 @@ export const assetStatusSchema = z.enum([
   "error"
 ]);
 
+/**
+ * The management list can explicitly request every lifecycle state. The
+ * default API behavior remains `active` for picker compatibility.
+ */
+export const assetListStatusSchema = z.union([
+  assetStatusSchema,
+  z.literal("all")
+]);
+
 export const assetVersionStatusSchema = z.enum([
   "processing",
   "ready",
@@ -110,6 +119,12 @@ export const assetVersionSummarySchema = strictObject({
   updatedAt: isoUtcDateTimeSchema
 });
 
+export const assetListTagSchema = strictObject({
+  tagId: idSchema,
+  axis: assetTagAxisSchema,
+  canonicalName: z.string().min(1)
+});
+
 export const assetDetailSchema = strictObject({
   assetId: idSchema,
   revision: positiveIntegerSchema.optional(),
@@ -119,6 +134,8 @@ export const assetDetailSchema = strictObject({
   versionHistory: z.array(assetVersionSummarySchema).optional(),
   versions: z.array(assetVersionSummarySchema).optional(),
   pendingVersion: assetVersionSummarySchema.nullable().optional(),
+  tags: z.array(assetListTagSchema).optional(),
+  tagIds: z.array(idSchema).optional(),
   kind: assetKindSchema,
   title: z.string().min(1),
   description: z.string(),
@@ -139,12 +156,6 @@ export const assetDetailSchema = strictObject({
   errorMessage: z.string().nullable(),
   createdAt: isoUtcDateTimeSchema,
   updatedAt: isoUtcDateTimeSchema
-});
-
-export const assetListTagSchema = strictObject({
-  tagId: idSchema,
-  axis: assetTagAxisSchema,
-  canonicalName: z.string().min(1)
 });
 
 export const assetListItemSchema = strictObject({
@@ -227,6 +238,7 @@ export function normalizeAssetSearchQuery(value: string): string | undefined {
 export type AssetKind = z.infer<typeof assetKindSchema>;
 export type AssetFormat = z.infer<typeof assetFormatSchema>;
 export type AssetStatus = z.infer<typeof assetStatusSchema>;
+export type AssetListStatus = z.infer<typeof assetListStatusSchema>;
 export type AssetVersionStatus = z.infer<typeof assetVersionStatusSchema>;
 export type AssetTagStatus = z.infer<typeof assetTagStatusSchema>;
 export type AssetTagAxis = z.infer<typeof assetTagAxisSchema>;
