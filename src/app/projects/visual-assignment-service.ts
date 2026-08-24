@@ -827,7 +827,9 @@ export class VisualAssignmentService {
       );
     }
 
-    const replacingAsset = request.assignment.assetId !== currentAssignment.assetId;
+    const replacingAsset =
+      request.assignment.assetId !== currentAssignment.assetId ||
+      request.assetVersion !== undefined;
     let placement: PlacementResult | undefined;
     let placementProjectRoot: string | undefined;
     let replacementImport:
@@ -845,7 +847,8 @@ export class VisualAssignmentService {
 
     if (replacingAsset) {
       const asset = this.assetRepository.findAssetDetail(
-        request.assignment.assetId
+        request.assignment.assetId,
+        request.assetVersion
       );
       if (asset === undefined) {
         throw visualAssignmentError(

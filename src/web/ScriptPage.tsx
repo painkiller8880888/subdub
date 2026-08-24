@@ -1537,7 +1537,8 @@ export function ScriptPage() {
 
   async function saveMediaAssignment(
     currentProject: VideoProject,
-    assignment: VisualAssignment
+    assignment: VisualAssignment,
+    assetVersion?: number
   ): Promise<boolean> {
     const requestProjectId = currentProject.metadata.id;
     const requestGeneration = projectGenerationRef.current;
@@ -1549,6 +1550,7 @@ export function ScriptPage() {
         projectGeneration: requestGeneration,
         input: {
           expectedRevision: currentProject.revision,
+          ...(assetVersion === undefined ? {} : { assetVersion }),
           assignment: assignmentInput(assignment)
         }
       });
@@ -1764,11 +1766,15 @@ export function ScriptPage() {
         );
         return;
       }
-      await saveMediaAssignment(currentProject, {
-        ...currentAssignment,
-        assetId: confirmation.asset.assetId,
-        display: displayResult.display
-      });
+      await saveMediaAssignment(
+        currentProject,
+        {
+          ...currentAssignment,
+          assetId: confirmation.asset.assetId,
+          display: displayResult.display
+        },
+        confirmation.asset.version
+      );
     } finally {
       endMediaAction();
     }
@@ -1911,7 +1917,11 @@ export function ScriptPage() {
         setMediaError(null);
         return;
       }
-      const saved = await saveMediaAssignment(currentProject, assignment);
+      const saved = await saveMediaAssignment(
+        currentProject,
+        assignment,
+        asset.version
+      );
       if (saved) {
         setMediaPicker(null);
         setMediaPickerSearch("");

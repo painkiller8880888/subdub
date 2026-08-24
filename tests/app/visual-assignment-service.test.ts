@@ -1104,6 +1104,135 @@ describe("VisualAssignmentService", () => {
     );
   });
 
+  it("resnapshots the selected version when the stable asset ID is unchanged", async () => {
+    const context = await setup();
+    const replacementBytes = Buffer.from("asset version 2 bytes", "utf8");
+    const replacementAsset = createAsset(
+      {
+        version: 2,
+        libraryMediaPath: `media/${ASSET_ID}/v2.png`
+      },
+      replacementBytes
+    );
+    const replacementSource = path.join(
+      context.libraryRoot,
+      replacementAsset.libraryMediaPath
+    );
+    await fs.mkdir(path.dirname(replacementSource), { recursive: true });
+    await fs.writeFile(replacementSource, replacementBytes);
+
+    const versionedService = new VisualAssignmentService({
+      repository: context.repository,
+      assetRepository: {
+        findAssetDetail: (assetId, version) => {
+          if (assetId !== ASSET_ID) {
+            return undefined;
+          }
+          return version === replacementAsset.version
+            ? replacementAsset
+            : context.asset;
+        }
+      },
+      workspaceRoot: context.workspaceRoot,
+      libraryRoot: context.libraryRoot,
+      createId: () => "replacement-file-id"
+    });
+
+    const assigned = await context.service.assign(PROJECT_ID, {
+      expectedRevision: 0,
+      assignment: createAssignment()
+    });
+    const current = assigned.data.visuals.assignments[0];
+    if (current === undefined) {
+      throw new Error("assignment was not created");
+    }
+
+    const updated = await versionedService.update(PROJECT_ID, current.id, {
+      expectedRevision: assigned.revision,
+      assetVersion: replacementAsset.version,
+      assignment: {
+        id: current.id,
+        startLineId: current.startLineId,
+        endLineId: current.endLineId,
+        assetId: current.assetId,
+        display: current.display
+      }
+    });
+
+    expect(updated.data.visuals.assignments[0]).toMatchObject({
+      assetId: ASSET_ID,
+      assetChecksum: replacementAsset.checksum,
+      projectMediaPath: "media/visuals/asset-photo/v2.png"
+    });
+    expect(
+      await fs.readFile(
+        path.join(context.projectRoot, "media", "visuals", ASSET_ID, "v2.png")
+      )
+    ).toEqual(replacementBytes);
+    expect(await fs.readFile(await finalPath(context.projectRoot))).toEqual(
+      context.bytes
+    );
+  });
+
+  it("does not implicitly upgrade a snapshot during a regular update", async () => {
+    const context = await setup();
+    const replacementBytes = Buffer.from("asset version 2 bytes", "utf8");
+    const replacementAsset = createAsset(
+      {
+        version: 2,
+        libraryMediaPath: `media/${ASSET_ID}/v2.png`
+      },
+      replacementBytes
+    );
+    const versionedService = new VisualAssignmentService({
+      repository: context.repository,
+      assetRepository: {
+        findAssetDetail: (assetId, version) => {
+          if (assetId !== ASSET_ID) {
+            return undefined;
+          }
+          return version === undefined ? replacementAsset : context.asset;
+        }
+      },
+      workspaceRoot: context.workspaceRoot,
+      libraryRoot: context.libraryRoot,
+      createId: () => "replacement-file-id"
+    });
+
+    const assigned = await context.service.assign(PROJECT_ID, {
+      expectedRevision: 0,
+      assignment: createAssignment()
+    });
+    const current = assigned.data.visuals.assignments[0];
+    if (current === undefined) {
+      throw new Error("assignment was not created");
+    }
+    const before = await fs.readFile(context.projectFile);
+
+    await expectError(
+      () =>
+        versionedService.update(PROJECT_ID, current.id, {
+          expectedRevision: assigned.revision,
+          assignment: {
+            id: current.id,
+            startLineId: current.startLineId,
+            endLineId: current.endLineId,
+            assetId: current.assetId,
+            display: {
+              ...current.display,
+              prioritizeVisual: true
+            }
+          }
+        }),
+      VISUAL_ASSIGNMENT_ERROR_CODE.checksumMismatch
+    );
+
+    expect(await fs.readFile(context.projectFile)).toEqual(before);
+    expect(await fs.readFile(await finalPath(context.projectRoot))).toEqual(
+      context.bytes
+    );
+  });
+
   it("keeps the old assignment when the replacement asset cannot be resolved", async () => {
     const context = await setup();
     const assigned = await context.service.assign(PROJECT_ID, {

@@ -347,6 +347,39 @@ describe("visual assignments API", () => {
     ]);
   });
 
+  it("passes an explicit asset version through the update contract", async () => {
+    let receivedInput: unknown;
+    const app = buildApp({
+      visualAssignmentService: {
+        assign: async () => ({ data: videoProjectFixture, revision: 1 }),
+        update: async (_projectId, _assignmentId, input) => {
+          receivedInput = input;
+          return { data: videoProjectFixture, revision: 2 };
+        },
+        remove: async () => ({ data: videoProjectFixture, revision: 3 }),
+        approve: async () => ({ data: videoProjectFixture, revision: 4 })
+      }
+    });
+    apps.push(app);
+
+    const response = await app.inject({
+      method: "PUT",
+      url: "/api/projects/api-project/visual-assignments/api-visual-assignment",
+      payload: {
+        expectedRevision: 1,
+        assetVersion: 2,
+        assignment: assignmentPayload()
+      }
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(receivedInput).toEqual({
+      expectedRevision: 1,
+      assetVersion: 2,
+      assignment: assignmentPayload()
+    });
+  });
+
   it("returns 422 for an update with an URL/body assignment ID mismatch", async () => {
     const app = buildApp({
       visualAssignmentService: {

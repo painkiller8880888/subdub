@@ -54,6 +54,10 @@ type WorkflowState = {
     script: VideoProject["script"];
     expectedRevision: number;
   }>;
+  visualAssignmentUpdates: Array<{
+    assetId: string;
+    assetVersion?: number;
+  }>;
   assetCatalog?: readonly AssetDetail[];
   templateDetailRequests: number;
 };
@@ -527,7 +531,12 @@ async function installApiRoutes(
           "id" | "startLineId" | "endLineId" | "assetId" | "display"
         >;
         expectedRevision: number;
+        assetVersion?: number;
       };
+      state.visualAssignmentUpdates.push({
+        assetId: body.assignment.assetId,
+        assetVersion: body.assetVersion
+      });
       const asset = assets.get(body.assignment.assetId);
       if (asset?.checksum === null || asset === undefined) {
         await route.fulfill(errorResponse(404, "visual asset missing"));
@@ -678,6 +687,7 @@ describe("ScreenTemplate workflow browser E2E", () => {
       project: createScreenTemplateProjectFixture(),
       templateSaves: [],
       scriptSaves: [],
+      visualAssignmentUpdates: [],
       templateDetailRequests: 0
     };
     await installApiRoutes(page, state);
@@ -711,6 +721,7 @@ describe("ScreenTemplate workflow browser E2E", () => {
       project,
       templateSaves: [],
       scriptSaves: [],
+      visualAssignmentUpdates: [],
       assetCatalog,
       templateDetailRequests: 0
     };
@@ -1354,6 +1365,10 @@ describe("ScreenTemplate workflow browser E2E", () => {
           .getByRole("button", { name: "この素材を選択" })
           .click();
         await replaceSave;
+        expect(state.visualAssignmentUpdates.at(-1)).toEqual({
+          assetId: replacementAsset.assetId,
+          assetVersion: replacementAsset.version
+        });
         expect(
           state.project.visuals.assignments.find(
             (assignment) => assignment.id === createdAssignment.id
