@@ -266,7 +266,7 @@ export function VoiceAdjustmentEditor({
         aria-controls={`${line.id}-voice-adjustment-dialog`}
         onClick={() => setOpen((current) => !current)}
       >
-        {open ? "音声設定を閉じる" : "このセリフの音声を調整"}
+        {open ? "閉じる" : "音声調整"}
       </button>
 
       {open ? (

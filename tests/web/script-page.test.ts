@@ -21,12 +21,23 @@ describe("ScriptPage workflow navigation", () => {
     const source = await fs.readFile("src/web/ScriptPage.tsx", "utf8");
 
     expect(source).toContain('className="script-line-primary-row"');
+    expect(source).toContain('className="script-line-primary-controls"');
     expect(source).toContain('className="script-line-action-row"');
     expect(source).toContain("rows={expanded ? 4 : 1}");
     expect(source).toContain("onFocus={() => setExpandedTextField(field)}");
-    expect(source).toContain("現在の音声");
+    expect(source).toContain("音声を再生");
+    expect(source).toContain("voiceStatusLoading");
+    expect(source).toContain('state: "missing"');
+    expect(source).toContain('state: "unavailable"');
+    expect(source).toContain("aria-label={voiceIndicator.accessibleLabel}");
+    expect(source).toContain('className="script-line-details-dialog"');
     expect(source).toContain("再生成");
-    expect(source).toContain("詳細設定（表情・発話前後の間）");
+    expect(source).toContain(">詳細設定</");
+    expect(source).not.toContain("<details");
+    expect(source).not.toMatch(/<audio[^>]*\bcontrols(?:\s|=|>)/);
+    expect(source).not.toContain("candidate.role");
+    expect(source).not.toContain("CharacterVariantPreview");
+    expect(source).not.toContain("variantSummary");
     expect(source).not.toContain('className="script-line-fields"');
   });
 
@@ -42,9 +53,14 @@ describe("ScriptPage workflow navigation", () => {
     expect(pageSource).toContain("removePlaybackCuesOutsideRange");
     expect(pageSource).toContain("mediaKindChangeConfirmation");
     expect(pageSource).toContain("ScriptMediaDialog");
-    expect(paneSource).toContain("素材を表示 / 再生開始");
+    expect(paneSource).toContain("素材を挿入");
     expect(paneSource).toContain("一時停止");
     expect(paneSource).toContain("再開");
+    expect(paneSource).toContain("停止");
+    expect(paneSource).toContain("変更");
+    expect(paneSource).not.toContain("素材を表示 / 再生開始");
+    expect(paneSource).not.toContain("script-media-details");
+    expect(paneSource).not.toContain("script-media-conflict-message");
     expect(paneSource).toContain("boundaryCueDisabled");
     expect(paneSource).toContain("次のセリフ以降で指定してください");
     expect(paneSource).toContain("mediaDialogFocusableSelector");

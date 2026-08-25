@@ -726,7 +726,7 @@ describe("ScreenTemplate workflow browser E2E", () => {
       templateDetailRequests: 0
     };
     await installApiRoutes(page, state);
-    await page.setViewportSize({ width: 1200, height: 900 });
+    await page.setViewportSize({ width: 1800, height: 1000 });
     await page.goto(`${webUrl}/projects/${projectId}/script`, {
       waitUntil: "domcontentloaded"
     });
@@ -980,7 +980,7 @@ describe("ScreenTemplate workflow browser E2E", () => {
         );
         const introMediaPane = introLineCard.locator(".script-line-media-pane");
         await introMediaPane.waitFor({ state: "visible" });
-        expect(await introMediaPane.textContent()).toContain(
+        expect(await introMediaPane.getAttribute("aria-label")).toContain(
           "playing（再生中）"
         );
         expect(
@@ -1006,6 +1006,25 @@ describe("ScreenTemplate workflow browser E2E", () => {
             .getByRole("button", { name: "再開" })
             .count()
         ).toBe(0);
+        const staticMediaPane = lineCard.locator(".script-line-media-pane");
+        expect(
+          await staticMediaPane
+            .getByRole("button", {
+              name: "停止",
+              exact: true
+            })
+            .count()
+        ).toBe(1);
+        expect(
+          await staticMediaPane
+            .getByRole("button", {
+              name: "変更",
+              exact: true
+            })
+            .count()
+        ).toBe(1);
+        expect(await staticMediaPane.locator("video").count()).toBe(0);
+        expect(await staticMediaPane.locator("img").count()).toBe(1);
         expect(
           await firstLineCard
             .locator(
@@ -1084,13 +1103,66 @@ describe("ScreenTemplate workflow browser E2E", () => {
             alternateTemplate.canvasWidth,
           1
         );
+        const scriptPageLayout = await page
+          .locator(".script-editor-page")
+          .evaluate((element) => {
+            const pageElement = element as unknown as BrowserElement;
+            return {
+              clientWidth: pageElement.clientWidth,
+              scrollWidth: pageElement.scrollWidth
+            };
+          });
+        expect(scriptPageLayout.clientWidth).toBeGreaterThanOrEqual(1450);
+        expect(scriptPageLayout.clientWidth).toBeLessThanOrEqual(1500);
+        expect(scriptPageLayout.scrollWidth).toBeLessThanOrEqual(
+          scriptPageLayout.clientWidth
+        );
+        expect(
+          await page.locator(".script-production-main").evaluate((element) => {
+            const main = element as unknown as BrowserElement;
+            return main.clientWidth;
+          })
+        ).toBeGreaterThanOrEqual(1400);
+        await page.setViewportSize({ width: 600, height: 900 });
+        const narrowPageLayout = await page
+          .locator("body")
+          .evaluate((element) => {
+            const body = element as unknown as BrowserElement;
+            return {
+              clientWidth: body.clientWidth,
+              scrollWidth: body.scrollWidth
+            };
+          });
+        expect(narrowPageLayout.scrollWidth).toBeLessThanOrEqual(
+          narrowPageLayout.clientWidth
+        );
+        await page.setViewportSize({ width: 1800, height: 1000 });
+        expect(await lineCard.locator(".script-line-text-row").count()).toBe(2);
+        expect(
+          await lineCard.locator(".script-line-primary-controls").count()
+        ).toBe(1);
+        expect(await lineCard.locator(".script-line-action-row").count()).toBe(
+          1
+        );
+        expect(
+          await lineCard.locator(".script-line-details-dialog").count()
+        ).toBe(0);
+        expect(await lineCard.locator("audio[controls]").count()).toBe(0);
         expect(
           await lineCard
-            .locator('audio[aria-label="main-learner-1の現在の音声"]')
-            .getAttribute("src")
-        ).toContain(
-          `/api/projects/${projectId}/files/audio/voice/main-learner-1.wav`
-        );
+            .locator(
+              'audio[src*="/api/projects/manual-video-project/files/audio/voice/main-learner-1.wav"]'
+            )
+            .count()
+        ).toBe(1);
+        expect(
+          await lineCard
+            .getByRole("button", {
+              name: "main-learner-1の音声を再生",
+              exact: true
+            })
+            .count()
+        ).toBe(1);
         const primaryRowLayout = await lineCard
           .locator(".script-line-primary-row")
           .evaluate((element) => {
@@ -1177,11 +1249,11 @@ describe("ScreenTemplate workflow browser E2E", () => {
         await picker.waitFor({ state: "visible" });
         await picker.getByRole("button", { name: "閉じる" }).click();
         await page
-          .getByRole("button", { name: "このセリフの音声を調整" })
+          .getByRole("button", { name: "音声調整" })
           .first()
           .waitFor({ state: "visible" });
         const adjustmentTrigger = lineCard.getByRole("button", {
-          name: "このセリフの音声を調整"
+          name: "音声調整"
         });
         await adjustmentTrigger.focus();
         expect(
@@ -1256,6 +1328,82 @@ describe("ScreenTemplate workflow browser E2E", () => {
                 .activeElement === element
           )
         ).toBe(true);
+
+        const detailsTrigger = lineCard.getByRole("button", {
+          name: "詳細設定"
+        });
+        await detailsTrigger.focus();
+        await detailsTrigger.click();
+        const detailsDialog = page.getByRole("dialog", {
+          name: "セリフ main-learner-1の詳細設定"
+        });
+        await detailsDialog.waitFor({ state: "visible" });
+        expect(
+          await detailsDialog.locator("#main-learner-1-expression").count()
+        ).toBe(1);
+        const detailsCloseButton = detailsDialog.getByRole("button", {
+          name: "閉じる"
+        });
+        expect(
+          await detailsCloseButton.evaluate(
+            (element) =>
+              (element as unknown as BrowserElement).ownerDocument
+                .activeElement === element
+          )
+        ).toBe(true);
+        await page.keyboard.press("Shift+Tab");
+        expect(
+          await detailsDialog.evaluate((dialog) => {
+            const dialogElement = dialog as unknown as BrowserElement;
+            return dialogElement.contains(
+              dialogElement.ownerDocument.activeElement
+            );
+          })
+        ).toBe(true);
+        await page.keyboard.press("Tab");
+        expect(
+          await detailsCloseButton.evaluate(
+            (element) =>
+              (element as unknown as BrowserElement).ownerDocument
+                .activeElement === element
+          )
+        ).toBe(true);
+        await page.keyboard.press("Escape");
+        await detailsDialog.waitFor({ state: "detached" });
+        expect(
+          await detailsTrigger.evaluate(
+            (element) =>
+              (element as unknown as BrowserElement).ownerDocument
+                .activeElement === element
+          )
+        ).toBe(true);
+      } finally {
+        await context.close();
+      }
+    }
+  );
+
+  it(
+    "keeps an unassigned media pane to a single insert action",
+    { timeout: 60_000 },
+    async () => {
+      const project = createScreenTemplateProjectFixture();
+      project.visuals.assignments = project.visuals.assignments.filter(
+        (assignment) => assignment.id !== "visual-outro-document"
+      );
+      const { context, page } = await openScript(project);
+      try {
+        const emptyPane = page.locator(
+          '.script-line-card[aria-label="セリフ outro-mentor-1"] .script-line-media-pane'
+        );
+        await emptyPane.waitFor({ state: "visible" });
+        expect(await emptyPane.getAttribute("aria-label")).toContain(
+          "素材未挿入"
+        );
+        expect(
+          await emptyPane.getByRole("button", { name: "素材を挿入" }).count()
+        ).toBe(1);
+        expect(await emptyPane.locator("header, h3, p, dl").count()).toBe(0);
       } finally {
         await context.close();
       }
@@ -1290,9 +1438,7 @@ describe("ScreenTemplate workflow browser E2E", () => {
               )
           );
 
-        await startLineCard
-          .getByRole("button", { name: "素材を表示 / 再生開始" })
-          .click();
+        await startLineCard.getByRole("button", { name: "素材を挿入" }).click();
         const startPicker = page.getByRole("dialog", {
           name: "表示素材を選択"
         });
@@ -1342,7 +1488,9 @@ describe("ScreenTemplate workflow browser E2E", () => {
         });
 
         const endSave = waitForVisualSave();
-        await resumeEndLineCard.getByRole("button", { name: "終了" }).click();
+        await resumeEndLineCard
+          .getByRole("button", { name: "停止", exact: true })
+          .click();
         await endSave;
         expect(
           state.project.visuals.assignments.find(
@@ -1351,7 +1499,7 @@ describe("ScreenTemplate workflow browser E2E", () => {
         ).toMatchObject({ endLineId: "main-mentor-2" });
 
         await resumeEndLineCard
-          .getByRole("button", { name: "素材を変更" })
+          .getByRole("button", { name: "変更", exact: true })
           .click();
         const picker = page.getByRole("dialog", {
           name: "表示素材を差し替え"
@@ -1386,10 +1534,19 @@ describe("ScreenTemplate workflow browser E2E", () => {
           ".script-line-media-pane"
         );
         await reloadedPane.waitFor({ state: "visible" });
-        expect(await reloadedPane.textContent()).toContain(
+        expect(
+          await reloadedPane
+            .locator(
+              `video[aria-label="${replacementAsset.title}の管理素材プレビュー"]`
+            )
+            .count()
+        ).toBe(1);
+        expect(await reloadedPane.textContent()).not.toContain(
           replacementAsset.title
         );
-        expect(await reloadedPane.textContent()).toContain("playing（再生中）");
+        expect(await reloadedPane.getAttribute("aria-label")).toContain(
+          "playing（再生中）"
+        );
         expect(
           state.project.visuals.assignments.find(
             (assignment) => assignment.id === createdAssignment.id

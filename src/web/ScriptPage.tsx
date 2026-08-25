@@ -77,7 +77,6 @@ import {
   type ScriptDraftIssue
 } from "./script-editor";
 import { CharacterVisualPickerModal } from "./CharacterVisualPicker";
-import { characterVisualFileUrl } from "./character-visual-picker";
 import { VoiceAdjustmentEditor } from "./VoiceAdjustmentEditor";
 import { visualAssignmentsPath } from "./VisualAssignmentsPage";
 import {
@@ -251,64 +250,51 @@ function projectAudioUrl(
     : createProjectManifestAssetUrlResolver(projectId)(audioPath);
 }
 
-function variantFileSlots(variant: CharacterVariant): readonly {
-  key: "single" | "closed" | "open";
-  label: string;
-}[] {
-  return variant.renderType === "single-image"
-    ? [{ key: "single", label: "素材" }]
-    : [
-        { key: "closed", label: "口閉じ" },
-        { key: "open", label: "口開き" }
-      ];
-}
+type VoiceIndicator = Readonly<{
+  readonly state:
+    | "current"
+    | "stale"
+    | "needs_review"
+    | "generating"
+    | "failed"
+    | "missing"
+    | "unavailable"
+    | "loading";
+  readonly label: string;
+  readonly accessibleLabel: string;
+}>;
 
-function CharacterVariantPreview({
-  visual,
-  variant,
-  characterName
-}: {
-  readonly visual: CharacterVisualSet;
-  readonly variant: CharacterVariant;
-  readonly characterName: string;
-}) {
-  return (
-    <div
-      className={
-        variant.renderType === "mouth-pair"
-          ? "script-line-variant-preview script-line-variant-preview-pair"
-          : "script-line-variant-preview"
-      }
-    >
-      {variantFileSlots(variant).map((slot) => {
-        const file = variant.files.find(
-          (candidate) => candidate.key === slot.key
-        );
-        return file === undefined ? (
-          <div
-            className="script-line-variant-preview-missing"
-            key={slot.key}
-            role="img"
-            aria-label={`${characterName}の${variant.label}・${slot.label}が未登録`}
-          >
-            未登録
-          </div>
-        ) : (
-          <img
-            alt={`${characterName}の${variant.label}・${slot.label}`}
-            className="script-line-variant-preview-image"
-            key={slot.key}
-            loading="lazy"
-            src={characterVisualFileUrl(
-              visual.visualId,
-              variant.variantId,
-              file.key
-            )}
-          />
-        );
-      })}
-    </div>
-  );
+function voiceIndicatorForLine(
+  status: VoiceLineGenerationStatus | undefined,
+  available: boolean,
+  loading: boolean
+): VoiceIndicator {
+  if (loading) {
+    return {
+      state: "loading",
+      label: "確認中",
+      accessibleLabel: "音声状態を確認中"
+    };
+  }
+  if (!available) {
+    return {
+      state: "unavailable",
+      label: "利用不可",
+      accessibleLabel: "音声サービスを利用できません"
+    };
+  }
+  if (status === undefined) {
+    return {
+      state: "missing",
+      label: "未生成",
+      accessibleLabel: "音声がありません"
+    };
+  }
+  return {
+    state: status.status,
+    label: voiceStatusLabel(status.status),
+    accessibleLabel: `音声状態: ${voiceStatusLabel(status.status)}`
+  };
 }
 
 function visualForLine(
@@ -336,7 +322,6 @@ function visualForLine(
 
 function ScriptLineCard({
   line,
-  section,
   sectionIndex,
   lineIndex,
   project,
@@ -346,6 +331,7 @@ function ScriptLineCard({
   linePreview,
   issues,
   voiceStatus,
+  voiceStatusLoading,
   voiceGenerationDisabled,
   voiceAvailable,
   projectId,
@@ -364,7 +350,6 @@ function ScriptLineCard({
   mediaMutationPending
 }: {
   readonly line: ScriptLine;
-  readonly section: Pick<ScriptSection, "id" | "lines">;
   readonly sectionIndex: number;
   readonly lineIndex: number;
   readonly project: VideoProject;
@@ -374,6 +359,7 @@ function ScriptLineCard({
   readonly linePreview: ReturnType<typeof resolveScriptLineScreenPreview>;
   readonly issues: readonly ScriptDraftIssue[];
   readonly voiceStatus: VoiceLineGenerationStatus | undefined;
+  readonly voiceStatusLoading: boolean;
   readonly voiceGenerationDisabled: boolean;
   readonly voiceAvailable: boolean;
   readonly projectId: string;
@@ -392,43 +378,46 @@ function ScriptLineCard({
   readonly mediaMutationPending: boolean;
 }) {
   const lineIssues = lineIssueText(issues, sectionIndex, lineIndex);
-  const { character, visual, variant } = visualForLine(project, catalog, line);
-  const { mode, resolvedTemplate, persistentScreenState } = previewState;
+  const { visual } = visualForLine(project, catalog, line);
+  const { mode, resolvedTemplate } = previewState;
   const [expandedTextField, setExpandedTextField] = useState<
     "subtitle" | "spoken" | null
   >(null);
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const [audioPlaying, setAudioPlaying] = useState(false);
+  const audioRef = useRef<HTMLAudioElement>(null);
   const numberValue = (value: number): string =>
     Number.isFinite(value) ? String(value) : "";
   const visualButtonDisabled =
     catalogUnavailable || visual === undefined || visual.status !== "active";
-  const visualSummary =
-    character === undefined
-      ? "話者が未解決です"
-      : character.characterVisual.visualId === null
-        ? "話者のビジュアルセットが未設定です"
-        : visual === undefined
-          ? "カタログにないビジュアルセットです"
-          : line.characterVariantId === null ||
-              line.characterVariantId === undefined
-            ? "未選択"
-            : variant === undefined
-              ? "カタログにない variant です"
-              : variant.status === "active" && visual.status === "active"
-                ? "選択中"
-                : "非アクティブな参照です";
   const templateReferenceError =
     screenTemplateReferenceMessage(resolvedTemplate);
   const audioUrl =
     voiceStatus?.status === "current"
       ? projectAudioUrl(projectId, voiceStatus.audioPath)
       : undefined;
-  const variantSummary =
-    variant === undefined
-      ? visualSummary
-      : `${variant.label}（${variant.renderType}）`;
-  const unresolvedVisual = persistentScreenState.visualPresentationState.some(
-    (visualState) => visualState.assetResolution === "unresolved"
+  const voiceIndicator = voiceIndicatorForLine(
+    voiceStatus,
+    voiceAvailable,
+    voiceStatusLoading
   );
+
+  useEffect(() => {
+    audioRef.current?.pause();
+    setAudioPlaying(false);
+  }, [audioUrl]);
+
+  function playCurrentVoice(): void {
+    const audio = audioRef.current;
+    if (audio === null) {
+      return;
+    }
+    if (audio.paused) {
+      void audio.play().catch(() => setAudioPlaying(false));
+    } else {
+      audio.pause();
+    }
+  }
 
   function textRow(
     field: "subtitle" | "spoken",
@@ -498,12 +487,6 @@ function ScriptLineCard({
               ) : null}
             </div>
           )}
-          {unresolvedVisual ? (
-            <p className="script-line-card-preview-warning" role="status">
-              表示素材を解決できません。出力 validation
-              の詳細を確認してください。
-            </p>
-          ) : null}
         </aside>
 
         <div className="script-line-card-editor">
@@ -513,112 +496,106 @@ function ScriptLineCard({
               <code>{line.id}</code>
             </div>
 
-            <div className="form-field script-line-speaker-field">
-              <label htmlFor={`${line.id}-speaker`}>話者</label>
-              <select
-                id={`${line.id}-speaker`}
-                value={line.speakerId}
-                onChange={(event) =>
-                  onChange({
-                    speakerId: event.target.value,
-                    characterVariantId: null
-                  })
-                }
-              >
-                {project.characters.map((candidate) => (
-                  <option key={candidate.id} value={candidate.id}>
-                    {candidate.name}（{candidate.role}）
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div
-              aria-label={`${line.id}のキャラクタービジュアル設定`}
-              className="script-line-visual-control"
-            >
-              <div className="script-line-visual-control-copy">
-                <span className="eyebrow">ビジュアル</span>
-                <strong>{visual?.name ?? "binding 未設定"}</strong>
-                <span className="status-message">{variantSummary}</span>
+            <div className="script-line-primary-controls">
+              <div className="form-field script-line-speaker-field">
+                <label htmlFor={`${line.id}-speaker`}>話者</label>
+                <select
+                  id={`${line.id}-speaker`}
+                  value={line.speakerId}
+                  onChange={(event) =>
+                    onChange({
+                      speakerId: event.target.value,
+                      characterVariantId: null
+                    })
+                  }
+                >
+                  {project.characters.map((candidate) => (
+                    <option key={candidate.id} value={candidate.id}>
+                      {candidate.name}
+                    </option>
+                  ))}
+                </select>
               </div>
-              {visual !== undefined && variant !== undefined ? (
-                <CharacterVariantPreview
-                  visual={visual}
-                  variant={variant}
-                  characterName={character?.name ?? line.speakerId}
-                />
-              ) : null}
-              <button
-                aria-label={`${line.id}のビジュアルを${
-                  variant === undefined ? "選択" : "変更"
-                }`}
-                className="button button-small"
-                type="button"
-                disabled={visualButtonDisabled}
-                onClick={onOpenPicker}
-              >
-                {variant === undefined
-                  ? "ビジュアルを選択"
-                  : "ビジュアルを変更"}
-              </button>
-            </div>
 
-            <div className="script-line-audio-control" aria-label="音声操作">
-              <div className="script-line-audio-status">
-                <span className="eyebrow">音声</span>
-                {voiceStatus === undefined ? (
-                  <span className="status-message">確認中…</span>
+              <div
+                aria-label={`${line.id}のキャラクタービジュアル設定`}
+                className="script-line-visual-control"
+              >
+                <button
+                  aria-label={`${line.id}のビジュアルを変更`}
+                  className="button button-small"
+                  type="button"
+                  disabled={visualButtonDisabled}
+                  onClick={onOpenPicker}
+                >
+                  ビジュアルを変更
+                </button>
+              </div>
+
+              <div className="script-line-audio-control" aria-label="音声操作">
+                <span
+                  aria-label={voiceIndicator.accessibleLabel}
+                  className={`voice-status voice-status-${voiceIndicator.state}`}
+                  title={voiceIndicator.accessibleLabel}
+                >
+                  {voiceIndicator.label}
+                </span>
+                {audioUrl !== undefined ? (
+                  <audio
+                    aria-hidden="true"
+                    preload="none"
+                    ref={audioRef}
+                    src={audioUrl}
+                    tabIndex={-1}
+                    onEnded={() => setAudioPlaying(false)}
+                    onPause={() => setAudioPlaying(false)}
+                    onPlay={() => setAudioPlaying(true)}
+                  />
                 ) : (
                   <span
-                    className={`voice-status voice-status-${voiceStatus.status}`}
-                  >
-                    {voiceStatusLabel(voiceStatus.status)}
-                  </span>
+                    aria-hidden="true"
+                    className="script-line-audio-missing"
+                  />
                 )}
-                {voiceStatus?.status === "failed" &&
-                voiceStatus.errorCode !== undefined ? (
-                  <code>{voiceStatus.errorCode}</code>
-                ) : null}
+                <button
+                  aria-label={`${line.id}の音声を再生`}
+                  aria-pressed={audioPlaying}
+                  className="button button-small"
+                  disabled={audioUrl === undefined}
+                  type="button"
+                  onClick={playCurrentVoice}
+                >
+                  再生
+                </button>
+                <button
+                  aria-label={`${line.id}の音声を再生成`}
+                  className="button button-small"
+                  type="button"
+                  disabled={
+                    voiceGenerationDisabled ||
+                    lineIssues.length > 0 ||
+                    voiceStatus?.status === "current" ||
+                    voiceStatus?.status === "generating" ||
+                    voiceStatus?.status === "needs_review"
+                  }
+                  onClick={onGenerateVoice}
+                >
+                  {voiceStatus?.status === "generating" ? "生成中…" : "再生成"}
+                </button>
               </div>
-              {audioUrl !== undefined ? (
-                <audio
-                  aria-label={`${line.id}の現在の音声`}
-                  controls
-                  preload="none"
-                  src={audioUrl}
-                />
-              ) : (
-                <span className="status-message">現在の音声なし</span>
-              )}
-              <button
-                aria-label={`${line.id}の音声を再生成`}
-                className="button button-small"
-                type="button"
-                disabled={
-                  voiceGenerationDisabled ||
-                  lineIssues.length > 0 ||
-                  voiceStatus?.status === "current" ||
-                  voiceStatus?.status === "generating" ||
-                  voiceStatus?.status === "needs_review"
-                }
-                onClick={onGenerateVoice}
-              >
-                {voiceStatus?.status === "generating" ? "生成中…" : "再生成"}
-              </button>
+
+              <VoiceAdjustmentEditor
+                projectId={projectId}
+                line={line}
+                voiceAvailable={voiceAvailable}
+              />
+
+              {lineIssues.length > 0 ? (
+                <span className="script-line-validation-error" role="alert">
+                  入力エラー {lineIssues.length}件
+                </span>
+              ) : null}
             </div>
-
-            <VoiceAdjustmentEditor
-              projectId={projectId}
-              line={line}
-              voiceAvailable={voiceAvailable}
-            />
-
-            {lineIssues.length > 0 ? (
-              <span className="script-line-validation-error" role="alert">
-                入力エラー {lineIssues.length}件
-              </span>
-            ) : null}
           </div>
 
           {textRow("subtitle", "字幕", line.subtitleText, (value) =>
@@ -629,7 +606,16 @@ function ScriptLineCard({
           )}
 
           <div className="script-line-action-row">
-            <span className="eyebrow">セリフ操作</span>
+            <button
+              aria-controls={`${line.id}-details-dialog`}
+              aria-expanded={detailsOpen}
+              aria-haspopup="dialog"
+              className="button button-small"
+              type="button"
+              onClick={() => setDetailsOpen(true)}
+            >
+              詳細設定
+            </button>
             <div className="script-line-actions">
               <button
                 className="button button-small"
@@ -667,77 +653,102 @@ function ScriptLineCard({
             </div>
           </div>
 
-          <details className="script-line-details">
-            <summary>詳細設定（表情・発話前後の間）</summary>
-            <div className="script-line-secondary-fields">
-              <div className="form-field">
-                <label htmlFor={`${line.id}-expression`}>
-                  表情（表示選択には影響しません）
-                </label>
-                <select
-                  id={`${line.id}-expression`}
-                  value={line.expression}
-                  onChange={(event) =>
-                    onChange({
-                      expression: event.target.value as ScriptLine["expression"]
-                    })
-                  }
+          {detailsOpen ? (
+            <ScriptMediaDialog
+              className="script-line-details-dialog"
+              dialogId={`${line.id}-details-dialog`}
+              describedById={`${line.id}-details-description`}
+              onClose={() => setDetailsOpen(false)}
+              titleId={`${line.id}-details-title`}
+            >
+              <header className="script-line-details-dialog-header">
+                <div>
+                  <p className="eyebrow">詳細設定</p>
+                  <h2 id={`${line.id}-details-title`}>
+                    セリフ {line.id}の詳細設定
+                  </h2>
+                  <p id={`${line.id}-details-description`}>
+                    表情と発話前後の間を設定します。
+                  </p>
+                </div>
+                <button
+                  className="button button-small"
+                  type="button"
+                  onClick={() => setDetailsOpen(false)}
                 >
-                  <option value="neutral">通常</option>
-                  <option value="smile">喜び</option>
-                  <option value="explain">説明</option>
-                  <option value="caution">注意</option>
-                </select>
+                  閉じる
+                </button>
+              </header>
+              <div className="script-line-secondary-fields">
+                <div className="form-field">
+                  <label htmlFor={`${line.id}-expression`}>
+                    表情（表示選択には影響しません）
+                  </label>
+                  <select
+                    id={`${line.id}-expression`}
+                    value={line.expression}
+                    onChange={(event) =>
+                      onChange({
+                        expression: event.target
+                          .value as ScriptLine["expression"]
+                      })
+                    }
+                  >
+                    <option value="neutral">通常</option>
+                    <option value="smile">喜び</option>
+                    <option value="explain">説明</option>
+                    <option value="caution">注意</option>
+                  </select>
+                </div>
+                <div className="form-field">
+                  <label htmlFor={`${line.id}-pause-before`}>
+                    発話前の間（ミリ秒）
+                  </label>
+                  <input
+                    id={`${line.id}-pause-before`}
+                    type="number"
+                    min={0}
+                    step={1}
+                    value={numberValue(line.pauseBeforeMs)}
+                    onChange={(event) =>
+                      onChange({
+                        pauseBeforeMs:
+                          event.target.value.length === 0
+                            ? Number.NaN
+                            : Number(event.target.value)
+                      })
+                    }
+                  />
+                </div>
+                <div className="form-field">
+                  <label htmlFor={`${line.id}-pause-after`}>
+                    発話後の間（ミリ秒）
+                  </label>
+                  <input
+                    id={`${line.id}-pause-after`}
+                    type="number"
+                    min={0}
+                    step={1}
+                    value={numberValue(line.pauseAfterMs)}
+                    onChange={(event) =>
+                      onChange({
+                        pauseAfterMs:
+                          event.target.value.length === 0
+                            ? Number.NaN
+                            : Number(event.target.value)
+                      })
+                    }
+                  />
+                </div>
               </div>
-              <div className="form-field">
-                <label htmlFor={`${line.id}-pause-before`}>
-                  発話前の間（ミリ秒）
-                </label>
-                <input
-                  id={`${line.id}-pause-before`}
-                  type="number"
-                  min={0}
-                  step={1}
-                  value={numberValue(line.pauseBeforeMs)}
-                  onChange={(event) =>
-                    onChange({
-                      pauseBeforeMs:
-                        event.target.value.length === 0
-                          ? Number.NaN
-                          : Number(event.target.value)
-                    })
-                  }
-                />
-              </div>
-              <div className="form-field">
-                <label htmlFor={`${line.id}-pause-after`}>
-                  発話後の間（ミリ秒）
-                </label>
-                <input
-                  id={`${line.id}-pause-after`}
-                  type="number"
-                  min={0}
-                  step={1}
-                  value={numberValue(line.pauseAfterMs)}
-                  onChange={(event) =>
-                    onChange({
-                      pauseAfterMs:
-                        event.target.value.length === 0
-                          ? Number.NaN
-                          : Number(event.target.value)
-                    })
-                  }
-                />
-              </div>
-            </div>
-          </details>
-
-          {lineIssues.length > 0 ? (
-            <ul className="form-error script-line-errors" role="alert">
-              {lineIssues.map((issue) => (
-                <li key={issue}>{issue}</li>
-              ))}
-            </ul>
+              {lineIssues.length > 0 ? (
+                <ul className="form-error script-line-errors" role="alert">
+                  {lineIssues.map((issue) => (
+                    <li key={issue}>{issue}</li>
+                  ))}
+                </ul>
+              ) : null}
+            </ScriptMediaDialog>
           ) : null}
         </div>
 
@@ -754,7 +765,6 @@ function ScriptLineCard({
           presentationStates={
             previewState.persistentScreenState.visualPresentationState
           }
-          section={section}
         />
       </div>
     </article>
@@ -2473,7 +2483,6 @@ export function ScriptPage() {
                         <ScriptLineCard
                           key={line.id}
                           line={line}
-                          section={section}
                           sectionIndex={sectionIndex}
                           lineIndex={lineIndex}
                           project={project}
@@ -2493,6 +2502,7 @@ export function ScriptPage() {
                           })}
                           issues={issues}
                           voiceStatus={voiceStatusByLine.get(line.id)}
+                          voiceStatusLoading={voiceStatusQuery.isPending}
                           voiceGenerationDisabled={
                             voiceGenerationDisabled || issues.length > 0
                           }
