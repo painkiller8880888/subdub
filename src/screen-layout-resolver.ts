@@ -2,7 +2,9 @@ import type {
   DisplayV13,
   RenderResolvedVisualDisplay,
   ResolvedScreenLayout,
+  ResolvedScreenLayoutV26,
   ResolvedScreenElement,
+  ResolvedScreenElementV26,
   AnyScreenTransform,
   ScreenTransform
 } from "./schema/index.js";
@@ -23,6 +25,8 @@ type CharacterIds = Readonly<{
 export type ScreenLayoutResolutionOptions = Readonly<{
   readonly characterIds?: CharacterIds;
   readonly prioritizeVisual?: boolean;
+  /** Include the RF-01 dialogue window visual settings in the resolved layout. */
+  readonly includeDialogueWindowStyle?: boolean;
 }>;
 
 export type VisualDisplayResolutionOptions = Readonly<{
@@ -48,8 +52,9 @@ function scaledRect(
 function resolvedElement(
   element: ScreenTemplateElement,
   characterIds: CharacterIds | undefined,
-  prioritizeVisual: boolean
-): ResolvedScreenElement {
+  prioritizeVisual: boolean,
+  includeDialogueWindowStyle: boolean
+): ResolvedScreenElement | ResolvedScreenElementV26 {
   const transform = {
     ...element.transform,
     ...(element.type === "character-visual" && prioritizeVisual
@@ -60,6 +65,16 @@ function resolvedElement(
   };
 
   if (element.type === "dialogue-window") {
+    if (includeDialogueWindowStyle) {
+      return {
+        elementId: element.elementId,
+        type: element.type,
+        transform,
+        fontSize: element.fontSize,
+        backgroundColor: element.backgroundColor,
+        backgroundOpacity: element.backgroundOpacity
+      };
+    }
     return {
       elementId: element.elementId,
       type: element.type,
@@ -100,8 +115,18 @@ function resolvedElement(
  */
 export function resolveScreenTemplateLayout(
   template: Pick<ScreenTemplate, "canvasWidth" | "canvasHeight" | "elements">,
+  options: ScreenLayoutResolutionOptions & {
+    readonly includeDialogueWindowStyle: true;
+  }
+): ResolvedScreenLayoutV26;
+export function resolveScreenTemplateLayout(
+  template: Pick<ScreenTemplate, "canvasWidth" | "canvasHeight" | "elements">,
+  options?: ScreenLayoutResolutionOptions
+): ResolvedScreenLayout;
+export function resolveScreenTemplateLayout(
+  template: Pick<ScreenTemplate, "canvasWidth" | "canvasHeight" | "elements">,
   options: ScreenLayoutResolutionOptions = {}
-): ResolvedScreenLayout {
+): ResolvedScreenLayout | ResolvedScreenLayoutV26 {
   return {
     canvasWidth: template.canvasWidth,
     canvasHeight: template.canvasHeight,
@@ -109,9 +134,10 @@ export function resolveScreenTemplateLayout(
       resolvedElement(
         element,
         options.characterIds,
-        options.prioritizeVisual === true
+        options.prioritizeVisual === true,
+        options.includeDialogueWindowStyle === true
       )
-    )
+    ) as ResolvedScreenElement[] | ResolvedScreenElementV26[]
   };
 }
 

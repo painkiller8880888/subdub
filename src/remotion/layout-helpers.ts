@@ -108,33 +108,47 @@ export function subtitleContainerStyle(side: CharacterSide): CSSProperties {
   };
 }
 
+export function subtitleTypographyScale(subtitleText: string): number;
 export function subtitleTypographyScale(
-  displayName: string,
+  _legacyDisplayName: string,
   subtitleText: string
+): number;
+export function subtitleTypographyScale(
+  firstText: string,
+  secondText?: string
 ): number {
   return subtitleTypographyScaleForFontSize(
-    displayName,
-    subtitleText,
+    secondText ?? firstText,
     SUBTITLE_BODY_FONT_SIZE_PX
   );
 }
 
 export function subtitleTypographyScaleForFontSize(
-  displayName: string,
   subtitleText: string,
   bodyFontSizePx: number
+): number;
+export function subtitleTypographyScaleForFontSize(
+  _legacyDisplayName: string,
+  subtitleText: string,
+  bodyFontSizePx: number
+): number;
+export function subtitleTypographyScaleForFontSize(
+  firstText: string,
+  secondText: string | number,
+  thirdFontSize?: number
 ): number {
-  return subtitleTypographyMetricsForFontSize(
-    displayName,
-    subtitleText,
-    bodyFontSizePx
-  ).scale;
+  const subtitleText = typeof secondText === "number" ? firstText : secondText;
+  const bodyFontSizePx =
+    typeof secondText === "number" ? secondText : (thirdFontSize as number);
+  return subtitleTypographyMetricsForFontSize(subtitleText, bodyFontSizePx)
+    .scale;
 }
 
 export type ResolvedSubtitleContent = Readonly<{
   displayName: string;
   subtitleText: string;
   side: CharacterSide;
+  glowColor: string;
   speakerColor: string;
 }>;
 
@@ -158,6 +172,7 @@ export function resolveSubtitleContent(
     displayName: character.displayName,
     subtitleText: line.subtitleText,
     side: characterSideForIndex(characterIndex),
-    speakerColor: resolveCharacterThemeColor(character.themeColorToken)
+    glowColor: character.glowColor,
+    speakerColor: character.glowColor
   };
 }

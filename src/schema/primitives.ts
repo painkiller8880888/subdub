@@ -1,5 +1,9 @@
 import { z } from "zod";
 
+export const hexColorSchema = z
+  .string()
+  .regex(/^#[0-9a-fA-F]{6}$/u, "must be a #RRGGBB color");
+
 const lowerKebabCasePattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const sha256Pattern = /^[0-9a-fA-F]{64}$/;
 const controlCharacterPattern = /[\u0000-\u001F\u007F]/;

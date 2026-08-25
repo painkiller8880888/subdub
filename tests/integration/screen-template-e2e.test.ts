@@ -42,6 +42,7 @@ import {
   screenPreviewAssetKey
 } from "../../src/web/screen-template-preview.js";
 import {
+  DEFAULT_SCREEN_LAYOUT_PREVIEW,
   ScreenLayoutFrame,
   type ScreenLayoutPreview
 } from "../../src/remotion/screen-template-layout.js";
@@ -72,6 +73,7 @@ function createCharacterCatalog(): CharacterVisualCatalogSnapshot {
     name: `${visualId} fixture`,
     description: "",
     status: "active",
+    glowColor: visualId === "character-mentor" ? "#e78ac3" : "#75c97a",
     baseWidth: 600,
     baseHeight: 1000,
     variants: legacyCharacterVariantCatalog
@@ -758,7 +760,30 @@ describe("ScreenTemplate cross-layer acceptance fixture", () => {
     expect(markup).toContain("rotate(7deg)");
     expect(markup).toContain("padding:0 1.25cqw");
     expect(markup).toContain("padding:0.8333333333333334cqw 1.5625cqw");
-    expect(markup).toContain("margin-bottom:0.20833333333333334cqw");
+    expect(markup).toContain("background-color:rgba(0, 0, 0, 0.4)");
+    expect(markup).toContain("justify-content:center");
+    expect(markup).toContain("text-align:center");
+    expect(markup).toContain("text-shadow:0 0 6px #ffffff, 0 0 14px #ffffff");
+    expect(markup).not.toContain(">話者</span>");
+    expect(markup).not.toContain(">話者名</span>");
+    expect(markup).not.toContain("margin-bottom:0.20833333333333334cqw");
+  });
+
+  it("keeps the dialogue window visible when the preview text is empty", () => {
+    const template = createAlternateScreenTemplate();
+    const markup = renderToStaticMarkup(
+      createElement(ScreenLayoutFrame, {
+        preview: {
+          ...DEFAULT_SCREEN_LAYOUT_PREVIEW,
+          dialogueText: ""
+        },
+        template
+      })
+    );
+
+    expect(markup).toContain("screen-layout-dialogue-card");
+    expect(markup).toContain("background-color:rgba(0, 0, 0, 0.4)");
+    expect(markup).not.toContain("ここにサンプルセリフが表示されます。");
   });
 
   it("rejects ScreenTemplate subtitles that overflow at the template font size", () => {

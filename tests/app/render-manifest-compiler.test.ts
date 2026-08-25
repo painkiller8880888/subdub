@@ -292,7 +292,7 @@ describe("compileRenderManifest", () => {
     const segments = result.manifest.visuals.filter(
       (visual) => visual.sourceAssignmentId === assignment.id
     );
-    expect(result.manifest.manifestVersion).toBe("2.5.0");
+    expect(result.manifest.manifestVersion).toBe("2.6.0");
     expect(
       segments.map((segment) =>
         segment.kind === "video" ? segment.display.playbackState : segment.kind
@@ -407,7 +407,7 @@ describe("compileRenderManifest", () => {
       return;
     }
 
-    expect(result.manifest.manifestVersion).toBe("2.5.0");
+    expect(result.manifest.manifestVersion).toBe("2.6.0");
     expect(result.manifest.characterCatalogVersion).toBe(
       CHARACTER_VARIANT_CATALOG_VERSION
     );
@@ -420,6 +420,7 @@ describe("compileRenderManifest", () => {
         visualId: "character-mentor",
         displayName: "四国めたん",
         themeColorToken: "character.metan",
+        glowColor: "#ffffff",
         lipSyncPeriodFrames: 3,
         idleVariantId: "character-mentor-stand-v1"
       },
@@ -428,6 +429,7 @@ describe("compileRenderManifest", () => {
         visualId: "character-learner",
         displayName: "ずんだもん",
         themeColorToken: "character.zundamon",
+        glowColor: "#ffffff",
         lipSyncPeriodFrames: 3,
         idleVariantId: "character-learner-stand-v1"
       }
@@ -556,6 +558,38 @@ describe("compileRenderManifest", () => {
         .map(({ path }) => path)
         .sort((left, right) => left.localeCompare(right))
     );
+  });
+
+  it("takes subtitle glow colors from the selected visual snapshot", () => {
+    const input = validInput();
+    const snapshot = snapshotCatalogInput(input);
+    const catalog = characterVisualCatalogSnapshotSchema
+      .parse(snapshot.catalog)
+      .map((visual) => ({
+        ...visual,
+        glowColor:
+          visual.visualId === "character-mentor" ? "#102030" : "#405060"
+      }));
+
+    const result = compileRenderManifest({
+      ...input,
+      characterVariantCatalog: catalog,
+      assetMetadata: snapshot.assetMetadata
+    });
+
+    expect(result.success).toBe(true);
+    if (!result.success) {
+      return;
+    }
+    expect(
+      result.manifest.characters.map((character) => ({
+        visualId: character.visualId,
+        glowColor: character.glowColor
+      }))
+    ).toEqual([
+      { visualId: "character-mentor", glowColor: "#102030" },
+      { visualId: "character-learner", glowColor: "#405060" }
+    ]);
   });
 
   it("adds source-end boundaries without using line-template differences", () => {
@@ -768,7 +802,7 @@ describe("compileRenderManifest", () => {
     expect(visual.display.sourceTrimAfterFrame).toBeCloseTo(4.4);
   });
 
-  it("bakes coordinate space, section titles, and freshness into 2.5.0", () => {
+  it("bakes coordinate space, section titles, and freshness into 2.6.0", () => {
     const legacy = compileRenderManifest(validInput());
     expect(legacy.success).toBe(true);
     if (!legacy.success) {

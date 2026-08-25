@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import {
   idSchema,
+  hexColorSchema,
   isoUtcDateTimeSchema,
   nonNegativeIntegerSchema,
   positiveIntegerSchema,
@@ -11,6 +12,8 @@ import {
 } from "./primitives.js";
 
 export const characterVisualStatusSchema = z.enum(["active", "inactive"]);
+
+export const DEFAULT_CHARACTER_VISUAL_GLOW_COLOR = "#ffffff" as const;
 
 export const characterVariantStatusSchema = z.enum(["active", "inactive"]);
 
@@ -83,6 +86,7 @@ export const characterVisualSetSchema = strictObject({
   name: z.string().min(1),
   description: z.string(),
   status: characterVisualStatusSchema,
+  glowColor: hexColorSchema.default(DEFAULT_CHARACTER_VISUAL_GLOW_COLOR),
   baseWidth: positiveIntegerSchema.nullable(),
   baseHeight: positiveIntegerSchema.nullable(),
   variants: z.array(characterVariantSchema),

@@ -162,6 +162,7 @@ const characterCatalog: CharacterVisualCatalogSnapshot = [
     name: "メンター素材",
     description: "",
     status: "active",
+    glowColor: "#e78ac3",
     baseWidth: 256,
     baseHeight: 256,
     variants: [
@@ -193,6 +194,7 @@ const characterCatalog: CharacterVisualCatalogSnapshot = [
     name: "学習者素材",
     description: "",
     status: "active",
+    glowColor: "#75c97a",
     baseWidth: 256,
     baseHeight: 256,
     variants: [
@@ -330,6 +332,10 @@ describe("script ScreenTemplate preview resolution", () => {
       projectId: "preview-project",
       createdAt: TIMESTAMP
     });
+    project.characters[0]!.characterVisual = {
+      visualId: "visual-mentor",
+      idleVariantId: "variant-idle"
+    };
     const section = {
       ...createSection(),
       background: {
@@ -354,6 +360,7 @@ describe("script ScreenTemplate preview resolution", () => {
     });
 
     expect(preview.dialogueText).toBe("現在の字幕");
+    expect(preview.dialogueGlowColor).toBe("#e78ac3");
     expect(preview.sectionTitleText).toBe("操作");
     expect(preview.background).toEqual({
       fit: "cover",

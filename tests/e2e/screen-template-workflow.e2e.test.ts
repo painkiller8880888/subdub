@@ -150,6 +150,7 @@ function characterCatalog(): CharacterVisualCatalogSnapshot {
     name: `${visualId} browser fixture`,
     description: "",
     status: "active",
+    glowColor: visualId === "character-mentor" ? "#e78ac3" : "#75c97a",
     baseWidth: 600,
     baseHeight: 1000,
     variants: legacyCharacterVariantCatalog

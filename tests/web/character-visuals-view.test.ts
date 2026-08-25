@@ -24,6 +24,7 @@ function makeVisual(checksum: string): CharacterVisualSet {
     name: "霊夢",
     description: "主人公",
     status: "inactive",
+    glowColor: "#ffffff",
     baseWidth: 640,
     baseHeight: 360,
     variants: [
@@ -118,6 +119,7 @@ describe("character visual view behavior", () => {
 
     expect(characterVisualDraftFromSet(visual)).toEqual({
       description: "主人公",
+      glowColor: "#ffffff",
       name: "霊夢",
       status: "inactive"
     });

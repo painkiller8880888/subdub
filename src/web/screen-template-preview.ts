@@ -290,11 +290,18 @@ export function resolveScriptLineScreenPreview({
   readonly assets: ReadonlyMap<string, AssetDetail | undefined>;
 }): ScreenLayoutPreview {
   const contents = resolveContentPreviews(assignments, assets);
+  const speaker = project.characters.find(
+    (character) => character.id === line.speakerId
+  );
+  const speakerVisual = catalog?.find(
+    (visual) => visual.visualId === speaker?.characterVisual.visualId
+  );
   return {
     background: resolveBackgroundPreview(projectId, section),
     characters: resolveCharacterPreviews(project, line, catalog),
     content: contents[0] ?? unresolvedContentPreview(undefined),
     contents,
+    dialogueGlowColor: speakerVisual?.glowColor,
     dialogueText: line.subtitleText,
     speakerNameText:
       project.characters.find((character) => character.id === line.speakerId)
@@ -387,7 +394,9 @@ function templateRenderIdentity(template: ScriptScreenTemplate): unknown {
         return {
           type: element.type,
           transform: element.transform,
-          fontSize: element.fontSize
+          fontSize: element.fontSize,
+          backgroundColor: element.backgroundColor,
+          backgroundOpacity: element.backgroundOpacity
         };
       }
       if (element.type === "section-title") {

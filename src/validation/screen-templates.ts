@@ -157,15 +157,11 @@ function textIssuesForElement(
   const path = ["elements", index, "transform", "rect"] as const;
 
   if (element.type === "dialogue-window") {
-    if (
-      textContent.dialogueText === undefined &&
-      textContent.speakerNameText === undefined
-    ) {
+    if (textContent.dialogueText === undefined) {
       return [];
     }
 
     const metrics = subtitleTypographyMetricsForFontSize(
-      textContent.speakerNameText ?? "",
       textContent.dialogueText ?? "",
       element.fontSize,
       { widthPx, heightPx }
@@ -175,7 +171,7 @@ function textIssuesForElement(
         {
           path,
           message:
-            "dialogue text and speaker label do not fit inside the production subtitle card padding"
+            "dialogue text does not fit inside the production subtitle window padding"
         }
       ];
     }
@@ -184,7 +180,7 @@ function textIssuesForElement(
         {
           path,
           message:
-            "dialogue text and speaker label do not fit inside the production subtitle card padding"
+            "dialogue text does not fit inside the production subtitle window padding"
         }
       ];
     }
@@ -192,7 +188,7 @@ function textIssuesForElement(
       return [
         {
           path,
-          message: `dialogue text and speaker label overflow the element bounds (${metrics.estimatedTextHeightPx.toFixed(1)}px exceeds ${metrics.availableTextHeightPx.toFixed(1)}px at the template font size)`
+          message: `dialogue text overflows the element bounds (${metrics.estimatedTextHeightPx.toFixed(1)}px exceeds ${metrics.availableTextHeightPx.toFixed(1)}px at the template font size)`
         }
       ];
     }

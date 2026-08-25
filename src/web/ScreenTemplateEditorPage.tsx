@@ -308,6 +308,11 @@ function elementFieldValue(
       ? element.fontSize
       : null;
   }
+  if (field === "backgroundOpacity") {
+    return element.type === "dialogue-window"
+      ? element.backgroundOpacity
+      : null;
+  }
   return element.transform.rect[field];
 }
 
@@ -1145,6 +1150,9 @@ export function ScreenTemplateEditorPage() {
       )
     },
     content: selectedAssetPreview(assetId, assetsQuery.data),
+    dialogueGlowColor: activeVisuals(characterCatalogQuery.data).find(
+      (visual) => visual.visualId === characterSelections["speaker-1"].visualId
+    )?.glowColor,
     dialogueText,
     speakerNameText: "話者名",
     sectionTitleText
@@ -1540,7 +1548,58 @@ export function ScreenTemplateEditorPage() {
                       }
                     />
                   ) : null}
+                  {selected.type === "dialogue-window" ? (
+                    <NumericPropertyField
+                      disabled={!active || saveState === "saving"}
+                      error={
+                        fieldErrors[`${selected.elementId}:backgroundOpacity`]
+                      }
+                      hint="0〜1。文字を含まない背景の不透明度"
+                      id="screen-template-property-background-opacity"
+                      label="backgroundOpacity"
+                      max={1}
+                      min={0}
+                      step={0.05}
+                      value={selected.backgroundOpacity}
+                      onChange={(next) =>
+                        updateNumericField(selected, "backgroundOpacity", next)
+                      }
+                    />
+                  ) : null}
                 </div>
+                {selected.type === "dialogue-window" ? (
+                  <div className="form-field screen-template-property-field">
+                    <label htmlFor="screen-template-property-background-color">
+                      backgroundColor
+                    </label>
+                    <input
+                      aria-label="dialogue-window背景色"
+                      disabled={!active || saveState === "saving"}
+                      id="screen-template-property-background-color"
+                      type="color"
+                      value={selected.backgroundColor}
+                      onChange={(event) => {
+                        if (draft === null) {
+                          return;
+                        }
+                        setDraftDirty(
+                          updateDraftElement(
+                            draft,
+                            selected.elementId,
+                            (element) =>
+                              element.type === "dialogue-window"
+                                ? {
+                                    ...element,
+                                    backgroundColor: event.target.value
+                                  }
+                                : element
+                          )
+                        );
+                      }}
+                    />
+                    <small>字幕ウィンドウの背景色（#RRGGBB）</small>
+                  </div>
+                ) : null}
                 {isCharacterElement(selected) ? (
                   <label
                     className="checkbox-field screen-template-flip-field"

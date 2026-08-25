@@ -2,12 +2,17 @@ import { z } from "zod";
 
 import {
   finiteNumberSchema,
+  hexColorSchema,
   idSchema,
   isoUtcDateTimeSchema,
   positiveIntegerSchema,
   positiveNumberSchema,
-  strictObject
+  strictObject,
+  unitIntervalSchema
 } from "./primitives.js";
+
+export const DEFAULT_DIALOGUE_WINDOW_BACKGROUND_COLOR = "#000000" as const;
+export const DEFAULT_DIALOGUE_WINDOW_BACKGROUND_OPACITY = 0.4 as const;
 
 export const SCREEN_TEMPLATE_CANVAS_WIDTH = 1920 as const;
 export const SCREEN_TEMPLATE_CANVAS_HEIGHT = 1080 as const;
@@ -73,7 +78,13 @@ const characterOverflowElementBaseSchema = {
 const dialogueWindowElementSchema = strictObject({
   ...canvasContainedElementBaseSchema,
   type: z.literal("dialogue-window"),
-  fontSize: positiveNumberSchema
+  fontSize: positiveNumberSchema,
+  backgroundColor: hexColorSchema.default(
+    DEFAULT_DIALOGUE_WINDOW_BACKGROUND_COLOR
+  ),
+  backgroundOpacity: unitIntervalSchema.default(
+    DEFAULT_DIALOGUE_WINDOW_BACKGROUND_OPACITY
+  )
 });
 
 const sectionTitleElementSchema = strictObject({

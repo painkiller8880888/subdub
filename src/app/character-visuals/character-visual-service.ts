@@ -16,6 +16,7 @@ import { Readable, Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
 
 import {
+  DEFAULT_CHARACTER_VISUAL_GLOW_COLOR,
   characterVisualSetSchema,
   type CharacterVariant,
   type CharacterVariantStatus,
@@ -85,12 +86,14 @@ export type CharacterVisualCreateInput = {
   readonly name: string;
   readonly description?: string;
   readonly status?: CharacterVisualStatus;
+  readonly glowColor?: CharacterVisualSet["glowColor"];
 };
 
 export type CharacterVisualUpdateInput = {
   readonly name: string;
   readonly description: string;
   readonly status: CharacterVisualStatus;
+  readonly glowColor?: CharacterVisualSet["glowColor"];
 };
 
 export type CharacterVisualStagedUpload = {
@@ -150,6 +153,7 @@ type PreparedSeedVisual = {
   readonly name: string;
   readonly description: string;
   readonly status: CharacterVisualStatus;
+  readonly glowColor: CharacterVisualSet["glowColor"];
   readonly baseWidth: number;
   readonly baseHeight: number;
   readonly variants: readonly PreparedSeedVariant[];
@@ -394,6 +398,16 @@ function validateLegacyVariant(variant: LegacyCharacterVisualVariant): void {
   }
 }
 
+function legacyGlowColorForVisual(visualId: string): string {
+  if (visualId === "character-mentor") {
+    return "#e78ac3";
+  }
+  if (visualId === "character-learner") {
+    return "#75c97a";
+  }
+  return DEFAULT_CHARACTER_VISUAL_GLOW_COLOR;
+}
+
 async function prepareSeedCatalog(
   sourceRoot: string,
   catalog: readonly LegacyCharacterVisualVariant[],
@@ -489,6 +503,7 @@ async function prepareSeedCatalog(
         descriptions[visualId] ??
         "Migrated from the legacy character visual catalog.",
       status: "active",
+      glowColor: legacyGlowColorForVisual(visualId),
       baseWidth,
       baseHeight,
       variants: preparedVariants
@@ -560,6 +575,7 @@ function visualInsert(
     name: visual.name,
     description: visual.description,
     status: visual.status,
+    glowColor: visual.glowColor,
     baseWidth: visual.baseWidth,
     baseHeight: visual.baseHeight,
     createdAt: timestamp,
@@ -647,6 +663,7 @@ function preparedSeedSnapshot(
     name: visual.name,
     description: visual.description,
     status: visual.status,
+    glowColor: visual.glowColor,
     baseWidth: visual.baseWidth,
     baseHeight: visual.baseHeight,
     variants: visual.variants.map((variant) => ({
@@ -1290,12 +1307,14 @@ export class CharacterVisualCatalogService {
       name: input.name.trim(),
       description: input.description.trim(),
       status: input.status,
+      glowColor: input.glowColor ?? visual.glowColor,
       updatedAt: timestamp
     });
     this.repository.updateVisual(visualId, {
       name: next.name,
       description: next.description,
       status: next.status,
+      glowColor: next.glowColor,
       updatedAt: next.updatedAt
     });
     return this.requireVisual(visualId);
@@ -1330,6 +1349,7 @@ export class CharacterVisualCatalogService {
       name: input.name.trim(),
       description: input.description?.trim() ?? "",
       status: input.status ?? "active",
+      glowColor: input.glowColor ?? DEFAULT_CHARACTER_VISUAL_GLOW_COLOR,
       baseWidth: null,
       baseHeight: null,
       variants: [],

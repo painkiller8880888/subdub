@@ -2,14 +2,15 @@ import type { CharacterVisualSet } from "../schema/character-visual.js";
 
 export type CharacterVisualDraft = Pick<
   CharacterVisualSet,
-  "name" | "description" | "status"
+  "name" | "description" | "status" | "glowColor"
 >;
 
 export function createEmptyCharacterVisualDraft(): CharacterVisualDraft {
   return {
     name: "",
     description: "",
-    status: "active"
+    status: "active",
+    glowColor: "#ffffff"
   };
 }
 
@@ -19,7 +20,8 @@ export function characterVisualDraftFromSet(
   return {
     name: visual.name,
     description: visual.description,
-    status: visual.status
+    status: visual.status,
+    glowColor: visual.glowColor
   };
 }
 

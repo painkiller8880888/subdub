@@ -421,6 +421,14 @@ function resolvedLayoutForLine(line: RenderManifestV23["lines"][number]) {
   });
 }
 
+function resolvedLayoutV26ForLine(line: RenderManifestV23["lines"][number]) {
+  return resolveScreenTemplateLayout(STANDARD_TEMPLATE, {
+    characterIds: CHARACTER_IDS,
+    prioritizeVisual: lineHasPriority(line),
+    includeDialogueWindowStyle: true
+  });
+}
+
 function sectionTitle(sectionId: string): string {
   return (
     {
@@ -596,13 +604,23 @@ function toV25FixtureLine(
 
 export const renderManifestFixture: RenderManifest = {
   ...manifestHeader,
-  manifestVersion: "2.5.0",
-  sectionLayouts: renderManifestFixtureV24.sectionLayouts,
+  manifestVersion: "2.6.0",
+  characters: manifestHeader.characters.map((character) => ({
+    ...character,
+    glowColor: character.visualId === "character-mentor" ? "#e78ac3" : "#75c97a"
+  })),
+  sectionLayouts: renderManifestFixtureV24.sectionLayouts.map((layout) => ({
+    ...layout,
+    resolvedLayout: resolveScreenTemplateLayout(STANDARD_TEMPLATE, {
+      characterIds: CHARACTER_IDS,
+      includeDialogueWindowStyle: true
+    })
+  })),
   layoutIntervals: renderManifestFixtureV24.lines.map((line) => ({
     sectionId: line.sectionId,
     from: line.from,
     durationInFrames: line.durationInFrames,
-    resolvedLayout: line.resolvedLayout
+    resolvedLayout: resolvedLayoutV26ForLine(line)
   })),
   lines: renderManifestFixtureV24.lines.map(toV25FixtureLine),
   visuals: renderManifestFixtureV24.visuals.map(toV25FixtureVisual),

@@ -96,6 +96,14 @@ describe("screen template catalog", { timeout: 30_000 }, () => {
         first.repository.findById(STANDARD_SCREEN_TEMPLATE_ID)!.createdAt
       )
     );
+    expect(
+      first.repository
+        .findById(STANDARD_SCREEN_TEMPLATE_ID)!
+        .elements.find((element) => element.type === "dialogue-window")
+    ).toMatchObject({
+      backgroundColor: "#000000",
+      backgroundOpacity: 0.4
+    });
     const firstSnapshot = first.repository.list();
     first.database.close();
 
@@ -160,17 +168,28 @@ describe("screen template catalog", { timeout: 30_000 }, () => {
     ]);
     expect(repository.findById(template.templateId)).toEqual(template);
 
+    const editedElements = template.elements.map((element) =>
+      element.type === "dialogue-window"
+        ? { ...element, backgroundColor: "#123456", backgroundOpacity: 0.7 }
+        : element
+    );
     const updated = service.update(
       template.templateId,
       {
         name: template.name,
         description: template.description,
         status: "inactive",
-        elements: template.elements
+        elements: editedElements
       },
       template.revision
     );
     expect(updated.revision).toBe(template.revision + 1);
+    expect(
+      updated.elements.find((element) => element.type === "dialogue-window")
+    ).toMatchObject({
+      backgroundColor: "#123456",
+      backgroundOpacity: 0.7
+    });
     expect(() =>
       service.update(
         template.templateId,

@@ -20,6 +20,7 @@
     "src/voicevox/**/*.ts",
     "src/schema/**/*.ts",
     "src/screen-layout-resolver.ts",
+    "src/screen-template-style.ts",
     "src/screen-template-typography.ts",
     "src/media-frame.ts",
     "src/assets/**/*.ts",

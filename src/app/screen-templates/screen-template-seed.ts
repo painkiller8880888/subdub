@@ -39,7 +39,9 @@ const STANDARD_ELEMENTS: readonly ScreenTemplateElement[] = [
       },
       rotationDeg: 0
     },
-    fontSize: 38
+    fontSize: 38,
+    backgroundColor: "#000000",
+    backgroundOpacity: 0.4
   },
   {
     elementId: "screen-template-standard-content-slot",
@@ -132,7 +134,9 @@ export function resetScreenTemplateElementsToCanonicalDefaults(
           rect: { ...canonical.transform.rect },
           rotationDeg: canonical.transform.rotationDeg
         },
-        fontSize: canonical.fontSize
+        fontSize: canonical.fontSize,
+        backgroundColor: canonical.backgroundColor,
+        backgroundOpacity: canonical.backgroundOpacity
       };
     }
     if (element.type === "section-title") {
