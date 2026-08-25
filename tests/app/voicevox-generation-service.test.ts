@@ -20,21 +20,18 @@ import { videoProjectFixture } from "../fixtures/video-project.js";
 const projectId = videoProjectFixture.metadata.id;
 const roots: string[] = [];
 
-async function nextTurn(): Promise<void> {
-  await new Promise<void>((resolve) => setImmediate(resolve));
-}
-
 async function waitForJob(
   service: VoicevoxGenerationService,
   runId: string
 ): Promise<"succeeded" | "failed"> {
-  for (let attempt = 0; attempt < 100; attempt += 1) {
+  const deadline = Date.now() + 10_000;
+  while (Date.now() < deadline) {
     const status = await service.getStatus(projectId);
     const job = status.jobs.find((candidate) => candidate.runId === runId);
     if (job?.status === "succeeded" || job?.status === "failed") {
       return job.status;
     }
-    await nextTurn();
+    await new Promise<void>((resolve) => setTimeout(resolve, 20));
   }
   throw new Error(`job ${runId} did not finish`);
 }

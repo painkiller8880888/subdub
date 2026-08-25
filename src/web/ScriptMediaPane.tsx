@@ -4,7 +4,6 @@ import type {
   AssetDetail,
   AssetListItem,
   ScriptLine,
-  ScriptSection,
   VisualAssignment
 } from "../schema/index.js";
 import {
@@ -25,6 +24,7 @@ const mediaDialogFocusableSelector =
 
 export type ScriptMediaDialogProps = Readonly<{
   titleId: string;
+  dialogId?: string;
   describedById?: string;
   className?: string;
   onClose: () => void;
@@ -33,6 +33,7 @@ export type ScriptMediaDialogProps = Readonly<{
 
 export function ScriptMediaDialog({
   titleId,
+  dialogId,
   describedById,
   className = "script-media-picker",
   onClose,
@@ -104,6 +105,7 @@ export function ScriptMediaDialog({
     <div className="script-media-picker-overlay">
       <section
         ref={dialogRef}
+        id={dialogId}
         aria-describedby={describedById}
         aria-labelledby={titleId}
         aria-modal="true"
@@ -147,16 +149,6 @@ function lifecycleLabel(lifecycle: PersistentVisualLifecycle): string {
   }
 }
 
-function assignmentRangeLabel(
-  assignment: VisualAssignment,
-  section: Pick<ScriptSection, "lines">
-): string {
-  const lastLineId = section.lines.at(-1)?.id;
-  return assignment.endLineId === lastLineId
-    ? `開始: ${assignment.startLineId} / 終了: セクション末（未指定）`
-    : `開始: ${assignment.startLineId} / 終了: ${assignment.endLineId}`;
-}
-
 function thumbnailUrl(
   assetId: string,
   thumbnailIndex: number,
@@ -197,11 +189,10 @@ function MediaPreview({
   if (asset === undefined) {
     return (
       <div
+        aria-label="素材プレビューを読み込み中"
         className="script-media-preview script-media-preview-empty"
         role="img"
-      >
-        素材情報を読み込み中…
-      </div>
+      />
     );
   }
 
@@ -210,9 +201,9 @@ function MediaPreview({
       <video
         aria-label={`${asset.title}の管理素材プレビュー`}
         className="script-media-preview"
-        controls
         preload="metadata"
         src={mediaUrl(asset.assetId, asset.version)}
+        playsInline
       />
     );
   }
@@ -224,11 +215,10 @@ function MediaPreview({
   if (asset.thumbnailPaths[thumbnailIndex] === undefined) {
     return (
       <div
+        aria-label="素材プレビューなし"
         className="script-media-preview script-media-preview-empty"
         role="img"
-      >
-        サムネイルなし
-      </div>
+      />
     );
   }
   return (
@@ -242,7 +232,6 @@ function MediaPreview({
 
 export type ScriptMediaPaneProps = {
   readonly line: ScriptLine;
-  readonly section: Pick<ScriptSection, "lines">;
   readonly assignments: readonly VisualAssignment[];
   readonly presentationStates: readonly PersistentVisualPresentationState[];
   readonly assets: ReadonlyMap<string, AssetDetail | undefined>;
@@ -256,7 +245,6 @@ export type ScriptMediaPaneProps = {
 
 export function ScriptMediaPane({
   line,
-  section,
   assignments,
   presentationStates,
   assets,
@@ -267,27 +255,20 @@ export function ScriptMediaPane({
   onEnd,
   onReplace
 }: ScriptMediaPaneProps) {
-  const headingId = `${line.id}-media-pane-title`;
   if (assignments.length === 0) {
     return (
-      <aside aria-labelledby={headingId} className="script-line-media-pane">
-        <header className="script-media-pane-header">
-          <div>
-            <p className="eyebrow">表示素材</p>
-            <h3 id={headingId}>素材 state</h3>
-          </div>
-          <span className="script-media-state">hidden</span>
-        </header>
-        <p className="status-message">
-          このセリフには表示中の素材がありません。
-        </p>
+      <aside
+        aria-label={`${line.id}の素材操作。素材未挿入`}
+        className="script-line-media-pane script-line-media-pane-empty"
+        aria-busy={isPending}
+      >
         <button
           className="button button-small button-primary"
           disabled={isPending}
           type="button"
           onClick={onStart}
         >
-          {isPending ? "保存中…" : "素材を表示 / 再生開始"}
+          素材を挿入
         </button>
       </aside>
     );
@@ -296,30 +277,14 @@ export function ScriptMediaPane({
   if (assignments.length > 1) {
     return (
       <aside
-        aria-labelledby={headingId}
+        aria-label={`${line.id}の素材操作。複数の素材割当が競合しています`}
         className="script-line-media-pane script-line-media-pane-conflict"
       >
-        <header className="script-media-pane-header">
-          <div>
-            <p className="eyebrow">表示素材</p>
-            <h3 id={headingId}>素材 state</h3>
-          </div>
-          <span className="script-media-state script-media-state-error">
-            conflict
-          </span>
-        </header>
-        <p role="alert">
-          同じセリフに複数のgeneric
-          visualが重なっています。z-orderはこの画面では変更できません。
-        </p>
-        <ul className="script-media-conflict-list">
-          {assignments.map((assignment) => (
-            <li key={assignment.id}>
-              {assets.get(screenPreviewAssetKey(assignment))?.title ??
-                assignment.assetId}
-            </li>
-          ))}
-        </ul>
+        <div
+          aria-label="素材割当の競合"
+          className="script-media-conflict-indicator"
+          role="img"
+        />
       </aside>
     );
   }
@@ -346,69 +311,18 @@ export function ScriptMediaPane({
       : undefined;
   const boundaryCueDisabled = boundaryCue !== undefined;
   const endDisabled = actionDisabled || assignment.endLineId === line.id;
-  const assetTitle = asset?.title ?? assignment.assetId;
+  const paneLabel = `${line.id}の素材操作。${lifecycleLabel(lifecycle)}${
+    hasPlaybackConflict ? `。${playbackIssueText(issues)}` : ""
+  }`;
 
   return (
-    <aside aria-labelledby={headingId} className="script-line-media-pane">
-      <header className="script-media-pane-header">
-        <div>
-          <p className="eyebrow">表示素材</p>
-          <h3 id={headingId}>素材 state</h3>
-        </div>
-        <span
-          aria-label={`${line.id}の素材状態: ${lifecycleLabel(lifecycle)}`}
-          className={`script-media-state script-media-state-${lifecycle}`}
-        >
-          {lifecycleLabel(lifecycle)}
-        </span>
-      </header>
-
-      <div className="script-media-asset-heading">
-        <strong>{assetTitle}</strong>
-        <span>{mediaKindLabel(assignment.display.kind)}</span>
-      </div>
+    <aside
+      aria-label={paneLabel}
+      aria-busy={isPending}
+      className={`script-line-media-pane script-line-media-pane-${lifecycle}`}
+      data-lifecycle={lifecycle}
+    >
       <MediaPreview assignment={assignment} asset={asset} />
-
-      <dl className="script-media-details">
-        <div>
-          <dt>素材</dt>
-          <dd>{assetTitle}</dd>
-        </div>
-        <div>
-          <dt>種類</dt>
-          <dd>{mediaKindLabel(assignment.display.kind)}</dd>
-        </div>
-        <div>
-          <dt>範囲</dt>
-          <dd>{assignmentRangeLabel(assignment, section)}</dd>
-        </div>
-        {asset?.kind === "video" ? (
-          <div>
-            <dt>素材の尺</dt>
-            <dd>{formatDuration(asset.durationMs)}</dd>
-          </div>
-        ) : null}
-      </dl>
-
-      {hasPlaybackConflict ? (
-        <p className="script-media-conflict-message" role="alert">
-          cueを解決できないため操作を停止しています: {playbackIssueText(issues)}
-        </p>
-      ) : null}
-      {pauseAtStartDisabled ? (
-        <p className="status-message" role="status">
-          開始行のBEFOREは暗黙の再生開始境界のため、ここでは一時停止できません。
-        </p>
-      ) : null}
-      {boundaryCueDisabled ? (
-        <p className="status-message" role="status">
-          このセリフのBEFOREには既存の
-          {boundaryCue.action === "pause" ? "一時停止" : "再開"}
-          cueがあります。
-          {boundaryCue.action === "pause" ? "再開" : "一時停止"}
-          は次のセリフ以降で指定してください。
-        </p>
-      ) : null}
 
       <div className="script-media-actions">
         {lifecycle === "playing" ? (
@@ -447,7 +361,8 @@ export function ScriptMediaPane({
         ) : null}
         {lifecycle === "static-visible" ||
         lifecycle === "playing" ||
-        lifecycle === "paused" ? (
+        lifecycle === "paused" ||
+        lifecycle === "ended" ? (
           <button
             className="button button-small"
             disabled={endDisabled}
@@ -459,7 +374,7 @@ export function ScriptMediaPane({
             type="button"
             onClick={() => onEnd(assignment.id)}
           >
-            終了
+            停止
           </button>
         ) : null}
         <button
@@ -468,14 +383,9 @@ export function ScriptMediaPane({
           type="button"
           onClick={() => onReplace(assignment.id)}
         >
-          素材を変更
+          変更
         </button>
       </div>
-      {isPending ? (
-        <p className="status-message" role="status">
-          表示素材の変更を保存しています…
-        </p>
-      ) : null}
     </aside>
   );
 }
