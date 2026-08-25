@@ -324,6 +324,8 @@ type InsertTextTemplate = {
   description: string;
   status: "active" | "inactive";
   revision: number;
+  createdAt: string;
+  updatedAt: string;
   canvasWidth: 1920;
   canvasHeight: 1080;
   textRect: { x: number; y: number; width: number; height: number };

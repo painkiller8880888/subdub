@@ -205,7 +205,7 @@ dialogue window の背景設定は ScreenTemplate metadata に保存する。leg
 
 #### RF-02: intro / outro / アイキャッチの template text
 
-本編用の ScreenTemplate と分離した workspace catalog として `InsertTextTemplate` を導入する。`InsertTextTemplate` は少なくとも `templateId`、`name`、`description`、`status`、`revision`、1920 × 1080 canvas、text rect、rotation、fontSize、fontWeight、textColor、`textAlign: "left" | "center" | "right"`、`verticalAlign: "top" | "center" | "bottom"` を持つ。本編用の dialogue / character / content-slot 必須要素を挿入文字へ持ち込まない。
+本編用の ScreenTemplate と分離した workspace catalog として `InsertTextTemplate` を導入する。`InsertTextTemplate` は少なくとも `templateId`、`name`、`description`、`status`、`revision`、`createdAt`、`updatedAt`、1920 × 1080 canvas、text rect、rotation、fontSize、fontWeight、textColor、`textAlign: "left" | "center" | "right"`、`verticalAlign: "top" | "center" | "bottom"` を持つ。本編用の dialogue / character / content-slot 必須要素を挿入文字へ持ち込まない。
 
 RF-02 の editor は template selection と、1つの複数行 text field だけを編集対象とする。タイトル・サブタイトルを分割した field は設けない。`EditVideoElement` には `text` と `textTemplateId` を追加し、`RenderManifest 2.7.0` には templateId に加えて revision、hash、resolved text layout、resolved text を snapshot する。既存 video element は `text: ""`、`textTemplateId: null` へ migration し、文字を描画しない従来の見た目を保つ。RF-02 は `VideoProject 1.5.0 → 1.6.0`、`RenderManifest 2.6.0 → 2.7.0` を導入する。
 
@@ -1129,7 +1129,7 @@ BGM は音声生成の一部ではなく、次の 6.6 で定義する編集フ�
 
 #### 挿入文字 template（RF-02）
 
-`InsertTextTemplate` は ScreenTemplate とは別の workspace catalog である。少なくとも template ID、name、description、status、revision、1920 × 1080 canvas、text rect、rotation、fontSize、fontWeight、textColor、`textAlign: "left" | "center" | "right"`、`verticalAlign: "top" | "center" | "bottom"` を持つ。ScreenTemplate の dialogue / character / content-slot cardinalityを持ち込まず、intro / outro / cutin の文字レイアウトだけを表現する。compiler は選択した template の revision / hash と resolved text layout を `RenderManifest` へ snapshot し、template の更新で古い manifest を current とみなさない。
+`InsertTextTemplate` は ScreenTemplate とは別の workspace catalog である。少なくとも template ID、name、description、status、revision、`createdAt`、`updatedAt`、1920 × 1080 canvas、text rect、rotation、fontSize、fontWeight、textColor、`textAlign: "left" | "center" | "right"`、`verticalAlign: "top" | "center" | "bottom"` を持つ。ScreenTemplate の dialogue / character / content-slot cardinalityを持ち込まず、intro / outro / cutin の文字レイアウトだけを表現する。compiler は選択した template の revision / hash と resolved text layout を `RenderManifest` へ snapshot し、template の更新で古い manifest を current とみなさない。
 
 ### 6.7 タイムライン
 
