@@ -201,17 +201,17 @@ Issue #179（RF-00）は、後続の RF-01〜RF-04 が参照する本書と `imp
 
 dialogue window の背景設定は ScreenTemplate metadata に保存する。legacy/current template に設定がない場合の migration は黒 `#000000`・透過率 `0.4` を補う。`CharacterVisualSet` は variant ではなく visual 全体に `glowColor: string` を1つだけ持ち、保存形式は `#RRGGBB` とする。Character Visual 登録・編集画面を glow color の設定画面とし、project character の `themeColorToken` は字幕 glow color の正本にしない。compiler は selected `CharacterVisualSet` の glow color を `RenderManifest 2.6.0` へ snapshot し、Web preview と Remotion は manifest snapshot だけを参照する。
 
-既存 visual の glow color は、四国めたん相当を `#e78ac3`、ずんだもん相当を `#75c97a`、その他を `#ffffff` として決定論的に migration する。RF-01 は `VideoProject` の version を上げず、`RenderManifest 2.5.0 → 2.6.0` だけを導入する。
+既存 visual の glow color は、四国めたん相当を `#e78ac3`、ずんだもん相当を `#75c97a`、その他を `#ffffff` として決定論的に migration する。RF-01 は `VideoProject` の version を上げず、`RenderManifest 2.5.0 → 2.6.0` だけを導入する。2.5.0 の parser / cache / run log の意味は変更せず、旧 2.5.0 manifest を 2.6.0 として暗黙 upgrade しない。
 
 #### RF-02: intro / outro / アイキャッチの template text
 
-本編用の ScreenTemplate と分離した workspace catalog として `InsertTextTemplate` を導入する。`InsertTextTemplate` は少なくとも `templateId`、`name`、`description`、`status`、`revision`、1920 × 1080 canvas、text rect、rotation、fontSize、fontWeight、textColor、textAlign、verticalAlign を持つ。本編用の dialogue / character / content-slot 必須要素を挿入文字へ持ち込まない。
+本編用の ScreenTemplate と分離した workspace catalog として `InsertTextTemplate` を導入する。`InsertTextTemplate` は少なくとも `templateId`、`name`、`description`、`status`、`revision`、1920 × 1080 canvas、text rect、rotation、fontSize、fontWeight、textColor、`textAlign: "left" | "center" | "right"`、`verticalAlign: "top" | "center" | "bottom"` を持つ。本編用の dialogue / character / content-slot 必須要素を挿入文字へ持ち込まない。
 
 RF-02 の editor は template selection と、1つの複数行 text field だけを編集対象とする。タイトル・サブタイトルを分割した field は設けない。`EditVideoElement` には `text` と `textTemplateId` を追加し、`RenderManifest 2.7.0` には templateId に加えて revision、hash、resolved text layout、resolved text を snapshot する。既存 video element は `text: ""`、`textTemplateId: null` へ migration し、文字を描画しない従来の見た目を保つ。RF-02 は `VideoProject 1.5.0 → 1.6.0`、`RenderManifest 2.6.0 → 2.7.0` を導入する。
 
 #### RF-03: 挿入動画の開始秒・音量・再生速度
 
-`EditVideoElement` は `startMs: number | null`、許可列挙値だけを受理する `playbackRate`、既存 unit interval の `volume` を持つ。再生速度の UI 候補は `x1/3`、`x1/2.5`、`x1/2`、`x1/1.5`、`x1.0`、`x1.5`、`x2.0`、`x2.5`、`x3.0` とし、未指定時の既定値は `x1.0` とする。arbitrary float は保存しない。
+`EditVideoElement` は `startMs: number | null`、許可列挙値だけを受理する `playbackRate`、既存 unit interval の `volume` を持つ。再生速度の UI 候補は `x1/3`、`x1/2.5`、`x1/2`、`x1/1.5`、`x1.0`、`x1.5`、`x2.0`、`x2.5`、`x3.0` とし、未指定時の既定値は `x1.0` とする。arbitrary float は保存しない。指定する `startMs` は `0 <= startMs < sourceDuration` を満たす値だけを受理し、`startMs === sourceDuration` および sourceDuration 超を reject する。
 
 `startMs` が null の場合は現行の source 開始位置を維持し、指定時はその source position から開始する。Preview Player が停止中でも指定位置の frame を表示し、再生開始時はその frame から直ちに進める。ここでいう停止は Preview Player の停止状態であり、`EditVideoElement` 自身の persistent playback state を意味しない。generic `VisualAssignment` の playback cue state machine を `EditVideoElement` へ導入しない。
 
@@ -553,7 +553,7 @@ VideoProject
 
 #### 5.1.1 ScreenTemplate の概念モデル
 
-現行 main の `VideoProject 1.5.0` / `RenderManifest 2.5.0` は ScreenTemplate を使用する。ScreenTemplate の定義は workspace SQLite に保存し、次の TypeScript 型は DB レコードの検証済み view model として使用する。`VideoProject 1.2.0` / `RenderManifest 2.3.0` からの導入経緯、`1.3.0` line override、`1.4.0` の section-only boundary は履歴・互換境界として 17.18、implementation-spec の 24 章、および 2.5.0 の RF-00 section に残す。
+現行 main の `VideoProject 1.5.0` / `RenderManifest 2.5.0` は ScreenTemplate を使用する。ScreenTemplate の定義は workspace SQLite に保存し、次の TypeScript 型は DB レコードの検証済み view model として使用する。`metadata.dialogueWindow` は RF-01 の workspace extension であり、`RenderManifest 2.5.0` へは snapshot しない。`VideoProject 1.2.0` / `RenderManifest 2.3.0` からの導入経緯、`1.3.0` line override、`1.4.0` の section-only boundary は履歴・互換境界として 17.18、implementation-spec の 24 章、および 2.5.0 の RF-00 section に残す。
 
 ```ts
 type ScreenTemplate = {
@@ -564,6 +564,7 @@ type ScreenTemplate = {
   canvasWidth: 1920;
   canvasHeight: 1080;
   revision: number;
+  // RF-01 workspace extension; omitted from RenderManifest 2.5.0.
   metadata: ScreenTemplateMetadata;
   elements: ScreenTemplateElement[];
   createdAt: string;
@@ -627,12 +628,12 @@ type ScreenTemplateElement =
 
 element の責務は次のとおりである。
 
-- `dialogue-window`: 移動、拡大・縮小、回転、font size を持つ。セリフの有無にかかわらず常時表示し、本文は水平・垂直とも中央へ配置する。背景色と透過率は `metadata.dialogueWindow` から解決し、既定値は黒 `#000000`・40% とする。話者名称を visible rendering しない。
+- `dialogue-window`（RF-01後）: 移動、拡大・縮小、回転、font size を持つ。セリフの有無にかかわらず常時表示し、本文は水平・垂直とも中央へ配置する。背景色と透過率は `metadata.dialogueWindow` から解決し、既定値は黒 `#000000`・40% とする。話者名称を visible rendering しない。`RenderManifest 2.5.0` ではこの metadata と glow を snapshot しない。
 - `section-title`: 移動、拡大・縮小、回転、font size を持つ。現行 Remotion に対応 layer がないため、standard template の値は ST-01 が画面上端の要件から新規 canonical geometry として確定する。
 - `character-visual`: 移動、拡大・縮小、回転、`flipX` を持つ。画面外への部分的な overflow を許可するが、完全に画面外へ消える配置は許可しない。物理 PNG、variant、CharacterVisualSet は参照せず、speaker slot だけを表す。resolver は `speaker-1` / `speaker-2` を project character の配列先頭2件へ対応付け、resolved layout へ `characterId` を固定する。
 - `content-slot`: 移動、拡大・縮小、回転を持つ。generic `VisualAssignment` はこの outer slot 内へ表示し、素材側の crop / fit / scale / position は inner transform として適用する。
 
-template の geometry を先に解決し、その後に generic assignment の inner transform を content slot 内へ適用する。`display.prioritizeVisual` は互換表示ポリシーとして最後に適用できるが、template の element geometry を上書きしたり、固定座標へ戻したりしてはならない。初期版では適用後の character の縮小結果だけを resolved layout として manifest へ固定し、非表示は対象外とする。dialogue window の metadata が欠落する legacy/current template は migration で黒40%を補う。
+template の geometry を先に解決し、その後に generic assignment の inner transform を content slot 内へ適用する。`display.prioritizeVisual` は互換表示ポリシーとして最後に適用できるが、template の element geometry を上書きしたり、固定座標へ戻したりしてはならない。初期版では適用後の character の縮小結果だけを resolved layout として manifest へ固定し、非表示は対象外とする。dialogue window の metadata が欠落する legacy/current template は RF-01 migration で黒40%を補い、`RenderManifest 2.6.0` へ snapshot する。
 
 `screen-template-standard` は、既存 layer については現在の Remotion / CSS / layout constants を調査して得た標準見た目を表す stable ID である。section-title だけは現行コードに描画 layer がないため、doc.md の「画面上端」という要件から ST-01 が新規 canonical geometry を確定し、その rect / rotation / font size / 根拠を seed / migration と仕様へ記録する。この値は現行実値の抽出結果とは区別し、後から変更する場合は template revision / hash を更新する。workspace SQLite の seed / migration は idempotent に実行し、既存 project の移行時は各 section へこの ID を明示保存する。workspace に mutable な default template 設定を追加して、project の参照を省略する方式は採用しない。
 
@@ -768,7 +769,7 @@ RenderManifest（`2.5.0` 現行、`2.3.0` / `2.4.0` 互換履歴）
 
 既存 `RenderManifest 2.2.0` の generic video は `muted` を持つ意味を維持する。`VideoProject 1.2.0` の `volume` をこの経路へ渡す場合は、ED-01で導入する adapter を通し、assignment の display をそのまま legacy manifest へ渡さない。ED-08で `RenderManifest 2.3.0` に移行した後は、generic video の任意 `volume` を現行 manifest と Remotion の正本経路へ流せる。ED-07 はその既存経路へ UI / API の保存導線を追加する後続 Issueであり、ED-08 前の2.2.0経路では 0 / 1 以外を保存可能なUIを公開しない。
 
-現行のキャラクター素材解決では、次の情報を `RenderManifest 2.5.0` へ固定する。登録機能とレンダリング解決は分離し、コンパイラが検証済み snapshot から派生データを生成する。CharacterVisualSet の glow color、実動画挿入、BGM の最終セクション範囲、section 単位の ScreenTemplate resolved layout も同じ派生マニフェストへ解決する。`RenderManifest 2.3.0` / `2.4.0` は履歴・互換境界として扱い、2.5.0 の意味へ暗黙に再解釈しない。
+現行のキャラクター素材解決では、次の情報を `RenderManifest 2.5.0` へ固定する。登録機能とレンダリング解決は分離し、コンパイラが検証済み snapshot から派生データを生成する。実動画挿入、BGM の最終セクション範囲、section 単位の ScreenTemplate resolved layout も同じ派生マニフェストへ解決する。`RenderManifest 2.3.0` / `2.4.0` は履歴・互換境界として扱い、2.5.0 の意味へ暗黙に再解釈しない。RF-01 の CharacterVisualSet glow color と dialogue-window metadata は `RenderManifest 2.6.0` で初めて snapshot する。
 
 ```text
 project.characters[].characterVisual.visualId
@@ -830,7 +831,7 @@ RenderManifest 2.4.0
 
 `sectionLayouts[].sectionTitle` は `ScriptSection.name` を compiler がそのまま固定した必須文字列である。互換 `RenderLineV24` は line-level の `resolvedLayout` を持ち、`RenderManifest 2.4.0` では line の template snapshot と整合する。現行 `RenderLineV25` は `sectionId` から親 section layout を参照し、section-title element の geometry と文字列を重複保存しない。`speaker-1` / `speaker-2` はそれぞれ `project.characters[0]` / `[1]` に解決し、`characterId` を resolved layout へ固定する。generic visual の `display` は resolver が最終 geometry と media state へ解決し、version ごとの manifest shape として保存するため、Remotion は `position` / `scale` の座標系を再解釈しない。source-end boundary も resolver が確定する state boundary として manifest partition に含める。
 
-template の revision / hash、section title、project の section selection、現行 1.5.0 の section-only template authority、ScreenTemplate の element geometry、dialogue metadata、speaker mapping、generic assignment の inner transform、VisualAssignment の section / cue segment partition（source assignment ID、segment line 境界、template ID / revision / hash、segment の `from` / `durationInFrames`）、resolved generic visual の `outerFrame` / `contentClip` / `fit` / `crop` / annotation、CharacterVisualSet の visual-level glow、動画 segment の provenance `startMs` / `endMs` と version に応じた resolved video branch（V24 / V25 playing の source trim pair、V25 paused / ended の `sourceFrame`）、`displayCoordinateSpace`、`prioritizeVisual` の適用結果のいずれかが変わった場合は `compilerInputHash` を変え、旧 manifest を current とみなさない。`displayCoordinateSpace` は compiler input として legacy adapter の選択に使うが、V24 / V25 の resolved visual display へ raw 値を残して Remotion に再解釈させない。source-end boundary と ended state も partition / resolved source state として hash に含める。RF-02 / RF-03 後は insert text snapshot / source start / canonical playbackRate / effective duration も hash に含める。過去 revision の template を project.json に埋め込む snapshot history や rollback UI は今回対象外とする。
+template の revision / hash、section title、project の section selection、現行 1.5.0 の section-only template authority、ScreenTemplate の element geometry、speaker mapping、generic assignment の inner transform、VisualAssignment の section / cue segment partition（source assignment ID、segment line 境界、template ID / revision / hash、segment の `from` / `durationInFrames`）、resolved generic visual の `outerFrame` / `contentClip` / `fit` / `crop` / annotation、動画 segment の provenance `startMs` / `endMs` と version に応じた resolved video branch（V24 / V25 playing の source trim pair、V25 paused / ended の `sourceFrame`）、`displayCoordinateSpace`、`prioritizeVisual` の適用結果のいずれかが変わった場合は `compilerInputHash` を変え、旧 manifest を current とみなさない。`displayCoordinateSpace` は compiler input として legacy adapter の選択に使うが、V24 / V25 の resolved visual display へ raw 値を残して Remotion に再解釈させない。source-end boundary と ended state も partition / resolved source state として hash に含める。RF-01 の `2.6.0` では dialogue metadata と CharacterVisualSet の visual-level glow を、RF-02 / RF-03 後は insert text snapshot / source start / canonical playbackRate / effective duration をそれぞれの manifest hash に追加する。過去 revision の template を project.json に埋め込む snapshot history や rollback UI は今回対象外とする。
 
 VP-02 の `RenderManifest 2.5.0` は、次の section-only shape と video playback state を持つ。
 
@@ -1110,8 +1111,8 @@ BGM は音声生成の一部ではなく、次の 6.6 で定義する編集フ�
 - snapshot 作成後は live な Asset `status` を既存 project の出力条件にしない。保存・出力時には project 内 `projectMediaPath` の存在、`assetChecksum` との一致、MP4 / MP3 の実ファイル形式を検証し、Asset Service の SQLite を再参照しない。
 - 動画要素ごとに `0 <= volume <= 1` の音量を保存する。`volume: 0` は無音として扱い、`muted` を現行正本へ保存しない。
 - RF-02 の実装後、`EditVideoElement` には intro / outro / cutin の文字を任意で載せる `text: string` と `textTemplateId: string | null` を持たせる。文字レイアウトは本編の ScreenTemplate ではなく、workspace catalog の `InsertTextTemplate` から選択する。editor の入力は template selection と1つの複数行 text field だけとし、タイトル・サブタイトルの分割 field は設けない。
-- RF-03 の実装後、`EditVideoElement` の `startMs` は null または source 開始位置からの millisecond、`playbackRate` は `x1/3`、`x1/2.5`、`x1/2`、`x1/1.5`、`x1.0`、`x1.5`、`x2.0`、`x2.5`、`x3.0` の許可値だけ、既定値は `x1.0` とする。arbitrary float、persistent `muted`、挿入動画固有の playback cue state は保存しない。
-- RF-03 の `startMs` が null の場合は現行の source 開始位置、指定時はその source frame から開始する。Preview Player が停止中も開始位置の frame を表示し、再生開始時はその frame から進める。挿入動画の timeline 占有時間は `effective duration = (source duration - startMs) / playbackRate`（null は source duration を使用）で決定し、後続の section timing を shift する。
+- RF-03 の実装後、`EditVideoElement` の `startMs` は null または `0 <= startMs < sourceDuration` を満たす source 開始位置からの millisecond とし、`startMs === sourceDuration` および sourceDuration 超は reject する。`playbackRate` は `x1/3`、`x1/2.5`、`x1/2`、`x1/1.5`、`x1.0`、`x1.5`、`x2.0`、`x2.5`、`x3.0` の許可値だけ、既定値は `x1.0` とする。arbitrary float、persistent `muted`、挿入動画固有の playback cue state は保存しない。
+- RF-03 の `startMs` が null の場合は現行の source 開始位置、指定時は `0 <= startMs < sourceDuration` の source position から開始する。`startMs === sourceDuration` および sourceDuration 超は reject する。Preview Player が停止中も開始位置の frame を表示し、再生開始時はその frame から進める。挿入動画の timeline 占有時間は `effective duration = (source duration - startMs) / playbackRate`（null は source duration を使用）で決定し、後続の section timing を shift する。
 
 #### セクション BGM
 
@@ -1128,7 +1129,7 @@ BGM は音声生成の一部ではなく、次の 6.6 で定義する編集フ�
 
 #### 挿入文字 template（RF-02）
 
-`InsertTextTemplate` は ScreenTemplate とは別の workspace catalog である。少なくとも template ID、name、description、status、revision、1920 × 1080 canvas、text rect、rotation、fontSize、fontWeight、textColor、textAlign、verticalAlign を持つ。ScreenTemplate の dialogue / character / content-slot cardinalityを持ち込まず、intro / outro / cutin の文字レイアウトだけを表現する。compiler は選択した template の revision / hash と resolved text layout を `RenderManifest` へ snapshot し、template の更新で古い manifest を current とみなさない。
+`InsertTextTemplate` は ScreenTemplate とは別の workspace catalog である。少なくとも template ID、name、description、status、revision、1920 × 1080 canvas、text rect、rotation、fontSize、fontWeight、textColor、`textAlign: "left" | "center" | "right"`、`verticalAlign: "top" | "center" | "bottom"` を持つ。ScreenTemplate の dialogue / character / content-slot cardinalityを持ち込まず、intro / outro / cutin の文字レイアウトだけを表現する。compiler は選択した template の revision / hash と resolved text layout を `RenderManifest` へ snapshot し、template の更新で古い manifest を current とみなさない。
 
 ### 6.7 タイムライン
 
@@ -1258,8 +1259,8 @@ JSON の通常編集は用途別フォームから行い、ファイルの直接
 - セクション ID、セリフ ID、キャラクター ID の重複や不正参照を検出する。
 - character の `visualId` と `idleVariantId` が同じ `CharacterVisualSet` 配下の active variant を参照することを検出する。未設定は編集中に許可するが、出力前 validation ではエラーとする。
 - `ScreenTemplate` が workspace SQLite に存在し、active / inactive、revision、element cardinality、element type 別 geometry、rect center rotation、`fontSize > 0`、`flipX` を検証する。contained element は canvas 内、character は finite x / y と positive size、部分 overflow を許可し完全 off-canvas を拒否する。TypeScript の静的配列を実在テンプレートの一覧として使用しない。
-- `ScreenTemplate.metadata.dialogueWindow` の `backgroundColor` が `#RRGGBB`、`backgroundOpacity` が 0〜1 であり、未指定の legacy/current template は黒40%へ migration されること、dialogue-window が常時表示され本文が水平・垂直中央、話者名称が visible rendering されないことを検証する。
-- `CharacterVisualSet.glowColor` が visual 単位の `#RRGGBB` で、variant ごとの色を持たず、四国めたん相当 `#e78ac3`、ずんだもん相当 `#75c97a`、その他 `#ffffff` の migration default を使うことを検証する。compiler、Web preview、Remotion が project character の `themeColorToken` ではなく manifest snapshot だけを参照することを検証する。
+- RF-01 の `RenderManifest 2.6.0` compile 前提として、`ScreenTemplate.metadata.dialogueWindow` の `backgroundColor` が `#RRGGBB`、`backgroundOpacity` が 0〜1 であり、未指定の legacy/current template は黒40%へ migration されること、dialogue-window が常時表示され本文が水平・垂直中央、話者名称が visible rendering されないことを検証する。
+- RF-01 の `RenderManifest 2.6.0` で、`CharacterVisualSet.glowColor` が visual 単位の `#RRGGBB` で、variant ごとの色を持たず、四国めたん相当 `#e78ac3`、ずんだもん相当 `#75c97a`、その他 `#ffffff` の migration default を使うことを検証する。compiler、Web preview、Remotion が project character の `themeColorToken` ではなく 2.6.0 manifest snapshot だけを参照することを検証する。
 - `screen-template-standard` が idempotent seed / migration で存在し、既存 project の section が stable ID を明示参照することを検証する。missing / inactive の明示参照は自動代替しない。
 - 現行 `VideoProject 1.5.0` では section の `screenTemplateId` だけを全 line の template authority とし、line には template selector または template ID を保存しない。`1.4.0` は VP-01 前の互換 input、`1.3.0` の nullable line override は migration input にだけ存在する。
 - VP-01 の video display は `playbackCues` の `lineId` が assignment の同一 section 内 `startLineId` / `endLineId` range に含まれ、`edge` が BEFORE / AFTER、`action` が pause / resume であることを検証する。range 外、playing 中でない pause、paused 中でない resume、ended 後の pause / resume、同じ line / edge の相反 cue、photo / `document_scan` の cue は error とし、initial play / final end を冗長 cue として要求しない。start BEFORE は implicit play 後、source-end boundary は implicit source-end → ended 後、end AFTER は cue 後に implicit end を適用し、state 不一致または no-op / redundant cue を拒否する。
@@ -1268,7 +1269,7 @@ JSON の通常編集は用途別フォームから行い、ファイルの直接
 - 編集の動画 Asset が MP4、BGM Asset が MP3 で、snapshot の `assetVersion`・`assetChecksum`・`projectMediaPath` が一致することを検出する。出力時に live な Asset `status` は検証しない。
 - generic video、intro、outro、cutin、BGM の `volume` が 0〜1 であることを検出する。旧 generic `muted` は ED-01 migration で変換済みであることを検証する。
 - RF-02 後の `EditVideoElement.textTemplateId` が null または active な `InsertTextTemplate` を参照し、指定時は一つの複数行 `text` field と template revision / hash / resolved text layout を manifest snapshot へ渡すことを検証する。既存 element の migration default は `text: ""`、`textTemplateId: null` とする。
-- RF-03 後の `EditVideoElement.startMs` が null または source の有効範囲内、`playbackRate` が固定候補（x1/3、x1/2.5、x1/2、x1/1.5、x1.0、x1.5、x2.0、x2.5、x3.0）の canonical value、`volume` が 0〜1 であることを検証する。挿入動画へ generic playback cue / persistent muted field を保存しないこと、effective duration が `(source duration - startMs) / playbackRate`（null は source duration）で決まることを検証する。
+- RF-03 後の `EditVideoElement.startMs` が null または `0 <= startMs < sourceDuration` を満たし、`startMs === sourceDuration` および sourceDuration 超が reject されること、`playbackRate` が固定候補（x1/3、x1/2.5、x1/2、x1/1.5、x1.0、x1.5、x2.0、x2.5、x3.0）の canonical value、`volume` が 0〜1 であることを検証する。挿入動画へ generic playback cue / persistent muted field を保存しないこと、effective duration が `(source duration - startMs) / playbackRate`（null は source duration）で決まることを検証する。
 - 2.2.0 compatibility manifest へ出力する場合、generic video の `volume` が 0 または 1 で adapter を通ることを検出する。0 / 1 以外を `muted` へ丸めたり暗黙に変換したりせず、2.3.0 経路が必要なエラーとして返す。
 - セクションごとの BGM が 0/1 件で、動画要素中に BGM を再生しない最終タイムラインを検証する。
 - `ScriptLine.characterVariantId` が line の speaker に project 上で binding された visual 配下の active variant を参照することを検出する。missing、inactive、cross-visual は自動代替せずエラーとする。
@@ -1333,7 +1334,7 @@ JSON の通常編集は用途別フォームから行い、ファイルの直接
 
 - 16:9 の横長画面。
 - ScreenTemplate が dialogue window、section title、2 つの character visual、primary content slot の outer geometry を決める。`screen-template-standard` は従来の中央素材、下部左右のキャラクター、下部中央字幕、画面上端の section title と見た目互換な初期値を提供し、dialogue window の黒40%背景を metadata に持つ。
-- テンプレート editor では 16:9 canvas 内で各 element を移動、拡大縮小、回転できる。字幕の話者識別には選択済み CharacterVisualSet の glow color を使い、話者名は字幕へ描画しない。font size は template の element 設定で調整する。
+- RF-01 後のテンプレート editor では 16:9 canvas 内で各 element を移動、拡大縮小、回転できる。字幕の話者識別には選択済み CharacterVisualSet の glow color を使い、話者名は字幕へ描画しない。font size は template の element 設定で調整する。RF-01 前の `RenderManifest 2.5.0` は glow color を snapshot しない。
 - generic visual は content slot 内へアスペクト比を保って表示し、素材側の crop / fit / scale / position と注釈を inner transform として適用する。
 - 素材は可能な限り大きく表示し、必要な場合だけ重要箇所へ短い注釈を重ねる。`prioritizeVisual` は template を無視せず、content slot 内の素材優先と character element の互換的な縮小へ限定する。非表示は将来の manifest 契約で別途扱う。
 - 装飾的な動きより、操作対象と字幕の読みやすさを優先する。
@@ -1716,7 +1717,7 @@ WebUI は Vite + React SPA、画面ルーティングは React Router、サー�
 - 動画制作データの正本はプロジェクト JSON とし、生成音声、キャッシュ、出力、確定した現場素材の割り当て、character binding、line の explicit variant 参照をプロジェクト単位のフォルダーへ保存する。
 - ワークスペース共通の SQLite に、素材ライブラリのメタデータ、タグ辞書、サムネイル参照、継続改善のログ、生成ルール候補を保存する。
 - ワークスペース共通の SQLite に、キャラクタービジュアル本体の `CharacterVisualSet`、variant、file slot、checksum、キャンバス技術情報、visual 単位の `glowColor`、status、作成・更新日時を保存する。キャラクタービジュアルのメタデータはこの DB だけを正本とする。
-- ワークスペース共通の SQLite に、`ScreenTemplate` の `templateId`、name、description、status、1920 × 1080 canvas、revision、dialogue metadata、element 定義、created / updated timestamps を保存する。テンプレートの実在一覧と構造データはこの DB だけを正本とし、TypeScript の静的配列と二重管理しない。
+- ワークスペース共通の SQLite に、`ScreenTemplate` の `templateId`、name、description、status、1920 × 1080 canvas、revision、RF-01 で追加する dialogue metadata、element 定義、created / updated timestamps を保存する。テンプレートの実在一覧と構造データはこの DB だけを正本とし、TypeScript の静的配列と二重管理しない。dialogue metadata の manifest snapshot は `RenderManifest 2.6.0` から開始する。
 - ワークスペース共通の SQLite に、ScreenTemplate と分離した `InsertTextTemplate` の `templateId`、name、description、status、revision、1920 × 1080 canvas、text layout、created / updated timestamps を保存する。title / subtitle の分割や本編用 element cardinality は保存しない。
 - 素材ファイル本体とサムネイルは `library/` 配下へ保存し、SQLite にはバイナリ本体ではなく相対パス、技術情報、チェックサムを保持する。
 - キャラクタービジュアルのファイル本体は `library/character-visuals/{visualId}/{variantId}/` に保存し、新規登録ファイルを `public/` へ直接保存しない。WebUI の画像表示は Fastify の管理された配信経路を使う。
@@ -1878,7 +1879,7 @@ type CharacterVisualFile = {
 };
 ```
 
-`glowColor` は visual 全体に1つだけ設定し、variant ごとの色や `themeColorToken` からの字幕色継承は行わない。Character Visual 登録・編集画面がこの値を編集する正本画面であり、compiler は選択済み visual の `glowColor` を manifest snapshot へ固定する。Web preview と Remotion は `project.characters[].themeColorToken`、SQLite、静的 catalog を描画時に参照せず、resolved manifest の glow color だけを使う。既存値の migration default は四国めたん相当 `#e78ac3`、ずんだもん相当 `#75c97a`、その他 `#ffffff` とする。
+RF-01 では `glowColor` を visual 全体に1つだけ設定し、variant ごとの色や `themeColorToken` からの字幕色継承は行わない。Character Visual 登録・編集画面がこの値を編集する正本画面であり、compiler は選択済み visual の `glowColor` を `RenderManifest 2.6.0` の manifest snapshot へ固定する。Web preview と Remotion は `project.characters[].themeColorToken`、SQLite、静的 catalog を描画時に参照せず、2.6.0 resolved manifest の glow color だけを使う。既存値の migration default は四国めたん相当 `#e78ac3`、ずんだもん相当 `#75c97a`、その他 `#ffffff` とする。
 
 `renderType` だけを固定 enum とする。`stand`、`normal`、`pointing`、`smile`、`caution` などの表情・ポーズ名は固定 enum にしない。新しい素材は `ScriptLine.expression` へ値を追加せず、`CharacterVisualSet` へ新しい variant とメタデータを登録する。
 
