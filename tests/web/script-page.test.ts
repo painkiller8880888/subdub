@@ -39,7 +39,8 @@ describe("ScriptPage workflow navigation", () => {
     expect(source).not.toContain("<details");
     expect(source).not.toMatch(/<audio[^>]*\bcontrols(?:\s|=|>)/);
     expect(source).not.toContain("candidate.role");
-    expect(source).not.toContain("CharacterVariantPreview");
+    expect(source).toContain("CharacterVariantPreview");
+    expect(source).toContain('className="script-line-card-character-preview"');
     expect(source).not.toContain("variantSummary");
     expect(source).not.toContain('className="script-line-fields"');
   });
