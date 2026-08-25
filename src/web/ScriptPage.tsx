@@ -24,7 +24,6 @@ import type {
 import type {
   AssetListItem,
   AssetDetail,
-  CharacterVariant,
   CharacterVisualCatalogSnapshot,
   CharacterVisualSet,
   Script,
@@ -77,7 +76,6 @@ import {
   type ScriptDraftIssue
 } from "./script-editor";
 import { CharacterVisualPickerModal } from "./CharacterVisualPicker";
-import { characterVisualFileUrl } from "./character-visual-picker";
 import { VoiceAdjustmentEditor } from "./VoiceAdjustmentEditor";
 import { visualAssignmentsPath } from "./VisualAssignmentsPage";
 import {
@@ -251,66 +249,6 @@ function projectAudioUrl(
     : createProjectManifestAssetUrlResolver(projectId)(audioPath);
 }
 
-function variantFileSlots(variant: CharacterVariant): readonly {
-  key: "single" | "closed" | "open";
-  label: string;
-}[] {
-  return variant.renderType === "single-image"
-    ? [{ key: "single", label: "素材" }]
-    : [
-        { key: "closed", label: "口閉じ" },
-        { key: "open", label: "口開き" }
-      ];
-}
-
-function CharacterVariantPreview({
-  visual,
-  variant,
-  characterName
-}: {
-  readonly visual: CharacterVisualSet;
-  readonly variant: CharacterVariant;
-  readonly characterName: string;
-}) {
-  return (
-    <div
-      className={
-        variant.renderType === "mouth-pair"
-          ? "script-line-variant-preview script-line-variant-preview-pair"
-          : "script-line-variant-preview"
-      }
-    >
-      {variantFileSlots(variant).map((slot) => {
-        const file = variant.files.find(
-          (candidate) => candidate.key === slot.key
-        );
-        return file === undefined ? (
-          <div
-            aria-label={`${characterName}の${variant.label}・${slot.label}が未登録`}
-            className="script-line-variant-preview-missing"
-            key={slot.key}
-            role="img"
-          >
-            未登録
-          </div>
-        ) : (
-          <img
-            alt={`${characterName}の${variant.label}・${slot.label}`}
-            className="script-line-variant-preview-image"
-            key={slot.key}
-            loading="lazy"
-            src={characterVisualFileUrl(
-              visual.visualId,
-              variant.variantId,
-              file.key
-            )}
-          />
-        );
-      })}
-    </div>
-  );
-}
-
 type VoiceIndicator = Readonly<{
   readonly state:
     | "current"
@@ -365,7 +303,6 @@ function visualForLine(
 ): {
   character: VideoProject["characters"][number] | undefined;
   visual: CharacterVisualSet | undefined;
-  variant: CharacterVariant | undefined;
 } {
   const character = project.characters.find(
     (candidate) => candidate.id === line.speakerId
@@ -375,10 +312,7 @@ function visualForLine(
     visualId === null || visualId === undefined
       ? undefined
       : catalog?.find((candidate) => candidate.visualId === visualId);
-  const variant = visual?.variants.find(
-    (candidate) => candidate.variantId === line.characterVariantId
-  );
-  return { character, visual, variant };
+  return { character, visual };
 }
 
 function ScriptLineCard({
@@ -439,7 +373,7 @@ function ScriptLineCard({
   readonly mediaMutationPending: boolean;
 }) {
   const lineIssues = lineIssueText(issues, sectionIndex, lineIndex);
-  const { character, visual, variant } = visualForLine(project, catalog, line);
+  const { visual } = visualForLine(project, catalog, line);
   const { mode, resolvedTemplate } = previewState;
   const [expandedTextField, setExpandedTextField] = useState<
     "subtitle" | "spoken" | null
@@ -550,27 +484,6 @@ function ScriptLineCard({
           )}
         </aside>
 
-        <aside
-          aria-label={`${line.id}のキャラクタービジュアルプレビュー`}
-          className="script-line-card-character-preview"
-        >
-          {visual !== undefined && variant !== undefined ? (
-            <CharacterVariantPreview
-              characterName={character?.name ?? line.speakerId}
-              variant={variant}
-              visual={visual}
-            />
-          ) : (
-            <div
-              aria-label={`${line.id}のビジュアル未選択`}
-              className="script-line-card-character-preview-empty"
-              role="img"
-            >
-              ビジュアル未選択
-            </div>
-          )}
-        </aside>
-
         <div className="script-line-card-editor">
           <div className="script-line-primary-row">
             <div className="script-line-identity">
@@ -580,8 +493,8 @@ function ScriptLineCard({
 
             <div className="script-line-primary-controls">
               <div className="form-field script-line-speaker-field">
-                <label htmlFor={`${line.id}-speaker`}>話者</label>
                 <select
+                  aria-label={`${line.id}の話者`}
                   id={`${line.id}-speaker`}
                   value={line.speakerId}
                   onChange={(event) =>
@@ -683,7 +596,7 @@ function ScriptLineCard({
           {textRow("subtitle", "字幕", line.subtitleText, (value) =>
             onChange({ subtitleText: value })
           )}
-          {textRow("spoken", "読み上げ（VOICEVOX）", line.spokenText, (value) =>
+          {textRow("spoken", "読み上げ", line.spokenText, (value) =>
             onChange({ spokenText: value })
           )}
 

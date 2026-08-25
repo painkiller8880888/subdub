@@ -187,19 +187,19 @@ Issue #169（SW-04）は `doc/doc.md` と本書だけを更新する docs-only �
 ```text
 1行目（metadata / controls）
   ID subline:      セリフID | script-line-...
-  control subline: [話者] [ビジュアルを変更] [音声状態] [再生] [再生成] [音声調整]
+  control subline: [project character name] [ビジュアルを変更] [音声状態] [再生] [再生成] [音声調整]
 
 2行目
   [字幕] subtitleText
 
 3行目
-  [VOICEVOX 読み上げ] spokenText
+  [読み上げ] spokenText
 
 4行目
   [詳細設定]                                      [上へ移動] [下へ移動] [複製] [削除]
 ```
 
-`[VOICEVOX 読み上げ]` は visible label であり、`spokenText` は保存される読み上げ用 field である。`よみがな` を visible label として表示しない。
+`[読み上げ]` は visible label であり、`spokenText` は保存される読み上げ用 field である。`よみがな` を visible label として表示しない。
 
 - ID subline は1行で表示し、長い ID は layout を壊さない truncation と accessible な full value を許可する。
 - speaker selector の visible label は project character の name だけとする。`mentor` / `learner` / `teacher` などの role はデータとして維持するが、selector text へ併記しない。`speakerId`、VOICEVOX binding、保存 semantics は変更しない。
@@ -2693,7 +2693,7 @@ editor のサイドバーは active な CharacterVisualSet / variant と、必�
 
 - 1 ペイン: セクションとセリフカードを主役にする。プレビュー、保存状態、validation は補助表示として統合してよい。
 - 各セクション見出し: 台本の背景、セクション情報、音声状態の確認。BGM の編集は `/projects/{projectId}/edit` で行う
-- セリフカード: metadata / controls block を第1行として数える4行 compact layout。1 行目は ID subline と control subline（speaker name-only、`ビジュアルを変更`、compact voice status、再生、再生成、音声調整）、2 行目は `subtitleText`、3 行目は visible label `[VOICEVOX 読み上げ]` と保存 field `spokenText`、4 行目は `詳細設定` と上へ移動、下へ移動、複製、削除。visible label に `よみがな` は使用しない
+- セリフカード: metadata / controls block を第1行として数える4行 compact layout。1 行目は ID subline と control subline（speaker name-only、`ビジュアルを変更`、compact voice status、再生、再生成、音声調整）、2 行目は `subtitleText`、3 行目は visible label `[読み上げ]` と保存 field `spokenText`、4 行目は `詳細設定` と上へ移動、下へ移動、複製、削除。visible label に `よみがな` は使用しない
 - subtitle / 読み上げ表示は通常時に compact な 1 行とし、選択・編集時だけ input area へ expand する。音声調整の詳細は card 内へ常時展開せず modal / dialog で編集する。
 - 「ビジュアルを変更」modal picker: speaker に binding された `CharacterVisualSet` の active variant だけを表示し、preview、label、renderType、tags、選択中状態を表示する。通常カードにはこれらを常設せず、`mouth-pair` は `closed` / `open` を picker 内で表示する。
 - picker のタグ: 未指定では全 active variant を表示し、指定時は一致数の多い順へ移動するだけ。不一致を除外せず、同点は catalog snapshot の元順序を維持する。
@@ -3247,7 +3247,7 @@ Issue #169 は `doc/doc.md` と本書だけを更新する docs-only の仕様�
 
 | 領域 | 実装契約 |
 |---|---|
-| line card | metadata / controls block を第1行として数える4行構成。ID subline、speaker name-only、`[ビジュアルを変更]`、compact voice status / actions、subtitle、visible label `[VOICEVOX 読み上げ]` と保存 field `spokenText`、`[詳細設定]` と line actions を配置する。visible label に `よみがな` は使用しない。subtitle / spokenText は edit-time だけ expand し、詳細設定は keyboard / Escape / focus restore を備えた modal / dialog とする。 |
+| line card | metadata / controls block を第1行として数える4行構成。ID subline、speaker name-only、`[ビジュアルを変更]`、compact voice status / actions、subtitle、visible label `[読み上げ]` と保存 field `spokenText`、`[詳細設定]` と line actions を配置する。visible label に `よみがな` は使用しない。subtitle / spokenText は edit-time だけ expand し、詳細設定は keyboard / Escape / focus restore を備えた modal / dialog とする。 |
 | character visual | 通常カードに preview / label / `renderType` block を常設せず、speaker-bound active variant の preview、label、renderType、tags、selected state は picker 内で確認する。 |
 | voice | native audio controls を通常カードへ置かず、音声なしは再生 disabled 等で表す。voice status / freshness / generation semantics は維持する。 |
 | media pane | 挿入済み video は playing=`[一時停止] [停止] [変更]`、paused=`[再開] [停止] [変更]`、ended=`[last frame / thumbnail preview] [停止] [変更]`（pause / resume なし）、static media は `[停止] [変更]`、未挿入は `[素材を挿入]`。ended は assignment が残っている間、最終描画フレームを preview として保持する。preview 以外の説明文、状態説明、range / start / end labels、metadata summary、常設 warning は表示しない。 |

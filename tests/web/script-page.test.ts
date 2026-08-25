@@ -39,10 +39,26 @@ describe("ScriptPage workflow navigation", () => {
     expect(source).not.toContain("<details");
     expect(source).not.toMatch(/<audio[^>]*\bcontrols(?:\s|=|>)/);
     expect(source).not.toContain("candidate.role");
-    expect(source).toContain("CharacterVariantPreview");
-    expect(source).toContain('className="script-line-card-character-preview"');
+    expect(source).not.toContain("CharacterVariantPreview");
+    expect(source).not.toContain(
+      'className="script-line-card-character-preview"'
+    );
+    expect(source).toContain("aria-label={`${line.id}の話者`}");
+    expect(source).toContain('textRow("spoken", "読み上げ"');
+    expect(source).not.toContain("読み上げ（VOICEVOX）");
     expect(source).not.toContain("variantSummary");
     expect(source).not.toContain('className="script-line-fields"');
+  });
+
+  it("gives the removed character preview space to the screen preview", async () => {
+    const styles = await fs.readFile("src/web/styles.css", "utf8");
+
+    expect(styles).toContain(
+      "grid-template-columns: minmax(22rem, 0.8fr) minmax(0, 1fr) minmax(16rem, 0.32fr);"
+    );
+    expect(styles).toContain(
+      ".script-line-audio-control {\n  flex: 0 0 auto;\n  justify-content: flex-start;\n}"
+    );
   });
 
   it("connects the line media pane to shared visual assignment actions", async () => {
