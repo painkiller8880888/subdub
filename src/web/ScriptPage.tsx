@@ -276,6 +276,13 @@ function voiceIndicatorForLine(
       accessibleLabel: "音声状態を確認中"
     };
   }
+  if (status !== undefined) {
+    return {
+      state: status.status,
+      label: voiceStatusLabel(status.status),
+      accessibleLabel: `音声状態: ${voiceStatusLabel(status.status)}`
+    };
+  }
   if (!available) {
     return {
       state: "unavailable",
@@ -283,17 +290,10 @@ function voiceIndicatorForLine(
       accessibleLabel: "音声サービスを利用できません"
     };
   }
-  if (status === undefined) {
-    return {
-      state: "missing",
-      label: "未生成",
-      accessibleLabel: "音声がありません"
-    };
-  }
   return {
-    state: status.status,
-    label: voiceStatusLabel(status.status),
-    accessibleLabel: `音声状態: ${voiceStatusLabel(status.status)}`
+    state: "missing",
+    label: "未生成",
+    accessibleLabel: "音声がありません"
   };
 }
 

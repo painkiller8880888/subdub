@@ -29,6 +29,9 @@ describe("ScriptPage workflow navigation", () => {
     expect(source).toContain("voiceStatusLoading");
     expect(source).toContain('state: "missing"');
     expect(source).toContain('state: "unavailable"');
+    expect(source.indexOf("if (status !== undefined)")).toBeLessThan(
+      source.indexOf("if (!available)")
+    );
     expect(source).toContain("aria-label={voiceIndicator.accessibleLabel}");
     expect(source).toContain('className="script-line-details-dialog"');
     expect(source).toContain("再生成");
@@ -56,6 +59,7 @@ describe("ScriptPage workflow navigation", () => {
     expect(paneSource).toContain("素材を挿入");
     expect(paneSource).toContain("一時停止");
     expect(paneSource).toContain("再開");
+    expect(paneSource).toContain('lifecycle === "ended"');
     expect(paneSource).toContain("停止");
     expect(paneSource).toContain("変更");
     expect(paneSource).not.toContain("素材を表示 / 再生開始");

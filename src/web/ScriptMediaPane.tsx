@@ -361,7 +361,8 @@ export function ScriptMediaPane({
         ) : null}
         {lifecycle === "static-visible" ||
         lifecycle === "playing" ||
-        lifecycle === "paused" ? (
+        lifecycle === "paused" ||
+        lifecycle === "ended" ? (
           <button
             className="button button-small"
             disabled={endDisabled}

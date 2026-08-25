@@ -49,6 +49,7 @@ const projectId = "manual-video-project";
 type WorkflowState = {
   templates: Map<string, ScreenTemplate>;
   project: VideoProject;
+  voiceStatusOverride?: VoiceGenerationStatusData;
   templateSaves: unknown[];
   scriptSaves: Array<{
     script: VideoProject["script"];
@@ -443,7 +444,9 @@ async function installApiRoutes(
       await route.fulfill({
         status: 200,
         contentType: "application/json",
-        body: JSON.stringify({ data: voiceStatus(state.project) })
+        body: JSON.stringify({
+          data: state.voiceStatusOverride ?? voiceStatus(state.project)
+        })
       });
       return;
     }
@@ -703,7 +706,8 @@ describe("ScreenTemplate workflow browser E2E", () => {
 
   async function openScript(
     project = createScreenTemplateProjectFixture(),
-    assetCatalog: readonly AssetDetail[] = []
+    assetCatalog: readonly AssetDetail[] = [],
+    voiceStatusOverride?: VoiceGenerationStatusData
   ): Promise<{
     context: BrowserContext;
     page: Page;
@@ -719,6 +723,7 @@ describe("ScreenTemplate workflow browser E2E", () => {
         ])
       ),
       project,
+      voiceStatusOverride,
       templateSaves: [],
       scriptSaves: [],
       visualAssignmentUpdates: [],
@@ -736,6 +741,123 @@ describe("ScreenTemplate workflow browser E2E", () => {
     });
     expect(state.templateDetailRequests).toBe(2);
     return { context, page, state };
+  }
+
+  async function renderEndedMediaPane(page: Page): Promise<void> {
+    await page.setContent('<div id="ended-media-pane-fixture"></div>');
+    await page.evaluate(async (baseUrl) => {
+      const mainSource = await fetch(`${baseUrl}/main.tsx`).then((response) =>
+        response.text()
+      );
+      const moduleUrl = (pattern: RegExp): string => {
+        const match = pattern.exec(mainSource)?.[1];
+        if (match === undefined) {
+          throw new Error(`Vite module URL is missing: ${pattern}`);
+        }
+        return new URL(match, baseUrl).href;
+      };
+      const dynamicImport = (url: string): Promise<unknown> =>
+        new Function("url", "return import(url);")(url) as Promise<unknown>;
+      const [reactModule, reactDomModule, paneModule] = await Promise.all([
+        dynamicImport(moduleUrl(/from "([^"]*react\.js\?v=[^"]+)"/u)),
+        dynamicImport(
+          moduleUrl(/from "([^"]*react-dom_client\.js\?v=[^"]+)"/u)
+        ),
+        dynamicImport(`${baseUrl}/ScriptMediaPane.tsx`)
+      ]);
+      const { ScriptMediaPane } = paneModule as {
+        ScriptMediaPane: unknown;
+      };
+      const reactExports = reactModule as {
+        createElement?: (
+          type: unknown,
+          props: Record<string, unknown> | null
+        ) => unknown;
+        default?: {
+          createElement?: (
+            type: unknown,
+            props: Record<string, unknown> | null
+          ) => unknown;
+        };
+      };
+      const reactDomExports = reactDomModule as {
+        createRoot?: (container: unknown) => {
+          render(element: unknown): void;
+        };
+        default?: {
+          createRoot?: (container: unknown) => {
+            render(element: unknown): void;
+          };
+        };
+      };
+      const createElement =
+        reactExports.createElement ?? reactExports.default?.createElement;
+      const createRoot =
+        reactDomExports.createRoot ?? reactDomExports.default?.createRoot;
+      if (createElement === undefined || createRoot === undefined) {
+        throw new Error("React browser exports are missing");
+      }
+      const assignment = {
+        id: "ended-assignment",
+        startLineId: "line-one",
+        endLineId: "line-three",
+        assetId: "asset-ended",
+        assetChecksum: "a".repeat(64),
+        projectMediaPath: "media/ended.mp4",
+        display: {
+          kind: "video",
+          playbackCues: []
+        }
+      };
+      const asset = {
+        assetId: "asset-ended",
+        version: 1,
+        kind: "video",
+        title: "ended browser asset",
+        thumbnailPaths: [],
+        durationMs: 1_000
+      };
+      const browserDocument = (
+        globalThis as unknown as {
+          document: {
+            getElementById(id: string): unknown;
+          };
+        }
+      ).document;
+      const fixture = browserDocument.getElementById(
+        "ended-media-pane-fixture"
+      );
+      if (fixture === null) {
+        throw new Error("ended media pane fixture is missing");
+      }
+      createRoot(fixture).render(
+        createElement(ScriptMediaPane, {
+          line: { id: "line-two" },
+          assignments: [assignment],
+          presentationStates: [
+            {
+              assignmentId: assignment.id,
+              assetId: assignment.assetId,
+              assetChecksum: assignment.assetChecksum,
+              projectMediaPath: assignment.projectMediaPath,
+              lifecycle: "ended",
+              display: assignment.display,
+              assetResolution: "resolved",
+              playbackIssues: []
+            }
+          ],
+          assets: new Map([
+            [`${assignment.assetId}:${assignment.projectMediaPath}`, asset]
+          ]),
+          isPending: false,
+          onStart: () => undefined,
+          onPause: () => undefined,
+          onResume: () => undefined,
+          onEnd: () => undefined,
+          onReplace: () => undefined
+        })
+      );
+    }, webUrl);
   }
 
   it(
@@ -1404,6 +1526,98 @@ describe("ScreenTemplate workflow browser E2E", () => {
           await emptyPane.getByRole("button", { name: "素材を挿入" }).count()
         ).toBe(1);
         expect(await emptyPane.locator("header, h3, p, dl").count()).toBe(0);
+      } finally {
+        await context.close();
+      }
+    }
+  );
+
+  it(
+    "keeps ended media actionable without pause or resume controls",
+    { timeout: 60_000 },
+    async () => {
+      const { context, page } = await openScript();
+      try {
+        await renderEndedMediaPane(page);
+        const pane = page.locator(
+          "#ended-media-pane-fixture .script-line-media-pane"
+        );
+        await pane.waitFor({ state: "visible" });
+        expect(await pane.getAttribute("data-lifecycle")).toBe("ended");
+        expect(
+          await pane.getByRole("button", { name: "停止", exact: true }).count()
+        ).toBe(1);
+        expect(
+          await pane.getByRole("button", { name: "変更", exact: true }).count()
+        ).toBe(1);
+        expect(
+          await pane
+            .getByRole("button", { name: "停止", exact: true })
+            .isEnabled()
+        ).toBe(true);
+        expect(
+          await pane.getByRole("button", { name: "一時停止" }).count()
+        ).toBe(0);
+        expect(await pane.getByRole("button", { name: "再開" }).count()).toBe(
+          0
+        );
+        expect(await pane.locator("video").count()).toBe(1);
+      } finally {
+        await context.close();
+      }
+    }
+  );
+
+  it(
+    "keeps fallback voice line statuses visible while VOICEVOX is unavailable",
+    { timeout: 60_000 },
+    async () => {
+      const project = createScreenTemplateProjectFixture();
+      const voiceStatusOverride: VoiceGenerationStatusData = {
+        available: false,
+        unavailableCode: "VOICEVOX_ENGINE_UNAVAILABLE",
+        lines: project.script.sections.flatMap((section) =>
+          section.lines.map((line) => ({
+            lineId: line.id,
+            status:
+              line.id === "main-learner-1"
+                ? ("generating" as const)
+                : line.id === "main-mentor-1"
+                  ? ("failed" as const)
+                  : ("stale" as const),
+            ...(line.id === "main-mentor-1"
+              ? { errorCode: "VOICEVOX_GENERATION_FAILED" }
+              : {})
+          }))
+        ),
+        jobs: []
+      };
+      const { context, page } = await openScript(
+        project,
+        [],
+        voiceStatusOverride
+      );
+      try {
+        const generatingStatus = page.locator(
+          '.script-line-card[aria-label="セリフ main-learner-1"] .voice-status'
+        );
+        const failedStatus = page.locator(
+          '.script-line-card[aria-label="セリフ main-mentor-1"] .voice-status'
+        );
+        const staleStatus = page.locator(
+          '.script-line-card[aria-label="セリフ main-mentor-2"] .voice-status'
+        );
+        await generatingStatus.waitFor({ state: "visible" });
+        expect(await generatingStatus.getAttribute("aria-label")).toBe(
+          "音声状態: 生成中"
+        );
+        expect(await failedStatus.getAttribute("aria-label")).toBe(
+          "音声状態: 失敗"
+        );
+        expect(await staleStatus.getAttribute("aria-label")).toBe(
+          "音声状態: 再生成が必要"
+        );
+        expect(await page.locator(".message-panel-warning").count()).toBe(1);
       } finally {
         await context.close();
       }
