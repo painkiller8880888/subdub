@@ -144,13 +144,13 @@ Issue #169（SW-04）は `doc/doc.md` と `implementation-spec.md` だけを更�
 ```text
 1行目（metadata / controls）
   ID subline:      セリフID | script-line-...
-  control subline: [話者] [ビジュアルを変更] [音声状態] [再生] [再生成] [音声調整]
+  control subline: [project character name] [ビジュアルを変更] [音声状態] [再生] [再生成] [音声調整]
 
 2行目
   [字幕] subtitleText
 
 3行目
-  [VOICEVOX 読み上げ] spokenText
+  [読み上げ] spokenText
 
 4行目
   [詳細設定]                                      [上へ移動] [下へ移動] [複製] [削除]
@@ -1316,7 +1316,7 @@ SQLite は素材メタデータの検索と、複数プロジェクトを横断�
 - ScreenTemplate の 4 種類の固定 element（dialogue window、section title、2 character slots、primary content slot）について、移動、拡大縮小、回転、font size、`flipX` を編集・validation できる。
 - 現行 `VideoProject 1.4.0` の section `screenTemplateId` だけを `project.json` へ保存し、section 内の全 line に適用できる。`1.3.0` の nullable line override は migration input にだけ残す。
 - `/projects/{projectId}/script` の usable content pane だけを最大 `1500px` とし、他フェーズの width policy を変更せず、狭い viewport では縮小して horizontal overflow を作らない。
-- `/script` の line card を metadata / controls block を第1行として数える4行 compact 表示とし、ID subline、speaker name-only、ビジュアル変更、compact voice controls、subtitle、`[VOICEVOX 読み上げ]` と `spokenText`、詳細設定と line actions を配置する。`spokenText` は保存 field であり、visible label は「よみがな」としない。subtitle / 読み上げテキストは編集時だけ expand でき、詳細設定は modal / dialog で編集できる。
+- `/script` の line card を metadata / controls block を第1行として数える4行 compact 表示とし、ID subline、speaker name-only、ビジュアル変更、compact voice controls、subtitle、`[読み上げ]` と `spokenText`、詳細設定と line actions を配置する。`spokenText` は保存 field であり、visible label は「よみがな」としない。subtitle / 読み上げテキストは編集時だけ expand でき、詳細設定は modal / dialog で編集できる。
 - section の先頭、section / background の境界、または persistent canvas state が変化する line に full screen preview を表示し、それ以外は dialogue / subtitle の compact preview を表示できる。preview は shared resolver / layout component の表示領域だけを絞る。
 - 現行 `RenderManifest 2.4.0` に section ごとの `sectionTitle`、resolved layout、template revision / hash、font size、`flipX`、content slot、現行 line / visual resolved fields、generic visual の `RenderVisualV24.display` を固定する。VP-02 の `RenderManifest 2.5.0` では line は parent section layout を参照し、video の resolved playback state と branch-specific source state（playing の trim pair / paused の source end 前の `sourceFrame` / ended の `lastDrawableSourceFrame`）を追加して、`sourceEndFrame` を exclusive endpoint として別に扱い、Remotion が SQLite や raw display coordinate space を直接参照せずに描画できる。
 - 2 キャラクターの掛け合いを表現できる。
@@ -1504,9 +1504,9 @@ editor のサイドバーでは active な CharacterVisualSet / variant と必�
 ```text
 1 行目（metadata / controls）
   ID subline: セリフ ID | script-line-...
-  control subline: [話者] [ビジュアルを変更] [音声状態] [再生] [再生成] [音声調整]
+  control subline: [project character name] [ビジュアルを変更] [音声状態] [再生] [再生成] [音声調整]
 2 行目: [字幕] subtitleText（セリフ表示）
-3 行目: [VOICEVOX 読み上げ] spokenText（読み上げ用 field）
+3 行目: [読み上げ] spokenText（読み上げ用 field）
 4 行目: [詳細設定]                              [上へ移動] [下へ移動] [複製] [削除]
 ```
 
@@ -1517,7 +1517,7 @@ editor のサイドバーでは active な CharacterVisualSet / variant と必�
 - `[詳細設定]` は modal / dialog を開き、`expression`、`pauseBeforeMs`、`pauseAfterMs` を編集する。keyboard 操作、Escape close、focus restore を満たし、保存・autosave・revision・validation semantics は変更しない。
 - 現場素材の generic assignment が存在する場合、media pane の visible UI は SW-04 の preview と状態に応じた `[一時停止]` / `[再開]` / `[停止]` / `[変更]` に限定する。video ended は最終描画フレーム preview と `[停止] [変更]`、photo / `document_scan` は `[停止] [変更]`、未挿入時は `[素材を挿入]` だけを表示し、ended 中の pause / resume は表示しない。説明文、状態説明、常設 warning、asset metadata summary は置かない。
 
-読み上げテキストは、ひらがなだけでなくカタカナや読み方調整用の表記を入力する可能性があるため、UI 上では「よみがな」ではなく「VOICEVOX 読み上げ」と表記する。字幕プレビューには最終動画と同じ Remotion 字幕コンポーネントを使用し、改行、文字サイズ、はみ出しの判定を一致させる。
+読み上げテキストは、ひらがなだけでなくカタカナや読み方調整用の表記を入力する可能性があるため、UI 上では「よみがな」ではなく「読み上げ」と表記する。字幕プレビューには最終動画と同じ Remotion 字幕コンポーネントを使用し、改行、文字サイズ、はみ出しの判定を一致させる。
 
 人間がセリフカードを 1 件ずつ追加できる操作に加え、話者付きテキストをまとめて貼り付け、セリフカードへ機械的に分割する一括入力を用意する。一括入力は AI 生成ではなく、入力テキストの構造化処理として扱う。
 
@@ -2166,7 +2166,7 @@ Issue #169 は `doc/doc.md` と `doc/implementation-spec.md` だけを更新す�
 
 | 領域 | 実装契約 |
 |---|---|
-| line card | metadata / controls block を第1行として数える4行構成。ID subline、speaker name-only、`[ビジュアルを変更]`、compact voice status / actions、subtitle、`[VOICEVOX 読み上げ]` と `spokenText`、`[詳細設定]` と line actions を配置する。`spokenText` は保存 field であり、visible label は「よみがな」としない。subtitle / spokenText は edit-time だけ expand し、詳細設定は keyboard / Escape / focus restore を備えた modal / dialog とする。 |
+| line card | metadata / controls block を第1行として数える4行構成。ID subline、speaker name-only、`[ビジュアルを変更]`、compact voice status / actions、subtitle、`[読み上げ]` と `spokenText`、`[詳細設定]` と line actions を配置する。`spokenText` は保存 field であり、visible label は「よみがな」としない。subtitle / spokenText は edit-time だけ expand し、詳細設定は keyboard / Escape / focus restore を備えた modal / dialog とする。 |
 | character visual | 通常カードに preview / label / `renderType` block を常設せず、speaker-bound active variant の preview、label、renderType、tags、selected state は picker 内で確認する。 |
 | voice | native audio controls を通常カードへ置かず、音声なしは再生 disabled 等で表す。voice status / freshness / generation semantics は維持する。 |
 | media pane | 挿入済み video は playing=`[一時停止] [停止] [変更]`、paused=`[再開] [停止] [変更]`、ended=`[last frame / thumbnail preview] [停止] [変更]`、static media は `[停止] [変更]`、未挿入は `[素材を挿入]`。ended では pause / resume を表示しない。preview 以外の説明文、状態説明、range / start / end labels、metadata summary、常設 warning は表示しない。 |
