@@ -77,6 +77,7 @@ import {
   type ScriptDraftIssue
 } from "./script-editor";
 import { CharacterVisualPickerModal } from "./CharacterVisualPicker";
+import { characterVisualFileUrl } from "./character-visual-picker";
 import { VoiceAdjustmentEditor } from "./VoiceAdjustmentEditor";
 import { visualAssignmentsPath } from "./VisualAssignmentsPage";
 import {
@@ -250,6 +251,66 @@ function projectAudioUrl(
     : createProjectManifestAssetUrlResolver(projectId)(audioPath);
 }
 
+function variantFileSlots(variant: CharacterVariant): readonly {
+  key: "single" | "closed" | "open";
+  label: string;
+}[] {
+  return variant.renderType === "single-image"
+    ? [{ key: "single", label: "素材" }]
+    : [
+        { key: "closed", label: "口閉じ" },
+        { key: "open", label: "口開き" }
+      ];
+}
+
+function CharacterVariantPreview({
+  visual,
+  variant,
+  characterName
+}: {
+  readonly visual: CharacterVisualSet;
+  readonly variant: CharacterVariant;
+  readonly characterName: string;
+}) {
+  return (
+    <div
+      className={
+        variant.renderType === "mouth-pair"
+          ? "script-line-variant-preview script-line-variant-preview-pair"
+          : "script-line-variant-preview"
+      }
+    >
+      {variantFileSlots(variant).map((slot) => {
+        const file = variant.files.find(
+          (candidate) => candidate.key === slot.key
+        );
+        return file === undefined ? (
+          <div
+            aria-label={`${characterName}の${variant.label}・${slot.label}が未登録`}
+            className="script-line-variant-preview-missing"
+            key={slot.key}
+            role="img"
+          >
+            未登録
+          </div>
+        ) : (
+          <img
+            alt={`${characterName}の${variant.label}・${slot.label}`}
+            className="script-line-variant-preview-image"
+            key={slot.key}
+            loading="lazy"
+            src={characterVisualFileUrl(
+              visual.visualId,
+              variant.variantId,
+              file.key
+            )}
+          />
+        );
+      })}
+    </div>
+  );
+}
+
 type VoiceIndicator = Readonly<{
   readonly state:
     | "current"
@@ -378,7 +439,7 @@ function ScriptLineCard({
   readonly mediaMutationPending: boolean;
 }) {
   const lineIssues = lineIssueText(issues, sectionIndex, lineIndex);
-  const { visual } = visualForLine(project, catalog, line);
+  const { character, visual, variant } = visualForLine(project, catalog, line);
   const { mode, resolvedTemplate } = previewState;
   const [expandedTextField, setExpandedTextField] = useState<
     "subtitle" | "spoken" | null
@@ -485,6 +546,27 @@ function ScriptLineCard({
               {templateReferenceError !== null ? (
                 <span>activeなテンプレートを選び直してください。</span>
               ) : null}
+            </div>
+          )}
+        </aside>
+
+        <aside
+          aria-label={`${line.id}のキャラクタービジュアルプレビュー`}
+          className="script-line-card-character-preview"
+        >
+          {visual !== undefined && variant !== undefined ? (
+            <CharacterVariantPreview
+              characterName={character?.name ?? line.speakerId}
+              variant={variant}
+              visual={visual}
+            />
+          ) : (
+            <div
+              aria-label={`${line.id}のビジュアル未選択`}
+              className="script-line-card-character-preview-empty"
+              role="img"
+            >
+              ビジュアル未選択
             </div>
           )}
         </aside>
