@@ -9,7 +9,7 @@ import type {
 import { screenTransformStyle } from "../screen-layout-resolver";
 import {
   DEFAULT_DIALOGUE_WINDOW_GLOW_COLOR,
-  dialogueWindowBackgroundColor,
+  dialogueWindowSurfaceStyle,
   dialogueWindowTextShadow
 } from "../screen-template-style";
 import { REMOTION_FONT_FAMILY } from "./font";
@@ -63,24 +63,22 @@ export function SubtitleLayer({
     dialogueElement === undefined
       ? {
           ...subtitleContainerStyle("left"),
+          ...dialogueWindowSurfaceStyle("#000000", 0.4),
           alignItems: "center",
-          backgroundColor: dialogueWindowBackgroundColor("#000000", 0.4),
           boxSizing: "border-box",
-          borderRadius: 16,
           justifyContent: "center",
           overflow: "hidden",
           padding: `${SUBTITLE_CARD_VERTICAL_PADDING_PER_SIDE_PX}px ${SUBTITLE_CARD_HORIZONTAL_PADDING_PER_SIDE_PX}px`
         }
       : {
           ...screenTransformStyle(dialogueElement.transform),
-          zIndex: 5,
-          alignItems: "center",
-          backgroundColor: dialogueWindowBackgroundColor(
+          ...dialogueWindowSurfaceStyle(
             dialogueElement.backgroundColor,
             dialogueElement.backgroundOpacity
           ),
+          zIndex: 5,
+          alignItems: "center",
           boxSizing: "border-box",
-          borderRadius: 16,
           display: "flex",
           justifyContent: "center",
           overflow: "hidden",

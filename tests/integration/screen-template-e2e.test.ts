@@ -764,6 +764,9 @@ describe("ScreenTemplate cross-layer acceptance fixture", () => {
     expect(markup).toContain("justify-content:center");
     expect(markup).toContain("text-align:center");
     expect(markup).toContain("text-shadow:0 0 6px #ffffff, 0 0 14px #ffffff");
+    expect(markup).toContain("border:none");
+    expect(markup).toContain("border-radius:16px");
+    expect(markup).toContain("box-shadow:none");
     expect(markup).not.toContain(">話者</span>");
     expect(markup).not.toContain(">話者名</span>");
     expect(markup).not.toContain("margin-bottom:0.20833333333333334cqw");

@@ -4490,25 +4490,6 @@ textarea[aria-invalid="true"] {
   padding: 0;
 }
 
-.screen-layout-dialogue-card {
-  background: rgb(10 18 31 / 84%);
-  border: 1px solid rgb(255 255 255 / 22%);
-  border-radius: 0.8%;
-  box-shadow: 0 0.4rem 1rem rgb(0 0 0 / 18%);
-  box-sizing: border-box;
-  color: #fff;
-  display: block;
-  font-weight: 700;
-  max-height: 100%;
-  max-width: 100%;
-  min-width: 0;
-  overflow-wrap: anywhere;
-  overflow: hidden;
-  text-align: left;
-  white-space: pre-wrap;
-  width: fit-content;
-}
-
 .screen-layout-section-title {
   color: #fff;
   font-weight: 800;

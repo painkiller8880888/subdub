@@ -17,7 +17,7 @@ import type {
 import { resolveScreenTemplateLayout } from "../screen-layout-resolver";
 import {
   DEFAULT_DIALOGUE_WINDOW_GLOW_COLOR,
-  dialogueWindowBackgroundColor,
+  dialogueWindowSurfaceStyle,
   dialogueWindowTextShadow
 } from "../screen-template-style";
 import { AnnotationLayer } from "./layout";
@@ -212,22 +212,30 @@ function renderScreenTemplateElement(
           className="screen-layout-dialogue-card"
           style={{
             alignItems: "center",
-            backgroundColor: dialogueWindowBackgroundColor(
+            ...dialogueWindowSurfaceStyle(
               element.backgroundColor,
               element.backgroundOpacity
             ),
             boxSizing: "border-box",
+            color: "#fff",
             display: "flex",
+            fontWeight: 700,
             height: "100%",
             justifyContent: "center",
+            maxHeight: "100%",
+            maxWidth: "100%",
+            minWidth: 0,
+            overflow: "hidden",
+            overflowWrap: "anywhere",
             textAlign: "center",
-            width: "100%",
             fontSize: `${(element.fontSize / SCREEN_TEMPLATE_CANVAS_WIDTH) * 100}cqw`,
             lineHeight: SUBTITLE_BODY_LINE_HEIGHT,
             padding: `${(SUBTITLE_CARD_VERTICAL_PADDING_PER_SIDE_PX / SCREEN_TEMPLATE_CANVAS_WIDTH) * 100}cqw ${(SUBTITLE_CARD_HORIZONTAL_PADDING_PER_SIDE_PX / SCREEN_TEMPLATE_CANVAS_WIDTH) * 100}cqw`,
             textShadow: dialogueWindowTextShadow(
               preview.dialogueGlowColor ?? DEFAULT_DIALOGUE_WINDOW_GLOW_COLOR
-            )
+            ),
+            whiteSpace: "pre-wrap",
+            width: "100%"
           }}
         >
           {preview.dialogueText.length > 0 ? (
