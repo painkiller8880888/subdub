@@ -7,13 +7,16 @@ import {
   videoProjectV12Schema,
   videoProjectV13Schema,
   videoProjectV14Schema,
-  videoProjectV15Schema
+  videoProjectV15Schema,
+  videoProjectV16Schema
 } from "../../schema/video-project.js";
 import { STANDARD_SCREEN_TEMPLATE_ID } from "../screen-templates/screen-template-seed.js";
 import type { ScreenTemplateCatalogPort } from "./screen-template-selection.js";
 
-export const CURRENT_VIDEO_PROJECT_SCHEMA_VERSION = "1.6.0" as const;
-export const PREVIOUS_VIDEO_PROJECT_SCHEMA_VERSION = "1.5.0" as const;
+export const CURRENT_VIDEO_PROJECT_SCHEMA_VERSION = "1.7.0" as const;
+export const PREVIOUS_VIDEO_PROJECT_SCHEMA_VERSION = "1.6.0" as const;
+export const INSERT_TEXT_PREVIOUS_VIDEO_PROJECT_SCHEMA_VERSION =
+  "1.5.0" as const;
 export const PLAYBACK_CUE_PREVIOUS_VIDEO_PROJECT_SCHEMA_VERSION =
   "1.4.0" as const;
 export const SCREEN_TEMPLATE_PREVIOUS_VIDEO_PROJECT_SCHEMA_VERSION =
@@ -159,6 +162,7 @@ function migrationId(
     | typeof SCREEN_TEMPLATE_PREVIOUS_VIDEO_PROJECT_SCHEMA_VERSION
     | typeof LINE_SCREEN_TEMPLATE_PREVIOUS_VIDEO_PROJECT_SCHEMA_VERSION
     | typeof PLAYBACK_CUE_PREVIOUS_VIDEO_PROJECT_SCHEMA_VERSION
+    | typeof INSERT_TEXT_PREVIOUS_VIDEO_PROJECT_SCHEMA_VERSION
     | typeof PREVIOUS_VIDEO_PROJECT_SCHEMA_VERSION
 ): string {
   const digest = createHash("sha256")
@@ -523,7 +527,7 @@ function migratePlaybackCuesProject(
     }
   }
 
-  migrated.schemaVersion = PREVIOUS_VIDEO_PROJECT_SCHEMA_VERSION;
+  migrated.schemaVersion = INSERT_TEXT_PREVIOUS_VIDEO_PROJECT_SCHEMA_VERSION;
   migrated.revision = v14Result.data.revision + (incrementRevision ? 1 : 0);
   return migrated;
 }
@@ -554,8 +558,39 @@ function migrateInsertTextTemplateProject(
       textTemplateId: null
     };
   });
-  migrated.schemaVersion = CURRENT_VIDEO_PROJECT_SCHEMA_VERSION;
+  migrated.schemaVersion = PREVIOUS_VIDEO_PROJECT_SCHEMA_VERSION;
   migrated.revision = v15Result.data.revision + (incrementRevision ? 1 : 0);
+  return migrated;
+}
+
+function migrateEditVideoTimingProject(
+  project: unknown,
+  incrementRevision: boolean
+): unknown | undefined {
+  const v16Result = videoProjectV16Schema.safeParse(project);
+  if (!v16Result.success) {
+    return undefined;
+  }
+
+  const migrated = cloneJson(v16Result.data);
+  if (!isRecord(migrated) || !isRecord(migrated.edit)) {
+    return undefined;
+  }
+  if (!Array.isArray(migrated.edit.videoElements)) {
+    return undefined;
+  }
+  migrated.edit.videoElements = migrated.edit.videoElements.map((element) => {
+    if (!isRecord(element)) {
+      return element;
+    }
+    return {
+      ...element,
+      startMs: null,
+      playbackRate: 1
+    };
+  });
+  migrated.schemaVersion = CURRENT_VIDEO_PROJECT_SCHEMA_VERSION;
+  migrated.revision = v16Result.data.revision + (incrementRevision ? 1 : 0);
   return migrated;
 }
 
@@ -575,7 +610,32 @@ export function migrateVideoProjectWithDiagnostics(
       input,
       PREVIOUS_VIDEO_PROJECT_SCHEMA_VERSION
     );
-    const migrated = migrateInsertTextTemplateProject(input, true);
+    const migrated = migrateEditVideoTimingProject(input, true);
+    if (migrated === undefined) {
+      return noMigration(input);
+    }
+    return {
+      project: migrated,
+      migrated: true,
+      migrationId: currentMigrationId,
+      logEntries: [],
+      blockedReason: undefined
+    };
+  }
+
+  if (
+    input.schemaVersion ===
+    INSERT_TEXT_PREVIOUS_VIDEO_PROJECT_SCHEMA_VERSION
+  ) {
+    const currentMigrationId = migrationId(
+      input,
+      INSERT_TEXT_PREVIOUS_VIDEO_PROJECT_SCHEMA_VERSION
+    );
+    const insertTextMigration = migrateInsertTextTemplateProject(input, true);
+    if (insertTextMigration === undefined) {
+      return noMigration(input);
+    }
+    const migrated = migrateEditVideoTimingProject(insertTextMigration, true);
     if (migrated === undefined) {
       return noMigration(input);
     }
@@ -607,8 +667,15 @@ export function migrateVideoProjectWithDiagnostics(
     if (migrated === undefined) {
       return noMigration(input);
     }
+    const editVideoTimingMigration = migrateEditVideoTimingProject(
+      migrated,
+      true
+    );
+    if (editVideoTimingMigration === undefined) {
+      return noMigration(input);
+    }
     return {
-      project: migrated,
+      project: editVideoTimingMigration,
       migrated: true,
       migrationId: currentMigrationId,
       logEntries: [],
@@ -696,8 +763,16 @@ export function migrateVideoProjectWithDiagnostics(
     return noMigration(input);
   }
 
+  const editVideoTimingMigration = migrateEditVideoTimingProject(
+    insertTextTemplateMigration,
+    true
+  );
+  if (editVideoTimingMigration === undefined) {
+    return noMigration(input);
+  }
+
   return {
-    project: insertTextTemplateMigration,
+    project: editVideoTimingMigration,
     migrated: true,
     migrationId: currentMigrationId,
     logEntries: [

@@ -15,6 +15,8 @@ import {
   createEditPlanReadModel,
   createEditSectionReadModels,
   editAssetSearchInput,
+  editVideoSecondsInputToStartMs,
+  editVideoStartMsToSecondsInput,
   isSelectableEditAsset,
   moveEditVideoElement,
   reconcileSavedEditPlan,
@@ -88,6 +90,20 @@ const bgmAsset = {
 } satisfies AssetListItem;
 
 describe("edit page read model", () => {
+  it("converts seconds input to deterministic integer milliseconds", () => {
+    expect(editVideoSecondsInputToStartMs("")).toBeNull();
+    expect(editVideoSecondsInputToStartMs("5")).toBe(5_000);
+    expect(editVideoSecondsInputToStartMs("5.1")).toBe(5_100);
+    expect(editVideoSecondsInputToStartMs("5.0059")).toBe(5_006);
+    expect(editVideoSecondsInputToStartMs("-1")).toBeNull();
+    expect(editVideoSecondsInputToStartMs("five")).toBeNull();
+
+    expect(editVideoStartMsToSecondsInput(null)).toBe("");
+    expect(editVideoStartMsToSecondsInput(0)).toBe("0");
+    expect(editVideoStartMsToSecondsInput(5_100)).toBe("5.1");
+    expect(editVideoStartMsToSecondsInput(5_006)).toBe("5.006");
+  });
+
   it("renders the loading state through the edit route", () => {
     const queryClient = new QueryClient({
       defaultOptions: { queries: { retry: false } }
@@ -142,6 +158,8 @@ describe("edit page read model", () => {
           assetChecksum: "a".repeat(64),
           projectMediaPath: "media/intro.mp4",
           placement: { kind: "before_first_section" },
+          startMs: null,
+          playbackRate: 1,
           volume: 1,
           text: "",
           textTemplateId: null
@@ -158,6 +176,8 @@ describe("edit page read model", () => {
             sectionId: "section-main",
             order: 0
           },
+          startMs: null,
+          playbackRate: 1,
           volume: 0.5,
           text: "",
           textTemplateId: null
@@ -170,6 +190,8 @@ describe("edit page read model", () => {
           assetChecksum: "c".repeat(64),
           projectMediaPath: "media/outro.mp4",
           placement: { kind: "after_last_section" },
+          startMs: null,
+          playbackRate: 1,
           volume: 0.8,
           text: "",
           textTemplateId: null
@@ -219,6 +241,8 @@ describe("edit page read model", () => {
           assetChecksum: videoAsset.checksum!,
           projectMediaPath: "media/intro.mp4",
           placement: { kind: "before_first_section" as const },
+          startMs: null,
+          playbackRate: 1,
           volume: 0,
           text: "",
           textTemplateId: null
@@ -235,6 +259,8 @@ describe("edit page read model", () => {
           assetId: videoAsset.assetId,
           assetVersion: videoAsset.version,
           placement: { kind: "before_first_section" },
+          startMs: null,
+          playbackRate: 1,
           volume: 0,
           text: "",
           textTemplateId: null
@@ -349,6 +375,8 @@ describe("edit page read model", () => {
       assetChecksum: "a".repeat(64),
       projectMediaPath: `media/${id}.mp4`,
       placement: { kind: "before_section" as const, sectionId, order },
+      startMs: null,
+      playbackRate: 1,
       volume: 1,
       text: "",
       textTemplateId: null
@@ -487,6 +515,8 @@ describe("edit page read model", () => {
           assetChecksum: videoAsset.checksum!,
           projectMediaPath: "media/pending-edit-asset",
           placement: { kind: "before_first_section" as const },
+          startMs: null,
+          playbackRate: 1,
           volume: 1,
           text: "",
           textTemplateId: null

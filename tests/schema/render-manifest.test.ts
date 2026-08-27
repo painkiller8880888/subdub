@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   legacyRenderManifestV22Schema,
   renderManifestSchema,
+  renderManifestV27Schema,
   renderManifestV26Schema,
   renderManifestV25Schema,
   type RenderVisual,
@@ -55,6 +56,21 @@ describe("renderManifestSchema", () => {
     expect(result.success).toBe(true);
   });
 
+  it("keeps the 2.7 parser boundary separate from the 2.8 insert snapshot", () => {
+    const legacy = structuredClone(renderManifestFixture) as unknown as {
+      manifestVersion: string;
+      inserts: Array<Record<string, unknown>>;
+    };
+    legacy.manifestVersion = "2.7.0";
+    for (const insert of legacy.inserts) {
+      Reflect.deleteProperty(insert, "startMs");
+      Reflect.deleteProperty(insert, "playbackRate");
+    }
+
+    expect(renderManifestV27Schema.safeParse(legacy).success).toBe(true);
+    expect(renderManifestSchema.safeParse(legacy).success).toBe(false);
+  });
+
   it("keeps the 2.6 parser boundary separate from the 2.7 insert snapshot", () => {
     const legacy = structuredClone(renderManifestFixture) as unknown as {
       manifestVersion: string;
@@ -63,6 +79,8 @@ describe("renderManifestSchema", () => {
     legacy.manifestVersion = "2.6.0";
     for (const insert of legacy.inserts) {
       Reflect.deleteProperty(insert, "text");
+      Reflect.deleteProperty(insert, "startMs");
+      Reflect.deleteProperty(insert, "playbackRate");
     }
 
     expect(renderManifestV26Schema.safeParse(legacy).success).toBe(true);
@@ -98,6 +116,8 @@ describe("renderManifestSchema", () => {
     }
     for (const insert of legacy.inserts) {
       Reflect.deleteProperty(insert, "text");
+      Reflect.deleteProperty(insert, "startMs");
+      Reflect.deleteProperty(insert, "playbackRate");
     }
 
     expect(renderManifestV25Schema.safeParse(legacy).success).toBe(true);

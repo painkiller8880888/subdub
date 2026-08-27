@@ -23,6 +23,7 @@ import {
   strictObject,
   unitIntervalSchema
 } from "./primitives.js";
+import { editVideoPlaybackRateSchema } from "./edit-video.js";
 import { validateVisualPlaybackSequence } from "../timeline/visual-playback.js";
 
 export const outputSettingsSchema = strictObject({
@@ -340,7 +341,7 @@ export const editPlanV15Schema = strictObject({
   sectionBgms: z.array(sectionBgmAssignmentSchema)
 });
 
-export const editVideoElementSchema = strictObject({
+export const editVideoElementV16Schema = strictObject({
   ...projectAssetSnapshotFields,
   id: idSchema,
   role: z.enum(["intro", "outro", "cutin"]),
@@ -348,6 +349,17 @@ export const editVideoElementSchema = strictObject({
   volume: unitIntervalSchema,
   text: z.string(),
   textTemplateId: idSchema.nullable()
+});
+
+export const editPlanV16Schema = strictObject({
+  videoElements: z.array(editVideoElementV16Schema),
+  sectionBgms: z.array(sectionBgmAssignmentSchema)
+});
+
+export const editVideoElementSchema = strictObject({
+  ...editVideoElementV16Schema.shape,
+  startMs: nonNegativeIntegerSchema.nullable(),
+  playbackRate: editVideoPlaybackRateSchema
 });
 
 export const editPlanSchema = strictObject({
@@ -513,6 +525,22 @@ const videoProjectV16BaseSchema = strictObject({
   script: scriptSchema,
   visuals: visualPlanV15Schema,
   audio: audioPlanSchema,
+  edit: editPlanV16Schema,
+  thumbnail: thumbnailPlanSchema
+});
+
+const videoProjectV17BaseSchema = strictObject({
+  schemaVersion: z.literal("1.7.0"),
+  revision: finiteNumberSchema.int().nonnegative(),
+  metadata: projectMetadataSchema,
+  source: projectSourceSchema,
+  brief: projectBriefSchema,
+  aiSettings: aiSettingsSchema,
+  characters: z.array(characterSchema).length(2),
+  outline: outlineSchema,
+  script: scriptSchema,
+  visuals: visualPlanV15Schema,
+  audio: audioPlanSchema,
   edit: editPlanSchema,
   thumbnail: thumbnailPlanSchema
 });
@@ -594,7 +622,8 @@ type VideoProjectDomainShape =
   | z.infer<typeof videoProjectV13BaseSchema>
   | z.infer<typeof videoProjectV14BaseSchema>
   | z.infer<typeof videoProjectV15BaseSchema>
-  | z.infer<typeof videoProjectV16BaseSchema>;
+  | z.infer<typeof videoProjectV16BaseSchema>
+  | z.infer<typeof videoProjectV17BaseSchema>;
 
 function refineVideoProject(
   project: VideoProjectDomainShape,
@@ -1051,7 +1080,9 @@ export const videoProjectV15Schema =
   videoProjectV15BaseSchema.superRefine(refineVideoProject);
 export const videoProjectV16Schema =
   videoProjectV16BaseSchema.superRefine(refineVideoProject);
-export const videoProjectSchema = videoProjectV16Schema;
+export const videoProjectV17Schema =
+  videoProjectV17BaseSchema.superRefine(refineVideoProject);
+export const videoProjectSchema = videoProjectV17Schema;
 
 export type AiTaskKind = z.infer<typeof aiTaskKindSchema>;
 export type OutputSettings = z.infer<typeof outputSettingsSchema>;
@@ -1090,11 +1121,13 @@ export type VisualPlanV15 = z.infer<typeof visualPlanV15Schema>;
 export type ProjectAssetSnapshot = z.infer<typeof projectAssetSnapshotSchema>;
 export type EditVideoPlacement = z.infer<typeof editVideoPlacementSchema>;
 export type EditVideoElementV15 = z.infer<typeof editVideoElementV15Schema>;
+export type EditVideoElementV16 = z.infer<typeof editVideoElementV16Schema>;
 export type EditVideoElement = z.infer<typeof editVideoElementSchema>;
 export type SectionBgmAssignment = z.infer<
   typeof sectionBgmAssignmentSchema
 >;
 export type EditPlan = z.infer<typeof editPlanSchema>;
+export type EditPlanV16 = z.infer<typeof editPlanV16Schema>;
 export type EditPlanV15 = z.infer<typeof editPlanV15Schema>;
 export type LegacySectionBgm = z.infer<typeof legacySectionBgmSchema>;
 /** @deprecated Use SectionBgmAssignment for current projects. */
@@ -1128,4 +1161,5 @@ export type VideoProjectV13 = z.infer<typeof videoProjectV13Schema>;
 export type VideoProjectV14 = z.infer<typeof videoProjectV14Schema>;
 export type VideoProjectV15 = z.infer<typeof videoProjectV15Schema>;
 export type VideoProjectV16 = z.infer<typeof videoProjectV16Schema>;
+export type VideoProjectV17 = z.infer<typeof videoProjectV17Schema>;
 export type VideoProject = z.infer<typeof videoProjectSchema>;

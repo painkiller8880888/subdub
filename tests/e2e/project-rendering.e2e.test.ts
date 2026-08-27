@@ -66,6 +66,7 @@ import {
   type RenderRunLog,
   type VideoProject
 } from "../../src/schema/index.js";
+import { effectiveMediaDurationInFrames } from "../../src/media-frame.js";
 import {
   buildMultipartBody,
   type MultipartPart
@@ -744,7 +745,8 @@ async function validateWebPreviewPath(
   server: InitializedServer,
   projectId: string,
   manifest: RenderManifest,
-  expectedAssets: readonly PreviewAssetExpectation[]
+  expectedAssets: readonly PreviewAssetExpectation[],
+  expectedInitialVideoTimeMs?: number
 ): Promise<void> {
   const executable = browserExecutable();
   if (typeof executable !== "string") {
@@ -837,10 +839,54 @@ async function validateWebPreviewPath(
     expect(await playerPanel.locator('[role="alert"]').count()).toBe(0);
     const playButton = page.getByRole("button", { name: "Play video" });
     await playButton.waitFor({ state: "visible", timeout: 30_000 });
+    const previewVideo = playerPanel.locator("video").first();
+    if (expectedInitialVideoTimeMs !== undefined) {
+      await previewVideo.waitFor({ state: "attached", timeout: 30_000 });
+      const expectedInitialVideoTimeSeconds = expectedInitialVideoTimeMs / 1000;
+      const initialVideoTimeDeadline = Date.now() + 10_000;
+      let initialVideoTimeSeconds = 0;
+      while (
+        Date.now() < initialVideoTimeDeadline &&
+        Math.abs(initialVideoTimeSeconds - expectedInitialVideoTimeSeconds) >
+          0.4
+      ) {
+        initialVideoTimeSeconds = await previewVideo.evaluate(
+          (element) =>
+            (element as unknown as { currentTime: number }).currentTime
+        );
+        if (
+          Math.abs(initialVideoTimeSeconds - expectedInitialVideoTimeSeconds) >
+          0.4
+        ) {
+          await page.waitForTimeout(100);
+        }
+      }
+      expect(initialVideoTimeSeconds).toBeCloseTo(
+        expectedInitialVideoTimeSeconds,
+        0
+      );
+      await page.waitForTimeout(300);
+      const stoppedVideoTimeSeconds = await previewVideo.evaluate(
+        (element) => (element as unknown as { currentTime: number }).currentTime
+      );
+      expect(stoppedVideoTimeSeconds).toBeCloseTo(initialVideoTimeSeconds, 1);
+    }
     await playButton.click();
     await page
       .getByRole("button", { name: "Pause video" })
       .waitFor({ state: "visible", timeout: 5_000 });
+    if (expectedInitialVideoTimeMs !== undefined) {
+      const playingVideoTimeSeconds = await previewVideo.evaluate(
+        (element) => (element as unknown as { currentTime: number }).currentTime
+      );
+      await page.waitForTimeout(500);
+      const advancedVideoTimeSeconds = await previewVideo.evaluate(
+        (element) => (element as unknown as { currentTime: number }).currentTime
+      );
+      expect(advancedVideoTimeSeconds).toBeGreaterThan(
+        playingVideoTimeSeconds + 0.05
+      );
+    }
 
     const startedAt = Date.now();
     while (
@@ -2252,7 +2298,9 @@ describe("MVP final verification E2E", () => {
           id: string,
           role: VideoProject["edit"]["videoElements"][number]["role"],
           placement: VideoProject["edit"]["videoElements"][number]["placement"],
-          volume: number
+          volume: number,
+          startMs: number | null,
+          playbackRate: VideoProject["edit"]["videoElements"][number]["playbackRate"]
         ): VideoProject["edit"]["videoElements"][number] => ({
           id,
           role,
@@ -2261,6 +2309,8 @@ describe("MVP final verification E2E", () => {
           assetChecksum: ed09VideoChecksum,
           projectMediaPath: videoAssignment.assignment.projectMediaPath,
           placement,
+          startMs,
+          playbackRate,
           volume,
           text: "",
           textTemplateId: null
@@ -2288,7 +2338,9 @@ describe("MVP final verification E2E", () => {
                   "insert-ed09-intro",
                   "intro",
                   { kind: "before_first_section" },
-                  0.4
+                  0.4,
+                  5_000,
+                  0.5
                 ),
                 createEd09VideoElement(
                   "insert-ed09-cutin-1",
@@ -2298,7 +2350,9 @@ describe("MVP final verification E2E", () => {
                     sectionId: ed09MainSectionId,
                     order: 0
                   },
-                  0.25
+                  0.25,
+                  2_500,
+                  2
                 ),
                 createEd09VideoElement(
                   "insert-ed09-cutin-2",
@@ -2308,13 +2362,17 @@ describe("MVP final verification E2E", () => {
                     sectionId: ed09MainSectionId,
                     order: 1
                   },
-                  0.75
+                  0.75,
+                  1_000,
+                  1.5
                 ),
                 createEd09VideoElement(
                   "insert-ed09-outro",
                   "outro",
                   { kind: "after_last_section" },
-                  0.6
+                  0.6,
+                  0,
+                  3
                 )
               ],
               sectionBgms: [
@@ -2370,6 +2428,27 @@ describe("MVP final verification E2E", () => {
         expect(ed09Manifest.inserts.map((insert) => insert.volume)).toEqual([
           0.4, 0.25, 0.75, 0.6
         ]);
+        expect(ed09Manifest.inserts.map((insert) => insert.startMs)).toEqual([
+          5_000, 2_500, 1_000, 0
+        ]);
+        expect(
+          ed09Manifest.inserts.map((insert) => insert.playbackRate)
+        ).toEqual([0.5, 2, 1.5, 3]);
+        if (videoAsset.detail.durationMs === null) {
+          throw new Error("The ED-09 video asset duration is missing.");
+        }
+        expect(
+          ed09Manifest.inserts.map((insert) => insert.durationInFrames)
+        ).toEqual(
+          [0.5, 2, 1.5, 3].map((playbackRate, index) =>
+            effectiveMediaDurationInFrames(
+              videoAsset.detail.durationMs!,
+              [5_000, 2_500, 1_000, 0][index]!,
+              playbackRate,
+              ed09Manifest.fps
+            )
+          )
+        );
         expect(ed09Manifest.inserts[0]).toMatchObject({
           from: 0,
           src: videoAssignment.assignment.projectMediaPath
@@ -2419,13 +2498,19 @@ describe("MVP final verification E2E", () => {
         expect(serializeRenderManifest(ed09Preview.manifest!)).toBe(
           serializeRenderManifest(ed09Manifest)
         );
-        await validateWebPreviewPath(restartedServer, projectId, ed09Manifest, [
-          { path: bgmProjectMediaPath, contentType: /^audio\//i },
-          {
-            path: videoAssignment.assignment.projectMediaPath,
-            contentType: /^video\//i
-          }
-        ]);
+        await validateWebPreviewPath(
+          restartedServer,
+          projectId,
+          ed09Manifest,
+          [
+            { path: bgmProjectMediaPath, contentType: /^audio\//i },
+            {
+              path: videoAssignment.assignment.projectMediaPath,
+              contentType: /^video\//i
+            }
+          ],
+          5000
+        );
 
         const ed09SectionVisual = ed09Manifest.visuals.find(
           (visual) => visual.sourceAssignmentId === "visual-fixture-photo"

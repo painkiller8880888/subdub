@@ -96,6 +96,7 @@ export function RenderManifestComposition(
         >
           <VideoInsert
             insert={activeInsert}
+            fps={manifest.fps}
             assetUrlResolver={assetUrlResolver}
           />
         </Sequence>

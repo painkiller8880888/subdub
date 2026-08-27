@@ -25,7 +25,7 @@ import {
   renderManifestV24Schema,
   renderManifestV25Schema,
   renderManifestV26Schema,
-  renderManifestV27Schema,
+  renderManifestV28Schema,
   renderManifestSchema,
   sha256Schema,
   characterVisualCatalogSnapshotSchema,
@@ -45,9 +45,11 @@ import {
   type RenderManifestV25,
   type RenderManifestV26,
   type RenderManifestV27,
+  type RenderManifestV28,
   type RenderResolvedVideoDisplayV25,
   type RenderInsert,
   type RenderInsertV27,
+  type RenderInsertV28,
   type RenderInsertTextSnapshot,
   type RenderSoundEffect,
   type RenderVisualV24,
@@ -77,13 +79,15 @@ import {
   screenTemplateValidationReport
 } from "../../validation/screen-templates.js";
 import {
+  effectiveMediaDurationInFrames,
   mediaMillisecondsToFrames,
   presentationFramesToMediaPosition
 } from "../../media-frame.js";
 import { validateVisualPlaybackSequence } from "../../timeline/visual-playback.js";
 import type { VisualPlaybackCue } from "../../schema/visual-playback.js";
 
-export const RENDER_MANIFEST_VERSION = "2.7.0" as const;
+export const RENDER_MANIFEST_VERSION = "2.8.0" as const;
+export const RENDER_MANIFEST_V27_VERSION = "2.7.0" as const;
 export const RENDER_MANIFEST_V26_VERSION = "2.6.0" as const;
 export const RENDER_MANIFEST_V25_VERSION = "2.5.0" as const;
 export const RENDER_MANIFEST_V24_VERSION = "2.4.0" as const;
@@ -228,6 +232,10 @@ export type RenderManifestCompilerInput = {
   /** Compatibility aliases for the InsertTextTemplate snapshot boundary. */
   readonly insertTextTemplateSnapshot?: unknown;
   readonly insertTextTemplates?: unknown;
+};
+
+type RenderManifestCompileOptions = {
+  readonly resolveEditVideoTiming?: boolean;
 };
 
 export type RenderManifestCompileSuccess<TManifest = RenderManifest> = {
@@ -2081,9 +2089,47 @@ function orderedManifestV27(manifest: RenderManifestV27): RenderManifestV27 {
   };
 }
 
+function orderedManifestV28(manifest: RenderManifestV28): RenderManifestV28 {
+  const orderedLegacy = orderedManifestV27(
+    manifest as unknown as RenderManifestV27
+  );
+  return {
+    ...orderedLegacy,
+    manifestVersion: manifest.manifestVersion,
+    inserts: manifest.inserts.map((insert): RenderInsertV28 => ({
+      id: insert.id,
+      role: insert.role,
+      from: insert.from,
+      durationInFrames: insert.durationInFrames,
+      src: insert.src,
+      volume: insert.volume,
+      startMs: insert.startMs,
+      playbackRate: insert.playbackRate,
+      text:
+        insert.text === null
+          ? null
+          : {
+              templateId: insert.text.templateId,
+              templateRevision: insert.text.templateRevision,
+              templateHash: insert.text.templateHash,
+              text: insert.text.text,
+              resolvedTextLayout: {
+                rect: insert.text.resolvedTextLayout.rect,
+                rotationDeg: insert.text.resolvedTextLayout.rotationDeg,
+                fontSize: insert.text.resolvedTextLayout.fontSize,
+                fontWeight: insert.text.resolvedTextLayout.fontWeight,
+                textColor: insert.text.resolvedTextLayout.textColor,
+                textAlign: insert.text.resolvedTextLayout.textAlign,
+                verticalAlign: insert.text.resolvedTextLayout.verticalAlign
+              }
+            }
+    }))
+  };
+}
+
 export function serializeRenderManifest(manifest: unknown): string {
   const parsed = renderManifestSchema.parse(manifest);
-  return `${JSON.stringify(orderedManifestV27(parsed), null, 2)}\n`;
+  return `${JSON.stringify(orderedManifestV28(parsed), null, 2)}\n`;
 }
 
 export function serializeRenderManifestV24(manifest: unknown): string {
@@ -2132,7 +2178,8 @@ function successV24(
 }
 
 export function compileRenderManifestV24(
-  input: RenderManifestCompilerInput
+  input: RenderManifestCompilerInput,
+  options: RenderManifestCompileOptions = {}
 ): RenderManifestCompileResult<RenderManifestV24> {
   const diagnostics: RenderManifestDiagnostic[] = [];
   const projectRaw = input.project ?? input.videoProject;
@@ -2546,6 +2593,21 @@ export function compileRenderManifestV24(
         ["edit", "videoElements", elementIndex, "projectMediaPath"],
         { assignmentId: element.id, assetPath: element.projectMediaPath }
       );
+      if (
+        options.resolveEditVideoTiming === true &&
+        asset.durationMs !== undefined &&
+        asset.durationMs !== null &&
+        element.startMs !== null &&
+        element.startMs >= asset.durationMs
+      ) {
+        addDiagnostic(
+          diagnostics,
+          RENDER_MANIFEST_ERROR_CODE.assetRangeInvalid,
+          ["edit", "videoElements", elementIndex, "startMs"],
+          "edit video startMs must be less than the verified asset duration",
+          { assignmentId: element.id, assetPath: element.projectMediaPath }
+        );
+      }
       editVideoAssets.set(element.id, asset);
       addSourceAsset(sourceAssets, asset, diagnostics, {
         assignmentId: element.id,
@@ -2924,7 +2986,16 @@ export function compileRenderManifestV24(
         projectMediaPath: element.projectMediaPath,
         text: element.text,
         textTemplateId: element.textTemplateId,
-        durationInFrames: msToFrames(asset.durationMs, fps),
+        startMs:
+          options.resolveEditVideoTiming === true ? element.startMs : null,
+        playbackRate:
+          options.resolveEditVideoTiming === true ? element.playbackRate : 1,
+        durationInFrames: effectiveMediaDurationInFrames(
+          asset.durationMs,
+          options.resolveEditVideoTiming === true ? element.startMs : null,
+          options.resolveEditVideoTiming === true ? element.playbackRate : 1,
+          fps
+        ),
         inputIndex
       };
     }),
@@ -3664,14 +3735,16 @@ function successV25(
 }
 
 export function compileRenderManifestV25(
-  input: RenderManifestCompilerInput
+  input: RenderManifestCompilerInput,
+  options: RenderManifestCompileOptions = {}
 ): RenderManifestCompileResult<RenderManifestV25> {
   const projectResult = videoProjectSchema.safeParse(
     input.project ?? input.videoProject
   );
   if (!projectResult.success) {
     return compileRenderManifestV24(
-      input
+      input,
+      options
     ) as RenderManifestCompileResult<RenderManifestV25>;
   }
 
@@ -3680,10 +3753,13 @@ export function compileRenderManifestV25(
     return failure(diagnostics);
   }
 
-  const baseResult = compileRenderManifestV24({
-    ...input,
-    project: projectWithoutPlaybackCues(projectResult.data)
-  });
+  const baseResult = compileRenderManifestV24(
+    {
+      ...input,
+      project: projectWithoutPlaybackCues(projectResult.data)
+    },
+    options
+  );
   if (!baseResult.success) {
     return baseResult as RenderManifestCompileResult<RenderManifestV25>;
   }
@@ -3844,9 +3920,10 @@ function successV26(
 }
 
 export function compileRenderManifestV26(
-  input: RenderManifestCompilerInput
+  input: RenderManifestCompilerInput,
+  options: RenderManifestCompileOptions = {}
 ): RenderManifestCompileResult<RenderManifestV26> {
-  const baseResult = compileRenderManifestV25(input);
+  const baseResult = compileRenderManifestV25(input, options);
   if (!baseResult.success) {
     return baseResult as RenderManifestCompileResult<RenderManifestV26>;
   }
@@ -3941,14 +4018,14 @@ export function compileRenderManifestV26(
   return successV26(manifestResult.data, baseResult.warnings);
 }
 
-function successV27(
-  manifest: RenderManifestV27,
+function successV28(
+  manifest: RenderManifestV28,
   warnings: readonly RenderManifestWarning[]
-): RenderManifestCompileSuccess<RenderManifestV27> {
+): RenderManifestCompileSuccess<RenderManifestV28> {
   return {
     success: true,
     ok: true,
-    manifest: orderedManifestV27(manifest),
+    manifest: orderedManifestV28(manifest),
     diagnostics: [],
     errors: [],
     warnings: warnings.map((warning) => ({
@@ -3962,7 +4039,9 @@ function successV27(
 export function compileRenderManifest(
   input: RenderManifestCompilerInput
 ): RenderManifestCompileResult<RenderManifest> {
-  const baseResult = compileRenderManifestV26(input);
+  const baseResult = compileRenderManifestV26(input, {
+    resolveEditVideoTiming: true
+  });
   if (!baseResult.success) {
     return baseResult as RenderManifestCompileResult<RenderManifest>;
   }
@@ -4047,11 +4126,22 @@ export function compileRenderManifest(
     return failure(diagnostics, baseResult.warnings);
   }
 
-  const inserts: RenderInsertV27[] = baseResult.manifest.inserts.map(
-    (insert) => ({
-      ...insert,
-      text: snapshotByElementId.get(insert.id) ?? null
-    })
+  const elementById = new Map(
+    project.edit.videoElements.map((element) => [element.id, element])
+  );
+  const inserts: RenderInsertV28[] = baseResult.manifest.inserts.map(
+    (insert) => {
+      const element = elementById.get(insert.id);
+      if (element === undefined) {
+        throw new Error(`edit video element is missing: ${insert.id}`);
+      }
+      return {
+        ...insert,
+        startMs: element.startMs,
+        playbackRate: element.playbackRate,
+        text: snapshotByElementId.get(insert.id) ?? null
+      };
+    }
   );
   const dependencySnapshot = [...dependencies.entries()]
     .sort(([left], [right]) => compareStrings(left, right))
@@ -4080,8 +4170,8 @@ export function compileRenderManifest(
     manifestVersion: RENDER_MANIFEST_VERSION,
     compilerInputHash,
     inserts
-  } satisfies RenderManifestV27;
-  const manifestResult = renderManifestV27Schema.safeParse(manifest);
+  } satisfies RenderManifestV28;
+  const manifestResult = renderManifestV28Schema.safeParse(manifest);
   if (!manifestResult.success) {
     addZodDiagnostics(
       diagnostics,
@@ -4091,7 +4181,7 @@ export function compileRenderManifest(
     );
     return failure(diagnostics, baseResult.warnings);
   }
-  return successV27(manifestResult.data, baseResult.warnings);
+  return successV28(manifestResult.data, baseResult.warnings);
 }
 
 export class RenderManifestCompiler {

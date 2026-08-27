@@ -237,6 +237,8 @@ describe("RenderManifestInputBuilder", () => {
           assetChecksum: checksum,
           projectMediaPath: "media/edits/intro.mp4",
           placement: { kind: "before_first_section" },
+          startMs: null,
+          playbackRate: 1,
           volume: 0.25,
           text: "",
           textTemplateId: null
@@ -563,6 +565,8 @@ describe("RenderManifestInputBuilder", () => {
             assetChecksum: projectChecksum,
             projectMediaPath,
             placement: { kind: "before_first_section" },
+            startMs: null,
+            playbackRate: 1,
             volume: 0.25,
             text: "",
             textTemplateId: null

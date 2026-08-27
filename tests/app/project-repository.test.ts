@@ -371,7 +371,7 @@ describe("ProjectRepository", () => {
     candidate.metadata.title = "migration と同時の保存";
     let saveCompleted = false;
     const savePromise = repository
-      .save(projectId, candidate, 10)
+      .save(projectId, candidate, 11)
       .then((saved) => {
         saveCompleted = true;
         return saved;
@@ -382,14 +382,14 @@ describe("ProjectRepository", () => {
 
     releaseMigrationRename();
     const [migrated, saved] = await Promise.all([readPromise, savePromise]);
-    expect(migrated.revision).toBe(10);
-    expect(saved.revision).toBe(11);
+    expect(migrated.revision).toBe(11);
+    expect(saved.revision).toBe(12);
     expect(saved.metadata.title).toBe("migration と同時の保存");
 
     const finalProject = JSON.parse(
       await fs.readFile(projectFile, "utf8")
     ) as VideoProject;
-    expect(finalProject.revision).toBe(11);
+    expect(finalProject.revision).toBe(12);
     expect(finalProject.metadata.title).toBe("migration と同時の保存");
   });
 
@@ -523,8 +523,8 @@ describe("ProjectRepository", () => {
     const repository = new ProjectRepository(workspaceRoot);
 
     const migrated = await repository.read(projectId);
-    expect(migrated.schemaVersion).toBe("1.6.0");
-    expect(migrated.revision).toBe(10);
+    expect(migrated.schemaVersion).toBe("1.7.0");
+    expect(migrated.revision).toBe(11);
     expect(migrated.edit).toEqual({ videoElements: [], sectionBgms: [] });
     expect(migrated.audio).not.toHaveProperty("sectionBgms");
 
@@ -557,7 +557,7 @@ describe("ProjectRepository", () => {
     const migratedBytes = await readProjectBytes();
     expect(migratedBytes).not.toEqual(before);
     expect(JSON.parse(migratedBytes.toString("utf8")).schemaVersion).toBe(
-      "1.6.0"
+      "1.7.0"
     );
 
     await repository.read(projectId);
@@ -570,8 +570,8 @@ describe("ProjectRepository", () => {
     const repository = new ProjectRepository(workspaceRoot);
 
     const migrated = await repository.read(projectId);
-    expect(migrated.schemaVersion).toBe("1.6.0");
-    expect(migrated.revision).toBe((project.revision as number) + 3);
+    expect(migrated.schemaVersion).toBe("1.7.0");
+    expect(migrated.revision).toBe((project.revision as number) + 4);
     for (const line of migrated.script.sections.flatMap((section) => section.lines)) {
       expect(line).not.toHaveProperty("screenTemplateId");
     }

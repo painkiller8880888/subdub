@@ -133,6 +133,8 @@ export function createScreenTemplateProjectFixture(): VideoProject {
       projectMediaPath: "media/cutin-confirm.mp4",
       role: "cutin",
       placement: { kind: "before_section", sectionId: main.id, order: 0 },
+      startMs: null,
+      playbackRate: 1,
       volume: 0.35,
       text: "",
       textTemplateId: null
@@ -236,6 +238,8 @@ function removeEditInsertTextFields(project: unknown): void {
     }
     delete (element as Record<string, unknown>).text;
     delete (element as Record<string, unknown>).textTemplateId;
+    delete (element as Record<string, unknown>).startMs;
+    delete (element as Record<string, unknown>).playbackRate;
   }
 }
 

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   DEFAULT_SOUND_EFFECT_VOLUME,
+  EDIT_VIDEO_PLAYBACK_RATE_OPTIONS,
   createSoundEffect,
   videoProjectSchema,
   type VideoProject
@@ -26,6 +27,8 @@ const editVideoElementFixture = {
     sectionId: "section-main",
     order: 0
   },
+  startMs: null,
+  playbackRate: 1,
   volume: 0.5,
   text: "",
   textTemplateId: null
@@ -54,6 +57,31 @@ describe("videoProjectSchema", () => {
     const result = videoProjectSchema.safeParse(clone(videoProjectFixture));
 
     expect(result.success).toBe(true);
+  });
+
+  it("accepts only the centralized edit video playback rate options", () => {
+    for (const option of EDIT_VIDEO_PLAYBACK_RATE_OPTIONS) {
+      const project = clone(videoProjectFixture);
+      project.edit.videoElements = [
+        { ...editVideoElementFixture, playbackRate: option.value }
+      ];
+      expect(videoProjectSchema.safeParse(project).success).toBe(true);
+    }
+
+    const invalidRate = clone(videoProjectFixture);
+    invalidRate.edit.videoElements = [
+      {
+        ...editVideoElementFixture,
+        playbackRate: 1.25 as typeof editVideoElementFixture.playbackRate
+      }
+    ];
+    expectInvalid(invalidRate, ["edit", "videoElements", 0, "playbackRate"]);
+
+    const negativeStart = clone(videoProjectFixture);
+    negativeStart.edit.videoElements = [
+      { ...editVideoElementFixture, startMs: -1 }
+    ];
+    expectInvalid(negativeStart, ["edit", "videoElements", 0, "startMs"]);
   });
 
   it("requires playback cues only on current video displays", () => {

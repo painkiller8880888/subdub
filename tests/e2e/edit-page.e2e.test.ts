@@ -91,6 +91,8 @@ function cutin(
     assetChecksum: videoAsset.checksum,
     projectMediaPath: `media/${id}.mp4`,
     placement: { kind: "before_section", sectionId, order },
+    startMs: null,
+    playbackRate: 1,
     volume: 1,
     text: "",
     textTemplateId: null
@@ -419,6 +421,76 @@ describe("edit page DnD UI", () => {
         ]);
         expect(await readElementOrder(page)).toEqual(["cutin-b", "cutin-a"]);
         expect(saveRequests).toHaveLength(1);
+      } finally {
+        await context.close();
+      }
+    }
+  );
+
+  it(
+    "saves start, playback rate, and mute controls for an edit video",
+    { timeout: 30_000 },
+    async () => {
+      const { context, page, saveRequests } = await openPage("success");
+      try {
+        const card = page.locator('[data-edit-video-element-id="cutin-a"]');
+        const startSaveRequest = page.waitForRequest(
+          (request) =>
+            request.method() === "PUT" &&
+            new URL(request.url()).pathname ===
+              `/api/projects/${projectId}/edit`
+        );
+        await card.getByLabel("開始秒").fill("0.5");
+        await card.getByLabel("再生速度").selectOption({ label: "x2.0" });
+        const firstRequest = await startSaveRequest;
+        const firstBody = JSON.parse(firstRequest.postData() ?? "{}");
+        expect(firstBody.edit.videoElements).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({
+              id: "cutin-a",
+              startMs: 500,
+              playbackRate: 2,
+              volume: 1
+            })
+          ])
+        );
+        await page.getByText("保存済み", { exact: true }).waitFor({
+          state: "visible"
+        });
+
+        const muteSaveRequest = page.waitForRequest(
+          (request) =>
+            request.method() === "PUT" &&
+            new URL(request.url()).pathname ===
+              `/api/projects/${projectId}/edit`
+        );
+        await card.getByLabel("無音").check();
+        const mutedRequest = await muteSaveRequest;
+        const mutedBody = JSON.parse(mutedRequest.postData() ?? "{}");
+        expect(mutedBody.edit.videoElements).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({ id: "cutin-a", volume: 0 })
+          ])
+        );
+        await page.getByText("保存済み", { exact: true }).waitFor({
+          state: "visible"
+        });
+
+        const unmuteSaveRequest = page.waitForRequest(
+          (request) =>
+            request.method() === "PUT" &&
+            new URL(request.url()).pathname ===
+              `/api/projects/${projectId}/edit`
+        );
+        await card.getByLabel("無音").uncheck();
+        const unmutedRequest = await unmuteSaveRequest;
+        const unmutedBody = JSON.parse(unmutedRequest.postData() ?? "{}");
+        expect(unmutedBody.edit.videoElements).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({ id: "cutin-a", volume: 1 })
+          ])
+        );
+        await expect.poll(() => saveRequests.length).toBe(3);
       } finally {
         await context.close();
       }

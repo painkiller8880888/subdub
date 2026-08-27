@@ -21,6 +21,7 @@ import {
   relativePosixPathSchema,
   videoProjectSchema,
   type AssetDetail,
+  type ProjectEditVideoElementInput,
   type VideoProject
 } from "../../src/schema/index.js";
 import { videoProjectFixture } from "../fixtures/video-project.js";
@@ -214,13 +215,15 @@ describe("ProjectEditService", () => {
     assetId = "asset-video",
     id = "intro-video",
     assetVersion = 1
-  ) {
+  ): ProjectEditVideoElementInput {
     return {
       id,
       role: "intro" as const,
       assetId,
       assetVersion,
       placement: { kind: "before_first_section" as const },
+      startMs: null,
+      playbackRate: 1,
       volume: 0.4,
       text: "",
       textTemplateId: null
@@ -240,6 +243,8 @@ describe("ProjectEditService", () => {
       assetId,
       assetVersion,
       placement: { kind: "before_section" as const, sectionId, order },
+      startMs: null,
+      playbackRate: 1,
       volume: 0.4,
       text: "",
       textTemplateId: null
@@ -372,6 +377,62 @@ describe("ProjectEditService", () => {
       result.data.edit
     );
     expect(await readProject(context.projectFile)).toEqual(result.data);
+  });
+
+  it("rejects an edit video start at or beyond the verified asset duration", async () => {
+    const video = defaultVideo();
+    const context = await setup({ assets: [video] });
+
+    const error = await expectCode(
+      () =>
+        context.service.save(
+          PROJECT_ID,
+          request({
+            videoElements: [
+              { ...videoInput(), startMs: video.asset.durationMs }
+            ],
+            sectionBgms: []
+          })
+        ),
+      PROJECT_EDIT_ERROR_CODE.candidateInvalid
+    );
+
+    expect(error).toMatchObject({
+      status: 422,
+      details: [
+        expect.objectContaining({
+          path: ["edit", "videoElements", 0, "startMs"]
+        })
+      ]
+    });
+    await expectMissing(
+      actualFinalPath(context.projectRoot, "video", video.asset.assetId)
+    );
+  });
+
+  it("rejects edit video saves when the asset duration is unresolved", async () => {
+    const video = createAssetFixture(
+      "asset-unresolved-video",
+      "video",
+      Buffer.from("unresolved video bytes", "utf8"),
+      { durationMs: null }
+    );
+    const context = await setup({ assets: [video] });
+
+    await expectCode(
+      () =>
+        context.service.save(
+          PROJECT_ID,
+          request({
+            videoElements: [videoInput(video.asset.assetId)],
+            sectionBgms: []
+          })
+        ),
+      PROJECT_EDIT_ERROR_CODE.candidateInvalid
+    );
+    await expectMissing(
+      actualFinalPath(context.projectRoot, "video", video.asset.assetId)
+    );
   });
 
   it("persists cutin boundary moves and normalized order with the revision", async () => {
