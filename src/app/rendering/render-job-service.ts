@@ -2,10 +2,14 @@ import { randomUUID } from "node:crypto";
 
 import {
   idSchema,
+  previewPresetSchema,
+  productionRenderProfile,
   renderJobKindSchema,
   renderRunLogSchema,
+  type PreviewRenderAcceptedData,
   type RenderAcceptedData,
   type RenderJobKind,
+  type RenderProfile,
   type RenderRunLog
 } from "../../schema/index.js";
 import { RunLogStore, RunLogStoreError } from "../run-log-store.js";
@@ -51,7 +55,8 @@ export type RenderJobServiceOptions = {
 export type RenderJobServicePort = Pick<
   RenderJobService,
   "enqueueMp4" | "enqueueThumbnail" | "getStatus"
->;
+> &
+  Partial<Pick<RenderJobService, "enqueuePreview">>;
 
 export type RenderJobLifecyclePort = RenderJobServicePort &
   Pick<RenderJobService, "start" | "stop">;
@@ -176,11 +181,61 @@ export class RenderJobService {
   }
 
   async enqueueMp4(projectId: unknown): Promise<RenderAcceptedData> {
-    return this.enqueue(projectId, "mp4");
+    const accepted = await this.enqueue(
+      projectId,
+      "mp4",
+      productionRenderProfile
+    );
+    if (accepted.kind === "preview") {
+      throw new RenderJobError(
+        RENDER_JOB_ERROR_CODE.enqueueFailed,
+        500,
+        "The MP4 render job could not be created."
+      );
+    }
+    return accepted;
   }
 
   async enqueueThumbnail(projectId: unknown): Promise<RenderAcceptedData> {
-    return this.enqueue(projectId, "thumbnail");
+    const accepted = await this.enqueue(
+      projectId,
+      "thumbnail",
+      productionRenderProfile
+    );
+    if (accepted.kind === "preview") {
+      throw new RenderJobError(
+        RENDER_JOB_ERROR_CODE.enqueueFailed,
+        500,
+        "The thumbnail render job could not be created."
+      );
+    }
+    return accepted;
+  }
+
+  async enqueuePreview(
+    projectId: unknown,
+    previewPreset: unknown
+  ): Promise<PreviewRenderAcceptedData> {
+    const parsedPreset = previewPresetSchema.safeParse(previewPreset);
+    if (!parsedPreset.success) {
+      throw new RenderJobError(
+        RENDER_JOB_ERROR_CODE.previewPresetInvalid,
+        400,
+        "The preview preset is invalid."
+      );
+    }
+    const accepted = await this.enqueue(projectId, "mp4", {
+      kind: "preview",
+      previewPreset: parsedPreset.data
+    });
+    if (accepted.kind !== "preview") {
+      throw new RenderJobError(
+        RENDER_JOB_ERROR_CODE.enqueueFailed,
+        500,
+        "The preview render job could not be created."
+      );
+    }
+    return accepted;
   }
 
   async getStatus(projectId: unknown, runId: unknown): Promise<RenderRunLog> {
@@ -206,8 +261,9 @@ export class RenderJobService {
 
   private async enqueue(
     projectId: unknown,
-    kind: RenderJobKind
-  ): Promise<RenderAcceptedData> {
+    kind: RenderJobKind,
+    renderProfile: RenderProfile
+  ): Promise<RenderAcceptedData | PreviewRenderAcceptedData> {
     const safeProject = safeProjectId(projectId);
     const parsedKind = renderJobKindSchema.parse(kind);
     const project = await this.projectRepository.read(safeProject);
@@ -237,7 +293,8 @@ export class RenderJobService {
         status: "failed" as const,
         inputHash: computeRenderInputHash(
           { projectRevision: project.revision, manifest: null },
-          parsedKind
+          parsedKind,
+          renderProfile
         ),
         model: null,
         engine: "Remotion",
@@ -248,7 +305,8 @@ export class RenderJobService {
           providerFallbacks: null
         },
         outputs: [],
-        errorCode: failedPreflightCode(error)
+        errorCode: failedPreflightCode(error),
+        renderProfile
       };
       try {
         await this.runLogStore.write(safeProject, failed);
@@ -268,7 +326,11 @@ export class RenderJobService {
       startedAt: null,
       finishedAt: null,
       status: "queued" as const,
-      inputHash: computeRenderInputHash(preflight.manifest, parsedKind),
+      inputHash: computeRenderInputHash(
+        preflight.manifest,
+        parsedKind,
+        renderProfile
+      ),
       model: null,
       engine: "Remotion",
       privacy: {
@@ -278,14 +340,20 @@ export class RenderJobService {
         providerFallbacks: null
       },
       outputs: [],
-      errorCode: null
+      errorCode: null,
+      renderProfile
     };
     try {
       await this.runLogStore.write(safeProject, queued);
     } catch (error) {
       throw normalizeRunLogStoreError(error) ?? error;
     }
-    const item: RenderJobQueueItem = { projectId: safeProject, runId, kind };
+    const item: RenderJobQueueItem = {
+      projectId: safeProject,
+      runId,
+      kind: parsedKind,
+      renderProfile
+    };
     try {
       this.worker.enqueue(item);
     } catch {
@@ -308,6 +376,13 @@ export class RenderJobService {
         "The render job could not be enqueued."
       );
     }
-    return { runId, status: "queued", kind };
+    return renderProfile?.kind === "preview"
+      ? {
+          runId,
+          status: "queued",
+          kind: "preview",
+          previewPreset: renderProfile.previewPreset
+        }
+      : { runId, status: "queued", kind: parsedKind };
   }
 }

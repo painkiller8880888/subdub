@@ -3725,6 +3725,51 @@ textarea[aria-invalid="true"] {
   width: 100%;
 }
 
+.preview-export-controls {
+  align-items: end;
+  background: #1f2937;
+  border: 1px solid #374151;
+  border-radius: 0.6rem;
+  color: #f9fafb;
+  display: flex;
+  gap: 1rem;
+  justify-content: space-between;
+  padding: 0.8rem;
+}
+
+.preview-export-controls > div {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.preview-export-controls .eyebrow {
+  color: #cbd5e1;
+}
+
+.preview-export-controls select {
+  min-width: 12rem;
+}
+
+.preview-export-status {
+  align-items: center;
+  background: #1f2937;
+  border-radius: 0.6rem;
+  color: #e5e7eb;
+  display: flex;
+  gap: 1rem;
+  justify-content: space-between;
+  padding: 0.8rem;
+}
+
+.preview-export-status p,
+.preview-player-panel .status-message {
+  margin: 0;
+}
+
+.preview-player-panel .status-message-error {
+  color: #fecaca;
+}
+
 .ai-runs-page {
   max-width: 1200px;
 }

@@ -73,6 +73,46 @@ describe("project file route", () => {
     expect(range.headers["content-range"]).toBe("bytes 2-5/10");
   });
 
+  it("serves managed preview output while keeping other output paths private", async () => {
+    const root = await createWorkspace();
+    const previewPath = path.join(
+      root,
+      "projects",
+      projectId,
+      "output",
+      "previews",
+      "run-hd-hd.mp4"
+    );
+    await fs.mkdir(path.dirname(previewPath), { recursive: true });
+    await fs.writeFile(previewPath, "preview-bytes", "utf8");
+    await fs.mkdir(path.join(root, "projects", projectId, "output"), {
+      recursive: true
+    });
+    await fs.writeFile(
+      path.join(root, "projects", projectId, "output", "render-run.mp4"),
+      "production-bytes",
+      "utf8"
+    );
+    await app.close();
+    app = buildApp({
+      projectFileService: new ProjectFileService({ workspaceRoot: root })
+    });
+
+    const preview = await app.inject({
+      method: "GET",
+      url: `/api/projects/${projectId}/files/output/previews/run-hd-hd.mp4`
+    });
+    const production = await app.inject({
+      method: "GET",
+      url: `/api/projects/${projectId}/files/output/render-run.mp4`
+    });
+
+    expect(preview.statusCode).toBe(200);
+    expect(preview.headers["content-type"]).toMatch(/^video\/mp4/);
+    expect(preview.body).toBe("preview-bytes");
+    expect(production.statusCode).toBe(400);
+  });
+
   it("rejects traversal, encoded traversal, URL paths, and invalid ranges", async () => {
     const root = await createWorkspace();
     await fs.writeFile(path.join(root, "outside.txt"), "outside", "utf8");

@@ -4,7 +4,8 @@ import {
   normalizeRunLog,
   runLogSchema,
   type RenderJobKind,
-  type CommonRenderRunLog
+  type CommonRenderRunLog,
+  type RenderProfile
 } from "../../schema/index.js";
 import { RunLogStoreError } from "../run-log-store.js";
 import { ProjectRepositoryError } from "../projects/project-repository.js";
@@ -25,6 +26,7 @@ export type RenderJobQueueItem = {
   readonly projectId: string;
   readonly runId: string;
   readonly kind: RenderJobKind;
+  readonly renderProfile?: RenderProfile;
 };
 
 export type RenderJobWorkerOptions = {
@@ -48,10 +50,15 @@ export type RenderJobWorkerPort = Pick<
 
 export function computeRenderInputHash(
   manifest: unknown,
-  kind: RenderJobKind
+  kind: RenderJobKind,
+  renderProfile?: RenderProfile
 ): string {
+  const input =
+    renderProfile?.kind === "preview"
+      ? { manifest, renderKind: kind, renderProfile }
+      : { manifest, renderKind: kind };
   return createHash("sha256")
-    .update(JSON.stringify({ manifest, renderKind: kind }), "utf8")
+    .update(JSON.stringify(input), "utf8")
     .digest("hex");
 }
 
@@ -241,6 +248,19 @@ export class RenderJobWorker implements RenderJobWorkerPort {
     let outputTarget: RenderOutputTarget | undefined;
     try {
       const queued = asQueuedLog(queuedLog);
+      const renderProfile = queued.renderProfile ?? item.renderProfile;
+      if (
+        queued.renderProfile !== undefined &&
+        item.renderProfile !== undefined &&
+        JSON.stringify(queued.renderProfile) !==
+          JSON.stringify(item.renderProfile)
+      ) {
+        throw new RenderJobError(
+          RENDER_JOB_ERROR_CODE.manifestStale,
+          422,
+          "The render profile changed after the render was queued."
+        );
+      }
       runningLog = parseRenderLog({
         ...queued,
         status: "running",
@@ -260,7 +280,7 @@ export class RenderJobWorker implements RenderJobWorkerPort {
         );
       }
       if (
-        computeRenderInputHash(preflight.manifest, item.kind) !==
+        computeRenderInputHash(preflight.manifest, item.kind, renderProfile) !==
         queued.inputHash
       ) {
         throw new RenderJobError(
@@ -272,7 +292,8 @@ export class RenderJobWorker implements RenderJobWorkerPort {
       outputTarget = await this.outputStore.prepare(
         item.projectId,
         item.kind,
-        item.runId
+        item.runId,
+        renderProfile
       );
       const renderer =
         item.kind === "mp4" ? this.mp4Renderer : this.thumbnailRenderer;
@@ -281,7 +302,8 @@ export class RenderJobWorker implements RenderJobWorkerPort {
         runId: item.runId,
         project: preflight.project,
         manifest: preflight.manifest,
-        outputPath: outputTarget.temporaryPath
+        outputPath: outputTarget.temporaryPath,
+        ...(renderProfile === undefined ? {} : { renderProfile })
       });
       if (!this.running) {
         throw new RenderJobError(
@@ -361,7 +383,10 @@ export class RenderJobWorker implements RenderJobWorkerPort {
       privacy: base.privacy,
       outputs: [],
       errorCode,
-      renderKind: base.renderKind
+      renderKind: base.renderKind,
+      ...(base.renderProfile === undefined
+        ? {}
+        : { renderProfile: base.renderProfile })
     });
     try {
       await this.runLogStore.write(item.projectId, failed);

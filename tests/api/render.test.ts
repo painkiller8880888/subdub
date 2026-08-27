@@ -12,6 +12,7 @@ import {
 import { RenderJobService } from "../../src/app/rendering/render-job-service.js";
 import type { RenderRendererInput } from "../../src/app/rendering/renderers.js";
 import {
+  previewRenderAcceptedResponseSchema,
   renderAcceptedResponseSchema,
   renderRunStatusResponseSchema
 } from "../../src/schema/api.js";
@@ -126,6 +127,51 @@ describe("render API", () => {
       data: { runId: "thumbnail-run", status: "queued", kind: "thumbnail" }
     });
     expect(service.enqueueThumbnail).toHaveBeenCalledWith(projectId);
+    await app.close();
+  });
+
+  it("accepts a fixed preview preset through the preview render boundary", async () => {
+    const service = {
+      enqueueMp4: vi.fn(async () => ({
+        runId: "mp4-run",
+        status: "queued" as const,
+        kind: "mp4" as const
+      })),
+      enqueueThumbnail: vi.fn(async () => ({
+        runId: "thumbnail-run",
+        status: "queued" as const,
+        kind: "thumbnail" as const
+      })),
+      enqueuePreview: vi.fn(
+        async (_projectId: unknown, previewPreset: unknown) => ({
+          runId: "preview-run",
+          status: "queued" as const,
+          kind: "preview" as const,
+          previewPreset: previewPreset as "sd" | "hd" | "fhd"
+        })
+      ),
+      getStatus: vi.fn(async () => {
+        throw new Error("not used");
+      })
+    };
+    const app = buildApp({ renderJobService: service });
+
+    const response = await app.inject({
+      method: "POST",
+      url: `/api/projects/${projectId}/preview/render`,
+      payload: { previewPreset: "fhd" }
+    });
+
+    expect(response.statusCode).toBe(202);
+    expect(previewRenderAcceptedResponseSchema.parse(response.json())).toEqual({
+      data: {
+        runId: "preview-run",
+        status: "queued",
+        kind: "preview",
+        previewPreset: "fhd"
+      }
+    });
+    expect(service.enqueuePreview).toHaveBeenCalledWith(projectId, "fhd");
     await app.close();
   });
 

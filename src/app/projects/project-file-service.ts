@@ -37,7 +37,14 @@ export type ProjectFileServiceOptions = {
   readonly workspaceRoot: string;
 };
 
-const projectFileRootNames = new Set(["media", "audio", "backgrounds"]);
+const projectFileRootNames = new Set([
+  "media",
+  "audio",
+  "backgrounds",
+  "output"
+]);
+const previewOutputFilePattern =
+  /^[a-z0-9]+(?:-[a-z0-9]+)*-(?:sd|hd|fhd)\.mp4$/;
 
 function isPathInside(rootPath: string, candidatePath: string): boolean {
   const relativePath = path.relative(rootPath, candidatePath);
@@ -110,9 +117,19 @@ function normalizeProjectFilePath(value: unknown): string {
     throw invalidPathError();
   }
 
-  const [rootName] = relativePath.split("/");
+  const [rootName, outputKind, outputFileName] = relativePath.split("/");
   if (rootName === undefined || !projectFileRootNames.has(rootName)) {
     throw invalidPathError();
+  }
+  if (rootName === "output") {
+    if (
+      outputKind !== "previews" ||
+      outputFileName === undefined ||
+      !previewOutputFilePattern.test(outputFileName) ||
+      relativePath.split("/").length !== 3
+    ) {
+      throw invalidPathError();
+    }
   }
   return relativePath;
 }

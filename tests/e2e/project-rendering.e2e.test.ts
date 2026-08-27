@@ -746,7 +746,8 @@ async function validateWebPreviewPath(
   projectId: string,
   manifest: RenderManifest,
   expectedAssets: readonly PreviewAssetExpectation[],
-  expectedInitialVideoTimeMs?: number
+  expectedInitialVideoTimeMs?: number,
+  exercisePreviewExport = false
 ): Promise<void> {
   const executable = browserExecutable();
   if (typeof executable !== "string") {
@@ -837,6 +838,58 @@ async function validateWebPreviewPath(
     const playerPanel = page.locator(".preview-player-panel");
     await playerPanel.waitFor({ state: "visible", timeout: 30_000 });
     expect(await playerPanel.locator('[role="alert"]').count()).toBe(0);
+    const exportPreset = page.locator("#preview-export-preset");
+    await exportPreset.waitFor({ state: "visible", timeout: 30_000 });
+    expect(await exportPreset.locator("option").count()).toBe(3);
+    const exportButton = page.getByRole("button", {
+      name: "プレビューを保存"
+    });
+    await exportButton.waitFor({ state: "visible", timeout: 30_000 });
+    expect(await exportButton.isEnabled()).toBe(true);
+    if (exercisePreviewExport) {
+      for (const previewPreset of ["sd", "hd", "fhd"] as const) {
+        await exportPreset.selectOption(previewPreset);
+        await exportButton.click();
+        const disabledDeadline = Date.now() + 5_000;
+        while (
+          !(await exportButton.isDisabled()) &&
+          Date.now() < disabledDeadline
+        ) {
+          await page.waitForTimeout(100);
+        }
+        if (!(await exportButton.isDisabled())) {
+          throw new Error(
+            `Preview export did not enter progress state for ${previewPreset}: ${(
+              await page.locator('[role="alert"]').allTextContents()
+            ).join(" | ")}`
+          );
+        }
+        const downloadLink = page.getByRole("link", {
+          name: "保存したプレビューを取得"
+        });
+        const exportStatus = page.locator(".preview-export-status");
+        const exportDeadline = Date.now() + RENDER_TIMEOUT_MS;
+        while (!(await downloadLink.isVisible())) {
+          const statusText = (await exportStatus.textContent()) ?? "";
+          if (statusText.includes("保存に失敗しました")) {
+            throw new Error(
+              `Preview export failed in the browser for ${previewPreset}: ${statusText}`
+            );
+          }
+          if (Date.now() >= exportDeadline) {
+            throw new Error(
+              `Preview export timed out in the browser for ${previewPreset}: ${statusText}`
+            );
+          }
+          await page.waitForTimeout(1000);
+        }
+        expect(await downloadLink.getAttribute("href")).toMatch(
+          new RegExp(
+            `/api/projects/${encodeURIComponent(projectId)}/files/output/previews/[^/]+-${previewPreset}\\.mp4$`
+          )
+        );
+      }
+    }
     const playButton = page.getByRole("button", { name: "Play video" });
     await playButton.waitFor({ state: "visible", timeout: 30_000 });
     const previewVideo = playerPanel.locator("video").first();
@@ -1842,11 +1895,6 @@ describe("MVP final verification E2E", () => {
         expect(serializeRenderManifest(previewManifest)).toBe(
           serializeRenderManifest(manifest)
         );
-        await validateWebPreviewPath(server, projectId, previewManifest, [
-          { path: bgmProjectMediaPath, contentType: /^audio\//i },
-          { path: effectProjectMediaPath, contentType: /^audio\//i }
-        ]);
-
         const secondCompileResponse = await server.app.inject({
           method: "POST",
           url: `/api/projects/${projectId}/manifest/compile`
@@ -2068,6 +2116,23 @@ describe("MVP final verification E2E", () => {
           frequencyHz: SFX_MARKER_FREQUENCY_HZ,
           label: "SFX"
         });
+
+        expect(mp4Run.log.outputPath).toBe(
+          `output/render-${mp4Accepted.runId}.mp4`
+        );
+        await validateWebPreviewPath(
+          server,
+          projectId,
+          previewManifest,
+          [
+            { path: bgmProjectMediaPath, contentType: /^audio\//i },
+            { path: effectProjectMediaPath, contentType: /^audio\//i }
+          ],
+          undefined,
+          true
+        );
+        expect(await pathExists(mp4Path)).toBe(true);
+        expect(await sha256File(mp4Path)).toBe(mp4OutputChecksum);
 
         const thumbnailAcceptedResponse = await server.app.inject({
           method: "POST",

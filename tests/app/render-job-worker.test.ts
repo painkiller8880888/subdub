@@ -292,6 +292,60 @@ describe("RenderJobWorker and RenderJobService", () => {
     await service.stop();
   });
 
+  it("renders a preview profile into its isolated output directory", async () => {
+    const root = await createRoot();
+    const renderer = createRenderer(async (input) => {
+      expect(input.renderProfile).toEqual({
+        kind: "preview",
+        previewPreset: "hd"
+      });
+      await fs.writeFile(input.outputPath, "preview mp4");
+    });
+    const service = createService(root, renderer, ["preview-run"]);
+
+    service.start();
+    await expect(service.enqueuePreview(projectId, "hd")).resolves.toEqual({
+      runId: "preview-run",
+      status: "queued",
+      kind: "preview",
+      previewPreset: "hd"
+    });
+    const terminal = await waitFor(
+      () => service.getStatus(projectId, "preview-run"),
+      (status) => status.status === "succeeded" || status.status === "failed"
+    );
+    expect(terminal).toMatchObject({
+      status: "succeeded",
+      outputPath: "output/previews/preview-run-hd.mp4",
+      renderProfile: { kind: "preview", previewPreset: "hd" }
+    });
+    await expect(
+      fs.readFile(
+        path.join(
+          root,
+          "projects",
+          projectId,
+          "output",
+          "previews",
+          "preview-run-hd.mp4"
+        ),
+        "utf8"
+      )
+    ).resolves.toBe("preview mp4");
+    await expect(
+      fs.stat(
+        path.join(
+          root,
+          "projects",
+          projectId,
+          "output",
+          "render-preview-run.mp4"
+        )
+      )
+    ).rejects.toMatchObject({ code: "ENOENT" });
+    await service.stop();
+  });
+
   it("runs thumbnail jobs through the thumbnail port and normalizes its failure", async () => {
     const root = await createRoot();
     const renderer = createRenderer(async () => {

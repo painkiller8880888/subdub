@@ -66,6 +66,7 @@ import {
   renderJobKindSchema,
   renderRunLogSchema
 } from "./render-run-log.js";
+import { previewPresetSchema } from "./render-profile.js";
 import {
   runErrorCodeSchema,
   runStatusSchema
@@ -682,6 +683,21 @@ export const renderAcceptedDataSchema = strictObject({
 
 export const renderAcceptedResponseSchema = strictObject({
   data: renderAcceptedDataSchema
+});
+
+export const previewRenderRequestSchema = strictObject({
+  previewPreset: previewPresetSchema
+});
+
+export const previewRenderAcceptedDataSchema = strictObject({
+  runId: idSchema,
+  status: z.literal("queued"),
+  kind: z.literal("preview"),
+  previewPreset: previewPresetSchema
+});
+
+export const previewRenderAcceptedResponseSchema = strictObject({
+  data: previewRenderAcceptedDataSchema
 });
 
 export const renderRunStatusResponseSchema = strictObject({
@@ -1510,6 +1526,13 @@ export type RenderRunParams = z.infer<typeof renderRunParamsSchema>;
 export type RenderAcceptedData = z.infer<typeof renderAcceptedDataSchema>;
 export type RenderAcceptedResponse = z.infer<
   typeof renderAcceptedResponseSchema
+>;
+export type PreviewRenderRequest = z.infer<typeof previewRenderRequestSchema>;
+export type PreviewRenderAcceptedData = z.infer<
+  typeof previewRenderAcceptedDataSchema
+>;
+export type PreviewRenderAcceptedResponse = z.infer<
+  typeof previewRenderAcceptedResponseSchema
 >;
 export type RenderRunStatusResponse = z.infer<
   typeof renderRunStatusResponseSchema

@@ -1,14 +1,23 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Player } from "@remotion/player";
+import { useState } from "react";
 import { Link, Navigate, useParams } from "react-router";
 import { ZodError } from "zod";
 
 import { RenderManifestComposition } from "../remotion/composition";
 import {
+  previewPresetDefinitions,
+  previewPresetSchema,
+  type PreviewPreset
+} from "../schema/render-profile";
+import {
   ApiClientError,
   ApiClientProtocolError,
   compileProjectManifest,
-  fetchProjectManifest
+  enqueueProjectPreviewRender,
+  fetchProjectManifest,
+  fetchProjectRenderStatus,
+  projectPreviewDownloadUrl
 } from "./lib/api-client";
 import {
   createPreviewCompileDiagnosticViewModel,
@@ -16,6 +25,11 @@ import {
   createPreviewViewModel
 } from "./preview-state";
 import { WorkflowIndicator } from "./WorkflowIndicator";
+
+type PreviewRun = {
+  readonly runId: string;
+  readonly previewPreset: PreviewPreset;
+};
 
 function getErrorMessage(
   error: unknown,
@@ -45,6 +59,8 @@ function errorDetails(error: unknown): readonly string[] {
 export function PreviewPage() {
   const { projectId } = useParams<{ projectId: string }>();
   const queryClient = useQueryClient();
+  const [previewPreset, setPreviewPreset] = useState<PreviewPreset>("hd");
+  const [previewRun, setPreviewRun] = useState<PreviewRun | null>(null);
   const manifestQuery = useQuery({
     queryKey: ["projects", projectId, "manifest"],
     queryFn: () => fetchProjectManifest(projectId ?? ""),
@@ -57,6 +73,27 @@ export function PreviewPage() {
       await queryClient.invalidateQueries({
         queryKey: ["projects", projectId, "manifest"]
       });
+    }
+  });
+  const previewRenderMutation = useMutation({
+    mutationFn: () =>
+      enqueueProjectPreviewRender(projectId ?? "", previewPreset),
+    onSuccess: (accepted) => {
+      setPreviewRun({
+        runId: accepted.runId,
+        previewPreset: accepted.previewPreset
+      });
+    }
+  });
+  const previewStatusQuery = useQuery({
+    queryKey: ["projects", projectId, "preview-render", previewRun?.runId],
+    queryFn: () =>
+      fetchProjectRenderStatus(projectId ?? "", previewRun?.runId ?? ""),
+    enabled: projectId !== undefined && previewRun !== null,
+    retry: false,
+    refetchInterval: (query) => {
+      const status = query.state.data?.status;
+      return status === "queued" || status === "running" ? 1000 : false;
     }
   });
 
@@ -113,6 +150,22 @@ export function PreviewPage() {
           compileMutation.data.diagnostics
         )
       : [];
+  const previewStatus = previewStatusQuery.data;
+  const previewRenderInProgress =
+    previewRenderMutation.isPending ||
+    previewStatus?.status === "queued" ||
+    previewStatus?.status === "running";
+  let previewDownloadUrl: string | null = null;
+  if (previewStatus?.status === "succeeded") {
+    try {
+      previewDownloadUrl = projectPreviewDownloadUrl(
+        projectId,
+        previewStatus.outputPath
+      );
+    } catch {
+      previewDownloadUrl = null;
+    }
+  }
 
   return (
     <main className="page-shell preview-page">
@@ -249,8 +302,90 @@ export function PreviewPage() {
         </section>
       ) : null}
 
-      {playerProps !== null ? (
-        <section className="preview-player-panel" aria-label="動画プレビュー">
+      <section className="preview-player-panel" aria-label="動画プレビュー">
+        <div className="preview-export-controls">
+          <div>
+            <p className="eyebrow">プレビューを保存</p>
+            <label htmlFor="preview-export-preset">保存解像度</label>
+            <select
+              id="preview-export-preset"
+              value={previewPreset}
+              disabled={previewRenderInProgress || compileMutation.isPending}
+              onChange={(event) => {
+                const parsedPreset = previewPresetSchema.safeParse(
+                  event.target.value
+                );
+                if (parsedPreset.success) {
+                  setPreviewPreset(parsedPreset.data);
+                }
+              }}
+            >
+              {previewPresetDefinitions.map(({ preset, width, height }) => (
+                <option key={preset} value={preset}>
+                  {preset.toUpperCase()}（{width}×{height}）
+                </option>
+              ))}
+            </select>
+          </div>
+          <button
+            className="button button-primary"
+            type="button"
+            disabled={
+              !viewModel.canPlay ||
+              manifestQuery.isFetching ||
+              compileMutation.isPending ||
+              compileMutation.isError ||
+              compileMutation.data?.status === "failed" ||
+              compileDiagnostics.length > 0 ||
+              previewRenderInProgress
+            }
+            onClick={() => previewRenderMutation.mutate()}
+          >
+            {previewRenderInProgress
+              ? "プレビューを保存中…"
+              : "プレビューを保存"}
+          </button>
+        </div>
+        {previewRenderMutation.isError ? (
+          <p className="status-message status-message-error" role="alert">
+            {getErrorMessage(
+              previewRenderMutation.error,
+              "プレビューを保存できませんでした。"
+            )}
+          </p>
+        ) : null}
+        {previewStatusQuery.isError ? (
+          <p className="status-message status-message-error" role="alert">
+            {getErrorMessage(
+              previewStatusQuery.error,
+              "プレビュー保存の状態を取得できませんでした。"
+            )}
+          </p>
+        ) : null}
+        {previewRun !== null && !previewStatusQuery.isError ? (
+          <div
+            className="preview-export-status"
+            role={previewStatus?.status === "failed" ? "alert" : "status"}
+          >
+            <p>
+              {previewStatus === undefined
+                ? `${previewRun.previewPreset.toUpperCase()}の保存を受け付けました。`
+                : previewStatus.status === "queued"
+                  ? `${previewRun.previewPreset.toUpperCase()}を保存する準備をしています…`
+                  : previewStatus.status === "running"
+                    ? `${previewRun.previewPreset.toUpperCase()}を保存しています…`
+                    : previewStatus.status === "succeeded"
+                      ? `${previewRun.previewPreset.toUpperCase()}のプレビューを保存しました。`
+                      : `${previewRun.previewPreset.toUpperCase()}の保存に失敗しました。（エラーコード: ${previewStatus.errorCode}）`}
+            </p>
+            {previewDownloadUrl !== null ? (
+              <a className="button" href={previewDownloadUrl} download>
+                保存したプレビューを取得
+              </a>
+            ) : null}
+          </div>
+        ) : null}
+        {playerProps !== null ? (
           <Player
             component={RenderManifestComposition}
             inputProps={playerProps.inputProps}
@@ -268,8 +403,9 @@ export function PreviewPage() {
               </div>
             )}
           />
-        </section>
-      ) : data.manifest === null ? (
+        ) : null}
+      </section>
+      {data.manifest === null ? (
         <section
           className="message-panel"
           aria-labelledby="preview-empty-title"

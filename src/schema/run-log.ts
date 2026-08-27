@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { aiTaskKindSchema, type AiTaskKind } from "./video-project.js";
+import { renderProfileSchema } from "./render-profile.js";
 import {
   idSchema,
   isoUtcDateTimeSchema,
@@ -217,8 +218,18 @@ const manifestRunLogBaseSchema = strictObject({
 const renderRunLogBaseSchema = strictObject({
   ...runLogInvariantFields,
   kind: z.literal("render"),
-  renderKind: renderKindSchema
-}).superRefine(addRunStatusIssues);
+  renderKind: renderKindSchema,
+  renderProfile: renderProfileSchema.optional()
+}).superRefine((value, ctx) => {
+  addRunStatusIssues(value, ctx);
+  if (value.renderProfile?.kind === "preview" && value.renderKind !== "mp4") {
+    ctx.addIssue({
+      code: "custom",
+      path: ["renderProfile"],
+      message: "preview profiles are only valid for MP4 render jobs"
+    });
+  }
+});
 
 /** The persisted, strict, discriminated run-log contract. */
 export const runLogSchema = z.discriminatedUnion("kind", [
@@ -282,7 +293,8 @@ const legacyRenderRunLogCommonFields = {
   projectId: idSchema,
   kind: renderKindSchema,
   projectRevision: nonNegativeIntegerSchema,
-  queuedAt: isoUtcDateTimeSchema
+  queuedAt: isoUtcDateTimeSchema,
+  renderProfile: renderProfileSchema.optional()
 };
 
 const legacyRenderRunLogQueuedSchema = strictObject({
@@ -425,7 +437,10 @@ function legacyRenderToRunLog(value: LegacyRenderRunLog): CommonRenderRunLog {
     outputs: succeededOutput,
     errorCode:
       value.status === "failed" ? (value.errorCode ?? "RENDER_FAILED") : null,
-    renderKind: value.kind
+    renderKind: value.kind,
+    ...(value.renderProfile === undefined
+      ? {}
+      : { renderProfile: value.renderProfile })
   }) as CommonRenderRunLog;
 }
 

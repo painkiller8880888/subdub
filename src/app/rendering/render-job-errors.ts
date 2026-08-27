@@ -14,6 +14,8 @@ export const RENDER_JOB_ERROR_CODE = {
   compositionSelectionFailed: "RENDER_COMPOSITION_SELECTION_FAILED",
   mp4RenderFailed: "MP4_RENDER_FAILED",
   thumbnailRenderFailed: "THUMBNAIL_RENDER_FAILED",
+  previewPresetInvalid: "RENDER_PREVIEW_PRESET_INVALID",
+  previewKindInvalid: "RENDER_PREVIEW_KIND_INVALID",
   temporaryOutputWriteFailed: "RENDER_TEMPORARY_OUTPUT_WRITE_FAILED",
   finalOutputWriteFailed: "RENDER_FINAL_OUTPUT_WRITE_FAILED",
   runLogReadFailed: "RENDER_RUN_LOG_READ_FAILED",

@@ -4,12 +4,19 @@ import * as path from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { stagePublicDirectory } from "../../src/app/rendering/remotion-mp4-renderer.js";
+import {
+  remotionCompositionForProfile,
+  remotionOptionsFromProject,
+  type RemotionComposition,
+  stagePublicDirectory
+} from "../../src/app/rendering/remotion-mp4-renderer.js";
 import {
   renderManifestSchema,
-  type RenderManifest
+  type RenderManifest,
+  videoProjectSchema
 } from "../../src/schema/index.js";
 import { renderManifestFixture } from "../fixtures/render-manifest.js";
+import { videoProjectFixture } from "../fixtures/video-project.js";
 
 const projectId = "manual-video-project";
 let temporaryRoot: string | undefined;
@@ -22,6 +29,47 @@ afterEach(async () => {
 });
 
 describe("Remotion MP4 public staging", () => {
+  it("keeps production options unchanged and applies native-canvas preview scaling", () => {
+    const project = videoProjectSchema.parse(videoProjectFixture);
+
+    expect(remotionOptionsFromProject(project)).toEqual({
+      codec: "h264",
+      pixelFormat: "yuv420p",
+      audioCodec: "aac",
+      sampleRate: 48000
+    });
+    expect(
+      remotionOptionsFromProject(project, {
+        kind: "preview",
+        previewPreset: "sd"
+      })
+    ).toEqual({
+      codec: "h264",
+      pixelFormat: "yuv420p",
+      audioCodec: "aac",
+      sampleRate: 48000,
+      audioBitrate: "128k",
+      crf: 23,
+      x264Preset: "veryfast",
+      disallowParallelEncoding: true,
+      scale: 854 / 1920
+    });
+
+    const nativeComposition = {
+      width: 1920,
+      height: 1080
+    } as unknown as RemotionComposition;
+    for (const previewPreset of ["sd", "hd", "fhd"] as const) {
+      expect(
+        remotionCompositionForProfile(nativeComposition, {
+          kind: "preview",
+          previewPreset
+        })
+      ).toBe(nativeComposition);
+    }
+    expect(nativeComposition).toMatchObject({ width: 1920, height: 1080 });
+  });
+
   it("preserves the project-prefixed VOICEVOX audio path used by the manifest", async () => {
     temporaryRoot = await fs.mkdtemp(
       path.join(os.tmpdir(), "subdub-remotion-staging-")
