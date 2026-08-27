@@ -3,6 +3,7 @@ import { z } from "zod";
 import {
   legacyRenderRunLogSchema,
   runLogSchema,
+  type CommonRenderRunLog,
   type LegacyRenderRunLog,
   type RunLog
 } from "./run-log.js";
@@ -14,6 +15,7 @@ import {
   strictObject,
   nonNegativeIntegerSchema
 } from "./primitives.js";
+import { renderProfileSchema } from "./render-profile.js";
 
 export const renderJobKindSchema = z.enum(["mp4", "thumbnail"]);
 
@@ -29,7 +31,8 @@ const renderRunLogCommonFields = {
   projectId: idSchema,
   kind: renderJobKindSchema,
   projectRevision: nonNegativeIntegerSchema,
-  queuedAt: isoUtcDateTimeSchema
+  queuedAt: isoUtcDateTimeSchema,
+  renderProfile: renderProfileSchema.optional()
 };
 
 export const renderRunLogQueuedSchema = strictObject({
@@ -75,6 +78,15 @@ function publicOutputPath(path: string, projectId: string): string {
     : path;
 }
 
+function publicProfile(value: CommonRenderRunLog): {
+  readonly renderProfile?: CommonRenderRunLog["renderProfile"];
+} {
+  return value.renderProfile === undefined ||
+    value.renderProfile.kind === "production"
+    ? {}
+    : { renderProfile: value.renderProfile };
+}
+
 function toCompatibilityView(
   value: LegacyRenderRunLog | RunLog
 ):
@@ -100,6 +112,7 @@ function toCompatibilityView(
       runId: value.runId,
       projectId: value.projectId,
       kind: value.renderKind,
+      ...publicProfile(value),
       projectRevision: value.projectRevision,
       queuedAt: value.queuedAt,
       status: value.status,
@@ -118,6 +131,7 @@ function toCompatibilityView(
       runId: value.runId,
       projectId: value.projectId,
       kind: value.renderKind,
+      ...publicProfile(value),
       projectRevision: value.projectRevision,
       queuedAt: value.queuedAt,
       status: value.status,
@@ -131,6 +145,7 @@ function toCompatibilityView(
     runId: value.runId,
     projectId: value.projectId,
     kind: value.renderKind,
+    ...publicProfile(value),
     projectRevision: value.projectRevision,
     queuedAt: value.queuedAt,
     status: value.status,

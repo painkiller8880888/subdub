@@ -6,6 +6,7 @@ export * from "./common.js";
 export * from "./edit-video.js";
 export * from "./primitives.js";
 export * from "./render-manifest.js";
+export * from "./render-profile.js";
 export * from "./render-run-log.js";
 export * from "./run-log.js";
 export * from "./screen-template.js";

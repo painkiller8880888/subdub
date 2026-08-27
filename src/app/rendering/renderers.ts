@@ -1,4 +1,8 @@
-import type { RenderManifest, VideoProject } from "../../schema/index.js";
+import type {
+  RenderManifest,
+  RenderProfile,
+  VideoProject
+} from "../../schema/index.js";
 import { RENDER_JOB_ERROR_CODE, RenderJobError } from "./render-job-errors.js";
 
 export type RenderRendererInput = {
@@ -7,6 +11,8 @@ export type RenderRendererInput = {
   readonly project: VideoProject;
   readonly manifest: RenderManifest;
   readonly outputPath: string;
+  /** Omitted by older callers; omitted means the production profile. */
+  readonly renderProfile?: RenderProfile;
 };
 
 export type RenderRendererPort = {

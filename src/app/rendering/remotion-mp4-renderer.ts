@@ -19,8 +19,11 @@ import {
 } from "@remotion/renderer";
 
 import {
+  getPreviewPresetDefinition,
   relativePosixPathSchema,
+  type PreviewPreset,
   type RenderManifest,
+  type RenderProfile,
   type VideoProject
 } from "../../schema/index.js";
 import { RENDER_JOB_ERROR_CODE, RenderJobError } from "./render-job-errors.js";
@@ -311,7 +314,24 @@ export async function stagePublicDirectory(
   return publicRoot;
 }
 
-function remotionOptionsFromProject(project: VideoProject) {
+export function remotionOptionsFromProject(
+  project: VideoProject,
+  renderProfile?: RenderProfile
+) {
+  if (renderProfile?.kind === "preview") {
+    const preset = getPreviewPresetDefinition(renderProfile.previewPreset);
+    return {
+      codec: "h264" as const,
+      pixelFormat: "yuv420p" as const,
+      audioCodec: "aac" as const,
+      sampleRate: 48000 as const,
+      audioBitrate: "128k" as const,
+      crf: 23 as const,
+      x264Preset: "veryfast" as const,
+      scale: previewScaleForPreset(preset.preset)
+    };
+  }
+
   const settings = project.metadata.outputSettings;
   return {
     codec: settings.videoCodec,
@@ -319,6 +339,31 @@ function remotionOptionsFromProject(project: VideoProject) {
     audioCodec: settings.audioCodec,
     sampleRate: settings.audioSampleRate
   } as const;
+}
+
+function previewScaleForPreset(preset: PreviewPreset): number {
+  // 854x480 is the conventional SD target, but it is not an exact 16:9
+  // scale of 1920x1080. Render at an integer 1708x960 intermediate size and
+  // use Remotion's scale option to produce the exact requested dimensions.
+  return preset === "sd" ? 0.5 : preset === "hd" ? 2 / 3 : 1;
+}
+
+type RemotionComposition = Awaited<ReturnType<typeof selectComposition>>;
+
+export function remotionCompositionForProfile(
+  composition: RemotionComposition,
+  renderProfile?: RenderProfile
+): RemotionComposition {
+  if (renderProfile?.kind !== "preview") {
+    return composition;
+  }
+  const preset = getPreviewPresetDefinition(renderProfile.previewPreset);
+  const scale = previewScaleForPreset(preset.preset);
+  return {
+    ...composition,
+    width: preset.width / scale,
+    height: preset.height / scale
+  };
 }
 
 export type RemotionMp4RendererOptions = {
@@ -402,15 +447,19 @@ export class RemotionMp4Renderer implements Mp4RendererPort {
       }
 
       try {
+        const renderComposition = remotionCompositionForProfile(
+          composition,
+          input.renderProfile
+        );
         await renderMedia({
           serveUrl,
-          composition,
+          composition: renderComposition,
           inputProps: input.manifest as unknown as Record<string, unknown>,
           outputLocation: input.outputPath,
           overwrite: true,
           browserExecutable: browser,
           logLevel: "error",
-          ...remotionOptionsFromProject(input.project)
+          ...remotionOptionsFromProject(input.project, input.renderProfile)
         });
       } catch {
         throw new RenderJobError(

@@ -26,7 +26,10 @@ import {
   activateTerminology,
   previewTerminology,
   exportAiRuns,
-  searchAiRuns
+  searchAiRuns,
+  enqueueProjectPreviewRender,
+  fetchProjectRenderStatus,
+  projectPreviewDownloadUrl
 } from "../../src/web/lib/api-client.js";
 import {
   aiRunSearchResponseSchema,
@@ -34,7 +37,9 @@ import {
   projectListResponseSchema,
   manifestCompileResponseSchema,
   terminologyPreviewResponseSchema,
-  terminologyTermResponseSchema
+  terminologyTermResponseSchema,
+  previewRenderAcceptedResponseSchema,
+  renderRunStatusResponseSchema
 } from "../../src/schema/api.js";
 
 function jsonResponse(body: unknown, status: number): Response {
@@ -692,6 +697,104 @@ describe("web API client", () => {
     expect(
       manifestCompileResponseSchema.safeParse({ data: result }).success
     ).toBe(true);
+  });
+
+  it("queues a preview render, polls its status, and builds a managed download URL", async () => {
+    const calls: Array<{ input: string; init: RequestInit | undefined }> = [];
+    globalThis.fetch = async (input, init) => {
+      calls.push({ input: String(input), init });
+      if (String(input).includes("/preview/render")) {
+        return jsonResponse(
+          {
+            data: {
+              runId: "preview-run",
+              status: "queued",
+              kind: "preview",
+              previewPreset: "sd"
+            }
+          },
+          202
+        );
+      }
+      return jsonResponse(
+        {
+          data: {
+            runId: "preview-run",
+            projectId: "manual-video-project",
+            kind: "mp4",
+            renderProfile: { kind: "preview", previewPreset: "sd" },
+            projectRevision: 1,
+            queuedAt: "2026-08-11T00:00:00.000Z",
+            status: "succeeded",
+            startedAt: "2026-08-11T00:00:01.000Z",
+            completedAt: "2026-08-11T00:00:02.000Z",
+            outputPath: "output/previews/preview-run-sd.mp4",
+            outputChecksum: "a".repeat(64)
+          }
+        },
+        200
+      );
+    };
+
+    await expect(
+      enqueueProjectPreviewRender("manual-video-project", "sd")
+    ).resolves.toMatchObject({
+      runId: "preview-run",
+      kind: "preview",
+      previewPreset: "sd"
+    });
+    expect(JSON.parse(String(calls[0]?.init?.body))).toEqual({
+      previewPreset: "sd"
+    });
+
+    await expect(
+      fetchProjectRenderStatus("manual-video-project", "preview-run")
+    ).resolves.toMatchObject({
+      status: "succeeded",
+      outputPath: "output/previews/preview-run-sd.mp4",
+      renderProfile: { kind: "preview", previewPreset: "sd" }
+    });
+    expect(
+      projectPreviewDownloadUrl(
+        "manual-video-project",
+        "output/previews/preview-run-sd.mp4"
+      )
+    ).toBe(
+      "/api/projects/manual-video-project/files/output/previews/preview-run-sd.mp4"
+    );
+    expect(
+      previewRenderAcceptedResponseSchema.safeParse({
+        data: {
+          runId: "preview-run",
+          status: "queued",
+          kind: "preview",
+          previewPreset: "sd"
+        }
+      }).success
+    ).toBe(true);
+    expect(
+      renderRunStatusResponseSchema.safeParse({
+        data: {
+          runId: "preview-run",
+          projectId: "manual-video-project",
+          kind: "mp4",
+          renderProfile: { kind: "preview", previewPreset: "sd" },
+          projectRevision: 1,
+          queuedAt: "2026-08-11T00:00:00.000Z",
+          status: "succeeded",
+          startedAt: "2026-08-11T00:00:01.000Z",
+          completedAt: "2026-08-11T00:00:02.000Z",
+          outputPath: "output/previews/preview-run-sd.mp4",
+          outputChecksum: "a".repeat(64)
+        }
+      }).success
+    ).toBe(true);
+    expect(() =>
+      projectPreviewDownloadUrl(
+        "manual-video-project",
+        "output/previews/../render-run.mp4"
+      )
+    ).toThrow();
   });
 
   it("rejects malformed preview responses and preserves ApiClientError", async () => {

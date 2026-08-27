@@ -3,28 +3,37 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { registerMediabunnyServer } from "@mediabunny/server";
 import { bundle } from "@remotion/bundler";
 import {
   renderMedia,
   renderStill,
   selectComposition
 } from "@remotion/renderer";
+import { ALL_FORMATS, FilePathSource, Input } from "mediabunny";
 import sharp from "sharp";
 import { describe, expect, it, afterAll, beforeAll } from "vitest";
 
 import { renderManifestFixture } from "../fixtures/render-manifest.js";
 import { renderManifestRenderingFixture } from "../fixtures/render-manifest-rendering.js";
+import { videoProjectFixture } from "../fixtures/video-project.js";
 import {
   audioTrackSequenceProps,
   audioTrackVolumeAtFrame,
   soundEffectSequenceProps
 } from "../../src/remotion/audio.js";
 import {
+  browserExecutable as resolveBrowserExecutable,
+  remotionCompositionForProfile,
+  remotionOptionsFromProject
+} from "../../src/app/rendering/remotion-mp4-renderer.js";
+import {
   renderManifestSchema,
+  videoProjectSchema,
   type RenderManifest,
+  type RenderProfile,
   type VisualPlaybackCue
 } from "../../src/schema/index.js";
-import { browserExecutable as resolveBrowserExecutable } from "../../src/app/rendering/remotion-mp4-renderer.js";
 import {
   findCharacterVariant,
   selectCharacterImagePathForFrame,
@@ -50,6 +59,7 @@ const remotionEntryPoint = path.join(
   "entry-point.tsx"
 );
 const browserExecutable = resolveBrowserExecutable();
+registerMediabunnyServer();
 
 let testRoot: string | undefined;
 let bundleDirectory: string | undefined;
@@ -243,7 +253,8 @@ async function renderFixtureFrame(
 async function renderFixtureMp4(
   props: Record<string, unknown>,
   name: string,
-  frameRange: [number, number]
+  frameRange: [number, number],
+  renderProfile?: RenderProfile
 ): Promise<string> {
   if (bundleDirectory === undefined || outputDirectory === undefined) {
     throw new Error("Remotion bundle has not been initialized");
@@ -262,19 +273,30 @@ async function renderFixtureMp4(
   }
 
   const output = path.join(outputDirectory, `${name}.mp4`);
+  const renderComposition = remotionCompositionForProfile(
+    selectedComposition,
+    renderProfile
+  );
+  const project = videoProjectSchema.parse(videoProjectFixture);
+  const renderOptions =
+    renderProfile === undefined
+      ? {
+          codec: "h264" as const,
+          pixelFormat: "yuv420p" as const,
+          audioCodec: "aac" as const,
+          sampleRate: 48_000 as const,
+          muted: true
+        }
+      : remotionOptionsFromProject(project, renderProfile);
   await renderMedia({
     serveUrl: bundleDirectory,
-    composition: selectedComposition,
+    composition: renderComposition,
     inputProps: props,
     browserExecutable,
     frameRange,
     outputLocation: output,
     overwrite: true,
-    codec: "h264",
-    pixelFormat: "yuv420p",
-    audioCodec: "aac",
-    sampleRate: 48_000,
-    muted: true,
+    ...renderOptions,
     logLevel: "error"
   });
   return output;
@@ -774,6 +796,57 @@ describe("basic Remotion composition", () => {
     expect(mp4.length).toBeGreaterThan(1_000);
     expect(mp4.subarray(4, 8).toString("ascii")).toBe("ftyp");
   }, 180_000);
+
+  it("renders SD, HD, and FHD preview profiles with the fixed media contract", async () => {
+    const profiles = [
+      { kind: "preview", previewPreset: "sd", width: 854, height: 480 },
+      { kind: "preview", previewPreset: "hd", width: 1280, height: 720 },
+      { kind: "preview", previewPreset: "fhd", width: 1920, height: 1080 }
+    ] as const;
+
+    for (const profile of profiles) {
+      const outputPath = await renderFixtureMp4(
+        inputProps,
+        `preview-${profile.previewPreset}`,
+        [0, renderManifestRenderingFixture.durationInFrames - 1],
+        profile
+      );
+      const input = new Input({
+        source: new FilePathSource(outputPath),
+        formats: ALL_FORMATS
+      });
+      try {
+        const videoTrack = await input.getPrimaryVideoTrack();
+        const audioTrack = await input.getPrimaryAudioTrack();
+        expect(videoTrack).not.toBeNull();
+        expect(audioTrack).not.toBeNull();
+        if (videoTrack === null || audioTrack === null) {
+          throw new Error("Preview MP4 is missing a required media stream.");
+        }
+        expect(await videoTrack.getDisplayWidth()).toBe(profile.width);
+        expect(await videoTrack.getDisplayHeight()).toBe(profile.height);
+        expect(await videoTrack.getCodec()).toMatch(/avc|h264/i);
+        expect(await audioTrack.getCodec()).toMatch(/aac|mp4a/i);
+        expect(await audioTrack.getSampleRate()).toBe(48_000);
+        expect(await audioTrack.getNumberOfChannels()).toBe(2);
+        const packetStats = await videoTrack.computePacketStats();
+        expect(packetStats.averagePacketRate).toBeCloseTo(
+          renderManifestRenderingFixture.fps,
+          1
+        );
+        const durationSeconds = await input.computeDuration();
+        expect(
+          Math.abs(
+            durationSeconds -
+              renderManifestRenderingFixture.durationInFrames /
+                renderManifestRenderingFixture.fps
+          )
+        ).toBeLessThanOrEqual(0.25);
+      } finally {
+        input.dispose();
+      }
+    }
+  }, 600_000);
 
   it("renders registered insert videos instead of placeholder screens", async () => {
     const opening = await renderFixtureFrame(30, "video-insert-opening");

@@ -76,6 +76,9 @@ import {
   improvementDecisionResponseSchema,
   manifestCompileResponseSchema,
   manifestPreviewResponseSchema,
+  previewRenderAcceptedResponseSchema,
+  previewRenderRequestSchema,
+  renderRunStatusResponseSchema,
   voiceAdjustmentMutationResponseSchema,
   voiceAdjustmentPreviewRequestSchema,
   voiceAdjustmentPreviewResponseSchema,
@@ -137,6 +140,8 @@ import {
   type VoiceGenerationStatusData,
   type ManifestCompileData,
   type ManifestPreviewData,
+  type PreviewRenderAcceptedData,
+  type RenderRunStatusResponse,
   type CharacterVisualCreateRequest,
   type CharacterVisualUpdateRequest,
   type CharacterVisualVariantMultipartRequest,
@@ -154,6 +159,7 @@ import type {
   AssetUploadReceipt
 } from "../../schema/asset.js";
 import type { VideoProject } from "../../schema/video-project.js";
+import type { PreviewPreset } from "../../schema/render-profile.js";
 import type {
   CharacterVisualCatalogSnapshot,
   CharacterVisualSet
@@ -589,6 +595,59 @@ export async function compileProjectManifest(
     { method: "POST" }
   );
   return response.data;
+}
+
+export async function enqueueProjectPreviewRender(
+  projectId: string,
+  previewPreset: PreviewPreset
+): Promise<PreviewRenderAcceptedData> {
+  const validatedInput = previewRenderRequestSchema.parse({ previewPreset });
+  const response = await fetchApi(
+    `/api/projects/${encodeURIComponent(projectId)}/preview/render`,
+    previewRenderAcceptedResponseSchema,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(validatedInput)
+    }
+  );
+  return response.data;
+}
+
+export async function fetchProjectRenderStatus(
+  projectId: string,
+  runId: string
+): Promise<RenderRunStatusResponse["data"]> {
+  const response = await fetchApi(
+    `/api/projects/${encodeURIComponent(projectId)}/render/${encodeURIComponent(runId)}`,
+    renderRunStatusResponseSchema
+  );
+  return response.data;
+}
+
+export function projectPreviewDownloadUrl(
+  projectId: string,
+  outputPath: string
+): string {
+  const segments = outputPath.split("/");
+  if (
+    segments.length !== 3 ||
+    segments[0] !== "output" ||
+    segments[1] !== "previews" ||
+    outputPath.includes("\\") ||
+    outputPath.includes("%") ||
+    outputPath.includes("://") ||
+    /^[A-Za-z][A-Za-z0-9+.-]*:/.test(outputPath) ||
+    segments.some(
+      (segment) => segment.length === 0 || segment === "." || segment === ".."
+    ) ||
+    !/^[a-z0-9]+(?:-[a-z0-9]+)*-(?:sd|hd|fhd)\.mp4$/.test(segments[2] ?? "")
+  ) {
+    throw new Error("The preview output path is invalid.");
+  }
+  return `/api/projects/${encodeURIComponent(projectId)}/files/${segments
+    .map((segment) => encodeURIComponent(segment))
+    .join("/")}`;
 }
 
 export async function fetchProjectSource(

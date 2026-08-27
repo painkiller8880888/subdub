@@ -3,7 +3,13 @@ import { createReadStream } from "node:fs";
 import { promises as fs } from "node:fs";
 import * as path from "node:path";
 
-import { idSchema, type RenderJobKind } from "../../schema/index.js";
+import {
+  idSchema,
+  previewPresetSchema,
+  productionRenderProfile,
+  type RenderJobKind,
+  type RenderProfile
+} from "../../schema/index.js";
 import { RENDER_JOB_ERROR_CODE, RenderJobError } from "./render-job-errors.js";
 
 export type RenderOutputTarget = {
@@ -21,7 +27,8 @@ export type RenderOutputStorePort = {
   prepare(
     projectId: string,
     kind: RenderJobKind,
-    runId: string
+    runId: string,
+    renderProfile?: RenderProfile
   ): Promise<RenderOutputTarget>;
   promote(target: RenderOutputTarget): Promise<RenderOutputPromotion>;
   cleanup(target: RenderOutputTarget | undefined): Promise<void>;
@@ -48,15 +55,6 @@ function safeId(
     throw new RenderJobError(code, 400, "The render run ID is invalid.");
   }
   return result.data;
-}
-
-function outputNames(kind: RenderJobKind): {
-  readonly extension: "mp4" | "png";
-  readonly prefix: "render" | "thumbnail";
-} {
-  return kind === "mp4"
-    ? { extension: "mp4", prefix: "render" }
-    : { extension: "png", prefix: "thumbnail" };
 }
 
 function errorCode(error: unknown): string | undefined {
@@ -92,7 +90,8 @@ export class RenderOutputStore implements RenderOutputStorePort {
   async prepare(
     projectId: string,
     kind: RenderJobKind,
-    runId: string
+    runId: string,
+    renderProfile: RenderProfile = productionRenderProfile
   ): Promise<RenderOutputTarget> {
     const safeProjectId = safeId(
       projectId,
@@ -113,9 +112,31 @@ export class RenderOutputStore implements RenderOutputStorePort {
       );
     }
 
+    if (renderProfile.kind === "preview" && kind !== "mp4") {
+      throw new RenderJobError(
+        RENDER_JOB_ERROR_CODE.previewKindInvalid,
+        400,
+        "Preview output is only available for MP4 renders."
+      );
+    }
+    const previewPreset =
+      renderProfile.kind === "preview"
+        ? previewPresetSchema.safeParse(renderProfile.previewPreset)
+        : undefined;
+    if (previewPreset !== undefined && !previewPreset.success) {
+      throw new RenderJobError(
+        RENDER_JOB_ERROR_CODE.previewPresetInvalid,
+        400,
+        "The preview preset is invalid."
+      );
+    }
+    const outputDirectory =
+      previewPreset?.success === true
+        ? path.join(outputRoot, "previews")
+        : outputRoot;
     try {
-      await fs.mkdir(outputRoot, { recursive: true });
-      const resolvedRoot = await fs.realpath(outputRoot);
+      await fs.mkdir(outputDirectory, { recursive: true });
+      const resolvedRoot = await fs.realpath(outputDirectory);
       const resolvedWorkspaceRoot = await fs.realpath(this.workspaceRoot);
       if (!isPathInside(resolvedWorkspaceRoot, resolvedRoot)) {
         throw new Error("output path escaped workspace");
@@ -128,19 +149,33 @@ export class RenderOutputStore implements RenderOutputStorePort {
       );
     }
 
-    const names = outputNames(kind);
-    const outputPath = `output/${names.prefix}-${safeRunId}.${names.extension}`;
-    const finalPath = path.join(
-      outputRoot,
-      `${names.prefix}-${safeRunId}.${names.extension}`
-    );
-    // Remotion validates the container from the filename extension before it
-    // renders. Keep the format suffix on the temporary path while retaining
-    // the hidden, non-final staging name.
-    const temporaryPath = path.join(
-      outputRoot,
-      `.${names.prefix}-${safeRunId}.tmp.${names.extension}`
-    );
+    let outputPath: string;
+    let finalPath: string;
+    let temporaryPath: string;
+    if (previewPreset?.success === true) {
+      const fileName = `${safeRunId}-${previewPreset.data}.mp4`;
+      outputPath = `output/previews/${fileName}`;
+      finalPath = path.join(outputDirectory, fileName);
+      temporaryPath = path.join(
+        outputDirectory,
+        `.${safeRunId}-${previewPreset.data}.tmp.mp4`
+      );
+    } else {
+      const extension = kind === "mp4" ? "mp4" : "png";
+      const prefix = kind === "mp4" ? "render" : "thumbnail";
+      outputPath = `output/${prefix}-${safeRunId}.${extension}`;
+      finalPath = path.join(
+        outputDirectory,
+        `${prefix}-${safeRunId}.${extension}`
+      );
+      // Remotion validates the container from the filename extension before it
+      // renders. Keep the format suffix on the temporary path while retaining
+      // the hidden, non-final staging name.
+      temporaryPath = path.join(
+        outputDirectory,
+        `.${prefix}-${safeRunId}.tmp.${extension}`
+      );
+    }
     return { temporaryPath, finalPath, outputPath };
   }
 
