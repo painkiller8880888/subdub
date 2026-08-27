@@ -63,6 +63,12 @@ import {
   ScreenTemplateRevisionConflictError
 } from "../../app/screen-templates/screen-template-errors.js";
 import { ScreenTemplateValidationError } from "../../validation/screen-templates.js";
+import {
+  InsertTextTemplateNotFoundError,
+  InsertTextTemplateRepositoryError,
+  InsertTextTemplateRevisionConflictError
+} from "../../app/insert-text-templates/insert-text-template-errors.js";
+import { InsertTextTemplateValidationError } from "../../validation/insert-text-templates.js";
 
 export class ApiResponseValidationError extends Error {
   constructor(cause: unknown) {
@@ -124,6 +130,11 @@ export const API_ERROR_CODE = {
   screenTemplateValidationFailed: "SCREEN_TEMPLATE_VALIDATION_FAILED",
   screenTemplateConflict: "SCREEN_TEMPLATE_CONFLICT",
   screenTemplateDatabaseFailed: "SCREEN_TEMPLATE_DATABASE_FAILED",
+  insertTextTemplateNotFound: "INSERT_TEXT_TEMPLATE_NOT_FOUND",
+  insertTextTemplateRevisionConflict: "INSERT_TEXT_TEMPLATE_REVISION_CONFLICT",
+  insertTextTemplateValidationFailed: "INSERT_TEXT_TEMPLATE_VALIDATION_FAILED",
+  insertTextTemplateConflict: "INSERT_TEXT_TEMPLATE_CONFLICT",
+  insertTextTemplateDatabaseFailed: "INSERT_TEXT_TEMPLATE_DATABASE_FAILED",
   visualAssignmentProjectPathInvalid:
     VISUAL_ASSIGNMENT_ERROR_CODE.projectPathInvalid,
   visualAssignmentAssetNotFound: VISUAL_ASSIGNMENT_ERROR_CODE.assetNotFound,
@@ -764,6 +775,67 @@ export function mapApiError(error: unknown): MappedApiError {
     }
     return {
       code: API_ERROR_CODE.screenTemplateDatabaseFailed,
+      status: 500,
+      message: genericInternalMessage,
+      details: [],
+      shouldLog: true
+    };
+  }
+
+  if (error instanceof InsertTextTemplateNotFoundError) {
+    return {
+      code: API_ERROR_CODE.insertTextTemplateNotFound,
+      status: 404,
+      message: "InsertTextTemplateが見つかりません。",
+      details: [],
+      shouldLog: false
+    };
+  }
+
+  if (error instanceof InsertTextTemplateRevisionConflictError) {
+    return {
+      code: API_ERROR_CODE.insertTextTemplateRevisionConflict,
+      status: 409,
+      message: "InsertTextTemplateが別の内容へ更新されています。",
+      details: [
+        {
+          path: ["expectedRevision"],
+          message: "現在のrevisionと一致しません。"
+        },
+        {
+          path: ["revision"],
+          message: "最新のInsertTextTemplateを再取得してください。"
+        }
+      ],
+      shouldLog: false
+    };
+  }
+
+  if (error instanceof InsertTextTemplateValidationError) {
+    return {
+      code: API_ERROR_CODE.insertTextTemplateValidationFailed,
+      status: 422,
+      message: genericValidationMessage,
+      details: error.issues.map((issue) => ({
+        path: [...issue.path],
+        message: issue.message
+      })),
+      shouldLog: false
+    };
+  }
+
+  if (error instanceof InsertTextTemplateRepositoryError) {
+    if (error.constraint !== "unknown") {
+      return {
+        code: API_ERROR_CODE.insertTextTemplateConflict,
+        status: 409,
+        message: "InsertTextTemplateの保存内容が既存データと競合しました。",
+        details: [],
+        shouldLog: false
+      };
+    }
+    return {
+      code: API_ERROR_CODE.insertTextTemplateDatabaseFailed,
       status: 500,
       message: genericInternalMessage,
       details: [],

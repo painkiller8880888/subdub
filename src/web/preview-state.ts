@@ -46,6 +46,10 @@ const compileDiagnosticTitles: Readonly<Record<string, string>> = {
     "元資料が更新されています。構成案を確認してください。",
   SCRIPT_OUTLINE_HASH_MISMATCH:
     "構成案と台本の対応が古くなっています。台本を確認してください。",
+  INSERT_TEXT_TEMPLATE_MISSING:
+    "挿入文字テンプレートが見つかりません。編集画面のテンプレート設定を確認してください。",
+  INSERT_TEXT_TEMPLATE_INACTIVE:
+    "挿入文字テンプレートが無効です。編集画面で有効なテンプレートを選択してください。",
   SCRIPT_EMPTY: "台本にセリフがありません。",
   SCRIPT_SECTION_EMPTY: "セリフがないセクションがあります。",
   AUDIO_INDEX_ENTRY_MISSING: "セリフに必要な音声が未生成です。",
@@ -127,7 +131,11 @@ const blockerMessages: Readonly<Record<string, string>> = {
   MANIFEST_PROJECT_STALE:
     "保存済みプレビューが現在のプロジェクトと一致しません。再生成してください。",
   MANIFEST_SCREEN_TEMPLATE_STALE:
-    "保存済みプレビューの画面テンプレートが更新されています。再生成してください。"
+    "保存済みプレビューの画面テンプレートが更新されています。再生成してください。",
+  INSERT_TEXT_TEMPLATE_REFERENCE_INVALID:
+    "選択された挿入文字テンプレートが見つからないか無効です。編集画面の設定を修正してください。",
+  MANIFEST_INSERT_TEXT_TEMPLATE_STALE:
+    "保存済みプレビューの挿入文字テンプレートが更新されています。再生成してください。"
 };
 
 const blockerOrder: readonly string[] = [
@@ -136,10 +144,12 @@ const blockerOrder: readonly string[] = [
   "MANIFEST_UNREADABLE",
   "MANIFEST_PROJECT_STALE",
   "MANIFEST_SCREEN_TEMPLATE_STALE",
+  "MANIFEST_INSERT_TEXT_TEMPLATE_STALE",
   "OUTLINE_NOT_APPROVED",
   "OUTLINE_SOURCE_HASH_MISMATCH",
   "SCRIPT_NOT_APPROVED",
   "SCRIPT_OUTLINE_HASH_MISMATCH",
+  "INSERT_TEXT_TEMPLATE_REFERENCE_INVALID",
   "VISUALS_NOT_APPROVED",
   "AUDIO_INDEX_UNREADABLE",
   "AUDIO_INDEX_ENTRY_MISSING",
@@ -224,6 +234,11 @@ function targetView(
           target.assignmentId === undefined
             ? `/projects/${projectPath}/script`
             : `/projects/${projectPath}/visual-assignments`
+      };
+    case "edit":
+      return {
+        label: "編集画面を確認",
+        href: `/projects/${projectPath}/edit`
       };
     case "manifest":
       return {

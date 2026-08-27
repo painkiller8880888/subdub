@@ -297,7 +297,7 @@ describe("compileRenderManifest", () => {
     const segments = result.manifest.visuals.filter(
       (visual) => visual.sourceAssignmentId === assignment.id
     );
-    expect(result.manifest.manifestVersion).toBe("2.6.0");
+    expect(result.manifest.manifestVersion).toBe("2.7.0");
     expect(
       segments.map((segment) =>
         segment.kind === "video" ? segment.display.playbackState : segment.kind
@@ -412,7 +412,7 @@ describe("compileRenderManifest", () => {
       return;
     }
 
-    expect(result.manifest.manifestVersion).toBe("2.6.0");
+    expect(result.manifest.manifestVersion).toBe("2.7.0");
     expect(result.manifest.characterCatalogVersion).toBe(
       CHARACTER_VARIANT_CATALOG_VERSION
     );
@@ -1035,7 +1035,9 @@ describe("compileRenderManifest", () => {
         assetChecksum: videoAssignment.assetChecksum,
         projectMediaPath: videoAssignment.projectMediaPath,
         placement: { kind: "before_first_section" },
-        volume: 0
+        volume: 0,
+        text: "",
+        textTemplateId: null
       },
       {
         id: "edit-cutin-one",
@@ -1049,7 +1051,9 @@ describe("compileRenderManifest", () => {
           sectionId: "section-main",
           order: 1
         },
-        volume: 0.25
+        volume: 0.25,
+        text: "",
+        textTemplateId: null
       },
       {
         id: "edit-cutin-zero",
@@ -1063,7 +1067,9 @@ describe("compileRenderManifest", () => {
           sectionId: "section-main",
           order: 0
         },
-        volume: 1
+        volume: 1,
+        text: "",
+        textTemplateId: null
       },
       {
         id: "edit-outro",
@@ -1073,7 +1079,9 @@ describe("compileRenderManifest", () => {
         assetChecksum: videoAssignment.assetChecksum,
         projectMediaPath: videoAssignment.projectMediaPath,
         placement: { kind: "after_last_section" },
-        volume: 0.25
+        volume: 0.25,
+        text: "",
+        textTemplateId: null
       }
     ];
     const input = createRenderManifestInput(project);
@@ -1179,7 +1187,9 @@ describe("compileRenderManifest", () => {
             sectionId: "section-main",
             order: 0
           },
-          volume: 0.25
+          volume: 0.25,
+          text: "",
+          textTemplateId: null
         },
         {
           id: "edit-cutin-b",
@@ -1193,7 +1203,9 @@ describe("compileRenderManifest", () => {
             sectionId: "section-main",
             order: 1
           },
-          volume: 1
+          volume: 1,
+          text: "",
+          textTemplateId: null
         }
       ];
       return project;
@@ -1257,7 +1269,9 @@ describe("compileRenderManifest", () => {
         assetChecksum: "1".repeat(64),
         projectMediaPath: "media/intro.avi",
         placement: { kind: "before_first_section" },
-        volume: 1
+        volume: 1,
+        text: "",
+        textTemplateId: null
       }
     ];
     const input = validInput(project);

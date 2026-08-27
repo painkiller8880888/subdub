@@ -1482,6 +1482,22 @@ input:focus-visible {
   text-align: right;
 }
 
+.edit-insert-text-config {
+  border-top: 1px solid #e1e6ef;
+  display: grid;
+  gap: 0.75rem;
+  padding-top: 0.8rem;
+}
+
+.edit-insert-text-config .form-field {
+  margin: 0;
+}
+
+.edit-insert-text-config textarea {
+  min-height: 4.5rem;
+  resize: vertical;
+}
+
 .edit-card-actions {
   align-items: center;
   display: flex;
@@ -4434,6 +4450,172 @@ textarea[aria-invalid="true"] {
   overflow: visible;
 }
 
+.insert-text-templates-page,
+.insert-text-template-editor-page {
+  max-width: 1200px;
+}
+
+.insert-text-template-create-panel,
+.insert-text-template-list-panel,
+.insert-text-template-properties,
+.insert-text-template-preview-panel {
+  background: #fff;
+  border: 1px solid #d7deea;
+  border-radius: 0.8rem;
+  padding: 1.2rem;
+}
+
+.insert-text-template-create-panel,
+.insert-text-template-properties,
+.insert-text-template-preview-panel {
+  display: grid;
+  gap: 1rem;
+}
+
+.insert-text-template-create-panel h2,
+.insert-text-template-create-panel p,
+.insert-text-template-preview-heading h2,
+.insert-text-template-preview-heading p,
+.insert-text-template-preview-note {
+  margin: 0;
+}
+
+.insert-text-template-create-fields,
+.insert-text-template-two-column {
+  display: grid;
+  gap: 0.9rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.insert-text-template-list-header,
+.insert-text-template-title-row,
+.insert-text-template-preview-heading,
+.insert-text-template-save-row {
+  align-items: center;
+  display: flex;
+  gap: 1rem;
+  justify-content: space-between;
+}
+
+.insert-text-template-list-header h2,
+.insert-text-template-list-header p,
+.insert-text-template-list-header > span,
+.insert-text-template-title-row h3,
+.insert-text-template-card p,
+.insert-text-template-preview-heading span {
+  margin: 0;
+}
+
+.insert-text-template-list-header p,
+.insert-text-template-list-header > span,
+.insert-text-template-card p,
+.insert-text-template-preview-note {
+  color: #59647b;
+  font-size: 0.9rem;
+}
+
+.insert-text-template-list {
+  display: grid;
+  gap: 0.8rem;
+  list-style: none;
+  margin: 1rem 0 0;
+  padding: 0;
+}
+
+.insert-text-template-card {
+  align-items: start;
+  background: #fbfcff;
+  border: 1px solid #d7deea;
+  border-radius: 0.7rem;
+  display: flex;
+  gap: 1.2rem;
+  justify-content: space-between;
+  padding: 1rem;
+}
+
+.insert-text-template-card > div:first-child {
+  display: grid;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.insert-text-template-details {
+  border-top: 1px solid #e1e6ef;
+  display: grid;
+  gap: 0.35rem;
+  margin: 0.35rem 0 0;
+  padding-top: 0.65rem;
+}
+
+.insert-text-template-details > div {
+  display: grid;
+  gap: 0.4rem;
+  grid-template-columns: 5.5rem minmax(0, 1fr);
+}
+
+.insert-text-template-details dt {
+  color: #59647b;
+  font-weight: 700;
+}
+
+.insert-text-template-details dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.insert-text-template-editor-grid {
+  align-items: start;
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: minmax(20rem, 0.9fr) minmax(28rem, 1.5fr);
+}
+
+.insert-text-template-properties {
+  position: sticky;
+  top: 1rem;
+}
+
+.insert-text-template-fieldset {
+  border: 1px solid #d7deea;
+  border-radius: 0.6rem;
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin: 0;
+  padding: 0.8rem;
+}
+
+.insert-text-template-fieldset legend {
+  color: #59647b;
+  font-size: 0.85rem;
+  font-weight: 700;
+  padding: 0 0.35rem;
+}
+
+.insert-text-template-save-row {
+  border-top: 1px solid #e1e6ef;
+  padding-top: 0.9rem;
+}
+
+.insert-text-template-preview-canvas {
+  aspect-ratio: 16 / 9;
+  background: linear-gradient(135deg, #17243a, #30486f);
+  border: 2px solid #aeb8ca;
+  border-radius: 0.55rem;
+  container-type: inline-size;
+  overflow: hidden;
+  position: relative;
+  width: 100%;
+}
+
+.insert-text-template-preview-text {
+  display: flex;
+  position: absolute;
+  transform-origin: center center;
+  overflow: hidden;
+  line-height: 1.2;
+}
+
 .screen-template-canvas {
   aspect-ratio: 16 / 9;
   background: #17243a;
@@ -4940,6 +5122,21 @@ textarea[aria-invalid="true"] {
   }
 
   .edit-section-header-actions {
+    justify-content: flex-start;
+  }
+
+  .insert-text-template-create-fields,
+  .insert-text-template-two-column,
+  .insert-text-template-editor-grid,
+  .insert-text-template-fieldset {
+    grid-template-columns: 1fr;
+  }
+
+  .insert-text-template-card {
+    flex-direction: column;
+  }
+
+  .insert-text-template-card .screen-template-card-actions {
     justify-content: flex-start;
   }
 

@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   legacyRenderManifestV22Schema,
   renderManifestSchema,
+  renderManifestV26Schema,
   renderManifestV25Schema,
   type RenderVisual,
   type RenderManifest
@@ -54,10 +55,25 @@ describe("renderManifestSchema", () => {
     expect(result.success).toBe(true);
   });
 
+  it("keeps the 2.6 parser boundary separate from the 2.7 insert snapshot", () => {
+    const legacy = structuredClone(renderManifestFixture) as unknown as {
+      manifestVersion: string;
+      inserts: Array<Record<string, unknown>>;
+    };
+    legacy.manifestVersion = "2.6.0";
+    for (const insert of legacy.inserts) {
+      Reflect.deleteProperty(insert, "text");
+    }
+
+    expect(renderManifestV26Schema.safeParse(legacy).success).toBe(true);
+    expect(renderManifestSchema.safeParse(legacy).success).toBe(false);
+  });
+
   it("keeps the 2.5 parser boundary explicit without upgrading old manifests", () => {
     const legacy = structuredClone(renderManifestFixture) as unknown as {
       manifestVersion: string;
       characters: Array<Record<string, unknown>>;
+      inserts: Array<Record<string, unknown>>;
       sectionLayouts: Array<{
         resolvedLayout: { elements: Array<Record<string, unknown>> };
       }>;
@@ -79,6 +95,9 @@ describe("renderManifestSchema", () => {
           Reflect.deleteProperty(element, "backgroundOpacity");
         }
       }
+    }
+    for (const insert of legacy.inserts) {
+      Reflect.deleteProperty(insert, "text");
     }
 
     expect(renderManifestV25Schema.safeParse(legacy).success).toBe(true);

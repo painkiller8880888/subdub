@@ -91,7 +91,9 @@ function cutin(
     assetChecksum: videoAsset.checksum,
     projectMediaPath: `media/${id}.mp4`,
     placement: { kind: "before_section", sectionId, order },
-    volume: 1
+    volume: 1,
+    text: "",
+    textTemplateId: null
   };
 }
 

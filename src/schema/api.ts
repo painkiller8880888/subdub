@@ -85,6 +85,13 @@ import {
   screenTemplateElementSchema,
   screenTemplateStatusSchema
 } from "./screen-template.js";
+import {
+  INSERT_TEXT_TEMPLATE_CANVAS_HEIGHT,
+  INSERT_TEXT_TEMPLATE_CANVAS_WIDTH,
+  insertTextTemplateSchema,
+  insertTextTemplateTextAlignSchema,
+  insertTextTemplateVerticalAlignSchema
+} from "./insert-text-template.js";
 
 const optionalImprovementReasonSchema = improvementReasonSchema
   .nullable()
@@ -426,6 +433,89 @@ export const screenTemplateStatusChangeRequestSchema = strictObject({
   expectedRevision: positiveIntegerSchema
 });
 
+const insertTextTemplateNameInputSchema = z
+  .string()
+  .transform((value) => value.normalize("NFC").trim())
+  .refine((value) => value.length > 0, "name must not be blank");
+
+const insertTextTemplateDescriptionInputSchema = z
+  .string()
+  .transform((value) => value.normalize("NFC").trim());
+
+const insertTextTemplateResponseFields = {
+  templateId: idSchema,
+  name: z.string().min(1),
+  description: z.string(),
+  status: screenTemplateStatusSchema,
+  revision: positiveIntegerSchema,
+  canvasWidth: z.literal(INSERT_TEXT_TEMPLATE_CANVAS_WIDTH),
+  canvasHeight: z.literal(INSERT_TEXT_TEMPLATE_CANVAS_HEIGHT),
+  textRect: insertTextTemplateSchema.shape.textRect,
+  rotationDeg: finiteNumberSchema,
+  fontSize: insertTextTemplateSchema.shape.fontSize,
+  fontWeight: positiveIntegerSchema,
+  textColor: hexColorSchema,
+  textAlign: insertTextTemplateTextAlignSchema,
+  verticalAlign: insertTextTemplateVerticalAlignSchema,
+  contentHash: sha256Schema
+};
+
+export const insertTextTemplateSummarySchema = strictObject({
+  ...insertTextTemplateResponseFields,
+  updatedAt: isoUtcDateTimeSchema
+});
+
+export const insertTextTemplateDetailSchema = strictObject({
+  ...insertTextTemplateResponseFields,
+  createdAt: isoUtcDateTimeSchema,
+  updatedAt: isoUtcDateTimeSchema
+});
+
+export const insertTextTemplateListResponseSchema = strictObject({
+  data: z.array(insertTextTemplateSummarySchema),
+  revision: nonNegativeIntegerSchema.optional()
+});
+
+export const insertTextTemplateResponseSchema = strictObject({
+  data: insertTextTemplateDetailSchema,
+  revision: nonNegativeIntegerSchema.optional()
+});
+
+export const insertTextTemplateListQuerySchema = strictObject({
+  status: screenTemplateStatusSchema.optional()
+});
+
+export const insertTextTemplateParamsSchema = strictObject({
+  templateId: idSchema
+});
+
+const insertTextTemplateMutationFields = {
+  name: insertTextTemplateNameInputSchema,
+  description: insertTextTemplateDescriptionInputSchema,
+  textRect: insertTextTemplateSchema.shape.textRect,
+  rotationDeg: finiteNumberSchema,
+  fontSize: insertTextTemplateSchema.shape.fontSize,
+  fontWeight: positiveIntegerSchema,
+  textColor: hexColorSchema,
+  textAlign: insertTextTemplateTextAlignSchema,
+  verticalAlign: insertTextTemplateVerticalAlignSchema
+};
+
+export const insertTextTemplateCreateRequestSchema = strictObject({
+  ...insertTextTemplateMutationFields,
+  description: insertTextTemplateDescriptionInputSchema.default(""),
+  status: screenTemplateStatusSchema.default("active")
+});
+
+export const insertTextTemplateUpdateRequestSchema = strictObject({
+  ...insertTextTemplateMutationFields,
+  expectedRevision: positiveIntegerSchema,
+  status: screenTemplateStatusSchema.optional()
+});
+
+export const insertTextTemplateStatusChangeRequestSchema =
+  screenTemplateStatusChangeRequestSchema;
+
 export const voiceAdjustmentMutationResponseSchema = strictObject({
   data: strictObject({
     lineId: idSchema
@@ -502,11 +592,13 @@ export const manifestPreviewBlockerTargetSchema = strictObject({
     "visuals",
     "voice",
     "asset",
+    "edit",
     "manifest"
   ]),
   path: relativePosixPathSchema.optional(),
   lineId: idSchema.optional(),
   assignmentId: idSchema.optional(),
+  elementId: idSchema.optional(),
   sectionId: idSchema.optional()
 });
 
@@ -743,7 +835,9 @@ export const projectEditVideoElementInputSchema = strictObject({
   assetId: idSchema,
   assetVersion: positiveIntegerSchema,
   placement: editVideoPlacementSchema,
-  volume: unitIntervalSchema
+  volume: unitIntervalSchema,
+  text: z.string(),
+  textTemplateId: idSchema.nullable()
 });
 
 export const projectEditSectionBgmInputSchema = strictObject({
@@ -1193,6 +1287,30 @@ export type ScreenTemplateUpdateRequest = z.infer<
 >;
 export type ScreenTemplateStatusChangeRequest = z.infer<
   typeof screenTemplateStatusChangeRequestSchema
+>;
+export type InsertTextTemplateSummary = z.infer<
+  typeof insertTextTemplateSummarySchema
+>;
+export type InsertTextTemplateDetail = z.infer<
+  typeof insertTextTemplateDetailSchema
+>;
+export type InsertTextTemplateListResponse = z.infer<
+  typeof insertTextTemplateListResponseSchema
+>;
+export type InsertTextTemplateResponse = z.infer<
+  typeof insertTextTemplateResponseSchema
+>;
+export type InsertTextTemplateListQuery = z.infer<
+  typeof insertTextTemplateListQuerySchema
+>;
+export type InsertTextTemplateCreateRequest = z.infer<
+  typeof insertTextTemplateCreateRequestSchema
+>;
+export type InsertTextTemplateUpdateRequest = z.infer<
+  typeof insertTextTemplateUpdateRequestSchema
+>;
+export type InsertTextTemplateStatusChangeRequest = z.infer<
+  typeof insertTextTemplateStatusChangeRequestSchema
 >;
 export type VoicevoxStatusData = z.infer<typeof voicevoxStatusDataSchema>;
 export type VoicevoxStatusResponse = z.infer<

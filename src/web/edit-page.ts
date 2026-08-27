@@ -86,7 +86,9 @@ export function createProjectEditInput(
       assetId: element.assetId,
       assetVersion: element.assetVersion,
       placement: { ...element.placement },
-      volume: element.volume
+      volume: element.volume,
+      text: element.text,
+      textTemplateId: element.textTemplateId
     })),
     sectionBgms: editPlan.sectionBgms.map((bgm) => ({
       id: bgm.id,
@@ -155,7 +157,9 @@ export function addEditVideoElement(
     assetChecksum: asset.checksum,
     projectMediaPath: "media/pending-edit-asset",
     placement,
-    volume: 1
+    volume: 1,
+    text: "",
+    textTemplateId: null
   };
   return {
     ...editPlan,
@@ -428,7 +432,9 @@ export function reconcileSavedEditPlan(
           id: element.id,
           role: element.role,
           placement: { ...element.placement },
-          volume: element.volume
+          volume: element.volume,
+          text: element.text,
+          textTemplateId: element.textTemplateId
         };
       }
       return { ...element, placement: { ...element.placement } };

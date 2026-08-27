@@ -28,10 +28,12 @@ import type {
 } from "./render-manifest-store.js";
 import type {
   CharacterVisualCatalogSnapshot,
+  InsertTextTemplate,
   ScreenTemplate,
   VideoProject
 } from "../../schema/index.js";
 import { screenTemplateSchema } from "../../schema/screen-template.js";
+import { insertTextTemplateSchema } from "../../schema/insert-text-template.js";
 import type { VoicevoxAudioIndex } from "../voicevox/audio-index.js";
 import type { VoicevoxAudioStore } from "../voicevox/audio-store.js";
 import { RENDER_JOB_ERROR_CODE, RenderJobError } from "./render-job-errors.js";
@@ -45,11 +47,15 @@ type CharacterVisualCatalogVerifier = Pick<
 type AudioIndexReader = Pick<VoicevoxAudioStore, "readIndex">;
 type ManifestStoreWriter = Pick<RenderManifestStore, "compileAndStore">;
 type AssetMetadataByPath = Map<string, RenderManifestAssetMetadata>;
+type InsertTextTemplateSnapshotPort = Readonly<{
+  findById(templateId: string): InsertTextTemplate | undefined;
+}>;
 
 export type RenderManifestInputBuilderOptions = {
   readonly workspaceRoot: string;
   readonly projectRepository: ProjectReader;
   readonly screenTemplateCatalog: ScreenTemplateSnapshotPort;
+  readonly insertTextTemplateCatalog?: InsertTextTemplateSnapshotPort;
   readonly assetRepository: AssetDetailReader;
   readonly characterVisualCatalogService: CharacterVisualCatalogVerifier;
   readonly audioStore: AudioIndexReader;
@@ -93,6 +99,28 @@ function screenTemplateSnapshotForProject(
       return undefined;
     }
     snapshot.push(parsed.data);
+  }
+  return snapshot;
+}
+
+function insertTextTemplateSnapshotForProject(
+  project: VideoProject,
+  catalog: InsertTextTemplateSnapshotPort
+): InsertTextTemplate[] {
+  const ids = new Set(
+    project.edit.videoElements.flatMap((element) =>
+      element.text.length > 0 && element.textTemplateId !== null
+        ? [element.textTemplateId]
+        : []
+    )
+  );
+  const snapshot: InsertTextTemplate[] = [];
+  for (const templateId of [...ids].sort()) {
+    const candidate = catalog.findById(templateId);
+    const parsed = insertTextTemplateSchema.safeParse(candidate);
+    if (parsed.success) {
+      snapshot.push(parsed.data);
+    }
   }
   return snapshot;
 }
@@ -374,6 +402,7 @@ export class RenderManifestInputBuilder {
   private readonly workspaceRoot: string;
   private readonly projectRepository: ProjectReader;
   private readonly screenTemplateCatalog: ScreenTemplateSnapshotPort;
+  private readonly insertTextTemplateCatalog?: InsertTextTemplateSnapshotPort;
   private readonly assetRepository: AssetDetailReader;
   private readonly characterVisualCatalogService: CharacterVisualCatalogVerifier;
   private readonly audioStore: AudioIndexReader;
@@ -382,6 +411,7 @@ export class RenderManifestInputBuilder {
     this.workspaceRoot = path.resolve(options.workspaceRoot);
     this.projectRepository = options.projectRepository;
     this.screenTemplateCatalog = options.screenTemplateCatalog;
+    this.insertTextTemplateCatalog = options.insertTextTemplateCatalog;
     this.assetRepository = options.assetRepository;
     this.characterVisualCatalogService = options.characterVisualCatalogService;
     this.audioStore = options.audioStore;
@@ -394,6 +424,13 @@ export class RenderManifestInputBuilder {
       project,
       this.screenTemplateCatalog
     );
+    const insertTextTemplateCatalogSnapshot =
+      this.insertTextTemplateCatalog === undefined
+        ? undefined
+        : insertTextTemplateSnapshotForProject(
+            project,
+            this.insertTextTemplateCatalog
+          );
     const audioIndex = await this.audioStore.readIndex(projectId);
     const characterVisualCatalog =
       await this.characterVisualCatalogService.verifyFiles();
@@ -415,7 +452,10 @@ export class RenderManifestInputBuilder {
       characterMappingVersion: CHARACTER_VARIANT_MAPPING_VERSION,
       ...(screenTemplateCatalogSnapshot === undefined
         ? {}
-        : { screenTemplateCatalogSnapshot })
+        : { screenTemplateCatalogSnapshot }),
+      ...(insertTextTemplateCatalogSnapshot === undefined
+        ? {}
+        : { insertTextTemplateCatalogSnapshot })
     };
   }
 }

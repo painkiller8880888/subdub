@@ -46,6 +46,13 @@ import {
   screenTemplateResponseSchema,
   screenTemplateStatusChangeRequestSchema,
   screenTemplateUpdateRequestSchema,
+  insertTextTemplateCreateRequestSchema,
+  insertTextTemplateListQuerySchema,
+  insertTextTemplateListResponseSchema,
+  insertTextTemplateParamsSchema,
+  insertTextTemplateResponseSchema,
+  insertTextTemplateStatusChangeRequestSchema,
+  insertTextTemplateUpdateRequestSchema,
   scriptApproveRequestSchema,
   scriptInitializeRequestSchema,
   scriptSaveRequestSchema,
@@ -100,6 +107,11 @@ import {
   type ScreenTemplateListQuery,
   type ScreenTemplateSummary,
   type ScreenTemplateUpdateRequest,
+  type InsertTextTemplateCreateRequest,
+  type InsertTextTemplateDetail,
+  type InsertTextTemplateListQuery,
+  type InsertTextTemplateSummary,
+  type InsertTextTemplateUpdateRequest,
   type ScriptApproveRequest,
   type ScriptInitializeRequest,
   type ScriptSaveRequest,
@@ -1104,6 +1116,110 @@ export async function deactivateScreenTemplate(
   expectedRevision: number
 ): Promise<ScreenTemplateDetail> {
   return changeScreenTemplateStatus(templateId, "deactivate", expectedRevision);
+}
+
+export async function fetchInsertTextTemplates(
+  input: InsertTextTemplateListQuery = {}
+): Promise<InsertTextTemplateSummary[]> {
+  const query = insertTextTemplateListQuerySchema.parse(input);
+  const searchParams = new URLSearchParams();
+  if (query.status !== undefined) {
+    searchParams.set("status", query.status);
+  }
+  const queryString = searchParams.toString();
+  const response = await fetchApi(
+    `/api/insert-text-templates${queryString.length > 0 ? `?${queryString}` : ""}`,
+    insertTextTemplateListResponseSchema
+  );
+  return response.data;
+}
+
+export async function fetchInsertTextTemplate(
+  templateId: string
+): Promise<InsertTextTemplateDetail> {
+  const params = insertTextTemplateParamsSchema.parse({ templateId });
+  const response = await fetchApi(
+    `/api/insert-text-templates/${encodeURIComponent(params.templateId)}`,
+    insertTextTemplateResponseSchema
+  );
+  return response.data;
+}
+
+export async function createInsertTextTemplate(
+  input: InsertTextTemplateCreateRequest
+): Promise<InsertTextTemplateDetail> {
+  const validatedInput = insertTextTemplateCreateRequestSchema.parse(input);
+  const response = await fetchApi(
+    "/api/insert-text-templates",
+    insertTextTemplateResponseSchema,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(validatedInput)
+    }
+  );
+  return response.data;
+}
+
+export async function updateInsertTextTemplate(
+  templateId: string,
+  input: InsertTextTemplateUpdateRequest
+): Promise<InsertTextTemplateDetail> {
+  const params = insertTextTemplateParamsSchema.parse({ templateId });
+  const validatedInput = insertTextTemplateUpdateRequestSchema.parse(input);
+  const response = await fetchApi(
+    `/api/insert-text-templates/${encodeURIComponent(params.templateId)}`,
+    insertTextTemplateResponseSchema,
+    {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(validatedInput)
+    }
+  );
+  return response.data;
+}
+
+export async function activateInsertTextTemplate(
+  templateId: string,
+  expectedRevision: number
+): Promise<InsertTextTemplateDetail> {
+  return changeInsertTextTemplateStatus(
+    templateId,
+    "activate",
+    expectedRevision
+  );
+}
+
+export async function deactivateInsertTextTemplate(
+  templateId: string,
+  expectedRevision: number
+): Promise<InsertTextTemplateDetail> {
+  return changeInsertTextTemplateStatus(
+    templateId,
+    "deactivate",
+    expectedRevision
+  );
+}
+
+async function changeInsertTextTemplateStatus(
+  templateId: string,
+  action: "activate" | "deactivate",
+  expectedRevision: number
+): Promise<InsertTextTemplateDetail> {
+  const params = insertTextTemplateParamsSchema.parse({ templateId });
+  const validatedInput = insertTextTemplateStatusChangeRequestSchema.parse({
+    expectedRevision
+  });
+  const response = await fetchApi(
+    `/api/insert-text-templates/${encodeURIComponent(params.templateId)}/${action}`,
+    insertTextTemplateResponseSchema,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(validatedInput)
+    }
+  );
+  return response.data;
 }
 
 async function changeScreenTemplateStatus(

@@ -101,6 +101,41 @@ describe("preview state helpers", () => {
     expect(viewModel.blockers[1]?.message).toContain("FUTURE_BLOCKER");
   });
 
+  it("routes insert text blockers to the edit page with dedicated messages", () => {
+    const viewModel = createPreviewViewModel(
+      data({
+        blockers: [
+          {
+            code: "INSERT_TEXT_TEMPLATE_REFERENCE_INVALID",
+            message: "server fallback must not be shown",
+            target: { kind: "edit", elementId: "edit-intro" }
+          },
+          {
+            code: "MANIFEST_INSERT_TEXT_TEMPLATE_STALE",
+            message: "server fallback must not be shown",
+            target: { kind: "manifest" }
+          }
+        ]
+      }),
+      "manual-video-project"
+    );
+
+    expect(viewModel.blockers).toEqual([
+      expect.objectContaining({
+        message:
+          "保存済みプレビューの挿入文字テンプレートが更新されています。再生成してください。",
+        targetLabel: "制作工程を確認",
+        href: "/projects/manual-video-project/script"
+      }),
+      expect.objectContaining({
+        message:
+          "選択された挿入文字テンプレートが見つからないか無効です。編集画面の設定を修正してください。",
+        targetLabel: "編集画面を確認",
+        href: "/projects/manual-video-project/edit"
+      })
+    ]);
+  });
+
   it("turns compile diagnostics into actionable missing-item labels", () => {
     const diagnostics = createPreviewCompileDiagnosticViewModel([
       {
@@ -115,19 +150,41 @@ describe("preview state helpers", () => {
         message: "referenced asset metadata was not provided",
         assignmentId: "assignment-main-1",
         assetPath: "media/manual.mp4"
+      },
+      {
+        code: "INSERT_TEXT_TEMPLATE_MISSING",
+        path: ["edit", "videoElements", 0, "textTemplateId"],
+        message: "the insert text template is missing"
+      },
+      {
+        code: "INSERT_TEXT_TEMPLATE_INACTIVE",
+        path: ["edit", "videoElements", 1, "textTemplateId"],
+        message: "the insert text template is inactive"
       }
     ]);
 
-    expect(diagnostics).toEqual([
-      expect.objectContaining({
-        title: "キャラクター素材のvariantが未選択です。",
-        target: "セリフ line-main-1"
-      }),
-      expect.objectContaining({
-        title: "参照素材のメタデータが不足しています。",
-        target: "割り当て assignment-main-1 / 素材 media/manual.mp4"
-      })
-    ]);
+    expect(diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          title: "キャラクター素材のvariantが未選択です。",
+          target: "セリフ line-main-1"
+        }),
+        expect.objectContaining({
+          title: "参照素材のメタデータが不足しています。",
+          target: "割り当て assignment-main-1 / 素材 media/manual.mp4"
+        }),
+        expect.objectContaining({
+          title:
+            "挿入文字テンプレートが見つかりません。編集画面のテンプレート設定を確認してください。",
+          target: "edit.videoElements.0.textTemplateId"
+        }),
+        expect.objectContaining({
+          title:
+            "挿入文字テンプレートが無効です。編集画面で有効なテンプレートを選択してください。",
+          target: "edit.videoElements.1.textTemplateId"
+        })
+      ])
+    );
   });
 
   it("maps real fix targets and separates shared and project assets", () => {

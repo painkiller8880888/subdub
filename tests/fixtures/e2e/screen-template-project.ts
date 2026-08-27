@@ -133,7 +133,9 @@ export function createScreenTemplateProjectFixture(): VideoProject {
       projectMediaPath: "media/cutin-confirm.mp4",
       role: "cutin",
       placement: { kind: "before_section", sectionId: main.id, order: 0 },
-      volume: 0.35
+      volume: 0.35,
+      text: "",
+      textTemplateId: null
     }
   ];
 
@@ -152,6 +154,7 @@ export function createLineOverrideScreenTemplateProjectFixture(): unknown {
     };
   };
   project.schemaVersion = "1.3.0";
+  removeEditInsertTextFields(project);
   for (const section of project.script.sections) {
     for (const line of section.lines) {
       line.screenTemplateId = null;
@@ -193,6 +196,7 @@ export function createLegacyScreenTemplateProjectFixture(): unknown {
     };
   };
   project.schemaVersion = "1.2.0";
+  removeEditInsertTextFields(project);
   for (const section of project.script.sections) {
     delete section.screenTemplateId;
     for (const line of section.lines) {
@@ -204,6 +208,35 @@ export function createLegacyScreenTemplateProjectFixture(): unknown {
     delete assignment.display.playbackCues;
   }
   return project;
+}
+
+function removeEditInsertTextFields(project: unknown): void {
+  if (
+    typeof project !== "object" ||
+    project === null ||
+    Array.isArray(project)
+  ) {
+    return;
+  }
+  const edit = (project as { edit?: unknown }).edit;
+  if (typeof edit !== "object" || edit === null || Array.isArray(edit)) {
+    return;
+  }
+  const videoElements = (edit as { videoElements?: unknown }).videoElements;
+  if (!Array.isArray(videoElements)) {
+    return;
+  }
+  for (const element of videoElements) {
+    if (
+      typeof element !== "object" ||
+      element === null ||
+      Array.isArray(element)
+    ) {
+      continue;
+    }
+    delete (element as Record<string, unknown>).text;
+    delete (element as Record<string, unknown>).textTemplateId;
+  }
 }
 
 export function createStandardAndAlternateTemplateSnapshot(): ScreenTemplate[] {

@@ -1,0 +1,30 @@
+CREATE TABLE `insert_text_templates` (
+	`template_id` text PRIMARY KEY NOT NULL,
+	`name` text NOT NULL,
+	`description` text DEFAULT '' NOT NULL,
+	`status` text NOT NULL,
+	`revision` integer DEFAULT 1 NOT NULL,
+	`canvas_width` integer NOT NULL,
+	`canvas_height` integer NOT NULL,
+	`x` real NOT NULL,
+	`y` real NOT NULL,
+	`width` real NOT NULL,
+	`height` real NOT NULL,
+	`rotation_deg` real NOT NULL,
+	`font_size` real NOT NULL,
+	`font_weight` integer NOT NULL,
+	`text_color` text NOT NULL,
+	`text_align` text NOT NULL,
+	`vertical_align` text NOT NULL,
+	`created_at` text NOT NULL,
+	`updated_at` text NOT NULL,
+	CONSTRAINT `insert_text_templates_status_check` CHECK (`status` IN ('active', 'inactive')),
+	CONSTRAINT `insert_text_templates_canvas_check` CHECK (`canvas_width` = 1920 AND `canvas_height` = 1080),
+	CONSTRAINT `insert_text_templates_revision_check` CHECK (`revision` > 0),
+	CONSTRAINT `insert_text_templates_geometry_check` CHECK (`x` >= 0 AND `y` >= 0 AND `width` > 0 AND `height` > 0 AND `x` + `width` <= 1 AND `y` + `height` <= 1),
+	CONSTRAINT `insert_text_templates_typography_check` CHECK (`font_size` > 0 AND `font_weight` > 0),
+	CONSTRAINT `insert_text_templates_text_align_check` CHECK (`text_align` IN ('left', 'center', 'right')),
+	CONSTRAINT `insert_text_templates_vertical_align_check` CHECK (`vertical_align` IN ('top', 'center', 'bottom'))
+);
+--> statement-breakpoint
+CREATE INDEX `insert_text_templates_status_idx` ON `insert_text_templates` (`status`);

@@ -24,6 +24,13 @@ export const WORKSPACE_NAVIGATION = [
     icon: "screen-templates"
   },
   {
+    id: "insert-text-templates",
+    label: "挿入文字テンプレート",
+    section: "ライブラリ",
+    path: "/insert-text-templates",
+    icon: "insert-text-templates"
+  },
+  {
     id: "assets",
     label: "素材",
     section: "ライブラリ",

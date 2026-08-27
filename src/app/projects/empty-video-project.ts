@@ -78,7 +78,7 @@ export function createEmptyVideoProject(
   const manualVersion = options.manualVersion ?? "";
 
   const project: VideoProject = {
-    schemaVersion: "1.5.0",
+    schemaVersion: "1.6.0",
     revision: 0,
     metadata: {
       id: options.projectId,
