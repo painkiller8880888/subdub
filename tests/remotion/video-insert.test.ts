@@ -80,13 +80,13 @@ describe("Remotion insert text overlay", () => {
   it("passes the manifest-resolved source offset, rate, and volume to video", () => {
     const result = VideoInsert({ insert: insert("intro", ""), fps: 30 });
     const video = childElements(containerChildren(result))[0] as ReactElement<{
-      startFrom: number;
+      trimBefore: number;
       playbackRate: number;
       volume: number;
     }>;
 
     expect(video.props).toMatchObject({
-      startFrom: 150,
+      trimBefore: 150,
       playbackRate: 0.5,
       volume: 0.5
     });

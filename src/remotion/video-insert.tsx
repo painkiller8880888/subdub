@@ -18,7 +18,7 @@ export function videoInsertSequenceProps(
   readonly from: number;
   readonly durationInFrames: number;
   readonly src: string;
-  readonly startFrom: number;
+  readonly trimBefore: number;
   readonly playbackRate: number;
   readonly volume: number;
 } {
@@ -26,7 +26,7 @@ export function videoInsertSequenceProps(
     from: insert.from,
     durationInFrames: insert.durationInFrames,
     src: resolveManifestAssetUrl(insert.src, assetUrlResolver),
-    startFrom: mediaMillisecondsToFrames(insert.startMs ?? 0, fps),
+    trimBefore: mediaMillisecondsToFrames(insert.startMs ?? 0, fps),
     playbackRate: insert.playbackRate,
     volume: insert.volume
   };
@@ -80,7 +80,7 @@ export function VideoInsert({
     <AbsoluteFill>
       <OffthreadVideo
         src={props.src}
-        startFrom={props.startFrom}
+        trimBefore={props.trimBefore}
         playbackRate={props.playbackRate}
         volume={props.volume}
         style={{

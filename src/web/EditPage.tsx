@@ -229,6 +229,15 @@ function EditVideoElementCard({
   const textTemplateId = `${element.id}-text-template`;
   const textId = `${element.id}-insert-text`;
   const thumbnailAvailable = asset?.thumbnailPaths[0] !== undefined;
+  const [startSecondsInput, setStartSecondsInput] = useState(() =>
+    editVideoStartMsToSecondsInput(element.startMs)
+  );
+  useEffect(() => {
+    setStartSecondsInput(editVideoStartMsToSecondsInput(element.startMs));
+  }, [element.startMs]);
+  const startSecondsInputResult =
+    editVideoSecondsInputToStartMs(startSecondsInput);
+  const startSecondsInputInvalid = startSecondsInputResult.kind === "invalid";
   const startMsExceedsDuration =
     element.startMs !== null &&
     asset?.durationMs !== null &&
@@ -332,23 +341,31 @@ function EditVideoElementCard({
         <div className="form-field">
           <label htmlFor={startSecondsId}>開始秒</label>
           <input
+            aria-invalid={
+              startSecondsInputInvalid || startMsExceedsDuration
+                ? true
+                : undefined
+            }
             disabled={volumeDisabled}
             id={startSecondsId}
             inputMode="decimal"
-            min={0}
-            step={0.1}
-            type="number"
-            value={editVideoStartMsToSecondsInput(element.startMs)}
-            onChange={(event) =>
-              onStartMsChange(
-                editVideoSecondsInputToStartMs(event.target.value)
-              )
-            }
+            type="text"
+            value={startSecondsInput}
+            onChange={(event) => {
+              const value = event.target.value;
+              const result = editVideoSecondsInputToStartMs(value);
+              setStartSecondsInput(value);
+              if (result.kind !== "invalid") {
+                onStartMsChange(result.startMs);
+              }
+            }}
           />
           <small>
-            {startMsExceedsDuration
-              ? "開始秒は素材の長さ未満にしてください。"
-              : "空欄は素材の先頭（0秒）から再生します。保存値は整数msです。"}
+            {startSecondsInputInvalid
+              ? "0以上の数字を入力してください。"
+              : startMsExceedsDuration
+                ? "開始秒は素材の長さ未満にしてください。"
+                : "空欄は素材の先頭（0秒）から再生します。保存値は整数msです。"}
           </small>
         </div>
         <div className="form-field">

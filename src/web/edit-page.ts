@@ -82,15 +82,22 @@ export function editVideoStartMsToSecondsInput(startMs: number | null): string {
     : `${wholeSeconds}.${fractionalSeconds}`;
 }
 
+export type EditVideoSecondsInputResult =
+  | { readonly kind: "empty"; readonly startMs: null }
+  | { readonly kind: "valid"; readonly startMs: number }
+  | { readonly kind: "invalid" };
+
 /** Convert a non-negative decimal seconds field to integer milliseconds. */
-export function editVideoSecondsInputToStartMs(value: string): number | null {
+export function editVideoSecondsInputToStartMs(
+  value: string
+): EditVideoSecondsInputResult {
   const normalized = value.trim();
   if (normalized.length === 0) {
-    return null;
+    return { kind: "empty", startMs: null };
   }
   const match = /^(\d+)(?:\.(\d+))?$/u.exec(normalized);
   if (match === null) {
-    return null;
+    return { kind: "invalid" };
   }
   const wholeSeconds = Number(match[1]);
   const fraction = match[2] ?? "";
@@ -100,7 +107,9 @@ export function editVideoSecondsInputToStartMs(value: string): number | null {
       ? milliseconds + 1
       : milliseconds;
   const result = wholeSeconds * 1000 + roundedMillisecond;
-  return Number.isSafeInteger(result) ? result : null;
+  return Number.isSafeInteger(result)
+    ? { kind: "valid", startMs: result }
+    : { kind: "invalid" };
 }
 
 export function cloneEditPlan(editPlan: EditPlan): EditPlan {

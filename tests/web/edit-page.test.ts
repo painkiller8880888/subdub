@@ -91,12 +91,28 @@ const bgmAsset = {
 
 describe("edit page read model", () => {
   it("converts seconds input to deterministic integer milliseconds", () => {
-    expect(editVideoSecondsInputToStartMs("")).toBeNull();
-    expect(editVideoSecondsInputToStartMs("5")).toBe(5_000);
-    expect(editVideoSecondsInputToStartMs("5.1")).toBe(5_100);
-    expect(editVideoSecondsInputToStartMs("5.0059")).toBe(5_006);
-    expect(editVideoSecondsInputToStartMs("-1")).toBeNull();
-    expect(editVideoSecondsInputToStartMs("five")).toBeNull();
+    expect(editVideoSecondsInputToStartMs("")).toEqual({
+      kind: "empty",
+      startMs: null
+    });
+    expect(editVideoSecondsInputToStartMs("5")).toEqual({
+      kind: "valid",
+      startMs: 5_000
+    });
+    expect(editVideoSecondsInputToStartMs("5.1")).toEqual({
+      kind: "valid",
+      startMs: 5_100
+    });
+    expect(editVideoSecondsInputToStartMs("5.0059")).toEqual({
+      kind: "valid",
+      startMs: 5_006
+    });
+    expect(editVideoSecondsInputToStartMs("-1")).toEqual({
+      kind: "invalid"
+    });
+    expect(editVideoSecondsInputToStartMs("five")).toEqual({
+      kind: "invalid"
+    });
 
     expect(editVideoStartMsToSecondsInput(null)).toBe("");
     expect(editVideoStartMsToSecondsInput(0)).toBe("0");

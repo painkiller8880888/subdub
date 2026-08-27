@@ -569,7 +569,7 @@ describe("RenderManifest interval selection", () => {
       from: insert.from,
       durationInFrames: insert.durationInFrames,
       src: expect.stringContaining(insert.src),
-      startFrom: 0,
+      trimBefore: 0,
       playbackRate: 1,
       volume: insert.volume
     });

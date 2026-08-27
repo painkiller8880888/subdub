@@ -498,6 +498,40 @@ describe("edit page DnD UI", () => {
   );
 
   it(
+    "does not autosave an invalid start second over the existing value",
+    { timeout: 30_000 },
+    async () => {
+      const editWithExistingStart: EditPlan = {
+        ...initialEdit,
+        videoElements: initialEdit.videoElements.map((element) =>
+          element.id === "cutin-a" ? { ...element, startMs: 5_000 } : element
+        )
+      };
+      const { context, page, saveRequests } = await openPage(
+        "success",
+        editWithExistingStart
+      );
+      try {
+        const startInput = page
+          .locator('[data-edit-video-element-id="cutin-a"]')
+          .getByLabel("開始秒");
+        expect(await startInput.inputValue()).toBe("5");
+
+        await startInput.fill("-1");
+        await page
+          .getByText("0以上の数字を入力してください。", { exact: true })
+          .waitFor({ state: "visible" });
+        await page.waitForTimeout(750);
+
+        expect(await startInput.inputValue()).toBe("-1");
+        expect(saveRequests).toHaveLength(0);
+      } finally {
+        await context.close();
+      }
+    }
+  );
+
+  it(
     "moves a cutin to the next boundary before the existing cutin",
     { timeout: 30_000 },
     async () => {
