@@ -155,6 +155,34 @@ function playbackCueRenderingFixture(): RenderManifest {
   return renderManifestSchema.parse(manifest);
 }
 
+function insertTextRenderingFixture(): RenderManifest {
+  const manifest = structuredClone(
+    renderManifestRenderingFixture
+  ) as RenderManifest;
+  const insert = manifest.inserts.find(
+    (candidate) => candidate.id === "insert-eye-main"
+  );
+  if (insert === undefined) {
+    throw new Error("insert text rendering fixture insert is missing");
+  }
+  insert.text = {
+    templateId: "insert-text-template-fixture",
+    templateRevision: 1,
+    templateHash: "1".repeat(64),
+    text: "確認用の固定文字",
+    resolvedTextLayout: {
+      rect: { x: 0.08, y: 0.72, width: 0.84, height: 0.18 },
+      rotationDeg: -1.5,
+      fontSize: 56,
+      fontWeight: 700,
+      textColor: "#12abef",
+      textAlign: "center",
+      verticalAlign: "center"
+    }
+  };
+  return renderManifestSchema.parse(manifest);
+}
+
 async function preparePublicDirectory(): Promise<string> {
   const root = await mkdtemp(path.join(os.tmpdir(), "subdub-remotion-"));
   const temporaryPublicDir = path.join(root, "public");
@@ -213,7 +241,8 @@ async function preparePublicDirectory(): Promise<string> {
 async function renderFixtureFrame(
   frame: number,
   name: string,
-  props: Record<string, unknown> = inputProps
+  props: Record<string, unknown> = inputProps,
+  scale?: number
 ): Promise<Buffer> {
   if (bundleDirectory === undefined || composition === undefined) {
     throw new Error("Remotion bundle has not been initialized");
@@ -245,6 +274,7 @@ async function renderFixtureFrame(
     imageFormat: "png",
     output,
     overwrite: true,
+    ...(scale === undefined ? {} : { scale }),
     logLevel: "error"
   });
   return readFile(output);
@@ -277,6 +307,8 @@ async function renderFixtureMp4(
     selectedComposition,
     renderProfile
   );
+  expect(renderComposition.width).toBe(selectedComposition.width);
+  expect(renderComposition.height).toBe(selectedComposition.height);
   const project = videoProjectSchema.parse(videoProjectFixture);
   const renderOptions =
     renderProfile === undefined
@@ -287,7 +319,7 @@ async function renderFixtureMp4(
           sampleRate: 48_000 as const,
           muted: true
         }
-      : remotionOptionsFromProject(project, renderProfile);
+      : remotionOptionsFromProject(project, renderProfile, renderComposition);
   await renderMedia({
     serveUrl: bundleDirectory,
     composition: renderComposition,
@@ -406,6 +438,95 @@ async function differentPixelsInRegion(
   }
 
   return count;
+}
+
+type PixelBounds = {
+  readonly count: number;
+  readonly left: number | null;
+  readonly right: number | null;
+  readonly top: number | null;
+  readonly bottom: number | null;
+};
+
+async function pixelBoundsInRegion(
+  buffer: Buffer,
+  region: {
+    left: number;
+    right: number;
+    top: number;
+    bottom: number;
+  },
+  predicate: (
+    red: number,
+    green: number,
+    blue: number,
+    alpha: number
+  ) => boolean
+): Promise<PixelBounds> {
+  const { data, info } = await sharp(buffer)
+    .ensureAlpha()
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+  const left = Math.floor(info.width * region.left);
+  const right = Math.ceil(info.width * region.right);
+  const top = Math.floor(info.height * region.top);
+  const bottom = Math.ceil(info.height * region.bottom);
+  let count = 0;
+  let minX = right;
+  let maxX = left - 1;
+  let minY = bottom;
+  let maxY = top - 1;
+
+  for (let y = top; y < bottom; y += 1) {
+    for (let x = left; x < right; x += 1) {
+      const offset = (y * info.width + x) * 4;
+      if (
+        !predicate(
+          data[offset] ?? 0,
+          data[offset + 1] ?? 0,
+          data[offset + 2] ?? 0,
+          data[offset + 3] ?? 0
+        )
+      ) {
+        continue;
+      }
+      count += 1;
+      minX = Math.min(minX, x);
+      maxX = Math.max(maxX, x);
+      minY = Math.min(minY, y);
+      maxY = Math.max(maxY, y);
+    }
+  }
+
+  return {
+    count,
+    left: count === 0 ? null : minX,
+    right: count === 0 ? null : maxX,
+    top: count === 0 ? null : minY,
+    bottom: count === 0 ? null : maxY
+  };
+}
+
+function expectPixelBoundsClose(
+  actual: PixelBounds,
+  expected: PixelBounds,
+  label: string,
+  tolerance = 4
+): void {
+  expect(actual.count, `${label} actual pixels`).toBeGreaterThan(0);
+  expect(expected.count, `${label} expected pixels`).toBeGreaterThan(0);
+  for (const edge of ["left", "right", "top", "bottom"] as const) {
+    const actualEdge = actual[edge];
+    const expectedEdge = expected[edge];
+    expect(actualEdge, `${label} ${edge}`).not.toBeNull();
+    expect(expectedEdge, `${label} expected ${edge}`).not.toBeNull();
+    if (actualEdge !== null && expectedEdge !== null) {
+      expect(
+        Math.abs(actualEdge - expectedEdge),
+        `${label} ${edge}`
+      ).toBeLessThanOrEqual(tolerance);
+    }
+  }
 }
 
 describe("RenderManifest interval selection", () => {
@@ -847,6 +968,78 @@ describe("basic Remotion composition", () => {
       }
     }
   }, 600_000);
+
+  it("keeps fixed-pixel subtitle glow and insert text aligned with native SD scaling", async () => {
+    const manifest = insertTextRenderingFixture();
+    const props = manifest as unknown as Record<string, unknown>;
+    const sdScale = 854 / manifest.width;
+    const cases = [
+      {
+        frame: 260,
+        name: "sd-native-subtitle-glow",
+        region: { left: 0.03, right: 0.97, top: 0.35, bottom: 0.65 }
+      },
+      {
+        frame: 160,
+        name: "sd-native-insert-text",
+        region: { left: 0.05, right: 0.95, top: 0.68, bottom: 0.94 }
+      }
+    ] as const;
+
+    for (const entry of cases) {
+      const nativeFrame = await renderFixtureFrame(
+        entry.frame,
+        `${entry.name}-native`,
+        props
+      );
+      const scaledFrame = await renderFixtureFrame(
+        entry.frame,
+        `${entry.name}-scaled`,
+        props,
+        sdScale
+      );
+      const scaledStats = await imageStats(scaledFrame);
+      expect(scaledStats.width).toBe(854);
+      expect(scaledStats.height).toBe(480);
+      const nativeDownscaled = await sharp(nativeFrame)
+        .resize(854, 480, { fit: "fill", kernel: "lanczos3" })
+        .png()
+        .toBuffer();
+      const isSubtitlePixel = (red: number, green: number, blue: number) =>
+        red >= 190 &&
+        green >= 190 &&
+        blue >= 190 &&
+        Math.max(red, green, blue) - Math.min(red, green, blue) <= 24;
+      const isGlowPixel = (red: number, green: number, blue: number) =>
+        green >= red + 12 && green >= blue - 12 && green >= 80;
+      const isInsertTextPixel = (red: number, green: number, blue: number) =>
+        red <= 120 && green >= red + 30 && blue >= green + 20;
+      const pixelPredicate = entry.name.includes("subtitle")
+        ? isSubtitlePixel
+        : isInsertTextPixel;
+      expectPixelBoundsClose(
+        await pixelBoundsInRegion(scaledFrame, entry.region, pixelPredicate),
+        await pixelBoundsInRegion(
+          nativeDownscaled,
+          entry.region,
+          pixelPredicate
+        ),
+        entry.name
+      );
+      if (entry.name.includes("subtitle")) {
+        expectPixelBoundsClose(
+          await pixelBoundsInRegion(scaledFrame, entry.region, isGlowPixel),
+          await pixelBoundsInRegion(
+            nativeDownscaled,
+            entry.region,
+            isGlowPixel
+          ),
+          `${entry.name} glow`,
+          8
+        );
+      }
+    }
+  }, 180_000);
 
   it("renders registered insert videos instead of placeholder screens", async () => {
     const opening = await renderFixtureFrame(30, "video-insert-opening");

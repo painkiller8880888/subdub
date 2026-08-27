@@ -5,7 +5,9 @@ import * as path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
+  remotionCompositionForProfile,
   remotionOptionsFromProject,
+  type RemotionComposition,
   stagePublicDirectory
 } from "../../src/app/rendering/remotion-mp4-renderer.js";
 import {
@@ -27,7 +29,7 @@ afterEach(async () => {
 });
 
 describe("Remotion MP4 public staging", () => {
-  it("keeps production options unchanged and applies the fixed preview profile", () => {
+  it("keeps production options unchanged and applies native-canvas preview scaling", () => {
     const project = videoProjectSchema.parse(videoProjectFixture);
 
     expect(remotionOptionsFromProject(project)).toEqual({
@@ -49,8 +51,23 @@ describe("Remotion MP4 public staging", () => {
       audioBitrate: "128k",
       crf: 23,
       x264Preset: "veryfast",
-      scale: 0.5
+      disallowParallelEncoding: true,
+      scale: 854 / 1920
     });
+
+    const nativeComposition = {
+      width: 1920,
+      height: 1080
+    } as unknown as RemotionComposition;
+    for (const previewPreset of ["sd", "hd", "fhd"] as const) {
+      expect(
+        remotionCompositionForProfile(nativeComposition, {
+          kind: "preview",
+          previewPreset
+        })
+      ).toBe(nativeComposition);
+    }
+    expect(nativeComposition).toMatchObject({ width: 1920, height: 1080 });
   });
 
   it("preserves the project-prefixed VOICEVOX audio path used by the manifest", async () => {

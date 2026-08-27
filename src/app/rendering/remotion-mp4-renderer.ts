@@ -314,9 +314,15 @@ export async function stagePublicDirectory(
   return publicRoot;
 }
 
+export type RenderDimensions = {
+  readonly width: number;
+  readonly height: number;
+};
+
 export function remotionOptionsFromProject(
   project: VideoProject,
-  renderProfile?: RenderProfile
+  renderProfile?: RenderProfile,
+  sourceDimensions: RenderDimensions = project.metadata.outputSettings
 ) {
   if (renderProfile?.kind === "preview") {
     const preset = getPreviewPresetDefinition(renderProfile.previewPreset);
@@ -328,7 +334,11 @@ export function remotionOptionsFromProject(
       audioBitrate: "128k" as const,
       crf: 23 as const,
       x264Preset: "veryfast" as const,
-      scale: previewScaleForPreset(preset.preset)
+      // Remotion 4.0's parallel pre-stitcher validates the fractional
+      // dimensions before its final Math.round(). Use the regular stitcher
+      // so 854x480 can be produced while the composition stays native.
+      disallowParallelEncoding: true as const,
+      scale: previewScaleForPreset(preset.preset, sourceDimensions)
     };
   }
 
@@ -341,29 +351,38 @@ export function remotionOptionsFromProject(
   } as const;
 }
 
-function previewScaleForPreset(preset: PreviewPreset): number {
-  // 854x480 is the conventional SD target, but it is not an exact 16:9
-  // scale of 1920x1080. Render at an integer 1708x960 intermediate size and
-  // use Remotion's scale option to produce the exact requested dimensions.
-  return preset === "sd" ? 0.5 : preset === "hd" ? 2 / 3 : 1;
+function previewScaleForPreset(
+  preset: PreviewPreset,
+  sourceDimensions: RenderDimensions
+): number {
+  const target = getPreviewPresetDefinition(preset);
+  const scale = target.width / sourceDimensions.width;
+  if (
+    !Number.isFinite(scale) ||
+    scale <= 0 ||
+    Math.round(sourceDimensions.width * scale) !== target.width ||
+    Math.round(sourceDimensions.height * scale) !== target.height
+  ) {
+    throw new Error(
+      `Preview preset ${preset} is incompatible with composition ${sourceDimensions.width}x${sourceDimensions.height}.`
+    );
+  }
+  return scale;
 }
 
-type RemotionComposition = Awaited<ReturnType<typeof selectComposition>>;
+export type RemotionComposition = Awaited<ReturnType<typeof selectComposition>>;
 
 export function remotionCompositionForProfile(
   composition: RemotionComposition,
   renderProfile?: RenderProfile
 ): RemotionComposition {
-  if (renderProfile?.kind !== "preview") {
-    return composition;
+  if (renderProfile?.kind === "preview") {
+    // Preview profiles change only the encoded output scale. The composition
+    // remains the native manifest canvas so fixed-pixel typography, padding,
+    // glow, and insert text keep the same semantics as the Web Player.
+    previewScaleForPreset(renderProfile.previewPreset, composition);
   }
-  const preset = getPreviewPresetDefinition(renderProfile.previewPreset);
-  const scale = previewScaleForPreset(preset.preset);
-  return {
-    ...composition,
-    width: preset.width / scale,
-    height: preset.height / scale
-  };
+  return composition;
 }
 
 export type RemotionMp4RendererOptions = {
@@ -459,7 +478,11 @@ export class RemotionMp4Renderer implements Mp4RendererPort {
           overwrite: true,
           browserExecutable: browser,
           logLevel: "error",
-          ...remotionOptionsFromProject(input.project, input.renderProfile)
+          ...remotionOptionsFromProject(
+            input.project,
+            input.renderProfile,
+            renderComposition
+          )
         });
       } catch {
         throw new RenderJobError(
