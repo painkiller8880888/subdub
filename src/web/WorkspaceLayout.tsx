@@ -25,7 +25,9 @@ function WorkspaceNavIcon({
             ? "M5 4h14v16H5z M8 8h8 M8 12h8 M8 16h5"
             : icon === "screen-templates"
               ? "M4 5h16v14H4z M8 9h8 M8 13h5 M8 17h8"
-              : "M12 7v5l3 2 M12 3a9 9 0 1 0 9 9";
+              : icon === "insert-text-templates"
+                ? "M4 5h16v14H4z M7 9h10 M7 12h7 M7 15h9"
+                : "M12 7v5l3 2 M12 3a9 9 0 1 0 9 9";
 
   return (
     <svg

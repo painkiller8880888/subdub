@@ -2261,7 +2261,9 @@ describe("MVP final verification E2E", () => {
           assetChecksum: ed09VideoChecksum,
           projectMediaPath: videoAssignment.assignment.projectMediaPath,
           placement,
-          volume
+          volume,
+          text: "",
+          textTemplateId: null
         });
         project = await projectRepository.save(
           projectId,

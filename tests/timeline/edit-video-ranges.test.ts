@@ -13,7 +13,9 @@ describe("edit video timeline calculation", () => {
           volume: 1,
           projectMediaPath: "media/intro.mp4",
           durationInFrames: 10,
-          inputIndex: 0
+          inputIndex: 0,
+          text: "",
+          textTemplateId: null
         },
         {
           id: "cutin-order-one",
@@ -26,7 +28,9 @@ describe("edit video timeline calculation", () => {
           volume: 0.25,
           projectMediaPath: "media/cutin-one.mp4",
           durationInFrames: 5,
-          inputIndex: 1
+          inputIndex: 1,
+          text: "",
+          textTemplateId: null
         },
         {
           id: "cutin-order-zero",
@@ -39,7 +43,9 @@ describe("edit video timeline calculation", () => {
           volume: 0,
           projectMediaPath: "media/cutin-zero.mp4",
           durationInFrames: 7,
-          inputIndex: 2
+          inputIndex: 2,
+          text: "",
+          textTemplateId: null
         },
         {
           id: "outro",
@@ -48,7 +54,9 @@ describe("edit video timeline calculation", () => {
           volume: 1,
           projectMediaPath: "media/outro.mp4",
           durationInFrames: 11,
-          inputIndex: 3
+          inputIndex: 3,
+          text: "",
+          textTemplateId: null
         }
       ],
       [
@@ -65,7 +73,9 @@ describe("edit video timeline calculation", () => {
         from: 0,
         durationInFrames: 10,
         src: "media/intro.mp4",
-        volume: 1
+        volume: 1,
+        text: "",
+        textTemplateId: null
       },
       {
         id: "cutin-order-zero",
@@ -73,7 +83,9 @@ describe("edit video timeline calculation", () => {
         from: 90,
         durationInFrames: 7,
         src: "media/cutin-zero.mp4",
-        volume: 0
+        volume: 0,
+        text: "",
+        textTemplateId: null
       },
       {
         id: "cutin-order-one",
@@ -81,7 +93,9 @@ describe("edit video timeline calculation", () => {
         from: 97,
         durationInFrames: 5,
         src: "media/cutin-one.mp4",
-        volume: 0.25
+        volume: 0.25,
+        text: "",
+        textTemplateId: null
       },
       {
         id: "outro",
@@ -89,7 +103,9 @@ describe("edit video timeline calculation", () => {
         from: 212,
         durationInFrames: 11,
         src: "media/outro.mp4",
-        volume: 1
+        volume: 1,
+        text: "",
+        textTemplateId: null
       }
     ]);
     expect([...result.sectionShiftById.entries()]).toEqual([

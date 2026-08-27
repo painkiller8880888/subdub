@@ -6,13 +6,16 @@ import {
   legacyVideoProjectV11Schema,
   videoProjectV12Schema,
   videoProjectV13Schema,
-  videoProjectV14Schema
+  videoProjectV14Schema,
+  videoProjectV15Schema
 } from "../../schema/video-project.js";
 import { STANDARD_SCREEN_TEMPLATE_ID } from "../screen-templates/screen-template-seed.js";
 import type { ScreenTemplateCatalogPort } from "./screen-template-selection.js";
 
-export const CURRENT_VIDEO_PROJECT_SCHEMA_VERSION = "1.5.0" as const;
-export const PREVIOUS_VIDEO_PROJECT_SCHEMA_VERSION = "1.4.0" as const;
+export const CURRENT_VIDEO_PROJECT_SCHEMA_VERSION = "1.6.0" as const;
+export const PREVIOUS_VIDEO_PROJECT_SCHEMA_VERSION = "1.5.0" as const;
+export const PLAYBACK_CUE_PREVIOUS_VIDEO_PROJECT_SCHEMA_VERSION =
+  "1.4.0" as const;
 export const SCREEN_TEMPLATE_PREVIOUS_VIDEO_PROJECT_SCHEMA_VERSION =
   "1.2.0" as const;
 export const LINE_SCREEN_TEMPLATE_PREVIOUS_VIDEO_PROJECT_SCHEMA_VERSION =
@@ -49,7 +52,7 @@ export type ScreenTemplateMigrationLogEntry = {
 export type LineScreenTemplateOverrideMigrationLogEntry = {
   readonly migrationId: string;
   readonly fromSchemaVersion: typeof LINE_SCREEN_TEMPLATE_PREVIOUS_VIDEO_PROJECT_SCHEMA_VERSION;
-  readonly toSchemaVersion: typeof PREVIOUS_VIDEO_PROJECT_SCHEMA_VERSION;
+  readonly toSchemaVersion: typeof PLAYBACK_CUE_PREVIOUS_VIDEO_PROJECT_SCHEMA_VERSION;
   readonly kind: "removed_line_screen_template_override";
   readonly sectionId: string;
   readonly lineId: string;
@@ -155,6 +158,7 @@ function migrationId(
     | LegacyVideoProjectSchemaVersion
     | typeof SCREEN_TEMPLATE_PREVIOUS_VIDEO_PROJECT_SCHEMA_VERSION
     | typeof LINE_SCREEN_TEMPLATE_PREVIOUS_VIDEO_PROJECT_SCHEMA_VERSION
+    | typeof PLAYBACK_CUE_PREVIOUS_VIDEO_PROJECT_SCHEMA_VERSION
     | typeof PREVIOUS_VIDEO_PROJECT_SCHEMA_VERSION
 ): string {
   const digest = createHash("sha256")
@@ -475,7 +479,8 @@ function migrateLineScreenTemplateOverridesProject(
           migrationId: currentMigrationId,
           fromSchemaVersion:
             LINE_SCREEN_TEMPLATE_PREVIOUS_VIDEO_PROJECT_SCHEMA_VERSION,
-          toSchemaVersion: PREVIOUS_VIDEO_PROJECT_SCHEMA_VERSION,
+          toSchemaVersion:
+            PLAYBACK_CUE_PREVIOUS_VIDEO_PROJECT_SCHEMA_VERSION,
           kind: "removed_line_screen_template_override",
           sectionId,
           lineId: rawLine.id,
@@ -487,7 +492,8 @@ function migrateLineScreenTemplateOverridesProject(
     }
   }
 
-  migrated.schemaVersion = PREVIOUS_VIDEO_PROJECT_SCHEMA_VERSION;
+  migrated.schemaVersion =
+    PLAYBACK_CUE_PREVIOUS_VIDEO_PROJECT_SCHEMA_VERSION;
   return { project: migrated, logEntries };
 }
 
@@ -517,8 +523,39 @@ function migratePlaybackCuesProject(
     }
   }
 
-  migrated.schemaVersion = CURRENT_VIDEO_PROJECT_SCHEMA_VERSION;
+  migrated.schemaVersion = PREVIOUS_VIDEO_PROJECT_SCHEMA_VERSION;
   migrated.revision = v14Result.data.revision + (incrementRevision ? 1 : 0);
+  return migrated;
+}
+
+function migrateInsertTextTemplateProject(
+  project: unknown,
+  incrementRevision: boolean
+): unknown | undefined {
+  const v15Result = videoProjectV15Schema.safeParse(project);
+  if (!v15Result.success) {
+    return undefined;
+  }
+
+  const migrated = cloneJson(v15Result.data);
+  if (!isRecord(migrated) || !isRecord(migrated.edit)) {
+    return undefined;
+  }
+  if (!Array.isArray(migrated.edit.videoElements)) {
+    return undefined;
+  }
+  migrated.edit.videoElements = migrated.edit.videoElements.map((element) => {
+    if (!isRecord(element)) {
+      return element;
+    }
+    return {
+      ...element,
+      text: "",
+      textTemplateId: null
+    };
+  });
+  migrated.schemaVersion = CURRENT_VIDEO_PROJECT_SCHEMA_VERSION;
+  migrated.revision = v15Result.data.revision + (incrementRevision ? 1 : 0);
   return migrated;
 }
 
@@ -538,7 +575,35 @@ export function migrateVideoProjectWithDiagnostics(
       input,
       PREVIOUS_VIDEO_PROJECT_SCHEMA_VERSION
     );
-    const migrated = migratePlaybackCuesProject(input, true);
+    const migrated = migrateInsertTextTemplateProject(input, true);
+    if (migrated === undefined) {
+      return noMigration(input);
+    }
+    return {
+      project: migrated,
+      migrated: true,
+      migrationId: currentMigrationId,
+      logEntries: [],
+      blockedReason: undefined
+    };
+  }
+
+  if (
+    input.schemaVersion ===
+    PLAYBACK_CUE_PREVIOUS_VIDEO_PROJECT_SCHEMA_VERSION
+  ) {
+    const currentMigrationId = migrationId(
+      input,
+      PLAYBACK_CUE_PREVIOUS_VIDEO_PROJECT_SCHEMA_VERSION
+    );
+    const playbackCueMigration = migratePlaybackCuesProject(input, true);
+    if (playbackCueMigration === undefined) {
+      return noMigration(input);
+    }
+    const migrated = migrateInsertTextTemplateProject(
+      playbackCueMigration,
+      true
+    );
     if (migrated === undefined) {
       return noMigration(input);
     }
@@ -577,7 +642,8 @@ export function migrateVideoProjectWithDiagnostics(
     fromSchemaVersion = SCREEN_TEMPLATE_PREVIOUS_VIDEO_PROJECT_SCHEMA_VERSION;
     currentMigrationId = migrationId(input, fromSchemaVersion);
   } else if (
-    input.schemaVersion === LINE_SCREEN_TEMPLATE_PREVIOUS_VIDEO_PROJECT_SCHEMA_VERSION
+    input.schemaVersion ===
+    LINE_SCREEN_TEMPLATE_PREVIOUS_VIDEO_PROJECT_SCHEMA_VERSION
   ) {
     fromSchemaVersion =
       LINE_SCREEN_TEMPLATE_PREVIOUS_VIDEO_PROJECT_SCHEMA_VERSION;
@@ -622,8 +688,16 @@ export function migrateVideoProjectWithDiagnostics(
     return noMigration(input);
   }
 
+  const insertTextTemplateMigration = migrateInsertTextTemplateProject(
+    playbackCueMigration,
+    true
+  );
+  if (insertTextTemplateMigration === undefined) {
+    return noMigration(input);
+  }
+
   return {
-    project: playbackCueMigration,
+    project: insertTextTemplateMigration,
     migrated: true,
     migrationId: currentMigrationId,
     logEntries: [

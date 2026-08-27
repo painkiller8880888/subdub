@@ -18,7 +18,11 @@ import {
 import { Link, Navigate, useNavigate, useParams } from "react-router";
 import { ZodError } from "zod";
 
-import type { ProjectEditResponse, ProjectSummary } from "../schema/api.js";
+import type {
+  InsertTextTemplateSummary,
+  ProjectEditResponse,
+  ProjectSummary
+} from "../schema/api.js";
 import type { AssetDetail, AssetListItem } from "../schema/asset.js";
 import {
   editPlanSchema,
@@ -32,6 +36,7 @@ import {
   ApiClientError,
   ApiClientProtocolError,
   fetchAsset,
+  fetchInsertTextTemplates,
   fetchProject,
   fetchProjectEdit,
   saveProjectEdit,
@@ -163,6 +168,8 @@ function EditVideoElementCard({
   element,
   asset,
   sections,
+  insertTextTemplates,
+  insertTextTemplatesLoading,
   disabled,
   volumeDisabled,
   isKeyboardDragging = false,
@@ -170,6 +177,8 @@ function EditVideoElementCard({
   onReplace,
   onDelete,
   onVolumeChange,
+  onTextChange,
+  onTextTemplateChange,
   onDragStart,
   onDragEnd,
   onKeyboardKey
@@ -177,6 +186,8 @@ function EditVideoElementCard({
   readonly element: EditVideoElement;
   readonly asset: AssetDetail | undefined;
   readonly sections: VideoProject["script"]["sections"];
+  readonly insertTextTemplates: readonly InsertTextTemplateSummary[];
+  readonly insertTextTemplatesLoading: boolean;
   readonly disabled: boolean;
   readonly volumeDisabled: boolean;
   readonly isKeyboardDragging?: boolean;
@@ -184,14 +195,23 @@ function EditVideoElementCard({
   readonly onReplace: () => void;
   readonly onDelete: () => void;
   readonly onVolumeChange: (volume: number) => void;
+  readonly onTextChange: (text: string) => void;
+  readonly onTextTemplateChange: (templateId: string | null) => void;
   readonly onDragStart?: (event: DragEvent<HTMLButtonElement>) => void;
   readonly onDragEnd?: () => void;
   readonly onKeyboardKey?: (event: KeyboardEvent<HTMLButtonElement>) => void;
 }) {
   const title = assetTitle(asset, element.assetId);
   const volumeId = `${element.id}-video-volume`;
+  const textTemplateId = `${element.id}-text-template`;
+  const textId = `${element.id}-insert-text`;
   const thumbnailAvailable = asset?.thumbnailPaths[0] !== undefined;
   const canReorder = element.role === "cutin" && onDragStart !== undefined;
+  const selectedTemplateIsUnavailable =
+    element.textTemplateId !== null &&
+    !insertTextTemplates.some(
+      (template) => template.templateId === element.textTemplateId
+    );
 
   return (
     <article
@@ -278,6 +298,46 @@ function EditVideoElementCard({
           value={element.volume}
         />
         <output htmlFor={volumeId}>{element.volume.toFixed(2)}</output>
+      </div>
+
+      <div className="edit-insert-text-config">
+        <div className="form-field">
+          <label htmlFor={textTemplateId}>挿入文字テンプレート</label>
+          <select
+            disabled={disabled || insertTextTemplatesLoading}
+            id={textTemplateId}
+            value={element.textTemplateId ?? ""}
+            onChange={(event) => {
+              onTextTemplateChange(
+                event.target.value.length > 0 ? event.target.value : null
+              );
+            }}
+          >
+            <option value="">テンプレートなし（文字を表示しない）</option>
+            {selectedTemplateIsUnavailable ? (
+              <option disabled value={element.textTemplateId ?? ""}>
+                選択中のテンプレート（利用停止または解決不可）
+              </option>
+            ) : null}
+            {insertTextTemplates.map((template) => (
+              <option key={template.templateId} value={template.templateId}>
+                {template.name}
+              </option>
+            ))}
+          </select>
+          <small>active のテンプレートだけを新しく選択できます。</small>
+        </div>
+        <div className="form-field">
+          <label htmlFor={textId}>表示文字（複数行可）</label>
+          <textarea
+            disabled={disabled}
+            id={textId}
+            rows={3}
+            value={element.text}
+            onChange={(event) => onTextChange(event.target.value)}
+          />
+          <small>空欄ならオーバーレイは表示されません。</small>
+        </div>
       </div>
 
       <div className="edit-card-actions">
@@ -693,6 +753,8 @@ function EditPlanEditor({
   editResponse,
   videoPickerQuery,
   bgmPickerQuery,
+  insertTextTemplates,
+  insertTextTemplatesLoading,
   onRetry
 }: {
   readonly projectId: string;
@@ -700,6 +762,8 @@ function EditPlanEditor({
   readonly editResponse: ProjectEditResponse;
   readonly videoPickerQuery: AssetPickerQueryState;
   readonly bgmPickerQuery: AssetPickerQueryState;
+  readonly insertTextTemplates: readonly InsertTextTemplateSummary[];
+  readonly insertTextTemplatesLoading: boolean;
   readonly onRetry: () => void;
 }) {
   const navigate = useNavigate();
@@ -930,6 +994,35 @@ function EditPlanEditor({
           element.id === elementId
             ? { ...element, volume: clampUnitInterval(volume) }
             : element
+        )
+      },
+      "saving"
+    );
+  }
+
+  function updateVideoText(elementId: string, text: string): void {
+    const current = draftRef.current;
+    updateDraft(
+      {
+        ...current,
+        videoElements: current.videoElements.map((element) =>
+          element.id === elementId ? { ...element, text } : element
+        )
+      },
+      "saving"
+    );
+  }
+
+  function updateVideoTextTemplate(
+    elementId: string,
+    textTemplateId: string | null
+  ): void {
+    const current = draftRef.current;
+    updateDraft(
+      {
+        ...current,
+        videoElements: current.videoElements.map((element) =>
+          element.id === elementId ? { ...element, textTemplateId } : element
         )
       },
       "saving"
@@ -1402,6 +1495,8 @@ function EditPlanEditor({
                 )}
                 disabled={interactionDisabled}
                 element={readModel.intro}
+                insertTextTemplates={insertTextTemplates}
+                insertTextTemplatesLoading={insertTextTemplatesLoading}
                 volumeDisabled={
                   autosaveState.status === "saving" ||
                   autosaveState.status === "conflict"
@@ -1417,6 +1512,12 @@ function EditPlanEditor({
                 }
                 onVolumeChange={(volume) =>
                   updateVideoVolume(readModel.intro!.id, volume)
+                }
+                onTextChange={(text) =>
+                  updateVideoText(readModel.intro!.id, text)
+                }
+                onTextTemplateChange={(templateId) =>
+                  updateVideoTextTemplate(readModel.intro!.id, templateId)
                 }
               />
             ) : null}
@@ -1461,6 +1562,8 @@ function EditPlanEditor({
                       )}
                       disabled={interactionDisabled}
                       element={cutin}
+                      insertTextTemplates={insertTextTemplates}
+                      insertTextTemplatesLoading={insertTextTemplatesLoading}
                       isDragging={draggingElementId === cutin.id}
                       isKeyboardDragging={
                         keyboardDraggingElementId === cutin.id
@@ -1480,6 +1583,10 @@ function EditPlanEditor({
                       }
                       onVolumeChange={(volume) =>
                         updateVideoVolume(cutin.id, volume)
+                      }
+                      onTextChange={(text) => updateVideoText(cutin.id, text)}
+                      onTextTemplateChange={(templateId) =>
+                        updateVideoTextTemplate(cutin.id, templateId)
                       }
                       onDragEnd={clearDragState}
                       onDragStart={() => startNativeDrag(cutin.id)}
@@ -1601,6 +1708,8 @@ function EditPlanEditor({
                 )}
                 disabled={interactionDisabled}
                 element={readModel.outro}
+                insertTextTemplates={insertTextTemplates}
+                insertTextTemplatesLoading={insertTextTemplatesLoading}
                 sections={project.script.sections}
                 volumeDisabled={
                   autosaveState.status === "saving" ||
@@ -1616,6 +1725,12 @@ function EditPlanEditor({
                 }
                 onVolumeChange={(volume) =>
                   updateVideoVolume(readModel.outro!.id, volume)
+                }
+                onTextChange={(text) =>
+                  updateVideoText(readModel.outro!.id, text)
+                }
+                onTextTemplateChange={(templateId) =>
+                  updateVideoTextTemplate(readModel.outro!.id, templateId)
                 }
               />
             ) : null}
@@ -1666,6 +1781,12 @@ export function EditPage() {
     initialPageParam: 1,
     getNextPageParam: (lastPage) =>
       lastPage.hasNextPage ? lastPage.page + 1 : undefined,
+    enabled: projectId !== undefined,
+    retry: false
+  });
+  const insertTextTemplatesQuery = useQuery({
+    queryKey: ["insert-text-templates", "active"],
+    queryFn: () => fetchInsertTextTemplates({ status: "active" }),
     enabled: projectId !== undefined,
     retry: false
   });
@@ -1752,6 +1873,8 @@ export function EditPage() {
         }
       }}
       editResponse={editResponse}
+      insertTextTemplates={insertTextTemplatesQuery.data ?? []}
+      insertTextTemplatesLoading={insertTextTemplatesQuery.isPending}
       onRetry={retry}
       project={project}
       projectId={projectId}

@@ -68,6 +68,10 @@ import {
   registerScreenTemplateRoutes,
   type ScreenTemplateServicePort
 } from "./routes/screen-templates.js";
+import {
+  registerInsertTextTemplateRoutes,
+  type InsertTextTemplateServicePort
+} from "./routes/insert-text-templates.js";
 
 export type AppOptions = {
   logger?: FastifyServerOptions["logger"];
@@ -95,6 +99,7 @@ export type AppOptions = {
   aiRunSearchService?: AiRunSearchServicePort;
   characterVisualCatalogService?: CharacterVisualCatalogServicePort;
   screenTemplateService?: ScreenTemplateServicePort;
+  insertTextTemplateService?: InsertTextTemplateServicePort;
 };
 
 export function buildApp(options: AppOptions = {}): FastifyInstance {
@@ -195,6 +200,10 @@ export function buildApp(options: AppOptions = {}): FastifyInstance {
 
   if (options.screenTemplateService !== undefined) {
     registerScreenTemplateRoutes(app, options.screenTemplateService);
+  }
+
+  if (options.insertTextTemplateService !== undefined) {
+    registerInsertTextTemplateRoutes(app, options.insertTextTemplateService);
   }
 
   if (options.staticRoot !== undefined) {

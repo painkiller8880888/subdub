@@ -237,7 +237,9 @@ describe("RenderManifestInputBuilder", () => {
           assetChecksum: checksum,
           projectMediaPath: "media/edits/intro.mp4",
           placement: { kind: "before_first_section" },
-          volume: 0.25
+          volume: 0.25,
+          text: "",
+          textTemplateId: null
         }
       ];
       const filePath = path.join(
@@ -561,7 +563,9 @@ describe("RenderManifestInputBuilder", () => {
             assetChecksum: projectChecksum,
             projectMediaPath,
             placement: { kind: "before_first_section" },
-            volume: 0.25
+            volume: 0.25,
+            text: "",
+            textTemplateId: null
           }
         ];
         const filePath = path.join(

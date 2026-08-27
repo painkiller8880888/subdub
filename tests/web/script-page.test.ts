@@ -51,7 +51,10 @@ describe("ScriptPage workflow navigation", () => {
   });
 
   it("gives the removed character preview space to the screen preview", async () => {
-    const styles = await fs.readFile("src/web/styles.css", "utf8");
+    const styles = (await fs.readFile("src/web/styles.css", "utf8")).replaceAll(
+      "\r\n",
+      "\n"
+    );
 
     expect(styles).toContain(
       "grid-template-columns: minmax(22rem, 0.8fr) minmax(0, 1fr) minmax(16rem, 0.32fr);"

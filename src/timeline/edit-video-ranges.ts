@@ -5,7 +5,13 @@ import type { TimelineSectionRange } from "./section-ranges.js";
 export type TimelineEditVideoElement = Readonly<
   Pick<
     EditVideoElement,
-    "id" | "role" | "placement" | "volume" | "projectMediaPath"
+    | "id"
+    | "role"
+    | "placement"
+    | "volume"
+    | "projectMediaPath"
+    | "text"
+    | "textTemplateId"
   >
 > & {
   readonly durationInFrames: number;
@@ -19,6 +25,8 @@ export type TimelineEditVideoInsert = Readonly<{
   readonly durationInFrames: number;
   readonly src: string;
   readonly volume: number;
+  readonly text: string;
+  readonly textTemplateId: string | null;
 }>;
 
 export type EditVideoTimelineResult = Readonly<{
@@ -96,7 +104,9 @@ export function calculateEditVideoTimeline(
       from: 0,
       durationInFrames: intro.durationInFrames,
       src: intro.projectMediaPath,
-      volume: intro.volume
+      volume: intro.volume,
+      text: intro.text,
+      textTemplateId: intro.textTemplateId
     });
   }
 
@@ -109,7 +119,9 @@ export function calculateEditVideoTimeline(
         from: section.from + accumulatedShift,
         durationInFrames: cutin.durationInFrames,
         src: cutin.projectMediaPath,
-        volume: cutin.volume
+        volume: cutin.volume,
+        text: cutin.text,
+        textTemplateId: cutin.textTemplateId
       });
       accumulatedShift += cutin.durationInFrames;
     }
@@ -127,7 +139,9 @@ export function calculateEditVideoTimeline(
       from: outroFrom,
       durationInFrames: outro.durationInFrames,
       src: outro.projectMediaPath,
-      volume: outro.volume
+      volume: outro.volume,
+      text: outro.text,
+      textTemplateId: outro.textTemplateId
     });
   }
 

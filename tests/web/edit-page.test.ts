@@ -142,7 +142,9 @@ describe("edit page read model", () => {
           assetChecksum: "a".repeat(64),
           projectMediaPath: "media/intro.mp4",
           placement: { kind: "before_first_section" },
-          volume: 1
+          volume: 1,
+          text: "",
+          textTemplateId: null
         },
         {
           id: "cutin",
@@ -156,7 +158,9 @@ describe("edit page read model", () => {
             sectionId: "section-main",
             order: 0
           },
-          volume: 0.5
+          volume: 0.5,
+          text: "",
+          textTemplateId: null
         },
         {
           id: "outro",
@@ -166,7 +170,9 @@ describe("edit page read model", () => {
           assetChecksum: "c".repeat(64),
           projectMediaPath: "media/outro.mp4",
           placement: { kind: "after_last_section" },
-          volume: 0.8
+          volume: 0.8,
+          text: "",
+          textTemplateId: null
         }
       ],
       sectionBgms: [
@@ -213,7 +219,9 @@ describe("edit page read model", () => {
           assetChecksum: videoAsset.checksum!,
           projectMediaPath: "media/intro.mp4",
           placement: { kind: "before_first_section" as const },
-          volume: 0
+          volume: 0,
+          text: "",
+          textTemplateId: null
         }
       ],
       sectionBgms: []
@@ -227,7 +235,9 @@ describe("edit page read model", () => {
           assetId: videoAsset.assetId,
           assetVersion: videoAsset.version,
           placement: { kind: "before_first_section" },
-          volume: 0
+          volume: 0,
+          text: "",
+          textTemplateId: null
         }
       ],
       sectionBgms: []
@@ -339,7 +349,9 @@ describe("edit page read model", () => {
       assetChecksum: "a".repeat(64),
       projectMediaPath: `media/${id}.mp4`,
       placement: { kind: "before_section" as const, sectionId, order },
-      volume: 1
+      volume: 1,
+      text: "",
+      textTemplateId: null
     });
     const editPlan = {
       videoElements: [
@@ -475,7 +487,9 @@ describe("edit page read model", () => {
           assetChecksum: videoAsset.checksum!,
           projectMediaPath: "media/pending-edit-asset",
           placement: { kind: "before_first_section" as const },
-          volume: 1
+          volume: 1,
+          text: "",
+          textTemplateId: null
         }
       ],
       sectionBgms: []

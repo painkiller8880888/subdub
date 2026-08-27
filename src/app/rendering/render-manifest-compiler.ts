@@ -25,10 +25,12 @@ import {
   renderManifestV24Schema,
   renderManifestV25Schema,
   renderManifestV26Schema,
+  renderManifestV27Schema,
   renderManifestSchema,
   sha256Schema,
   characterVisualCatalogSnapshotSchema,
   screenTemplateSchema,
+  insertTextTemplateSchema,
   type RenderLayoutInterval,
   type RenderSectionLayout,
   type RenderResolvedVisualDisplay,
@@ -42,8 +44,11 @@ import {
   type RenderManifestV24,
   type RenderManifestV25,
   type RenderManifestV26,
+  type RenderManifestV27,
   type RenderResolvedVideoDisplayV25,
   type RenderInsert,
+  type RenderInsertV27,
+  type RenderInsertTextSnapshot,
   type RenderSoundEffect,
   type RenderVisualV24,
   type RenderVisualV25,
@@ -64,6 +69,8 @@ import {
   screenTemplateContentHash,
   screenTemplateLegacyContentHash
 } from "../screen-templates/screen-template-hash.js";
+import { insertTextTemplateContentHash } from "../insert-text-templates/insert-text-template-hash.js";
+import type { InsertTextTemplate } from "../../schema/insert-text-template.js";
 import {
   resolvedScreenLayoutValidationIssues,
   screenTemplateTextValidationIssues,
@@ -76,7 +83,8 @@ import {
 import { validateVisualPlaybackSequence } from "../../timeline/visual-playback.js";
 import type { VisualPlaybackCue } from "../../schema/visual-playback.js";
 
-export const RENDER_MANIFEST_VERSION = "2.6.0" as const;
+export const RENDER_MANIFEST_VERSION = "2.7.0" as const;
+export const RENDER_MANIFEST_V26_VERSION = "2.6.0" as const;
 export const RENDER_MANIFEST_V25_VERSION = "2.5.0" as const;
 export const RENDER_MANIFEST_V24_VERSION = "2.4.0" as const;
 
@@ -149,6 +157,9 @@ export const RENDER_MANIFEST_ERROR_CODE = {
   screenTemplateGeometryInvalid: "SCREEN_TEMPLATE_GEOMETRY_INVALID",
   screenTemplateCardinalityInvalid: "SCREEN_TEMPLATE_CARDINALITY_INVALID",
   screenTemplateTextOverflow: "SCREEN_TEMPLATE_TEXT_OVERFLOW",
+  insertTextTemplateSchema: "INSERT_TEXT_TEMPLATE_SNAPSHOT_INVALID",
+  insertTextTemplateMissing: "INSERT_TEXT_TEMPLATE_MISSING",
+  insertTextTemplateInactive: "INSERT_TEXT_TEMPLATE_INACTIVE",
   screenLayoutMissing: "RESOLVED_SCREEN_LAYOUT_MISSING",
   screenLayoutCharacterMissing: "RESOLVED_SCREEN_LAYOUT_CHARACTER_MISSING",
   visualPlaybackCuesUnsupported: "VISUAL_PLAYBACK_CUES_UNSUPPORTED",
@@ -212,6 +223,11 @@ export type RenderManifestCompilerInput = {
   /** Compatibility aliases used by callers while the snapshot boundary was introduced. */
   readonly screenTemplateSnapshot?: unknown;
   readonly screenTemplates?: unknown;
+  /** Validated InsertTextTemplate catalog snapshot supplied by the application boundary. */
+  readonly insertTextTemplateCatalogSnapshot?: unknown;
+  /** Compatibility aliases for the InsertTextTemplate snapshot boundary. */
+  readonly insertTextTemplateSnapshot?: unknown;
+  readonly insertTextTemplates?: unknown;
 };
 
 export type RenderManifestCompileSuccess<TManifest = RenderManifest> = {
@@ -285,6 +301,11 @@ type ResolvedScreenTemplate = Readonly<{
   readonly templateHash: string;
   /** Current RenderManifest template identity, including RF-01 fields. */
   readonly currentTemplateHash: string;
+}>;
+
+type ResolvedInsertTextTemplate = Readonly<{
+  readonly template: InsertTextTemplate;
+  readonly templateHash: string;
 }>;
 
 type RenderProjectLine = {
@@ -411,6 +432,17 @@ function recordInputScreenTemplates(
   );
 }
 
+function recordInputInsertTextTemplates(
+  input: RenderManifestCompilerInput
+): unknown {
+  return (
+    input.insertTextTemplateCatalogSnapshot ??
+    input.insertTextTemplateSnapshot ??
+    input.insertTextTemplates ??
+    null
+  );
+}
+
 /**
  * Keep the V24/V25 cache identity on the pre-RF-01 ScreenTemplate contract.
  * Template revision and content hash remain part of that contract; the
@@ -514,6 +546,55 @@ function normalizeScreenTemplates(
       templateRevision: template.revision,
       templateHash: screenTemplateLegacyContentHash(template),
       currentTemplateHash: screenTemplateContentHash(template)
+    });
+  }
+  return templates;
+}
+
+function normalizeInsertTextTemplates(
+  rawTemplates: unknown,
+  diagnostics: RenderManifestDiagnostic[]
+): Map<string, ResolvedInsertTextTemplate> {
+  if (rawTemplates === null || rawTemplates === undefined) {
+    return new Map();
+  }
+  if (!Array.isArray(rawTemplates)) {
+    addDiagnostic(
+      diagnostics,
+      RENDER_MANIFEST_ERROR_CODE.insertTextTemplateSchema,
+      ["insertTextTemplateCatalogSnapshot"],
+      "insert text template snapshot must be an array"
+    );
+    return new Map();
+  }
+
+  const templates = new Map<string, ResolvedInsertTextTemplate>();
+  for (const [index, rawTemplate] of rawTemplates.entries()) {
+    const result = insertTextTemplateSchema.safeParse(rawTemplate);
+    if (!result.success) {
+      for (const issue of result.error.issues) {
+        addDiagnostic(
+          diagnostics,
+          RENDER_MANIFEST_ERROR_CODE.insertTextTemplateSchema,
+          ["insertTextTemplateCatalogSnapshot", index, ...zodPath(issue.path)],
+          issue.message
+        );
+      }
+      continue;
+    }
+    const template = result.data;
+    if (templates.has(template.templateId)) {
+      addDiagnostic(
+        diagnostics,
+        RENDER_MANIFEST_ERROR_CODE.insertTextTemplateSchema,
+        ["insertTextTemplateCatalogSnapshot", index, "templateId"],
+        "templateId must be unique in the InsertTextTemplate snapshot"
+      );
+      continue;
+    }
+    templates.set(template.templateId, {
+      template,
+      templateHash: insertTextTemplateContentHash(template)
     });
   }
   return templates;
@@ -1964,9 +2045,45 @@ function orderedManifestV26(manifest: RenderManifestV26): RenderManifestV26 {
   };
 }
 
+function orderedManifestV27(manifest: RenderManifestV27): RenderManifestV27 {
+  const orderedLegacy = orderedManifestV26(
+    manifest as unknown as RenderManifestV26
+  );
+  return {
+    ...orderedLegacy,
+    manifestVersion: manifest.manifestVersion,
+    inserts: manifest.inserts.map((insert): RenderInsertV27 => ({
+      id: insert.id,
+      role: insert.role,
+      from: insert.from,
+      durationInFrames: insert.durationInFrames,
+      src: insert.src,
+      volume: insert.volume,
+      text:
+        insert.text === null
+          ? null
+          : ({
+              templateId: insert.text.templateId,
+              templateRevision: insert.text.templateRevision,
+              templateHash: insert.text.templateHash,
+              text: insert.text.text,
+              resolvedTextLayout: {
+                rect: insert.text.resolvedTextLayout.rect,
+                rotationDeg: insert.text.resolvedTextLayout.rotationDeg,
+                fontSize: insert.text.resolvedTextLayout.fontSize,
+                fontWeight: insert.text.resolvedTextLayout.fontWeight,
+                textColor: insert.text.resolvedTextLayout.textColor,
+                textAlign: insert.text.resolvedTextLayout.textAlign,
+                verticalAlign: insert.text.resolvedTextLayout.verticalAlign
+              }
+            } satisfies RenderInsertTextSnapshot)
+    }))
+  };
+}
+
 export function serializeRenderManifest(manifest: unknown): string {
   const parsed = renderManifestSchema.parse(manifest);
-  return `${JSON.stringify(orderedManifestV26(parsed), null, 2)}\n`;
+  return `${JSON.stringify(orderedManifestV27(parsed), null, 2)}\n`;
 }
 
 export function serializeRenderManifestV24(manifest: unknown): string {
@@ -2805,6 +2922,8 @@ export function compileRenderManifestV24(
         placement: element.placement,
         volume: element.volume,
         projectMediaPath: element.projectMediaPath,
+        text: element.text,
+        textTemplateId: element.textTemplateId,
         durationInFrames: msToFrames(asset.durationMs, fps),
         inputIndex
       };
@@ -3724,7 +3843,7 @@ function successV26(
   };
 }
 
-export function compileRenderManifest(
+export function compileRenderManifestV26(
   input: RenderManifestCompilerInput
 ): RenderManifestCompileResult<RenderManifestV26> {
   const baseResult = compileRenderManifestV25(input);
@@ -3792,7 +3911,7 @@ export function compileRenderManifest(
       visual.templateHash
   }));
   const compilerInputHash = sha256CanonicalJson({
-    manifestVersion: RENDER_MANIFEST_VERSION,
+    manifestVersion: RENDER_MANIFEST_V26_VERSION,
     baseCompilerInputHash: baseResult.manifest.compilerInputHash,
     glowColors: [...glowColors.entries()].sort(([left], [right]) =>
       compareStrings(left, right)
@@ -3802,7 +3921,7 @@ export function compileRenderManifest(
   });
   const manifest = {
     ...baseResult.manifest,
-    manifestVersion: RENDER_MANIFEST_VERSION,
+    manifestVersion: RENDER_MANIFEST_V26_VERSION,
     compilerInputHash,
     characters,
     sectionLayouts,
@@ -3820,6 +3939,159 @@ export function compileRenderManifest(
     return failure(diagnostics, baseResult.warnings);
   }
   return successV26(manifestResult.data, baseResult.warnings);
+}
+
+function successV27(
+  manifest: RenderManifestV27,
+  warnings: readonly RenderManifestWarning[]
+): RenderManifestCompileSuccess<RenderManifestV27> {
+  return {
+    success: true,
+    ok: true,
+    manifest: orderedManifestV27(manifest),
+    diagnostics: [],
+    errors: [],
+    warnings: warnings.map((warning) => ({
+      ...warning,
+      soundEffectIds: [...warning.soundEffectIds],
+      lineIds: [...warning.lineIds]
+    }))
+  };
+}
+
+export function compileRenderManifest(
+  input: RenderManifestCompilerInput
+): RenderManifestCompileResult<RenderManifest> {
+  const baseResult = compileRenderManifestV26(input);
+  if (!baseResult.success) {
+    return baseResult as RenderManifestCompileResult<RenderManifest>;
+  }
+
+  const projectResult = videoProjectSchema.safeParse(
+    input.project ?? input.videoProject
+  );
+  if (!projectResult.success) {
+    const diagnostics: RenderManifestDiagnostic[] = [];
+    addZodDiagnostics(
+      diagnostics,
+      RENDER_MANIFEST_ERROR_CODE.videoProjectSchema,
+      projectResult.error,
+      []
+    );
+    return failure(diagnostics, baseResult.warnings);
+  }
+
+  const diagnostics: RenderManifestDiagnostic[] = [];
+  const templates = normalizeInsertTextTemplates(
+    recordInputInsertTextTemplates(input),
+    diagnostics
+  );
+  const project = projectResult.data;
+  const templateById = new Map(
+    [...templates.values()].map((binding) => [
+      binding.template.templateId,
+      binding
+    ])
+  );
+  const snapshotByElementId = new Map<string, RenderInsertTextSnapshot>();
+  const dependencies = new Map<
+    string,
+    { readonly template: InsertTextTemplate; readonly templateHash: string }
+  >();
+
+  for (const [elementIndex, element] of project.edit.videoElements.entries()) {
+    if (element.text.length === 0 || element.textTemplateId === null) {
+      continue;
+    }
+    const binding = templateById.get(element.textTemplateId);
+    if (binding === undefined) {
+      addDiagnostic(
+        diagnostics,
+        RENDER_MANIFEST_ERROR_CODE.insertTextTemplateMissing,
+        ["edit", "videoElements", elementIndex, "textTemplateId"],
+        "selected insert text template does not exist",
+        { assignmentId: element.id }
+      );
+      continue;
+    }
+    if (binding.template.status !== "active") {
+      addDiagnostic(
+        diagnostics,
+        RENDER_MANIFEST_ERROR_CODE.insertTextTemplateInactive,
+        ["edit", "videoElements", elementIndex, "textTemplateId"],
+        "selected insert text template is inactive",
+        { assignmentId: element.id }
+      );
+      continue;
+    }
+    const template = binding.template;
+    snapshotByElementId.set(element.id, {
+      templateId: template.templateId,
+      templateRevision: template.revision,
+      templateHash: binding.templateHash,
+      text: element.text,
+      resolvedTextLayout: {
+        rect: template.textRect,
+        rotationDeg: template.rotationDeg,
+        fontSize: template.fontSize,
+        fontWeight: template.fontWeight,
+        textColor: template.textColor,
+        textAlign: template.textAlign,
+        verticalAlign: template.verticalAlign
+      }
+    });
+    dependencies.set(template.templateId, binding);
+  }
+
+  if (diagnostics.length > 0) {
+    return failure(diagnostics, baseResult.warnings);
+  }
+
+  const inserts: RenderInsertV27[] = baseResult.manifest.inserts.map(
+    (insert) => ({
+      ...insert,
+      text: snapshotByElementId.get(insert.id) ?? null
+    })
+  );
+  const dependencySnapshot = [...dependencies.entries()]
+    .sort(([left], [right]) => compareStrings(left, right))
+    .map(([templateId, binding]) => ({
+      templateId,
+      templateRevision: binding.template.revision,
+      templateHash: binding.templateHash,
+      resolvedTextLayout: {
+        rect: binding.template.textRect,
+        rotationDeg: binding.template.rotationDeg,
+        fontSize: binding.template.fontSize,
+        fontWeight: binding.template.fontWeight,
+        textColor: binding.template.textColor,
+        textAlign: binding.template.textAlign,
+        verticalAlign: binding.template.verticalAlign
+      }
+    }));
+  const compilerInputHash = sha256CanonicalJson({
+    manifestVersion: RENDER_MANIFEST_VERSION,
+    baseCompilerInputHash: baseResult.manifest.compilerInputHash,
+    insertTextTemplates: dependencySnapshot,
+    inserts
+  });
+  const manifest = {
+    ...baseResult.manifest,
+    manifestVersion: RENDER_MANIFEST_VERSION,
+    compilerInputHash,
+    inserts
+  } satisfies RenderManifestV27;
+  const manifestResult = renderManifestV27Schema.safeParse(manifest);
+  if (!manifestResult.success) {
+    addZodDiagnostics(
+      diagnostics,
+      RENDER_MANIFEST_ERROR_CODE.manifestSchema,
+      manifestResult.error,
+      []
+    );
+    return failure(diagnostics, baseResult.warnings);
+  }
+  return successV27(manifestResult.data, baseResult.warnings);
 }
 
 export class RenderManifestCompiler {

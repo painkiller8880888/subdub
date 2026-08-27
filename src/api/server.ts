@@ -65,6 +65,10 @@ import {
   ScreenTemplateCatalogService,
   ScreenTemplateRepository
 } from "../app/screen-templates/index.js";
+import {
+  InsertTextTemplateCatalogService,
+  InsertTextTemplateRepository
+} from "../app/insert-text-templates/index.js";
 
 export const SERVER_HOST = API_HOST;
 export const SERVER_PORT = API_PORT;
@@ -136,6 +140,7 @@ export async function initializeServer(
     voiceGenerationService: suppliedVoiceGenerationService,
     renderJobService: suppliedRenderJobService,
     screenTemplateService: suppliedScreenTemplateService,
+    insertTextTemplateService: suppliedInsertTextTemplateService,
     workspaceRoot = process.cwd(),
     ...appOptions
   } = options;
@@ -153,6 +158,11 @@ export async function initializeServer(
       suppliedScreenTemplateService ??
       new ScreenTemplateCatalogService({
         repository: new ScreenTemplateRepository(database.database)
+      });
+    const resolvedInsertTextTemplateService =
+      suppliedInsertTextTemplateService ??
+      new InsertTextTemplateCatalogService({
+        repository: new InsertTextTemplateRepository(database.database)
       });
     const resolvedProjectRepository =
       projectRepository ??
@@ -284,6 +294,7 @@ export async function initializeServer(
         workspaceRoot,
         projectRepository: resolvedProjectRepository,
         screenTemplateCatalog: resolvedScreenTemplateService,
+        insertTextTemplateCatalog: resolvedInsertTextTemplateService,
         manifestStore: renderManifestStore,
         audioStore,
         voiceGenerationService: resolvedVoiceGenerationService,
@@ -299,6 +310,7 @@ export async function initializeServer(
             workspaceRoot,
             projectRepository: resolvedProjectRepository,
             screenTemplateCatalog: resolvedScreenTemplateService,
+            insertTextTemplateCatalog: resolvedInsertTextTemplateService,
             assetRepository: resolvedAssetRepository,
             characterVisualCatalogService: {
               verifyFiles: verifyCharacterVisualFiles.bind(
@@ -334,7 +346,8 @@ export async function initializeServer(
       renderJobService: resolvedRenderJobService,
       aiRunSearchService: resolvedAiRunSearchService,
       characterVisualCatalogService: resolvedCharacterVisualCatalogService,
-      screenTemplateService: resolvedScreenTemplateService
+      screenTemplateService: resolvedScreenTemplateService,
+      insertTextTemplateService: resolvedInsertTextTemplateService
     });
     resolvedProcessingWorker.start();
     resolvedRenderJobService.start();

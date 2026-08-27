@@ -24,8 +24,13 @@ import {
 } from "./primitives.js";
 import {
   characterOverflowScreenTransformSchema,
+  canvasContainedRectSchema,
   screenTransformSchema
 } from "./screen-template.js";
+import {
+  insertTextTemplateTextAlignSchema,
+  insertTextTemplateVerticalAlignSchema
+} from "./insert-text-template.js";
 import { visualPlaybackCueSchema } from "./visual-playback.js";
 import { mediaMillisecondsToFrames } from "../media-frame.js";
 
@@ -236,6 +241,30 @@ export const renderInsertSchema = strictObject({
   volume: unitIntervalSchema
 });
 export const renderVideoInsertSchema = renderInsertSchema;
+
+export const renderInsertTextLayoutSchema = strictObject({
+  rect: canvasContainedRectSchema,
+  rotationDeg: finiteNumberSchema,
+  fontSize: positiveNumberSchema,
+  fontWeight: positiveIntegerSchema,
+  textColor: hexColorSchema,
+  textAlign: insertTextTemplateTextAlignSchema,
+  verticalAlign: insertTextTemplateVerticalAlignSchema
+});
+
+export const renderInsertTextSnapshotSchema = strictObject({
+  templateId: idSchema,
+  templateRevision: positiveIntegerSchema,
+  templateHash: sha256Schema,
+  text: z.string().min(1),
+  resolvedTextLayout: renderInsertTextLayoutSchema
+});
+
+export const renderInsertV27Schema = strictObject({
+  ...renderInsertSchema.shape,
+  text: renderInsertTextSnapshotSchema.nullable()
+});
+export const renderVideoInsertV27Schema = renderInsertV27Schema;
 
 const renderManifestBaseSchema = strictObject({
   manifestVersion: z.literal("2.3.0"),
@@ -1908,6 +1937,11 @@ const renderManifestV26BaseSchema = renderManifestV25BaseSchema.extend({
   layoutIntervals: z.array(renderLayoutIntervalV26Schema)
 });
 
+const renderManifestV27BaseSchema = renderManifestV26BaseSchema.extend({
+  manifestVersion: z.literal("2.7.0"),
+  inserts: z.array(renderInsertV27Schema)
+});
+
 function stripV26ResolvedLayout(
   layout: z.infer<typeof resolvedScreenLayoutV26Schema>
 ): z.infer<typeof resolvedScreenLayoutSchema> {
@@ -1964,9 +1998,33 @@ export const renderManifestV26Schema = renderManifestV26BaseSchema.superRefine(
   }
 );
 
+export const renderManifestV27Schema = renderManifestV27BaseSchema.superRefine(
+  (manifest, ctx) => {
+    const legacy = {
+      ...manifest,
+      manifestVersion: "2.6.0" as const,
+      inserts: manifest.inserts.map(({ text: _text, ...insert }) => {
+        void _text;
+        return insert;
+      })
+    };
+    const result = renderManifestV26Schema.safeParse(legacy);
+    if (result.success) {
+      return;
+    }
+    for (const issue of result.error.issues) {
+      ctx.addIssue({
+        code: "custom",
+        path: issue.path,
+        message: issue.message
+      });
+    }
+  }
+);
+
 /** Current production manifest schema. V24 remains available explicitly for
  * compatibility parsing and tests that exercise the frozen contracts. */
-export const renderManifestSchema = renderManifestV26Schema;
+export const renderManifestSchema = renderManifestV27Schema;
 
 export type SourceAssetChecksum = z.infer<typeof sourceAssetChecksumSchema>;
 export type RenderLineV23 = z.infer<typeof renderLineSchema>;
@@ -1990,6 +2048,16 @@ export type RenderAudioTrack = z.infer<typeof renderAudioTrackSchema>;
 export type RenderSoundEffect = z.infer<typeof renderSoundEffectSchema>;
 export type RenderInsert = z.infer<typeof renderInsertSchema>;
 export type RenderVideoInsert = z.infer<typeof renderVideoInsertSchema>;
+export type RenderInsertTextLayout = z.infer<
+  typeof renderInsertTextLayoutSchema
+>;
+export type RenderInsertTextSnapshot = z.infer<
+  typeof renderInsertTextSnapshotSchema
+>;
+export type RenderInsertV27 = z.infer<typeof renderInsertV27Schema>;
+export type RenderVideoInsertV27 = z.infer<
+  typeof renderVideoInsertV27Schema
+>;
 export type RenderManifest = z.infer<typeof renderManifestSchema>;
 export type RenderManifestV23 = z.infer<typeof renderManifestV23Schema>;
 export type RenderManifestV24 = z.infer<typeof renderManifestV24Schema>;
@@ -2000,6 +2068,7 @@ export type RenderResolvedVideoDisplayV25 = z.infer<
 export type RenderVisualV25 = z.infer<typeof renderVisualV25Schema>;
 export type RenderManifestV25 = z.infer<typeof renderManifestV25Schema>;
 export type RenderManifestV26 = z.infer<typeof renderManifestV26Schema>;
+export type RenderManifestV27 = z.infer<typeof renderManifestV27Schema>;
 export type ResolvedScreenElement = z.infer<typeof resolvedScreenElementSchema>;
 export type ResolvedScreenLayout = z.infer<typeof resolvedScreenLayoutSchema>;
 export type ResolvedScreenElementV26 = z.infer<

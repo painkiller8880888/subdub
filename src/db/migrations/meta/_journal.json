@@ -99,6 +99,13 @@
       "when": 1787443200000,
       "tag": "0013_rf01-dialogue-glow",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1787529600000,
+      "tag": "0014_rf02-insert-text-template",
+      "breakpoints": true
     }
   ]
 }

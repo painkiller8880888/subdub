@@ -2,7 +2,6 @@ import type {
   RenderBackground,
   RenderCharacter,
   RenderCharacterVariant,
-  RenderInsert,
   RenderLine,
   RenderManifest,
   RenderVisual,
@@ -44,7 +43,7 @@ export function selectActiveBackground(
 export function selectActiveInsert(
   manifest: RenderManifest,
   frame: number
-): RenderInsert | undefined {
+): RenderManifest["inserts"][number] | undefined {
   return selectActiveItem(manifest.inserts, frame);
 }
 

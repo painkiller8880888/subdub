@@ -28,6 +28,8 @@ import {
   type ScreenTemplateSnapshotPort
 } from "../projects/screen-template-selection.js";
 import { screenTemplateContentHash } from "../screen-templates/screen-template-hash.js";
+import type { InsertTextTemplate } from "../../schema/insert-text-template.js";
+import { insertTextTemplateContentHash } from "../insert-text-templates/insert-text-template-hash.js";
 import type { VoicevoxGenerationService } from "../voicevox/generation-service.js";
 import { VoicevoxAudioStore } from "../voicevox/audio-store.js";
 import type { VoicevoxAudioIndex } from "../voicevox/audio-index.js";
@@ -36,6 +38,10 @@ export type ManifestPreviewServiceOptions = {
   readonly workspaceRoot: string;
   readonly projectRepository: Pick<ProjectRepository, "read">;
   readonly screenTemplateCatalog: ScreenTemplateSnapshotPort;
+  readonly insertTextTemplateCatalog?: Pick<
+    Readonly<{ findById(templateId: string): InsertTextTemplate | undefined }>,
+    "findById"
+  >;
   readonly manifestStore?: Pick<RenderManifestStore, "readDetailed">;
   readonly audioStore?: Pick<VoicevoxAudioStore, "readIndex">;
   readonly voiceGenerationService: Pick<VoicevoxGenerationService, "getStatus">;
@@ -81,7 +87,11 @@ const blockerMessages: Readonly<Record<string, string>> = {
   MANIFEST_PROJECT_STALE:
     "保存済みプレビューが現在のプロジェクトと一致しません。プレビューを再生成してください.",
   MANIFEST_SCREEN_TEMPLATE_STALE:
-    "保存済みプレビューの画面テンプレートが更新されています。プレビューを再生成してください。"
+    "保存済みプレビューの画面テンプレートが更新されています。プレビューを再生成してください。",
+  INSERT_TEXT_TEMPLATE_REFERENCE_INVALID:
+    "選択された挿入文字テンプレートが見つからないか無効です。編集画面の設定を修正してください。",
+  MANIFEST_INSERT_TEXT_TEMPLATE_STALE:
+    "保存済みプレビューの挿入文字テンプレートが更新されています。プレビューを再生成してください。"
 };
 
 function isPathInside(rootPath: string, candidatePath: string): boolean {
@@ -215,6 +225,10 @@ export class ManifestPreviewService {
   private readonly workspaceRoot: string;
   private readonly projectRepository: Pick<ProjectRepository, "read">;
   private readonly screenTemplateCatalog: ScreenTemplateSnapshotPort;
+  private readonly insertTextTemplateCatalog?: Pick<
+    Readonly<{ findById(templateId: string): InsertTextTemplate | undefined }>,
+    "findById"
+  >;
   private readonly manifestStore: Pick<RenderManifestStore, "readDetailed">;
   private readonly audioStore: Pick<VoicevoxAudioStore, "readIndex">;
   private readonly voiceGenerationService: Pick<
@@ -227,6 +241,7 @@ export class ManifestPreviewService {
     this.workspaceRoot = path.resolve(options.workspaceRoot);
     this.projectRepository = options.projectRepository;
     this.screenTemplateCatalog = options.screenTemplateCatalog;
+    this.insertTextTemplateCatalog = options.insertTextTemplateCatalog;
     this.manifestStore =
       options.manifestStore ??
       new RenderManifestStore({
@@ -283,6 +298,7 @@ export class ManifestPreviewService {
         );
       }
       this.addScreenTemplateStaleBlockers(manifest, blockers);
+      this.addInsertTextTemplateStaleBlockers(manifest, blockers);
       await this.addAssetBlockers(safeProjectId, manifest, blockers);
     } else if (manifestResult.status === "missing") {
       addBlocker(
@@ -360,6 +376,23 @@ export class ManifestPreviewService {
           : toTarget("script", { sectionId: section?.id })
       );
     }
+    if (this.insertTextTemplateCatalog !== undefined) {
+      for (const element of project.edit.videoElements) {
+        if (element.text.length === 0 || element.textTemplateId === null) {
+          continue;
+        }
+        const template = this.insertTextTemplateCatalog.findById(
+          element.textTemplateId
+        );
+        if (template === undefined || template.status !== "active") {
+          addBlocker(
+            blockers,
+            "INSERT_TEXT_TEMPLATE_REFERENCE_INVALID",
+            toTarget("asset", { assignmentId: element.id })
+          );
+        }
+      }
+    }
   }
 
   private addScreenTemplateStaleBlockers(
@@ -388,6 +421,37 @@ export class ManifestPreviewService {
         addBlocker(
           blockers,
           "MANIFEST_SCREEN_TEMPLATE_STALE",
+          toTarget("manifest", { path: "cache/render-manifest.json" })
+        );
+        return;
+      }
+    }
+  }
+
+  private addInsertTextTemplateStaleBlockers(
+    manifest: RenderManifest,
+    blockers: ManifestPreviewBlocker[]
+  ): void {
+    if (this.insertTextTemplateCatalog === undefined) {
+      return;
+    }
+    for (const insert of manifest.inserts) {
+      if (insert.text === null) {
+        continue;
+      }
+      const current = this.insertTextTemplateCatalog.findById(
+        insert.text.templateId
+      );
+      if (current === undefined || current.status !== "active") {
+        continue;
+      }
+      if (
+        current.revision !== insert.text.templateRevision ||
+        insertTextTemplateContentHash(current) !== insert.text.templateHash
+      ) {
+        addBlocker(
+          blockers,
+          "MANIFEST_INSERT_TEXT_TEMPLATE_STALE",
           toTarget("manifest", { path: "cache/render-manifest.json" })
         );
         return;

@@ -49,6 +49,8 @@ import { EditPage } from "./EditPage";
 import { OutlinePage } from "./OutlinePage";
 import { ScreenTemplateEditorPage } from "./ScreenTemplateEditorPage";
 import { ScreenTemplatesPage } from "./ScreenTemplatesPage";
+import { InsertTextTemplateEditorPage } from "./InsertTextTemplateEditorPage";
+import { InsertTextTemplatesPage } from "./InsertTextTemplatesPage";
 import { ScriptPage } from "./ScriptPage";
 import { TerminologyPage } from "./TerminologyPage";
 import { PreviewPage } from "./PreviewPage";
@@ -1049,6 +1051,14 @@ export function App() {
         <Route
           element={<ScreenTemplateEditorPage />}
           path="/screen-templates/:templateId"
+        />
+        <Route
+          element={<InsertTextTemplatesPage />}
+          path="/insert-text-templates"
+        />
+        <Route
+          element={<InsertTextTemplateEditorPage />}
+          path="/insert-text-templates/:templateId"
         />
         <Route element={<AssetsPage />} path="/assets" />
         <Route element={<TerminologyPage />} path="/terminology" />

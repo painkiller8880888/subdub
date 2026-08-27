@@ -394,6 +394,63 @@ export const screenTemplates = sqliteTable(
   ]
 );
 
+export const insertTextTemplates = sqliteTable(
+  "insert_text_templates",
+  {
+    templateId: text("template_id").primaryKey(),
+    name: text("name").notNull(),
+    description: text("description").notNull().default(""),
+    status: text("status", { enum: ["active", "inactive"] }).notNull(),
+    revision: integer("revision").notNull().default(1),
+    canvasWidth: integer("canvas_width").notNull(),
+    canvasHeight: integer("canvas_height").notNull(),
+    x: real("x").notNull(),
+    y: real("y").notNull(),
+    width: real("width").notNull(),
+    height: real("height").notNull(),
+    rotationDeg: real("rotation_deg").notNull(),
+    fontSize: real("font_size").notNull(),
+    fontWeight: integer("font_weight").notNull(),
+    textColor: text("text_color").notNull(),
+    textAlign: text("text_align", {
+      enum: ["left", "center", "right"]
+    }).notNull(),
+    verticalAlign: text("vertical_align", {
+      enum: ["top", "center", "bottom"]
+    }).notNull(),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull()
+  },
+  (table) => [
+    index("insert_text_templates_status_idx").on(table.status),
+    check(
+      "insert_text_templates_status_check",
+      sql`${table.status} IN ('active', 'inactive')`
+    ),
+    check(
+      "insert_text_templates_canvas_check",
+      sql`${table.canvasWidth} = 1920 AND ${table.canvasHeight} = 1080`
+    ),
+    check("insert_text_templates_revision_check", sql`${table.revision} > 0`),
+    check(
+      "insert_text_templates_geometry_check",
+      sql`${table.x} >= 0 AND ${table.y} >= 0 AND ${table.width} > 0 AND ${table.height} > 0 AND ${table.x} + ${table.width} <= 1 AND ${table.y} + ${table.height} <= 1`
+    ),
+    check(
+      "insert_text_templates_typography_check",
+      sql`${table.fontSize} > 0 AND ${table.fontWeight} > 0`
+    ),
+    check(
+      "insert_text_templates_text_align_check",
+      sql`${table.textAlign} IN ('left', 'center', 'right')`
+    ),
+    check(
+      "insert_text_templates_vertical_align_check",
+      sql`${table.verticalAlign} IN ('top', 'center', 'bottom')`
+    )
+  ]
+);
+
 export const screenTemplateElements = sqliteTable(
   "screen_template_elements",
   {

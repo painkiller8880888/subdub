@@ -26,7 +26,9 @@ const editVideoElementFixture = {
     sectionId: "section-main",
     order: 0
   },
-  volume: 0.5
+  volume: 0.5,
+  text: "",
+  textTemplateId: null
 };
 
 function expectInvalid(

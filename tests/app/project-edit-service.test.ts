@@ -221,7 +221,9 @@ describe("ProjectEditService", () => {
       assetId,
       assetVersion,
       placement: { kind: "before_first_section" as const },
-      volume: 0.4
+      volume: 0.4,
+      text: "",
+      textTemplateId: null
     };
   }
 
@@ -238,7 +240,9 @@ describe("ProjectEditService", () => {
       assetId,
       assetVersion,
       placement: { kind: "before_section" as const, sectionId, order },
-      volume: 0.4
+      volume: 0.4,
+      text: "",
+      textTemplateId: null
     };
   }
 
