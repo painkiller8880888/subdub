@@ -405,6 +405,33 @@ function recordInputScreenTemplates(
   );
 }
 
+/**
+ * Keep the V24/V25 cache identity on the pre-RF-01 ScreenTemplate contract.
+ * Template revision and content hash remain part of that contract; the
+ * dialogue window's RF-01 appearance is added only by the V26 wrapper.
+ */
+function screenTemplateElementForV24Hash(
+  element: ScreenTemplate["elements"][number]
+): unknown {
+  if (element.type !== "dialogue-window") {
+    return element;
+  }
+  const {
+    backgroundColor: _backgroundColor,
+    backgroundOpacity: _backgroundOpacity,
+    ...legacyElement
+  } = element;
+  void _backgroundColor;
+  void _backgroundOpacity;
+  return legacyElement;
+}
+
+function screenTemplateElementsForV24Hash(
+  elements: ScreenTemplate["elements"]
+): unknown[] {
+  return elements.map(screenTemplateElementForV24Hash);
+}
+
 function screenTemplateDiagnosticCode(
   message: string
 ): RenderManifestDiagnosticCode {
@@ -2800,7 +2827,6 @@ export function compileRenderManifestV24(
   const catalogForHash = catalog.map((variant) => ({
     variantId: variant.variantId,
     visualId: variant.visualId,
-    glowColor: variant.visualGlowColor,
     renderType: variant.renderType,
     files: [...variant.files.values()]
       .sort((left, right) => compareStrings(left.key, right.key))
@@ -2837,7 +2863,9 @@ export function compileRenderManifestV24(
             : {
                 canvasWidth: binding.template.canvasWidth,
                 canvasHeight: binding.template.canvasHeight,
-                elements: binding.template.elements
+                elements: screenTemplateElementsForV24Hash(
+                  binding.template.elements
+                )
               },
         sectionIds: project.script.sections
           .filter((section) => section.screenTemplateId === templateId)

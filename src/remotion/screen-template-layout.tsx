@@ -214,7 +214,8 @@ function renderScreenTemplateElement(
             alignItems: "center",
             ...dialogueWindowSurfaceStyle(
               element.backgroundColor,
-              element.backgroundOpacity
+              element.backgroundOpacity,
+              "cqw"
             ),
             boxSizing: "border-box",
             color: "#fff",
@@ -232,7 +233,8 @@ function renderScreenTemplateElement(
             lineHeight: SUBTITLE_BODY_LINE_HEIGHT,
             padding: `${(SUBTITLE_CARD_VERTICAL_PADDING_PER_SIDE_PX / SCREEN_TEMPLATE_CANVAS_WIDTH) * 100}cqw ${(SUBTITLE_CARD_HORIZONTAL_PADDING_PER_SIDE_PX / SCREEN_TEMPLATE_CANVAS_WIDTH) * 100}cqw`,
             textShadow: dialogueWindowTextShadow(
-              preview.dialogueGlowColor ?? DEFAULT_DIALOGUE_WINDOW_GLOW_COLOR
+              preview.dialogueGlowColor ?? DEFAULT_DIALOGUE_WINDOW_GLOW_COLOR,
+              "cqw"
             ),
             whiteSpace: "pre-wrap",
             width: "100%"

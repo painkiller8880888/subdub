@@ -4,6 +4,7 @@ import type {
   ScriptLine,
   ScriptSection,
   ScreenTemplate,
+  RenderManifest,
   VideoProject,
   VisualAssignment
 } from "../schema/index.js";
@@ -34,6 +35,15 @@ export type ResolvedScriptScreenTemplate = Readonly<{
 export type ScriptScreenTemplate = ScreenTemplate & {
   readonly contentHash?: string;
 };
+
+type ManifestCharacterGlowSnapshot = Pick<
+  RenderManifest["characters"][number],
+  "characterId" | "glowColor"
+>;
+
+type RenderManifestGlowSnapshot = Readonly<{
+  readonly characters: readonly ManifestCharacterGlowSnapshot[];
+}>;
 
 export function screenTemplateIdsForScript(
   script: Pick<VideoProject["script"], "sections">
@@ -275,6 +285,7 @@ export function resolveScriptLineScreenPreview({
   section,
   line,
   catalog,
+  manifest,
   assignments,
   assets
 }: {
@@ -286,22 +297,21 @@ export function resolveScriptLineScreenPreview({
     "speakerId" | "characterVariantId" | "subtitleText"
   >;
   readonly catalog: CharacterVisualCatalogSnapshot | undefined;
+  /** RenderManifest 2.6.0 character snapshot; never resolve glow from catalog. */
+  readonly manifest: RenderManifestGlowSnapshot | null | undefined;
   readonly assignments: readonly VisualAssignment[];
   readonly assets: ReadonlyMap<string, AssetDetail | undefined>;
 }): ScreenLayoutPreview {
   const contents = resolveContentPreviews(assignments, assets);
-  const speaker = project.characters.find(
-    (character) => character.id === line.speakerId
-  );
-  const speakerVisual = catalog?.find(
-    (visual) => visual.visualId === speaker?.characterVisual.visualId
+  const manifestCharacter = manifest?.characters.find(
+    (character) => character.characterId === line.speakerId
   );
   return {
     background: resolveBackgroundPreview(projectId, section),
     characters: resolveCharacterPreviews(project, line, catalog),
     content: contents[0] ?? unresolvedContentPreview(undefined),
     contents,
-    dialogueGlowColor: speakerVisual?.glowColor,
+    dialogueGlowColor: manifestCharacter?.glowColor,
     dialogueText: line.subtitleText,
     speakerNameText:
       project.characters.find((character) => character.id === line.speakerId)

@@ -355,12 +355,15 @@ describe("script ScreenTemplate preview resolution", () => {
       section,
       line,
       catalog: characterCatalog,
+      manifest: {
+        characters: [{ characterId: "character-mentor", glowColor: "#102030" }]
+      },
       assignments: [assignment],
       assets
     });
 
     expect(preview.dialogueText).toBe("現在の字幕");
-    expect(preview.dialogueGlowColor).toBe("#e78ac3");
+    expect(preview.dialogueGlowColor).toBe("#102030");
     expect(preview.sectionTitleText).toBe("操作");
     expect(preview.background).toEqual({
       fit: "cover",

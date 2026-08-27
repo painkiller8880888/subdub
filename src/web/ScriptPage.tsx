@@ -39,6 +39,7 @@ import {
   fetchCharacterVisualCatalog,
   fetchAsset,
   fetchProject,
+  fetchProjectManifest,
   fetchProjectVoiceStatus,
   fetchScreenTemplate,
   fetchScreenTemplates,
@@ -853,6 +854,12 @@ export function ScriptPage() {
   const projectQuery = useQuery({
     queryKey: ["projects", projectId],
     queryFn: () => fetchProject(projectId ?? ""),
+    enabled: projectId !== undefined,
+    retry: false
+  });
+  const manifestQuery = useQuery({
+    queryKey: ["projects", projectId, "manifest"],
+    queryFn: () => fetchProjectManifest(projectId ?? ""),
     enabled: projectId !== undefined,
     retry: false
   });
@@ -1938,6 +1945,7 @@ export function ScriptPage() {
 
   const project = projectQuery.data;
   const catalog = catalogQuery.data;
+  const manifest = manifestQuery.data?.manifest;
   const activeTemplates = screenTemplatesQuery.data ?? [];
   const templateDetails = new Map<string, ScreenTemplateDetail>();
   const templateLoadingIds = new Set<string>();
@@ -2492,6 +2500,7 @@ export function ScriptPage() {
                             section,
                             line,
                             catalog,
+                            manifest,
                             assignments: previewState.assignments,
                             assets
                           })}

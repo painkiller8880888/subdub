@@ -416,6 +416,12 @@ describe("ScreenTemplate cross-layer acceptance fixture", () => {
       section: main,
       line,
       catalog: createCharacterCatalog(),
+      manifest: {
+        characters: [
+          { characterId: "character-mentor", glowColor: "#e78ac3" },
+          { characterId: "character-learner", glowColor: "#75c97a" }
+        ]
+      },
       assignments: [assignment],
       assets: new Map([
         [screenPreviewAssetKey(assignment), createAssetDetail()]
@@ -440,6 +446,12 @@ describe("ScreenTemplate cross-layer acceptance fixture", () => {
       section: main,
       line: singleImageLine,
       catalog: createCharacterCatalog(),
+      manifest: {
+        characters: [
+          { characterId: "character-mentor", glowColor: "#e78ac3" },
+          { characterId: "character-learner", glowColor: "#75c97a" }
+        ]
+      },
       assignments: [assignment],
       assets: new Map([
         [screenPreviewAssetKey(assignment), createAssetDetail()]
@@ -763,9 +775,11 @@ describe("ScreenTemplate cross-layer acceptance fixture", () => {
     expect(markup).toContain("background-color:rgba(0, 0, 0, 0.4)");
     expect(markup).toContain("justify-content:center");
     expect(markup).toContain("text-align:center");
-    expect(markup).toContain("text-shadow:0 0 6px #ffffff, 0 0 14px #ffffff");
+    expect(markup).toContain(
+      "text-shadow:0 0 0.3125cqw #ffffff, 0 0 0.7291666666666666cqw #ffffff"
+    );
     expect(markup).toContain("border:none");
-    expect(markup).toContain("border-radius:16px");
+    expect(markup).toContain("border-radius:0.8333333333333334cqw");
     expect(markup).toContain("box-shadow:none");
     expect(markup).not.toContain(">話者</span>");
     expect(markup).not.toContain(">話者名</span>");

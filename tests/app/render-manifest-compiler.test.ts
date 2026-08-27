@@ -10,6 +10,7 @@ import {
 import {
   compileRenderManifest,
   compileRenderManifestV24,
+  compileRenderManifestV25,
   serializeRenderManifest,
   type RenderManifestAssetMetadata,
   type RenderManifestCompileResult
@@ -590,6 +591,78 @@ describe("compileRenderManifest", () => {
       { visualId: "character-mentor", glowColor: "#102030" },
       { visualId: "character-learner", glowColor: "#405060" }
     ]);
+  });
+
+  it("keeps RF-01 fields out of the V24 and V25 cache identity", () => {
+    const input = validInput();
+    const snapshot = snapshotCatalogInput(input);
+    const baseCatalog = characterVisualCatalogSnapshotSchema.parse(
+      snapshot.catalog
+    );
+    const changedCatalog = baseCatalog.map((visual) => ({
+      ...visual,
+      glowColor: visual.visualId === "character-mentor" ? "#102030" : "#405060"
+    }));
+    const baseTemplates = [
+      createStandardScreenTemplate("2026-08-10T00:00:00.000Z")
+    ];
+    const changedTemplates = baseTemplates.map((template) => ({
+      ...template,
+      elements: template.elements.map((element) =>
+        element.type === "dialogue-window"
+          ? {
+              ...element,
+              backgroundColor: "#123456",
+              backgroundOpacity: 0.7
+            }
+          : element
+      )
+    }));
+    const createInput = (
+      catalog: typeof baseCatalog,
+      templates: typeof baseTemplates
+    ) => ({
+      ...input,
+      characterVariantCatalog: catalog,
+      assetMetadata: snapshot.assetMetadata,
+      screenTemplateCatalogSnapshot: templates
+    });
+
+    const baseInput = createInput(baseCatalog, baseTemplates);
+    const changedInput = createInput(changedCatalog, changedTemplates);
+    const v24Base = compileRenderManifestV24(baseInput);
+    const v24Changed = compileRenderManifestV24(changedInput);
+    const v25Base = compileRenderManifestV25(baseInput);
+    const v25Changed = compileRenderManifestV25(changedInput);
+    const v26Base = compileRenderManifest(baseInput);
+    const v26Changed = compileRenderManifest(changedInput);
+
+    expect(v24Base.success).toBe(true);
+    expect(v24Changed.success).toBe(true);
+    expect(v25Base.success).toBe(true);
+    expect(v25Changed.success).toBe(true);
+    expect(v26Base.success).toBe(true);
+    expect(v26Changed.success).toBe(true);
+    if (
+      !v24Base.success ||
+      !v24Changed.success ||
+      !v25Base.success ||
+      !v25Changed.success ||
+      !v26Base.success ||
+      !v26Changed.success
+    ) {
+      return;
+    }
+
+    expect(v24Changed.manifest.compilerInputHash).toBe(
+      v24Base.manifest.compilerInputHash
+    );
+    expect(v25Changed.manifest.compilerInputHash).toBe(
+      v25Base.manifest.compilerInputHash
+    );
+    expect(v26Changed.manifest.compilerInputHash).not.toBe(
+      v26Base.manifest.compilerInputHash
+    );
   });
 
   it("adds source-end boundaries without using line-template differences", () => {
