@@ -2,7 +2,10 @@ import {
   resolveScreenTemplateLayout,
   resolveVisualDisplay
 } from "../../src/screen-layout-resolver.js";
-import { screenTemplateContentHash } from "../../src/app/screen-templates/screen-template-hash.js";
+import {
+  screenTemplateContentHash,
+  screenTemplateLegacyContentHash
+} from "../../src/app/screen-templates/screen-template-hash.js";
 import { createStandardScreenTemplate } from "../../src/app/screen-templates/screen-template-seed.js";
 import type {
   RenderManifest,
@@ -400,6 +403,8 @@ const STANDARD_TEMPLATE = createStandardScreenTemplate(
   "2026-08-10T00:00:00.000Z"
 );
 const STANDARD_TEMPLATE_HASH = screenTemplateContentHash(STANDARD_TEMPLATE);
+const STANDARD_TEMPLATE_LEGACY_HASH =
+  screenTemplateLegacyContentHash(STANDARD_TEMPLATE);
 const CHARACTER_IDS = {
   "speaker-1": "character-mentor",
   "speaker-2": "character-learner"
@@ -471,7 +476,7 @@ function resolvedFixtureVisual(
     segmentEndLineId: lineRange.endLineId,
     screenTemplateId: STANDARD_TEMPLATE.templateId,
     templateRevision: STANDARD_TEMPLATE.revision,
-    templateHash: STANDARD_TEMPLATE_HASH,
+    templateHash: STANDARD_TEMPLATE_LEGACY_HASH,
     from: visual.from,
     durationInFrames: visual.durationInFrames,
     src: visual.src,
@@ -507,7 +512,7 @@ export const renderManifestFixtureV24: RenderManifestV24 = {
     sectionTitle: sectionTitle(sectionId),
     templateId: STANDARD_TEMPLATE.templateId,
     templateRevision: STANDARD_TEMPLATE.revision,
-    templateHash: STANDARD_TEMPLATE_HASH,
+    templateHash: STANDARD_TEMPLATE_LEGACY_HASH,
     resolvedLayout: resolveScreenTemplateLayout(STANDARD_TEMPLATE, {
       characterIds: CHARACTER_IDS
     })
@@ -516,7 +521,7 @@ export const renderManifestFixtureV24: RenderManifestV24 = {
     ...line,
     screenTemplateId: STANDARD_TEMPLATE.templateId,
     templateRevision: STANDARD_TEMPLATE.revision,
-    templateHash: STANDARD_TEMPLATE_HASH,
+    templateHash: STANDARD_TEMPLATE_LEGACY_HASH,
     resolvedLayout: resolvedLayoutForLine(line)
   })),
   visuals: legacyVisuals.map(resolvedFixtureVisual),
@@ -611,6 +616,7 @@ export const renderManifestFixture: RenderManifest = {
   })),
   sectionLayouts: renderManifestFixtureV24.sectionLayouts.map((layout) => ({
     ...layout,
+    templateHash: STANDARD_TEMPLATE_HASH,
     resolvedLayout: resolveScreenTemplateLayout(STANDARD_TEMPLATE, {
       characterIds: CHARACTER_IDS,
       includeDialogueWindowStyle: true
@@ -623,7 +629,10 @@ export const renderManifestFixture: RenderManifest = {
     resolvedLayout: resolvedLayoutV26ForLine(line)
   })),
   lines: renderManifestFixtureV24.lines.map(toV25FixtureLine),
-  visuals: renderManifestFixtureV24.visuals.map(toV25FixtureVisual),
+  visuals: renderManifestFixtureV24.visuals.map((visual) => ({
+    ...toV25FixtureVisual(visual),
+    templateHash: STANDARD_TEMPLATE_HASH
+  })),
   backgrounds: legacyBackgrounds,
   audioTracks: legacyAudioTracks,
   soundEffects: legacySoundEffects,

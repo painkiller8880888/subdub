@@ -21,6 +21,10 @@ import type { RenderVisual, VideoProject } from "../../src/schema/index.js";
 import type { VoicevoxAudioIndex } from "../../src/app/voicevox/audio-index.js";
 import { characterVisualCatalogSnapshotSchema } from "../../src/schema/character-visual.js";
 import { mediaMillisecondsToFrames } from "../../src/media-frame.js";
+import {
+  screenTemplateContentHash,
+  screenTemplateLegacyContentHash
+} from "../../src/app/screen-templates/screen-template-hash.js";
 
 const validInput = createRenderManifestInput;
 
@@ -606,13 +610,23 @@ describe("compileRenderManifest", () => {
     const baseTemplates = [
       createStandardScreenTemplate("2026-08-10T00:00:00.000Z")
     ];
-    const changedTemplates = baseTemplates.map((template) => ({
+    const changedColorTemplates = baseTemplates.map((template) => ({
       ...template,
       elements: template.elements.map((element) =>
         element.type === "dialogue-window"
           ? {
               ...element,
-              backgroundColor: "#123456",
+              backgroundColor: "#123456"
+            }
+          : element
+      )
+    }));
+    const changedOpacityTemplates = baseTemplates.map((template) => ({
+      ...template,
+      elements: template.elements.map((element) =>
+        element.type === "dialogue-window"
+          ? {
+              ...element,
               backgroundOpacity: 0.7
             }
           : element
@@ -629,40 +643,63 @@ describe("compileRenderManifest", () => {
     });
 
     const baseInput = createInput(baseCatalog, baseTemplates);
-    const changedInput = createInput(changedCatalog, changedTemplates);
     const v24Base = compileRenderManifestV24(baseInput);
-    const v24Changed = compileRenderManifestV24(changedInput);
     const v25Base = compileRenderManifestV25(baseInput);
-    const v25Changed = compileRenderManifestV25(changedInput);
     const v26Base = compileRenderManifest(baseInput);
-    const v26Changed = compileRenderManifest(changedInput);
 
     expect(v24Base.success).toBe(true);
-    expect(v24Changed.success).toBe(true);
     expect(v25Base.success).toBe(true);
-    expect(v25Changed.success).toBe(true);
     expect(v26Base.success).toBe(true);
-    expect(v26Changed.success).toBe(true);
-    if (
-      !v24Base.success ||
-      !v24Changed.success ||
-      !v25Base.success ||
-      !v25Changed.success ||
-      !v26Base.success ||
-      !v26Changed.success
-    ) {
+    if (!v24Base.success || !v25Base.success || !v26Base.success) {
       return;
     }
 
-    expect(v24Changed.manifest.compilerInputHash).toBe(
-      v24Base.manifest.compilerInputHash
+    const baseTemplate = baseTemplates[0]!;
+    expect(v24Base.manifest.sectionLayouts[0]?.templateHash).toBe(
+      screenTemplateLegacyContentHash(baseTemplate)
     );
-    expect(v25Changed.manifest.compilerInputHash).toBe(
-      v25Base.manifest.compilerInputHash
+    expect(v26Base.manifest.sectionLayouts[0]?.templateHash).toBe(
+      screenTemplateContentHash(baseTemplate)
     );
-    expect(v26Changed.manifest.compilerInputHash).not.toBe(
-      v26Base.manifest.compilerInputHash
-    );
+
+    const variants = [
+      { catalog: changedCatalog, templates: baseTemplates },
+      { catalog: baseCatalog, templates: changedColorTemplates },
+      { catalog: baseCatalog, templates: changedOpacityTemplates }
+    ];
+    for (const variant of variants) {
+      const changedInput = createInput(variant.catalog, variant.templates);
+      const v24Changed = compileRenderManifestV24(changedInput);
+      const v25Changed = compileRenderManifestV25(changedInput);
+      const v26Changed = compileRenderManifest(changedInput);
+
+      expect(v24Changed.success).toBe(true);
+      expect(v25Changed.success).toBe(true);
+      expect(v26Changed.success).toBe(true);
+      if (!v24Changed.success || !v25Changed.success || !v26Changed.success) {
+        return;
+      }
+
+      const changedTemplate = variant.templates[0]!;
+      expect(v24Changed.manifest.compilerInputHash).toBe(
+        v24Base.manifest.compilerInputHash
+      );
+      expect(v25Changed.manifest.compilerInputHash).toBe(
+        v25Base.manifest.compilerInputHash
+      );
+      expect(v26Changed.manifest.compilerInputHash).not.toBe(
+        v26Base.manifest.compilerInputHash
+      );
+      expect(v24Changed.manifest.sectionLayouts[0]?.templateHash).toBe(
+        screenTemplateLegacyContentHash(changedTemplate)
+      );
+      expect(v25Changed.manifest.sectionLayouts[0]?.templateHash).toBe(
+        screenTemplateLegacyContentHash(changedTemplate)
+      );
+      expect(v26Changed.manifest.sectionLayouts[0]?.templateHash).toBe(
+        screenTemplateContentHash(changedTemplate)
+      );
+    }
   });
 
   it("adds source-end boundaries without using line-template differences", () => {

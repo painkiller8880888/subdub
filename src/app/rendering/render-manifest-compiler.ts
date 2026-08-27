@@ -60,7 +60,10 @@ import {
   resolveScreenTemplateLayout,
   resolveVisualDisplay
 } from "../screen-templates/screen-layout-resolver.js";
-import { screenTemplateContentHash } from "../screen-templates/screen-template-hash.js";
+import {
+  screenTemplateContentHash,
+  screenTemplateLegacyContentHash
+} from "../screen-templates/screen-template-hash.js";
 import {
   resolvedScreenLayoutValidationIssues,
   screenTemplateTextValidationIssues,
@@ -278,7 +281,10 @@ type ResolvedScreenTemplate = Readonly<{
   readonly template: ScreenTemplate;
   readonly templateId: string;
   readonly templateRevision: number;
+  /** RenderManifest 2.4.0/2.5.0 frozen template identity. */
   readonly templateHash: string;
+  /** Current RenderManifest template identity, including RF-01 fields. */
+  readonly currentTemplateHash: string;
 }>;
 
 type RenderProjectLine = {
@@ -506,7 +512,8 @@ function normalizeScreenTemplates(
       template,
       templateId: template.templateId,
       templateRevision: template.revision,
-      templateHash: screenTemplateContentHash(template)
+      templateHash: screenTemplateLegacyContentHash(template),
+      currentTemplateHash: screenTemplateContentHash(template)
     });
   }
   return templates;
@@ -3740,18 +3747,30 @@ export function compileRenderManifest(
     glowColor:
       glowColors.get(character.visualId) ?? DEFAULT_CHARACTER_VISUAL_GLOW_COLOR
   }));
+  const currentTemplateHashById = new Map(
+    [...templates.values()].map((binding) => [
+      binding.templateId,
+      binding.currentTemplateHash
+    ])
+  );
   const sectionLayouts = baseResult.manifest.sectionLayouts.map((layout) => ({
     ...layout,
+    templateHash:
+      currentTemplateHashById.get(layout.templateId) ?? layout.templateHash,
     resolvedLayout: addDialogueWindowStyle(
       layout.resolvedLayout,
       templates.get(layout.templateId)?.template
     )
   }));
+  const templateIdBySectionId = new Map(
+    baseResult.manifest.sectionLayouts.map((layout) => [
+      layout.sectionId,
+      layout.templateId
+    ])
+  );
   const layoutIntervals = baseResult.manifest.layoutIntervals.map(
     (interval) => {
-      const templateId = baseResult.manifest.sectionLayouts.find(
-        (layout) => layout.sectionId === interval.sectionId
-      )?.templateId;
+      const templateId = templateIdBySectionId.get(interval.sectionId);
       return {
         ...interval,
         resolvedLayout: addDialogueWindowStyle(
@@ -3763,6 +3782,15 @@ export function compileRenderManifest(
       };
     }
   );
+  const currentTemplateHashBySectionId = new Map(
+    sectionLayouts.map((layout) => [layout.sectionId, layout.templateHash])
+  );
+  const visuals = baseResult.manifest.visuals.map((visual) => ({
+    ...visual,
+    templateHash:
+      currentTemplateHashBySectionId.get(visual.sectionId) ??
+      visual.templateHash
+  }));
   const compilerInputHash = sha256CanonicalJson({
     manifestVersion: RENDER_MANIFEST_VERSION,
     baseCompilerInputHash: baseResult.manifest.compilerInputHash,
@@ -3778,7 +3806,8 @@ export function compileRenderManifest(
     compilerInputHash,
     characters,
     sectionLayouts,
-    layoutIntervals
+    layoutIntervals,
+    visuals
   } satisfies RenderManifestV26;
   const manifestResult = renderManifestV26Schema.safeParse(manifest);
   if (!manifestResult.success) {
