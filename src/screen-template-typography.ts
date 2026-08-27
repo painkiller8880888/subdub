@@ -74,23 +74,38 @@ function subtitleTypographyBounds(
 }
 
 export function subtitleTypographyMetricsForFontSize(
-  displayName: string,
   subtitleText: string,
   bodyFontSizePx: number,
   bounds?: SubtitleTypographyBounds
+): SubtitleTypographyMetrics;
+/**
+ * Compatibility overload for callers that still pass the removed speaker
+ * label. The first argument is intentionally ignored for layout metrics.
+ */
+export function subtitleTypographyMetricsForFontSize(
+  _legacyDisplayName: string,
+  subtitleText: string,
+  bodyFontSizePx: number,
+  bounds?: SubtitleTypographyBounds
+): SubtitleTypographyMetrics;
+export function subtitleTypographyMetricsForFontSize(
+  firstText: string,
+  second: string | number,
+  third?: number | SubtitleTypographyBounds,
+  fourth?: SubtitleTypographyBounds
 ): SubtitleTypographyMetrics {
+  const subtitleText = typeof second === "number" ? firstText : second;
+  const bodyFontSizePx =
+    typeof second === "number" ? second : (third as number);
+  const bounds =
+    typeof second === "number"
+      ? (third as SubtitleTypographyBounds | undefined)
+      : fourth;
   const safeBodyFontSizePx = Math.max(1, bodyFontSizePx);
   const safeBounds = subtitleTypographyBounds(bounds);
   const contentWidthPx = Math.max(
     0,
     safeBounds.widthPx - SUBTITLE_CARD_HORIZONTAL_PADDING_PX
-  );
-  const labelFontSizePx = safeBodyFontSizePx * SUBTITLE_LABEL_FONT_SIZE_RATIO;
-  const labelLineCount = estimateWrappedTextLineCount(
-    displayName,
-    contentWidthPx,
-    labelFontSizePx,
-    SUBTITLE_ESTIMATED_GLYPH_WIDTH_EM
   );
   const bodyLineCount = estimateWrappedTextLineCount(
     subtitleText,
@@ -98,13 +113,7 @@ export function subtitleTypographyMetricsForFontSize(
     safeBodyFontSizePx,
     SUBTITLE_ESTIMATED_GLYPH_WIDTH_EM
   );
-  const estimatedLabelHeight =
-    labelLineCount === 0
-      ? 0
-      : labelLineCount * labelFontSizePx * SUBTITLE_LABEL_LINE_HEIGHT +
-        SUBTITLE_LABEL_MARGIN_BOTTOM_PX;
   const estimatedTextHeightPx =
-    estimatedLabelHeight +
     bodyLineCount * safeBodyFontSizePx * SUBTITLE_BODY_LINE_HEIGHT;
   const availableTextHeightPx =
     safeBounds.heightPx - SUBTITLE_CARD_VERTICAL_PADDING_PX;
@@ -119,7 +128,7 @@ export function subtitleTypographyMetricsForFontSize(
           ),
     contentWidthPx,
     availableTextHeightPx,
-    labelLineCount,
+    labelLineCount: 0,
     bodyLineCount,
     estimatedTextHeightPx
   };

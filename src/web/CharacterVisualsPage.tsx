@@ -757,13 +757,21 @@ export function CharacterVisualsPage() {
       visualId,
       name,
       description,
-      status
+      status,
+      glowColor
     }: {
       readonly visualId: string;
       readonly name: string;
       readonly description: string;
       readonly status: "active" | "inactive";
-    }) => updateCharacterVisual(visualId, { name, description, status }),
+      readonly glowColor: string;
+    }) =>
+      updateCharacterVisual(visualId, {
+        name,
+        description,
+        status,
+        glowColor
+      }),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ["character-visuals"] });
     }
@@ -779,7 +787,8 @@ export function CharacterVisualsPage() {
     createMutation.mutate({
       name: createDraft.name,
       description: createDraft.description,
-      status: createDraft.status
+      status: createDraft.status,
+      glowColor: createDraft.glowColor
     });
   }
 
@@ -803,7 +812,8 @@ export function CharacterVisualsPage() {
       visualId: selectedVisual.visualId,
       name: draft.name,
       description: draft.description,
-      status: draft.status
+      status: draft.status,
+      glowColor: draft.glowColor
     });
   }
 
@@ -952,6 +962,23 @@ export function CharacterVisualsPage() {
                 <option value="active">active</option>
                 <option value="inactive">inactive</option>
               </select>
+            </div>
+            <div className="form-field">
+              <label htmlFor="new-character-visual-glow-color">
+                字幕グロー色
+              </label>
+              <input
+                disabled={createMutation.isPending}
+                id="new-character-visual-glow-color"
+                type="color"
+                value={createDraft.glowColor}
+                onChange={(event) => {
+                  setCreateDraft((current) => ({
+                    ...current,
+                    glowColor: event.target.value
+                  }));
+                }}
+              />
             </div>
           </div>
           <div className="form-field">
@@ -1117,6 +1144,30 @@ export function CharacterVisualsPage() {
                       <option value="active">active</option>
                       <option value="inactive">inactive</option>
                     </select>
+                  </div>
+                  <div className="form-field">
+                    <label htmlFor="selected-character-visual-glow-color">
+                      字幕グロー色
+                    </label>
+                    <input
+                      disabled={
+                        updateMutationTargetsSelectedVisual &&
+                        updateMutation.isPending
+                      }
+                      id="selected-character-visual-glow-color"
+                      type="color"
+                      value={
+                        selectedDraftForRender?.glowColor ??
+                        selectedVisual.glowColor
+                      }
+                      onChange={(event) => {
+                        setSelectedVisualDraft((current) => ({
+                          ...(current ??
+                            characterVisualDraftFromSet(selectedVisual)),
+                          glowColor: event.target.value
+                        }));
+                      }}
+                    />
                   </div>
                 </div>
                 <div className="form-field">

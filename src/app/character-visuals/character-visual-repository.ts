@@ -22,6 +22,7 @@ export type CharacterVisualInsert = {
   readonly name: string;
   readonly description: string;
   readonly status: CharacterVisualStatus;
+  readonly glowColor: CharacterVisualSet["glowColor"];
   readonly baseWidth: number | null;
   readonly baseHeight: number | null;
   readonly createdAt: string;
@@ -56,6 +57,7 @@ export type CharacterVisualUpdate = {
   readonly name: string;
   readonly description: string;
   readonly status: CharacterVisualStatus;
+  readonly glowColor: CharacterVisualSet["glowColor"];
   readonly updatedAt: string;
 };
 
@@ -176,6 +178,7 @@ function toSnapshot(
     name: row.name,
     description: row.description,
     status: row.status,
+    glowColor: row.glowColor,
     baseWidth: row.baseWidth,
     baseHeight: row.baseHeight,
     variants: (variantsByVisualId.get(row.visualId) ?? []).sort((left, right) =>

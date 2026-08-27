@@ -348,6 +348,7 @@ export const characterVisuals = sqliteTable(
     name: text("name").notNull(),
     description: text("description").notNull().default(""),
     status: text("status", { enum: ["active", "inactive"] }).notNull(),
+    glowColor: text("glow_color").notNull().default("#ffffff"),
     baseWidth: integer("base_width"),
     baseHeight: integer("base_height"),
     createdAt: text("created_at").notNull(),

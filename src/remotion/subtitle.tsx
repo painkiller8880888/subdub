@@ -4,18 +4,20 @@ import type { CSSProperties } from "react";
 import type {
   RenderLine,
   RenderManifest,
-  ResolvedScreenLayout
+  ResolvedScreenLayoutV26
 } from "../schema/index";
 import { screenTransformStyle } from "../screen-layout-resolver";
+import {
+  DEFAULT_DIALOGUE_WINDOW_GLOW_COLOR,
+  dialogueWindowSurfaceStyle,
+  dialogueWindowTextShadow
+} from "../screen-template-style";
 import { REMOTION_FONT_FAMILY } from "./font";
 import { DESIGN_COLORS } from "./layout";
 import {
   SUBTITLE_BODY_LINE_HEIGHT,
   SUBTITLE_CARD_HORIZONTAL_PADDING_PER_SIDE_PX,
-  SUBTITLE_CARD_VERTICAL_PADDING_PER_SIDE_PX,
-  SUBTITLE_LABEL_FONT_SIZE_RATIO,
-  SUBTITLE_LABEL_LINE_HEIGHT,
-  SUBTITLE_LABEL_MARGIN_BOTTOM_PX
+  SUBTITLE_CARD_VERTICAL_PADDING_PER_SIDE_PX
 } from "../screen-template-typography";
 import {
   resolveSubtitleContent,
@@ -30,15 +32,14 @@ export function SubtitleLayer({
 }: {
   manifest: RenderManifest;
   lines: readonly RenderLine[];
-  layout?: ResolvedScreenLayout;
+  layout?: ResolvedScreenLayoutV26;
 }): ReactNode {
   const line = lines[0];
-  if (line === undefined || line.subtitleText.length === 0) {
-    return null;
-  }
-
-  const { displayName, side, speakerColor, subtitleText } =
-    resolveSubtitleContent(manifest, line);
+  const subtitleText = line?.subtitleText ?? "";
+  const glowColor =
+    line === undefined
+      ? DEFAULT_DIALOGUE_WINDOW_GLOW_COLOR
+      : resolveSubtitleContent(manifest, line).glowColor;
   const dialogueElement =
     layout === undefined
       ? undefined
@@ -46,7 +47,7 @@ export function SubtitleLayer({
           (
             element
           ): element is Extract<
-            ResolvedScreenLayout["elements"][number],
+            ResolvedScreenLayoutV26["elements"][number],
             { type: "dialogue-window" }
           > => element.type === "dialogue-window"
         );
@@ -56,78 +57,57 @@ export function SubtitleLayer({
   // overflow is reported before rendering instead of shrinking it here.
   const typographyScale =
     layout === undefined
-      ? subtitleTypographyScaleForFontSize(
-          displayName,
-          subtitleText,
-          dialogueFontSize
-        )
+      ? subtitleTypographyScaleForFontSize(subtitleText, dialogueFontSize)
       : 1;
   const containerStyle: CSSProperties =
     dialogueElement === undefined
-      ? subtitleContainerStyle(side)
+      ? {
+          ...subtitleContainerStyle("left"),
+          ...dialogueWindowSurfaceStyle("#000000", 0.4),
+          alignItems: "center",
+          boxSizing: "border-box",
+          justifyContent: "center",
+          overflow: "hidden",
+          padding: `${SUBTITLE_CARD_VERTICAL_PADDING_PER_SIDE_PX}px ${SUBTITLE_CARD_HORIZONTAL_PADDING_PER_SIDE_PX}px`
+        }
       : {
           ...screenTransformStyle(dialogueElement.transform),
+          ...dialogueWindowSurfaceStyle(
+            dialogueElement.backgroundColor,
+            dialogueElement.backgroundOpacity
+          ),
           zIndex: 5,
+          alignItems: "center",
+          boxSizing: "border-box",
           display: "flex",
-          alignItems: "flex-end",
-          justifyContent: side === "left" ? "flex-start" : "flex-end",
+          justifyContent: "center",
+          overflow: "hidden",
+          padding: `${SUBTITLE_CARD_VERTICAL_PADDING_PER_SIDE_PX}px ${SUBTITLE_CARD_HORIZONTAL_PADDING_PER_SIDE_PX}px`,
           pointerEvents: "none"
         };
 
   return (
     <div style={containerStyle}>
-      <div
-        style={{
-          width: "fit-content",
-          maxWidth: "100%",
-          minWidth: 0,
-          boxSizing: "border-box",
-          maxHeight: "100%",
-          borderRadius: 16,
-          backgroundColor: DESIGN_COLORS.subtitleBackground,
-          color: DESIGN_COLORS.card,
-          fontFamily: REMOTION_FONT_FAMILY,
-          fontWeight: 700,
-          lineHeight: SUBTITLE_BODY_LINE_HEIGHT,
-          textAlign: side === "left" ? "left" : "right",
-          overflowWrap: "anywhere",
-          wordBreak: "break-word",
-          display: "flex",
-          flexDirection: "column",
-          alignItems: side === "left" ? "flex-start" : "flex-end",
-          padding: `${SUBTITLE_CARD_VERTICAL_PADDING_PER_SIDE_PX}px ${SUBTITLE_CARD_HORIZONTAL_PADDING_PER_SIDE_PX}px`
-        }}
-      >
+      {subtitleText.length > 0 ? (
         <div
           style={{
-            color: speakerColor,
-            fontWeight: 800,
-            lineHeight: SUBTITLE_LABEL_LINE_HEIGHT,
-            marginBottom: SUBTITLE_LABEL_MARGIN_BOTTOM_PX,
+            color: DESIGN_COLORS.card,
+            fontFamily: REMOTION_FONT_FAMILY,
+            fontSize: dialogueFontSize * typographyScale,
+            fontWeight: 700,
+            lineHeight: SUBTITLE_BODY_LINE_HEIGHT,
             maxWidth: "100%",
             minWidth: 0,
-            whiteSpace: "pre-wrap",
             overflowWrap: "anywhere",
-            wordBreak: "break-word",
-            fontSize:
-              dialogueFontSize *
-              SUBTITLE_LABEL_FONT_SIZE_RATIO *
-              typographyScale
-          }}
-        >
-          {displayName}
-        </div>
-        <div
-          style={{
-            fontSize: dialogueFontSize * typographyScale,
+            textAlign: "center",
+            textShadow: dialogueWindowTextShadow(glowColor),
             whiteSpace: "pre-wrap",
-            overflowWrap: "anywhere",
             wordBreak: "break-word"
           }}
         >
           {subtitleText}
         </div>
-      </div>
+      ) : null}
     </div>
   );
 }

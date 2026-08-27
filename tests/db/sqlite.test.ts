@@ -815,6 +815,91 @@ describe("workspace SQLite", () => {
     third.close();
   });
 
+  it("backfills RF-01 glow colors and dialogue window defaults deterministically", async () => {
+    const workspaceRoot = await makeWorkspace();
+    const migrationsRoot = path.join(process.cwd(), "src", "db", "migrations");
+    const definitions = await readMigrationDefinitions(migrationsRoot);
+    const before = await initializeWorkspaceDatabase({
+      migrationsFolder: await makeMigrationFolder(
+        workspaceRoot,
+        definitions.slice(0, 13)
+      ),
+      workspaceRoot
+    });
+    const now = "2026-08-20T00:00:00.000Z";
+    const insertVisual = before.connection.prepare(
+      `INSERT INTO character_visuals
+        (visual_id, name, description, status, base_width, base_height, created_at, updated_at)
+       VALUES (?, ?, '', 'active', 600, 1000, ?, ?)`
+    );
+    for (const visualId of [
+      "character-mentor",
+      "character-learner",
+      "character-other"
+    ]) {
+      insertVisual.run(visualId, visualId, now, now);
+    }
+    before.connection
+      .prepare(
+        `INSERT INTO screen_templates
+          (template_id, name, description, status, canvas_width, canvas_height,
+           revision, created_at, updated_at)
+         VALUES ('migration-template', 'Migration template', '', 'active', 1920, 1080, 1, ?, ?)`
+      )
+      .run(now, now);
+    before.connection
+      .prepare(
+        `INSERT INTO screen_template_elements
+          (element_id, template_id, element_type, x, y, width, height,
+           rotation_deg, order_index, config_json, created_at, updated_at)
+         VALUES ('migration-dialogue', 'migration-template', 'dialogue-window',
+                 0.1, 0.1, 0.8, 0.2, 0, 0, ?, ?, ?)`
+      )
+      .run(JSON.stringify({ fontSize: 38 }), now, now);
+    before.close();
+
+    const migrationFolder = await makeMigrationFolder(
+      workspaceRoot,
+      definitions
+    );
+    const after = await initializeWorkspaceDatabase({
+      migrationsFolder: migrationFolder,
+      workspaceRoot
+    });
+    expect(after.migrationResult.applied).toBe(true);
+    expect(
+      after.connection
+        .prepare(
+          "SELECT visual_id, glow_color AS glowColor FROM character_visuals ORDER BY visual_id"
+        )
+        .all()
+    ).toEqual([
+      { visual_id: "character-learner", glowColor: "#75c97a" },
+      { visual_id: "character-mentor", glowColor: "#e78ac3" },
+      { visual_id: "character-other", glowColor: "#ffffff" }
+    ]);
+    const config = after.connection
+      .prepare(
+        "SELECT config_json FROM screen_template_elements WHERE element_id = 'migration-dialogue'"
+      )
+      .get() as { config_json: string };
+    expect(JSON.parse(config.config_json)).toEqual({
+      fontSize: 38,
+      backgroundColor: "#000000",
+      backgroundOpacity: 0.4
+    });
+    const history = migrationHistory(after.connection);
+    after.close();
+
+    const reopened = await initializeWorkspaceDatabase({
+      migrationsFolder: migrationFolder,
+      workspaceRoot
+    });
+    expect(reopened.migrationResult.applied).toBe(false);
+    expect(migrationHistory(reopened.connection)).toEqual(history);
+    reopened.close();
+  });
+
   it("preserves existing character variants and backfills active status", async () => {
     const workspaceRoot = await makeWorkspace();
     const migrationsRoot = path.join(process.cwd(), "src", "db", "migrations");

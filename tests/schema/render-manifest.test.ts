@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   legacyRenderManifestV22Schema,
   renderManifestSchema,
+  renderManifestV25Schema,
   type RenderVisual,
   type RenderManifest
 } from "../../src/schema/index.js";
@@ -51,6 +52,40 @@ describe("renderManifestSchema", () => {
     const result = renderManifestSchema.safeParse(clone(renderManifestFixture));
 
     expect(result.success).toBe(true);
+  });
+
+  it("keeps the 2.5 parser boundary explicit without upgrading old manifests", () => {
+    const legacy = structuredClone(renderManifestFixture) as unknown as {
+      manifestVersion: string;
+      characters: Array<Record<string, unknown>>;
+      sectionLayouts: Array<{
+        resolvedLayout: { elements: Array<Record<string, unknown>> };
+      }>;
+      layoutIntervals: Array<{
+        resolvedLayout: { elements: Array<Record<string, unknown>> };
+      }>;
+    };
+    legacy.manifestVersion = "2.5.0";
+    for (const character of legacy.characters) {
+      Reflect.deleteProperty(character, "glowColor");
+    }
+    for (const layout of [
+      ...legacy.sectionLayouts,
+      ...legacy.layoutIntervals
+    ]) {
+      for (const element of layout.resolvedLayout.elements) {
+        if (element.type === "dialogue-window") {
+          Reflect.deleteProperty(element, "backgroundColor");
+          Reflect.deleteProperty(element, "backgroundOpacity");
+        }
+      }
+    }
+
+    expect(renderManifestV25Schema.safeParse(legacy).success).toBe(true);
+    expect(renderManifestSchema.safeParse(legacy).success).toBe(false);
+    expect(renderManifestV25Schema.safeParse(renderManifestFixture).success).toBe(
+      false
+    );
   });
 
   it("keeps the 2.2.0 muted parser separate from the 2.3.0 volume contract", () => {

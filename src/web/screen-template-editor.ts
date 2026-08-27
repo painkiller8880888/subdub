@@ -17,7 +17,13 @@ export type ResizeHandle =
   "north-west" | "north-east" | "south-east" | "south-west";
 
 export type NumericElementField =
-  "x" | "y" | "width" | "height" | "rotationDeg" | "fontSize";
+  | "x"
+  | "y"
+  | "width"
+  | "height"
+  | "rotationDeg"
+  | "fontSize"
+  | "backgroundOpacity";
 
 export const SCREEN_TEMPLATE_MIN_ELEMENT_SIZE = 0.01;
 
@@ -340,6 +346,12 @@ export function updateScreenTemplateElementNumericField(
         return element;
       }
       return { ...element, fontSize: value };
+    }
+
+    if (field === "backgroundOpacity") {
+      return element.type === "dialogue-window"
+        ? { ...element, backgroundOpacity: value }
+        : element;
     }
 
     return {

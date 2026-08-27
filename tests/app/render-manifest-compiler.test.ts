@@ -10,6 +10,7 @@ import {
 import {
   compileRenderManifest,
   compileRenderManifestV24,
+  compileRenderManifestV25,
   serializeRenderManifest,
   type RenderManifestAssetMetadata,
   type RenderManifestCompileResult
@@ -20,6 +21,10 @@ import type { RenderVisual, VideoProject } from "../../src/schema/index.js";
 import type { VoicevoxAudioIndex } from "../../src/app/voicevox/audio-index.js";
 import { characterVisualCatalogSnapshotSchema } from "../../src/schema/character-visual.js";
 import { mediaMillisecondsToFrames } from "../../src/media-frame.js";
+import {
+  screenTemplateContentHash,
+  screenTemplateLegacyContentHash
+} from "../../src/app/screen-templates/screen-template-hash.js";
 
 const validInput = createRenderManifestInput;
 
@@ -292,7 +297,7 @@ describe("compileRenderManifest", () => {
     const segments = result.manifest.visuals.filter(
       (visual) => visual.sourceAssignmentId === assignment.id
     );
-    expect(result.manifest.manifestVersion).toBe("2.5.0");
+    expect(result.manifest.manifestVersion).toBe("2.6.0");
     expect(
       segments.map((segment) =>
         segment.kind === "video" ? segment.display.playbackState : segment.kind
@@ -407,7 +412,7 @@ describe("compileRenderManifest", () => {
       return;
     }
 
-    expect(result.manifest.manifestVersion).toBe("2.5.0");
+    expect(result.manifest.manifestVersion).toBe("2.6.0");
     expect(result.manifest.characterCatalogVersion).toBe(
       CHARACTER_VARIANT_CATALOG_VERSION
     );
@@ -420,6 +425,7 @@ describe("compileRenderManifest", () => {
         visualId: "character-mentor",
         displayName: "四国めたん",
         themeColorToken: "character.metan",
+        glowColor: "#ffffff",
         lipSyncPeriodFrames: 3,
         idleVariantId: "character-mentor-stand-v1"
       },
@@ -428,6 +434,7 @@ describe("compileRenderManifest", () => {
         visualId: "character-learner",
         displayName: "ずんだもん",
         themeColorToken: "character.zundamon",
+        glowColor: "#ffffff",
         lipSyncPeriodFrames: 3,
         idleVariantId: "character-learner-stand-v1"
       }
@@ -556,6 +563,143 @@ describe("compileRenderManifest", () => {
         .map(({ path }) => path)
         .sort((left, right) => left.localeCompare(right))
     );
+  });
+
+  it("takes subtitle glow colors from the selected visual snapshot", () => {
+    const input = validInput();
+    const snapshot = snapshotCatalogInput(input);
+    const catalog = characterVisualCatalogSnapshotSchema
+      .parse(snapshot.catalog)
+      .map((visual) => ({
+        ...visual,
+        glowColor:
+          visual.visualId === "character-mentor" ? "#102030" : "#405060"
+      }));
+
+    const result = compileRenderManifest({
+      ...input,
+      characterVariantCatalog: catalog,
+      assetMetadata: snapshot.assetMetadata
+    });
+
+    expect(result.success).toBe(true);
+    if (!result.success) {
+      return;
+    }
+    expect(
+      result.manifest.characters.map((character) => ({
+        visualId: character.visualId,
+        glowColor: character.glowColor
+      }))
+    ).toEqual([
+      { visualId: "character-mentor", glowColor: "#102030" },
+      { visualId: "character-learner", glowColor: "#405060" }
+    ]);
+  });
+
+  it("keeps RF-01 fields out of the V24 and V25 cache identity", () => {
+    const input = validInput();
+    const snapshot = snapshotCatalogInput(input);
+    const baseCatalog = characterVisualCatalogSnapshotSchema.parse(
+      snapshot.catalog
+    );
+    const changedCatalog = baseCatalog.map((visual) => ({
+      ...visual,
+      glowColor: visual.visualId === "character-mentor" ? "#102030" : "#405060"
+    }));
+    const baseTemplates = [
+      createStandardScreenTemplate("2026-08-10T00:00:00.000Z")
+    ];
+    const changedColorTemplates = baseTemplates.map((template) => ({
+      ...template,
+      elements: template.elements.map((element) =>
+        element.type === "dialogue-window"
+          ? {
+              ...element,
+              backgroundColor: "#123456"
+            }
+          : element
+      )
+    }));
+    const changedOpacityTemplates = baseTemplates.map((template) => ({
+      ...template,
+      elements: template.elements.map((element) =>
+        element.type === "dialogue-window"
+          ? {
+              ...element,
+              backgroundOpacity: 0.7
+            }
+          : element
+      )
+    }));
+    const createInput = (
+      catalog: typeof baseCatalog,
+      templates: typeof baseTemplates
+    ) => ({
+      ...input,
+      characterVariantCatalog: catalog,
+      assetMetadata: snapshot.assetMetadata,
+      screenTemplateCatalogSnapshot: templates
+    });
+
+    const baseInput = createInput(baseCatalog, baseTemplates);
+    const v24Base = compileRenderManifestV24(baseInput);
+    const v25Base = compileRenderManifestV25(baseInput);
+    const v26Base = compileRenderManifest(baseInput);
+
+    expect(v24Base.success).toBe(true);
+    expect(v25Base.success).toBe(true);
+    expect(v26Base.success).toBe(true);
+    if (!v24Base.success || !v25Base.success || !v26Base.success) {
+      return;
+    }
+
+    const baseTemplate = baseTemplates[0]!;
+    expect(v24Base.manifest.sectionLayouts[0]?.templateHash).toBe(
+      screenTemplateLegacyContentHash(baseTemplate)
+    );
+    expect(v26Base.manifest.sectionLayouts[0]?.templateHash).toBe(
+      screenTemplateContentHash(baseTemplate)
+    );
+
+    const variants = [
+      { catalog: changedCatalog, templates: baseTemplates },
+      { catalog: baseCatalog, templates: changedColorTemplates },
+      { catalog: baseCatalog, templates: changedOpacityTemplates }
+    ];
+    for (const variant of variants) {
+      const changedInput = createInput(variant.catalog, variant.templates);
+      const v24Changed = compileRenderManifestV24(changedInput);
+      const v25Changed = compileRenderManifestV25(changedInput);
+      const v26Changed = compileRenderManifest(changedInput);
+
+      expect(v24Changed.success).toBe(true);
+      expect(v25Changed.success).toBe(true);
+      expect(v26Changed.success).toBe(true);
+      if (!v24Changed.success || !v25Changed.success || !v26Changed.success) {
+        return;
+      }
+
+      const changedTemplate = variant.templates[0]!;
+      expect(v24Changed.manifest.compilerInputHash).toBe(
+        v24Base.manifest.compilerInputHash
+      );
+      expect(v25Changed.manifest.compilerInputHash).toBe(
+        v25Base.manifest.compilerInputHash
+      );
+      expect(v26Changed.manifest.compilerInputHash).not.toBe(
+        v26Base.manifest.compilerInputHash
+      );
+      expect(v24Changed.manifest.sectionLayouts[0]?.templateHash).toBe(
+        screenTemplateLegacyContentHash(changedTemplate)
+      );
+      expect(v25Changed.manifest.sectionLayouts[0]?.templateHash).toBe(
+        screenTemplateLegacyContentHash(changedTemplate)
+      );
+      expect(v26Changed.manifest.sectionLayouts[0]?.templateHash).toBe(
+        screenTemplateContentHash(changedTemplate)
+      );
+    }
   });
 
   it("adds source-end boundaries without using line-template differences", () => {
@@ -768,7 +912,7 @@ describe("compileRenderManifest", () => {
     expect(visual.display.sourceTrimAfterFrame).toBeCloseTo(4.4);
   });
 
-  it("bakes coordinate space, section titles, and freshness into 2.5.0", () => {
+  it("bakes coordinate space, section titles, and freshness into 2.6.0", () => {
     const legacy = compileRenderManifest(validInput());
     expect(legacy.success).toBe(true);
     if (!legacy.success) {

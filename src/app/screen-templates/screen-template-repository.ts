@@ -85,11 +85,13 @@ function parseConfigJson(
   }
 
   const expectedKeys =
-    row.elementType === "dialogue-window" || row.elementType === "section-title"
-      ? ["fontSize"]
-      : row.elementType === "character-visual"
-        ? ["slot", "flipX"]
-        : ["slot"];
+    row.elementType === "dialogue-window"
+      ? ["fontSize", "backgroundColor", "backgroundOpacity"]
+      : row.elementType === "section-title"
+        ? ["fontSize"]
+        : row.elementType === "character-visual"
+          ? ["slot", "flipX"]
+          : ["slot"];
   const keys = Object.keys(parsed);
   if (
     keys.length !== expectedKeys.length ||
@@ -154,7 +156,14 @@ function toTemplate(
 function elementConfig(
   element: ScreenTemplateElement
 ): Record<string, unknown> {
-  if (element.type === "dialogue-window" || element.type === "section-title") {
+  if (element.type === "dialogue-window") {
+    return {
+      fontSize: element.fontSize,
+      backgroundColor: element.backgroundColor,
+      backgroundOpacity: element.backgroundOpacity
+    };
+  }
+  if (element.type === "section-title") {
     return { fontSize: element.fontSize };
   }
   if (element.type === "character-visual") {

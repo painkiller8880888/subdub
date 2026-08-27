@@ -11,7 +11,8 @@ import {
   STANDARD_SCREEN_TEMPLATE_ID,
   createStandardScreenTemplate,
   resetScreenTemplateElementsToCanonicalDefaults,
-  screenTemplateContentHash
+  screenTemplateContentHash,
+  screenTemplateLegacyContentHash
 } from "../../src/app/screen-templates/index.js";
 import { initializeWorkspaceDatabase } from "../../src/db/initialize.js";
 import {
@@ -96,6 +97,14 @@ describe("screen template catalog", { timeout: 30_000 }, () => {
         first.repository.findById(STANDARD_SCREEN_TEMPLATE_ID)!.createdAt
       )
     );
+    expect(
+      first.repository
+        .findById(STANDARD_SCREEN_TEMPLATE_ID)!
+        .elements.find((element) => element.type === "dialogue-window")
+    ).toMatchObject({
+      backgroundColor: "#000000",
+      backgroundOpacity: 0.4
+    });
     const firstSnapshot = first.repository.list();
     first.database.close();
 
@@ -160,17 +169,28 @@ describe("screen template catalog", { timeout: 30_000 }, () => {
     ]);
     expect(repository.findById(template.templateId)).toEqual(template);
 
+    const editedElements = template.elements.map((element) =>
+      element.type === "dialogue-window"
+        ? { ...element, backgroundColor: "#123456", backgroundOpacity: 0.7 }
+        : element
+    );
     const updated = service.update(
       template.templateId,
       {
         name: template.name,
         description: template.description,
         status: "inactive",
-        elements: template.elements
+        elements: editedElements
       },
       template.revision
     );
     expect(updated.revision).toBe(template.revision + 1);
+    expect(
+      updated.elements.find((element) => element.type === "dialogue-window")
+    ).toMatchObject({
+      backgroundColor: "#123456",
+      backgroundOpacity: 0.7
+    });
     expect(() =>
       service.update(
         template.templateId,
@@ -565,6 +585,34 @@ describe("screen template catalog", { timeout: 30_000 }, () => {
         )
       })
     ).not.toBe(hash);
+  });
+
+  it("includes dialogue surface settings only in the current content hash", async () => {
+    const { repository } = await openDatabase();
+    const template = repository.findById(STANDARD_SCREEN_TEMPLATE_ID)!;
+    const withDialogueWindowChange = (
+      change: Partial<
+        Extract<ScreenTemplate["elements"][number], { type: "dialogue-window" }>
+      >
+    ) => ({
+      ...template,
+      elements: template.elements.map((element) =>
+        element.type === "dialogue-window" ? { ...element, ...change } : element
+      )
+    });
+    const colorChanged = withDialogueWindowChange({
+      backgroundColor: "#123456"
+    });
+    const opacityChanged = withDialogueWindowChange({
+      backgroundOpacity: 0.7
+    });
+    const currentHash = screenTemplateContentHash(template);
+    const legacyHash = screenTemplateLegacyContentHash(template);
+
+    expect(screenTemplateContentHash(colorChanged)).not.toBe(currentHash);
+    expect(screenTemplateContentHash(opacityChanged)).not.toBe(currentHash);
+    expect(screenTemplateLegacyContentHash(colorChanged)).toBe(legacyHash);
+    expect(screenTemplateLegacyContentHash(opacityChanged)).toBe(legacyHash);
   });
 
   it("rolls back template and element replacement as one transaction", async () => {

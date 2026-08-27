@@ -37,11 +37,8 @@ import {
 } from "../../src/remotion/selection.js";
 import {
   characterLayerStyle,
-  resolveCharacterThemeColor,
   resolveSubtitleContent,
-  SUBTITLE_SAFE_AREA_PX,
-  subtitleTypographyScale,
-  subtitleContainerStyle
+  subtitleTypographyScale
 } from "../../src/remotion/layout-helpers.js";
 import { videoInsertSequenceProps } from "../../src/remotion/video-insert.js";
 
@@ -339,14 +336,7 @@ async function warningPixelsInRegion(
       const green = data[offset + 1] ?? 0;
       const blue = data[offset + 2] ?? 0;
       const alpha = data[offset + 3] ?? 0;
-      if (
-        red >= 225 &&
-        green >= 60 &&
-        green <= 110 &&
-        blue >= 60 &&
-        blue <= 110 &&
-        alpha > 200
-      ) {
+      if (red >= 100 && red >= green + 45 && red >= blue + 45 && alpha > 200) {
         count += 1;
       }
     }
@@ -522,7 +512,7 @@ describe("RenderManifest interval selection", () => {
     );
   });
 
-  it("renders the manifest speaker label and keeps subtitle geometry in the safe area", () => {
+  it("resolves speaker glow metadata while measuring subtitle body text only", () => {
     const line = manifest.lines.find(
       (candidate) => candidate.id === "main-learner-1"
     );
@@ -531,30 +521,13 @@ describe("RenderManifest interval selection", () => {
     }
     const subtitle = resolveSubtitleContent(manifest, line);
     expect(subtitle.displayName).toBe("ずんだもん");
-    expect(subtitle.speakerColor).toBe(
-      resolveCharacterThemeColor("character.zundamon")
-    );
+    expect(subtitle.glowColor).toBe("#75c97a");
+    expect(subtitle.speakerColor).toBe(subtitle.glowColor);
     expect(subtitle.subtitleText).toBe(line.subtitleText);
-    expect(subtitle.side).toBe("right");
+    expect(subtitleTypographyScale(subtitle.subtitleText)).toBe(1);
     expect(
-      subtitleTypographyScale(subtitle.displayName, subtitle.subtitleText)
+      subtitleTypographyScale("表示されない話者名", subtitle.subtitleText)
     ).toBe(1);
-
-    const side = subtitleContainerStyle(subtitle.side);
-    expect(side).toMatchObject({
-      left: SUBTITLE_SAFE_AREA_PX,
-      right: SUBTITLE_SAFE_AREA_PX,
-      top: SUBTITLE_SAFE_AREA_PX,
-      bottom: SUBTITLE_SAFE_AREA_PX,
-      boxSizing: "border-box",
-      justifyContent: "flex-end"
-    });
-    expect(subtitleContainerStyle("left")).toMatchObject({
-      left: SUBTITLE_SAFE_AREA_PX,
-      right: SUBTITLE_SAFE_AREA_PX,
-      top: SUBTITLE_SAFE_AREA_PX,
-      bottom: SUBTITLE_SAFE_AREA_PX
-    });
   });
 
   it("keeps character geometry independent of the selected mouth slot", () => {

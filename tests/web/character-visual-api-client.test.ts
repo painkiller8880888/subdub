@@ -22,6 +22,7 @@ const visual = {
   name: "Client visual",
   description: "",
   status: "active" as const,
+  glowColor: "#ffffff",
   baseWidth: null,
   baseHeight: null,
   variants: [],

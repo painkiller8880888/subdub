@@ -13,6 +13,7 @@ import {
 import {
   idSchema,
   finiteNumberSchema,
+  hexColorSchema,
   nonNegativeIntegerSchema,
   positiveIntegerSchema,
   positiveNumberSchema,
@@ -68,6 +69,11 @@ export const renderCharacterSchema = strictObject({
   themeColorToken: z.enum(["character.metan", "character.zundamon"]),
   lipSyncPeriodFrames: positiveIntegerSchema,
   idleVariantId: idSchema
+});
+
+/** Render character snapshot fields introduced by RenderManifest 2.6.0. */
+export const renderCharacterV26Schema = renderCharacterSchema.extend({
+  glowColor: hexColorSchema
 });
 
 export const renderSingleImageCharacterVariantSchema = strictObject({
@@ -742,6 +748,24 @@ export const resolvedScreenLayoutSchema = strictObject({
   elements: z.array(resolvedScreenElementSchema)
 });
 
+const resolvedDialogueWindowV26Schema = resolvedDialogueWindowSchema.extend({
+  backgroundColor: hexColorSchema,
+  backgroundOpacity: unitIntervalSchema
+});
+
+export const resolvedScreenElementV26Schema = z.discriminatedUnion("type", [
+  resolvedDialogueWindowV26Schema,
+  resolvedSectionTitleSchema,
+  resolvedCharacterVisualSchema,
+  resolvedContentSlotSchema
+]);
+
+export const resolvedScreenLayoutV26Schema = strictObject({
+  canvasWidth: z.literal(1920),
+  canvasHeight: z.literal(1080),
+  elements: z.array(resolvedScreenElementV26Schema)
+});
+
 export const renderContentClipSchema = strictObject({
   transform: screenTransformSchema,
   enabled: z.boolean()
@@ -872,6 +896,22 @@ export const renderLayoutIntervalSchema = strictObject({
   from: nonNegativeIntegerSchema,
   durationInFrames: positiveIntegerSchema,
   resolvedLayout: resolvedScreenLayoutSchema
+});
+
+export const renderSectionLayoutV26Schema = strictObject({
+  sectionId: idSchema,
+  sectionTitle: z.string(),
+  templateId: idSchema,
+  templateRevision: positiveIntegerSchema,
+  templateHash: sha256Schema,
+  resolvedLayout: resolvedScreenLayoutV26Schema
+});
+
+export const renderLayoutIntervalV26Schema = strictObject({
+  sectionId: idSchema,
+  from: nonNegativeIntegerSchema,
+  durationInFrames: positiveIntegerSchema,
+  resolvedLayout: resolvedScreenLayoutV26Schema
 });
 
 const renderManifestV24BaseSchema = strictObject({
@@ -1861,15 +1901,79 @@ export const renderManifestV25Schema = renderManifestV25BaseSchema.superRefine(
   }
 );
 
+const renderManifestV26BaseSchema = renderManifestV25BaseSchema.extend({
+  manifestVersion: z.literal("2.6.0"),
+  characters: z.array(renderCharacterV26Schema),
+  sectionLayouts: z.array(renderSectionLayoutV26Schema),
+  layoutIntervals: z.array(renderLayoutIntervalV26Schema)
+});
+
+function stripV26ResolvedLayout(
+  layout: z.infer<typeof resolvedScreenLayoutV26Schema>
+): z.infer<typeof resolvedScreenLayoutSchema> {
+  return {
+    canvasWidth: layout.canvasWidth,
+    canvasHeight: layout.canvasHeight,
+    elements: layout.elements.map((element) => {
+      if (element.type !== "dialogue-window") {
+        return element;
+      }
+      const {
+        backgroundColor: _backgroundColor,
+        backgroundOpacity: _backgroundOpacity,
+        ...legacyElement
+      } = element;
+      void _backgroundColor;
+      void _backgroundOpacity;
+      return legacyElement;
+    })
+  };
+}
+
+export const renderManifestV26Schema = renderManifestV26BaseSchema.superRefine(
+  (manifest, ctx) => {
+    const legacy = {
+      ...manifest,
+      manifestVersion: "2.5.0" as const,
+      characters: manifest.characters.map(
+        ({ glowColor: _glowColor, ...character }) => {
+          void _glowColor;
+          return character;
+        }
+      ),
+      sectionLayouts: manifest.sectionLayouts.map((layout) => ({
+        ...layout,
+        resolvedLayout: stripV26ResolvedLayout(layout.resolvedLayout)
+      })),
+      layoutIntervals: manifest.layoutIntervals.map((interval) => ({
+        ...interval,
+        resolvedLayout: stripV26ResolvedLayout(interval.resolvedLayout)
+      }))
+    };
+    const result = renderManifestV25Schema.safeParse(legacy);
+    if (result.success) {
+      return;
+    }
+    for (const issue of result.error.issues) {
+      ctx.addIssue({
+        code: "custom",
+        path: issue.path,
+        message: issue.message
+      });
+    }
+  }
+);
+
 /** Current production manifest schema. V24 remains available explicitly for
- * compatibility parsing and tests that exercise the frozen contract. */
-export const renderManifestSchema = renderManifestV25Schema;
+ * compatibility parsing and tests that exercise the frozen contracts. */
+export const renderManifestSchema = renderManifestV26Schema;
 
 export type SourceAssetChecksum = z.infer<typeof sourceAssetChecksumSchema>;
 export type RenderLineV23 = z.infer<typeof renderLineSchema>;
 export type RenderLineV24 = z.infer<typeof renderLineV24Schema>;
 export type RenderLine = z.infer<typeof renderLineV25Schema>;
 export type RenderCharacter = z.infer<typeof renderCharacterSchema>;
+export type RenderCharacterV26 = z.infer<typeof renderCharacterV26Schema>;
 export type RenderCharacterVariant = z.infer<
   typeof renderCharacterVariantSchema
 >;
@@ -1895,8 +1999,15 @@ export type RenderResolvedVideoDisplayV25 = z.infer<
 >;
 export type RenderVisualV25 = z.infer<typeof renderVisualV25Schema>;
 export type RenderManifestV25 = z.infer<typeof renderManifestV25Schema>;
+export type RenderManifestV26 = z.infer<typeof renderManifestV26Schema>;
 export type ResolvedScreenElement = z.infer<typeof resolvedScreenElementSchema>;
 export type ResolvedScreenLayout = z.infer<typeof resolvedScreenLayoutSchema>;
+export type ResolvedScreenElementV26 = z.infer<
+  typeof resolvedScreenElementV26Schema
+>;
+export type ResolvedScreenLayoutV26 = z.infer<
+  typeof resolvedScreenLayoutV26Schema
+>;
 export type RenderContentClip = z.infer<typeof renderContentClipSchema>;
 export type RenderResolvedVisualDisplay = z.infer<
   typeof renderResolvedVisualDisplaySchema
@@ -1904,6 +2015,12 @@ export type RenderResolvedVisualDisplay = z.infer<
 export type RenderVisualV24 = z.infer<typeof renderVisualV24Schema>;
 export type RenderSectionLayout = z.infer<typeof renderSectionLayoutSchema>;
 export type RenderLayoutInterval = z.infer<typeof renderLayoutIntervalSchema>;
+export type RenderSectionLayoutV26 = z.infer<
+  typeof renderSectionLayoutV26Schema
+>;
+export type RenderLayoutIntervalV26 = z.infer<
+  typeof renderLayoutIntervalV26Schema
+>;
 export type LegacyRenderManifestV22 = z.infer<
   typeof legacyRenderManifestV22Schema
 >;

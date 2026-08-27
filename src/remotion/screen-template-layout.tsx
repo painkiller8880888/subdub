@@ -10,18 +10,23 @@ import {
   type ScreenTemplate,
   type ScreenTemplateElement
 } from "../schema/screen-template";
-import type { ResolvedScreenElement } from "../schema/index";
+import type {
+  ResolvedScreenElementV26,
+  ResolvedScreenLayoutV26
+} from "../schema/index";
 import { resolveScreenTemplateLayout } from "../screen-layout-resolver";
+import {
+  DEFAULT_DIALOGUE_WINDOW_GLOW_COLOR,
+  dialogueWindowSurfaceStyle,
+  dialogueWindowTextShadow
+} from "../screen-template-style";
 import { AnnotationLayer } from "./layout";
 import {
   SECTION_TITLE_HORIZONTAL_PADDING_PER_SIDE_PX,
   SECTION_TITLE_LINE_HEIGHT,
   SUBTITLE_BODY_LINE_HEIGHT,
   SUBTITLE_CARD_HORIZONTAL_PADDING_PER_SIDE_PX,
-  SUBTITLE_CARD_VERTICAL_PADDING_PER_SIDE_PX,
-  SUBTITLE_LABEL_FONT_SIZE_RATIO,
-  SUBTITLE_LABEL_LINE_HEIGHT,
-  SUBTITLE_LABEL_MARGIN_BOTTOM_PX
+  SUBTITLE_CARD_VERTICAL_PADDING_PER_SIDE_PX
 } from "../screen-template-typography";
 
 export type ScreenCharacterSlot = "speaker-1" | "speaker-2";
@@ -54,6 +59,7 @@ export type ScreenLayoutBackground = Readonly<{
 
 export type ScreenLayoutPreview = Readonly<{
   dialogueText: string;
+  dialogueGlowColor?: string;
   speakerNameText?: string;
   sectionTitleText: string;
   characters: Readonly<
@@ -154,7 +160,7 @@ function contentPreviews(
 }
 
 function renderCharacterPreview(
-  element: Extract<ResolvedScreenElement, { type: "character-visual" }>,
+  element: Extract<ResolvedScreenElementV26, { type: "character-visual" }>,
   preview: ScreenLayoutPreview
 ): ReactNode {
   const character = preview.characters[element.slot];
@@ -178,7 +184,7 @@ function renderCharacterPreview(
 }
 
 function renderScreenTemplateElement(
-  element: ResolvedScreenElement,
+  element: ResolvedScreenElementV26,
   preview: ScreenLayoutPreview
 ): ReactNode {
   const contentPreviewsForLayout = contentPreviews(preview);
@@ -195,7 +201,6 @@ function renderScreenTemplateElement(
   };
 
   if (element.type === "dialogue-window") {
-    const speakerNameText = preview.speakerNameText ?? "";
     return (
       <div
         aria-hidden="true"
@@ -206,28 +211,38 @@ function renderScreenTemplateElement(
         <span
           className="screen-layout-dialogue-card"
           style={{
+            alignItems: "center",
+            ...dialogueWindowSurfaceStyle(
+              element.backgroundColor,
+              element.backgroundOpacity,
+              "cqw"
+            ),
+            boxSizing: "border-box",
+            color: "#fff",
+            display: "flex",
+            fontWeight: 700,
+            height: "100%",
+            justifyContent: "center",
+            maxHeight: "100%",
+            maxWidth: "100%",
+            minWidth: 0,
+            overflow: "hidden",
+            overflowWrap: "anywhere",
+            textAlign: "center",
             fontSize: `${(element.fontSize / SCREEN_TEMPLATE_CANVAS_WIDTH) * 100}cqw`,
             lineHeight: SUBTITLE_BODY_LINE_HEIGHT,
-            padding: `${(SUBTITLE_CARD_VERTICAL_PADDING_PER_SIDE_PX / SCREEN_TEMPLATE_CANVAS_WIDTH) * 100}cqw ${(SUBTITLE_CARD_HORIZONTAL_PADDING_PER_SIDE_PX / SCREEN_TEMPLATE_CANVAS_WIDTH) * 100}cqw`
+            padding: `${(SUBTITLE_CARD_VERTICAL_PADDING_PER_SIDE_PX / SCREEN_TEMPLATE_CANVAS_WIDTH) * 100}cqw ${(SUBTITLE_CARD_HORIZONTAL_PADDING_PER_SIDE_PX / SCREEN_TEMPLATE_CANVAS_WIDTH) * 100}cqw`,
+            textShadow: dialogueWindowTextShadow(
+              preview.dialogueGlowColor ?? DEFAULT_DIALOGUE_WINDOW_GLOW_COLOR,
+              "cqw"
+            ),
+            whiteSpace: "pre-wrap",
+            width: "100%"
           }}
         >
-          {speakerNameText.length > 0 ? (
-            <span
-              className="screen-layout-dialogue-speaker"
-              style={{
-                fontSize: `${
-                  ((element.fontSize * SUBTITLE_LABEL_FONT_SIZE_RATIO) /
-                    SCREEN_TEMPLATE_CANVAS_WIDTH) *
-                  100
-                }cqw`,
-                lineHeight: SUBTITLE_LABEL_LINE_HEIGHT,
-                marginBottom: `${(SUBTITLE_LABEL_MARGIN_BOTTOM_PX / SCREEN_TEMPLATE_CANVAS_WIDTH) * 100}cqw`
-              }}
-            >
-              {speakerNameText}
-            </span>
+          {preview.dialogueText.length > 0 ? (
+            <span>{preview.dialogueText}</span>
           ) : null}
-          <span>{preview.dialogueText}</span>
         </span>
       </div>
     );
@@ -322,13 +337,13 @@ function renderScreenLayoutContent(
 }
 
 function renderScreenLayoutContents(
-  elements: readonly ResolvedScreenElement[],
+  elements: readonly ResolvedScreenElementV26[],
   contents: readonly ScreenLayoutContentPreview[]
 ): ReactNode {
   const contentSlot = elements.find(
     (
       element
-    ): element is Extract<ResolvedScreenElement, { type: "content-slot" }> =>
+    ): element is Extract<ResolvedScreenElementV26, { type: "content-slot" }> =>
       element.type === "content-slot"
   );
   let relativeContentIndex = 0;
@@ -409,7 +424,7 @@ function renderDialogueOnlyFrame({
   className,
   ariaLabel
 }: {
-  readonly resolvedLayout: ReturnType<typeof resolveScreenTemplateLayout>;
+  readonly resolvedLayout: ResolvedScreenLayoutV26;
   readonly preview: ScreenLayoutPreview;
   readonly className: string;
   readonly ariaLabel: string;
@@ -417,8 +432,10 @@ function renderDialogueOnlyFrame({
   const dialogueElement = resolvedLayout.elements.find(
     (
       element
-    ): element is Extract<ResolvedScreenElement, { type: "dialogue-window" }> =>
-      element.type === "dialogue-window"
+    ): element is Extract<
+      ResolvedScreenElementV26,
+      { type: "dialogue-window" }
+    > => element.type === "dialogue-window"
   );
   if (dialogueElement === undefined) {
     return (
@@ -489,7 +506,8 @@ export function ScreenLayoutFrame({
   const resolvedLayout = resolveScreenTemplateLayout(template, {
     prioritizeVisual: contentPreviewsForLayout.some(
       (content) => content.display?.prioritizeVisual === true
-    )
+    ),
+    includeDialogueWindowStyle: true
   });
   const classes = ["screen-layout-frame", className]
     .filter((value): value is string => value !== undefined)

@@ -18,8 +18,13 @@ import {
 } from "../../timeline/index.js";
 import {
   idSchema,
+  DEFAULT_CHARACTER_VISUAL_GLOW_COLOR,
+  DEFAULT_DIALOGUE_WINDOW_BACKGROUND_COLOR,
+  DEFAULT_DIALOGUE_WINDOW_BACKGROUND_OPACITY,
   relativePosixPathSchema,
   renderManifestV24Schema,
+  renderManifestV25Schema,
+  renderManifestV26Schema,
   renderManifestSchema,
   sha256Schema,
   characterVisualCatalogSnapshotSchema,
@@ -36,11 +41,14 @@ import {
   type RenderManifest,
   type RenderManifestV24,
   type RenderManifestV25,
+  type RenderManifestV26,
   type RenderResolvedVideoDisplayV25,
   type RenderInsert,
   type RenderSoundEffect,
   type RenderVisualV24,
   type RenderVisualV25,
+  type ResolvedScreenElementV26,
+  type ResolvedScreenLayoutV26,
   type ScreenTemplate,
   videoProjectSchema
 } from "../../schema/index.js";
@@ -52,7 +60,10 @@ import {
   resolveScreenTemplateLayout,
   resolveVisualDisplay
 } from "../screen-templates/screen-layout-resolver.js";
-import { screenTemplateContentHash } from "../screen-templates/screen-template-hash.js";
+import {
+  screenTemplateContentHash,
+  screenTemplateLegacyContentHash
+} from "../screen-templates/screen-template-hash.js";
 import {
   resolvedScreenLayoutValidationIssues,
   screenTemplateTextValidationIssues,
@@ -65,7 +76,8 @@ import {
 import { validateVisualPlaybackSequence } from "../../timeline/visual-playback.js";
 import type { VisualPlaybackCue } from "../../schema/visual-playback.js";
 
-export const RENDER_MANIFEST_VERSION = "2.5.0" as const;
+export const RENDER_MANIFEST_VERSION = "2.6.0" as const;
+export const RENDER_MANIFEST_V25_VERSION = "2.5.0" as const;
 export const RENDER_MANIFEST_V24_VERSION = "2.4.0" as const;
 
 export const renderManifestAssetMetadataSchema = z
@@ -245,6 +257,7 @@ type NormalizedCatalogVariant = {
   readonly visualId: string;
   readonly status: "active" | "inactive";
   readonly visualStatus: "active" | "inactive";
+  readonly visualGlowColor: string;
   readonly renderType: CharacterVariantRenderType;
   readonly files: ReadonlyMap<string, NormalizedCatalogFile>;
   readonly inputIndex: number;
@@ -268,7 +281,10 @@ type ResolvedScreenTemplate = Readonly<{
   readonly template: ScreenTemplate;
   readonly templateId: string;
   readonly templateRevision: number;
+  /** RenderManifest 2.4.0/2.5.0 frozen template identity. */
   readonly templateHash: string;
+  /** Current RenderManifest template identity, including RF-01 fields. */
+  readonly currentTemplateHash: string;
 }>;
 
 type RenderProjectLine = {
@@ -395,6 +411,33 @@ function recordInputScreenTemplates(
   );
 }
 
+/**
+ * Keep the V24/V25 cache identity on the pre-RF-01 ScreenTemplate contract.
+ * Template revision and content hash remain part of that contract; the
+ * dialogue window's RF-01 appearance is added only by the V26 wrapper.
+ */
+function screenTemplateElementForV24Hash(
+  element: ScreenTemplate["elements"][number]
+): unknown {
+  if (element.type !== "dialogue-window") {
+    return element;
+  }
+  const {
+    backgroundColor: _backgroundColor,
+    backgroundOpacity: _backgroundOpacity,
+    ...legacyElement
+  } = element;
+  void _backgroundColor;
+  void _backgroundOpacity;
+  return legacyElement;
+}
+
+function screenTemplateElementsForV24Hash(
+  elements: ScreenTemplate["elements"]
+): unknown[] {
+  return elements.map(screenTemplateElementForV24Hash);
+}
+
 function screenTemplateDiagnosticCode(
   message: string
 ): RenderManifestDiagnosticCode {
@@ -469,7 +512,8 @@ function normalizeScreenTemplates(
       template,
       templateId: template.templateId,
       templateRevision: template.revision,
-      templateHash: screenTemplateContentHash(template)
+      templateHash: screenTemplateLegacyContentHash(template),
+      currentTemplateHash: screenTemplateContentHash(template)
     });
   }
   return templates;
@@ -499,6 +543,7 @@ function normalizeCatalog(
           renderType: variant.renderType,
           status: variant.status,
           visualStatus: visual.status,
+          visualGlowColor: visual.glowColor,
           files: variant.files.map((file) => ({
             key: file.key,
             destinationPath: file.libraryPath,
@@ -524,6 +569,10 @@ function normalizeCatalog(
 
     const variantId = rawVariant.variantId;
     const visualId = rawVariant.visualId ?? rawVariant.characterId;
+    const visualGlowColor =
+      rawVariant.visualGlowColor ??
+      rawVariant.glowColor ??
+      DEFAULT_CHARACTER_VISUAL_GLOW_COLOR;
     const renderType = rawVariant.renderType;
     const status = rawVariant.status ?? "active";
     const visualStatus = rawVariant.visualStatus ?? "active";
@@ -714,6 +763,10 @@ function normalizeCatalog(
       visualId,
       status: status === "inactive" ? "inactive" : "active",
       visualStatus: visualStatus === "inactive" ? "inactive" : "active",
+      visualGlowColor:
+        typeof visualGlowColor === "string"
+          ? visualGlowColor
+          : DEFAULT_CHARACTER_VISUAL_GLOW_COLOR,
       renderType,
       files,
       inputIndex: index
@@ -1374,6 +1427,51 @@ function orderedResolvedLayout(
   };
 }
 
+function orderedResolvedLayoutV26(
+  layout: ResolvedScreenLayoutV26
+): ResolvedScreenLayoutV26 {
+  return {
+    canvasWidth: layout.canvasWidth,
+    canvasHeight: layout.canvasHeight,
+    elements: layout.elements.map((element): ResolvedScreenElementV26 => {
+      if (element.type === "dialogue-window") {
+        return {
+          elementId: element.elementId,
+          type: element.type,
+          transform: orderedScreenTransform(element.transform),
+          fontSize: element.fontSize,
+          backgroundColor: element.backgroundColor,
+          backgroundOpacity: element.backgroundOpacity
+        };
+      }
+      if (element.type === "section-title") {
+        return {
+          elementId: element.elementId,
+          type: element.type,
+          transform: orderedScreenTransform(element.transform),
+          fontSize: element.fontSize
+        };
+      }
+      if (element.type === "content-slot") {
+        return {
+          elementId: element.elementId,
+          type: element.type,
+          slot: element.slot,
+          transform: orderedScreenTransform(element.transform)
+        };
+      }
+      return {
+        elementId: element.elementId,
+        type: element.type,
+        slot: element.slot,
+        characterId: element.characterId,
+        transform: orderedScreenTransform(element.transform),
+        flipX: element.flipX
+      };
+    })
+  };
+}
+
 function orderedResolvedDisplay(
   display: RenderResolvedVisualDisplay
 ): RenderResolvedVisualDisplay {
@@ -1833,9 +1931,42 @@ function orderedManifest(manifest: RenderManifestV25): RenderManifestV25 {
   };
 }
 
+function orderedManifestV26(manifest: RenderManifestV26): RenderManifestV26 {
+  const orderedLegacy = orderedManifest(
+    manifest as unknown as RenderManifestV25
+  );
+  return {
+    ...orderedLegacy,
+    manifestVersion: manifest.manifestVersion,
+    characters: manifest.characters.map((character) => ({
+      characterId: character.characterId,
+      visualId: character.visualId,
+      displayName: character.displayName,
+      themeColorToken: character.themeColorToken,
+      lipSyncPeriodFrames: character.lipSyncPeriodFrames,
+      idleVariantId: character.idleVariantId,
+      glowColor: character.glowColor
+    })),
+    sectionLayouts: manifest.sectionLayouts.map((layout) => ({
+      sectionId: layout.sectionId,
+      sectionTitle: layout.sectionTitle,
+      templateId: layout.templateId,
+      templateRevision: layout.templateRevision,
+      templateHash: layout.templateHash,
+      resolvedLayout: orderedResolvedLayoutV26(layout.resolvedLayout)
+    })),
+    layoutIntervals: manifest.layoutIntervals.map((interval) => ({
+      sectionId: interval.sectionId,
+      from: interval.from,
+      durationInFrames: interval.durationInFrames,
+      resolvedLayout: orderedResolvedLayoutV26(interval.resolvedLayout)
+    }))
+  };
+}
+
 export function serializeRenderManifest(manifest: unknown): string {
   const parsed = renderManifestSchema.parse(manifest);
-  return `${JSON.stringify(orderedManifest(parsed), null, 2)}\n`;
+  return `${JSON.stringify(orderedManifestV26(parsed), null, 2)}\n`;
 }
 
 export function serializeRenderManifestV24(manifest: unknown): string {
@@ -2035,9 +2166,6 @@ export function compileRenderManifestV24(
   const charactersForLayout = project.characters.map((character) => ({
     id: character.id
   }));
-  const characterNameById = new Map(
-    project.characters.map((character) => [character.id, character.name])
-  );
   const resolvedLayoutByLineId = new Map<string, ResolvedScreenLayout>();
   for (const [sectionIndex, section] of project.script.sections.entries()) {
     const binding = screenTemplates.get(section.screenTemplateId);
@@ -2089,8 +2217,7 @@ export function compileRenderManifestV24(
       "subtitleText"
     ];
     for (const issue of screenTemplateTextValidationIssues(binding.template, {
-      dialogueText: entry.line.subtitleText,
-      speakerNameText: characterNameById.get(entry.line.speakerId)
+      dialogueText: entry.line.subtitleText
     })) {
       addDiagnostic(
         diagnostics,
@@ -2743,7 +2870,9 @@ export function compileRenderManifestV24(
             : {
                 canvasWidth: binding.template.canvasWidth,
                 canvasHeight: binding.template.canvasHeight,
-                elements: binding.template.elements
+                elements: screenTemplateElementsForV24Hash(
+                  binding.template.elements
+                )
               },
         sectionIds: project.script.sections
           .filter((section) => section.screenTemplateId === templateId)
@@ -3299,7 +3428,7 @@ function buildV25VideoSegments(
     const segmentIdentity =
       resolvedDisplay.playbackState === "playing"
         ? {
-            manifestVersion: RENDER_MANIFEST_VERSION,
+            manifestVersion: RENDER_MANIFEST_V25_VERSION,
             baseCompilerInputHash,
             sourceAssignmentId: assignment.id,
             segmentIndex,
@@ -3316,7 +3445,7 @@ function buildV25VideoSegments(
             sourceTrimAfterFrame: resolvedDisplay.sourceTrimAfterFrame
           }
         : {
-            manifestVersion: RENDER_MANIFEST_VERSION,
+            manifestVersion: RENDER_MANIFEST_V25_VERSION,
             baseCompilerInputHash,
             sourceAssignmentId: assignment.id,
             segmentIndex,
@@ -3415,7 +3544,7 @@ function successV25(
   };
 }
 
-export function compileRenderManifest(
+export function compileRenderManifestV25(
   input: RenderManifestCompilerInput
 ): RenderManifestCompileResult<RenderManifestV25> {
   const projectResult = videoProjectSchema.safeParse(
@@ -3488,7 +3617,7 @@ export function compileRenderManifest(
   }));
   const sourceProjectHash = sha256CanonicalJson(projectResult.data);
   const compilerInputHash = sha256CanonicalJson({
-    manifestVersion: RENDER_MANIFEST_VERSION,
+    manifestVersion: RENDER_MANIFEST_V25_VERSION,
     baseCompilerInputHash: baseManifest.compilerInputHash,
     sourceProjectHash,
     sectionLayouts,
@@ -3498,7 +3627,7 @@ export function compileRenderManifest(
   });
   const manifest = {
     ...baseManifest,
-    manifestVersion: RENDER_MANIFEST_VERSION,
+    manifestVersion: RENDER_MANIFEST_V25_VERSION,
     sourceProjectHash,
     compilerInputHash,
     sectionLayouts,
@@ -3506,7 +3635,7 @@ export function compileRenderManifest(
     lines,
     visuals: visualValues
   } satisfies RenderManifestV25;
-  const manifestResult = renderManifestSchema.safeParse(manifest);
+  const manifestResult = renderManifestV25Schema.safeParse(manifest);
   if (!manifestResult.success) {
     addZodDiagnostics(
       diagnostics,
@@ -3517,6 +3646,180 @@ export function compileRenderManifest(
     return failure(diagnostics, baseResult.warnings);
   }
   return successV25(manifestResult.data, baseResult.warnings);
+}
+
+function glowColorsForCatalog(rawCatalog: unknown): Map<string, string> {
+  const colors = new Map<string, string>();
+  const snapshotResult =
+    characterVisualCatalogSnapshotSchema.safeParse(rawCatalog);
+  if (snapshotResult.success) {
+    for (const visual of snapshotResult.data) {
+      colors.set(visual.visualId, visual.glowColor);
+    }
+    return colors;
+  }
+
+  if (!Array.isArray(rawCatalog)) {
+    return colors;
+  }
+  for (const rawEntry of rawCatalog) {
+    if (!isPlainRecord(rawEntry)) {
+      continue;
+    }
+    const visualId = rawEntry.visualId ?? rawEntry.characterId;
+    const glowColor = rawEntry.glowColor ?? rawEntry.visualGlowColor;
+    if (
+      typeof visualId === "string" &&
+      typeof glowColor === "string" &&
+      !colors.has(visualId)
+    ) {
+      colors.set(visualId, glowColor);
+    }
+  }
+  return colors;
+}
+
+function addDialogueWindowStyle(
+  layout: ResolvedScreenLayout,
+  template: ScreenTemplate | undefined
+): ResolvedScreenLayoutV26 {
+  const dialogueElement = template?.elements.find(
+    (element) => element.type === "dialogue-window"
+  );
+  return {
+    canvasWidth: layout.canvasWidth,
+    canvasHeight: layout.canvasHeight,
+    elements: layout.elements.map((element): ResolvedScreenElementV26 => {
+      if (element.type !== "dialogue-window") {
+        return element;
+      }
+      return {
+        ...element,
+        backgroundColor:
+          dialogueElement?.backgroundColor ??
+          DEFAULT_DIALOGUE_WINDOW_BACKGROUND_COLOR,
+        backgroundOpacity:
+          dialogueElement?.backgroundOpacity ??
+          DEFAULT_DIALOGUE_WINDOW_BACKGROUND_OPACITY
+      };
+    })
+  };
+}
+
+function successV26(
+  manifest: RenderManifestV26,
+  warnings: readonly RenderManifestWarning[]
+): RenderManifestCompileSuccess<RenderManifestV26> {
+  return {
+    success: true,
+    ok: true,
+    manifest: orderedManifestV26(manifest),
+    diagnostics: [],
+    errors: [],
+    warnings: warnings.map((warning) => ({
+      ...warning,
+      soundEffectIds: [...warning.soundEffectIds],
+      lineIds: [...warning.lineIds]
+    }))
+  };
+}
+
+export function compileRenderManifest(
+  input: RenderManifestCompilerInput
+): RenderManifestCompileResult<RenderManifestV26> {
+  const baseResult = compileRenderManifestV25(input);
+  if (!baseResult.success) {
+    return baseResult as RenderManifestCompileResult<RenderManifestV26>;
+  }
+
+  const diagnostics: RenderManifestDiagnostic[] = [];
+  const templates = normalizeScreenTemplates(
+    recordInputScreenTemplates(input),
+    diagnostics
+  );
+  if (diagnostics.length > 0) {
+    return failure(diagnostics, baseResult.warnings);
+  }
+
+  const glowColors = glowColorsForCatalog(recordInputCatalog(input));
+  const characters = baseResult.manifest.characters.map((character) => ({
+    ...character,
+    glowColor:
+      glowColors.get(character.visualId) ?? DEFAULT_CHARACTER_VISUAL_GLOW_COLOR
+  }));
+  const currentTemplateHashById = new Map(
+    [...templates.values()].map((binding) => [
+      binding.templateId,
+      binding.currentTemplateHash
+    ])
+  );
+  const sectionLayouts = baseResult.manifest.sectionLayouts.map((layout) => ({
+    ...layout,
+    templateHash:
+      currentTemplateHashById.get(layout.templateId) ?? layout.templateHash,
+    resolvedLayout: addDialogueWindowStyle(
+      layout.resolvedLayout,
+      templates.get(layout.templateId)?.template
+    )
+  }));
+  const templateIdBySectionId = new Map(
+    baseResult.manifest.sectionLayouts.map((layout) => [
+      layout.sectionId,
+      layout.templateId
+    ])
+  );
+  const layoutIntervals = baseResult.manifest.layoutIntervals.map(
+    (interval) => {
+      const templateId = templateIdBySectionId.get(interval.sectionId);
+      return {
+        ...interval,
+        resolvedLayout: addDialogueWindowStyle(
+          interval.resolvedLayout,
+          templateId === undefined
+            ? undefined
+            : templates.get(templateId)?.template
+        )
+      };
+    }
+  );
+  const currentTemplateHashBySectionId = new Map(
+    sectionLayouts.map((layout) => [layout.sectionId, layout.templateHash])
+  );
+  const visuals = baseResult.manifest.visuals.map((visual) => ({
+    ...visual,
+    templateHash:
+      currentTemplateHashBySectionId.get(visual.sectionId) ??
+      visual.templateHash
+  }));
+  const compilerInputHash = sha256CanonicalJson({
+    manifestVersion: RENDER_MANIFEST_VERSION,
+    baseCompilerInputHash: baseResult.manifest.compilerInputHash,
+    glowColors: [...glowColors.entries()].sort(([left], [right]) =>
+      compareStrings(left, right)
+    ),
+    sectionLayouts,
+    layoutIntervals
+  });
+  const manifest = {
+    ...baseResult.manifest,
+    manifestVersion: RENDER_MANIFEST_VERSION,
+    compilerInputHash,
+    characters,
+    sectionLayouts,
+    layoutIntervals,
+    visuals
+  } satisfies RenderManifestV26;
+  const manifestResult = renderManifestV26Schema.safeParse(manifest);
+  if (!manifestResult.success) {
+    addZodDiagnostics(
+      diagnostics,
+      RENDER_MANIFEST_ERROR_CODE.manifestSchema,
+      manifestResult.error,
+      []
+    );
+    return failure(diagnostics, baseResult.warnings);
+  }
+  return successV26(manifestResult.data, baseResult.warnings);
 }
 
 export class RenderManifestCompiler {

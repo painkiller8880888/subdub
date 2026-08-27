@@ -6,7 +6,7 @@ import type {
   RenderLine,
   RenderManifest,
   RenderVisual,
-  ResolvedScreenLayout
+  ResolvedScreenLayoutV26
 } from "../schema/index";
 
 export type TimelineInterval = Readonly<{
@@ -66,7 +66,7 @@ export function selectActiveScreenLayout(
   manifest: RenderManifest,
   frame: number,
   lines: readonly RenderLine[]
-): ResolvedScreenLayout | undefined {
+): ResolvedScreenLayoutV26 | undefined {
   const layoutInterval = selectActiveItem(manifest.layoutIntervals, frame);
   if (layoutInterval !== undefined) {
     return layoutInterval.resolvedLayout;

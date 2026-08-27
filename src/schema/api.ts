@@ -7,6 +7,7 @@ import {
   positiveIntegerSchema,
   relativePosixPathSchema,
   sha256Schema,
+  hexColorSchema,
   finiteNumberSchema,
   unitIntervalSchema,
   strictObject
@@ -163,13 +164,15 @@ export const characterVisualCreateRequestSchema = strictObject({
     .transform((value) => value.normalize("NFC").trim())
     .optional()
     .default(""),
-  status: characterVisualStatusSchema.optional().default("active")
+  status: characterVisualStatusSchema.optional().default("active"),
+  glowColor: hexColorSchema.optional()
 });
 
 export const characterVisualUpdateRequestSchema = strictObject({
   name: nonBlankCharacterVisualTextSchema,
   description: z.string().transform((value) => value.normalize("NFC").trim()),
-  status: characterVisualStatusSchema
+  status: characterVisualStatusSchema,
+  glowColor: hexColorSchema.optional()
 });
 
 export const characterVisualResponseSchema = strictObject({

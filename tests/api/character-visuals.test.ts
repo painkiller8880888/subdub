@@ -236,7 +236,8 @@ describe("character visual catalog routes", () => {
         payload: JSON.stringify({
           name: "API status visual",
           description: "",
-          status: "active"
+          status: "active",
+          glowColor: "#123456"
         })
       });
       expect(createResponse.statusCode).toBe(200);
@@ -244,6 +245,20 @@ describe("character visual catalog routes", () => {
         createResponse.json()
       ).data;
       expect(created.variants).toEqual([]);
+      expect(created.glowColor).toBe("#123456");
+
+      const invalidGlowResponse = await initialized.app.inject({
+        method: "POST",
+        url: "/api/character-visuals",
+        headers: { "content-type": "application/json" },
+        payload: JSON.stringify({
+          name: "Invalid glow visual",
+          description: "",
+          status: "active",
+          glowColor: "#fff"
+        })
+      });
+      expect(invalidGlowResponse.statusCode).toBe(422);
 
       const deactivateVisualResponse = await initialized.app.inject({
         method: "PUT",
@@ -252,7 +267,8 @@ describe("character visual catalog routes", () => {
         payload: JSON.stringify({
           name: "API status visual",
           description: "temporarily disabled",
-          status: "inactive"
+          status: "inactive",
+          glowColor: "#654321"
         })
       });
       expect(deactivateVisualResponse.statusCode).toBe(200);
@@ -260,6 +276,10 @@ describe("character visual catalog routes", () => {
         characterVisualResponseSchema.parse(deactivateVisualResponse.json())
           .data.status
       ).toBe("inactive");
+      expect(
+        characterVisualResponseSchema.parse(deactivateVisualResponse.json())
+          .data.glowColor
+      ).toBe("#654321");
 
       const reactivateVisualResponse = await initialized.app.inject({
         method: "PUT",
@@ -272,6 +292,10 @@ describe("character visual catalog routes", () => {
         })
       });
       expect(reactivateVisualResponse.statusCode).toBe(200);
+      expect(
+        characterVisualResponseSchema.parse(reactivateVisualResponse.json())
+          .data.glowColor
+      ).toBe("#654321");
 
       const multipart = buildMultipartBody([
         { name: "label", value: "API status variant" },

@@ -86,6 +86,12 @@ describe("character visual catalog", { timeout: 30_000 }, () => {
     ).toHaveLength(10);
     expect(first.every((visual) => visual.baseWidth === 600)).toBe(true);
     expect(first.every((visual) => visual.baseHeight === 1000)).toBe(true);
+    expect(
+      first.find((visual) => visual.visualId === "character-mentor")?.glowColor
+    ).toBe("#e78ac3");
+    expect(
+      first.find((visual) => visual.visualId === "character-learner")?.glowColor
+    ).toBe("#75c97a");
     const compatibilityCatalog = characterVisualSnapshotToVariantCatalog(first);
     expect(compatibilityCatalog).toHaveLength(6);
     expect(
@@ -186,6 +192,18 @@ describe("character visual catalog", { timeout: 30_000 }, () => {
       baseHeight: null,
       variants: []
     });
+
+    const colored = service.create({
+      name: "Colored visual",
+      glowColor: "#123456"
+    });
+    expect(colored.glowColor).toBe("#123456");
+    expect(
+      characterVisualSetSchema.safeParse({
+        ...visual,
+        glowColor: "#12345"
+      }).success
+    ).toBe(false);
 
     const invalid = characterVisualSetSchema.safeParse({
       ...visual,
@@ -430,6 +448,7 @@ describe("character visual catalog", { timeout: 30_000 }, () => {
           name: "Rollback",
           description: "",
           status: "active",
+          glowColor: "#ffffff",
           baseWidth: null,
           baseHeight: null,
           createdAt: "2026-08-14T00:00:00.000Z",
@@ -477,6 +496,7 @@ describe("character visual catalog", { timeout: 30_000 }, () => {
         name: "Concurrent visual",
         description: "Concurrent description",
         status: "inactive",
+        glowColor: "#ffffff",
         updatedAt: "2026-08-14T00:00:01.000Z"
       });
       return originalTransaction(operation);
