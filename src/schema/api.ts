@@ -592,11 +592,13 @@ export const manifestPreviewBlockerTargetSchema = strictObject({
     "visuals",
     "voice",
     "asset",
+    "edit",
     "manifest"
   ]),
   path: relativePosixPathSchema.optional(),
   lineId: idSchema.optional(),
   assignmentId: idSchema.optional(),
+  elementId: idSchema.optional(),
   sectionId: idSchema.optional()
 });
 

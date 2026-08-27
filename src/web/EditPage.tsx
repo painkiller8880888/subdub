@@ -164,12 +164,19 @@ function projectSummaryFromProject(project: VideoProject): ProjectSummary {
   };
 }
 
+type InsertTextTemplateQueryState = {
+  readonly items: readonly InsertTextTemplateSummary[];
+  readonly isPending: boolean;
+  readonly isError: boolean;
+  readonly error: unknown;
+  readonly onRetry: () => void;
+};
+
 function EditVideoElementCard({
   element,
   asset,
   sections,
-  insertTextTemplates,
-  insertTextTemplatesLoading,
+  insertTextTemplatesQuery,
   disabled,
   volumeDisabled,
   isKeyboardDragging = false,
@@ -186,8 +193,7 @@ function EditVideoElementCard({
   readonly element: EditVideoElement;
   readonly asset: AssetDetail | undefined;
   readonly sections: VideoProject["script"]["sections"];
-  readonly insertTextTemplates: readonly InsertTextTemplateSummary[];
-  readonly insertTextTemplatesLoading: boolean;
+  readonly insertTextTemplatesQuery: InsertTextTemplateQueryState;
   readonly disabled: boolean;
   readonly volumeDisabled: boolean;
   readonly isKeyboardDragging?: boolean;
@@ -209,7 +215,7 @@ function EditVideoElementCard({
   const canReorder = element.role === "cutin" && onDragStart !== undefined;
   const selectedTemplateIsUnavailable =
     element.textTemplateId !== null &&
-    !insertTextTemplates.some(
+    !insertTextTemplatesQuery.items.some(
       (template) => template.templateId === element.textTemplateId
     );
 
@@ -304,7 +310,11 @@ function EditVideoElementCard({
         <div className="form-field">
           <label htmlFor={textTemplateId}>挿入文字テンプレート</label>
           <select
-            disabled={disabled || insertTextTemplatesLoading}
+            disabled={
+              disabled ||
+              insertTextTemplatesQuery.isPending ||
+              insertTextTemplatesQuery.isError
+            }
             id={textTemplateId}
             value={element.textTemplateId ?? ""}
             onChange={(event) => {
@@ -319,13 +329,17 @@ function EditVideoElementCard({
                 選択中のテンプレート（利用停止または解決不可）
               </option>
             ) : null}
-            {insertTextTemplates.map((template) => (
+            {insertTextTemplatesQuery.items.map((template) => (
               <option key={template.templateId} value={template.templateId}>
                 {template.name}
               </option>
             ))}
           </select>
-          <small>active のテンプレートだけを新しく選択できます。</small>
+          <small>
+            {insertTextTemplatesQuery.isError
+              ? "テンプレート候補を取得できません。上の再読み込みを実行してください。"
+              : "active のテンプレートだけを新しく選択できます。"}
+          </small>
         </div>
         <div className="form-field">
           <label htmlFor={textId}>表示文字（複数行可）</label>
@@ -753,8 +767,7 @@ function EditPlanEditor({
   editResponse,
   videoPickerQuery,
   bgmPickerQuery,
-  insertTextTemplates,
-  insertTextTemplatesLoading,
+  insertTextTemplatesQuery,
   onRetry
 }: {
   readonly projectId: string;
@@ -762,8 +775,7 @@ function EditPlanEditor({
   readonly editResponse: ProjectEditResponse;
   readonly videoPickerQuery: AssetPickerQueryState;
   readonly bgmPickerQuery: AssetPickerQueryState;
-  readonly insertTextTemplates: readonly InsertTextTemplateSummary[];
-  readonly insertTextTemplatesLoading: boolean;
+  readonly insertTextTemplatesQuery: InsertTextTemplateQueryState;
   readonly onRetry: () => void;
 }) {
   const navigate = useNavigate();
@@ -1410,6 +1422,25 @@ function EditPlanEditor({
 
         <EditPlanSummary readModel={readModel} />
 
+        {insertTextTemplatesQuery.isError ? (
+          <section className="message-panel message-panel-error" role="alert">
+            <h2>挿入文字テンプレートを取得できません</h2>
+            <p>
+              {getErrorMessage(
+                insertTextTemplatesQuery.error,
+                "挿入文字テンプレートの取得に失敗しました。"
+              )}
+            </p>
+            <button
+              className="button"
+              type="button"
+              onClick={insertTextTemplatesQuery.onRetry}
+            >
+              再読み込み
+            </button>
+          </section>
+        ) : null}
+
         {draggingElementId !== null && activeDropTarget !== null ? (
           <p className="edit-dnd-status" role="status" aria-live="polite">
             {keyboardDraggingElementId !== null
@@ -1495,8 +1526,7 @@ function EditPlanEditor({
                 )}
                 disabled={interactionDisabled}
                 element={readModel.intro}
-                insertTextTemplates={insertTextTemplates}
-                insertTextTemplatesLoading={insertTextTemplatesLoading}
+                insertTextTemplatesQuery={insertTextTemplatesQuery}
                 volumeDisabled={
                   autosaveState.status === "saving" ||
                   autosaveState.status === "conflict"
@@ -1562,8 +1592,7 @@ function EditPlanEditor({
                       )}
                       disabled={interactionDisabled}
                       element={cutin}
-                      insertTextTemplates={insertTextTemplates}
-                      insertTextTemplatesLoading={insertTextTemplatesLoading}
+                      insertTextTemplatesQuery={insertTextTemplatesQuery}
                       isDragging={draggingElementId === cutin.id}
                       isKeyboardDragging={
                         keyboardDraggingElementId === cutin.id
@@ -1708,8 +1737,7 @@ function EditPlanEditor({
                 )}
                 disabled={interactionDisabled}
                 element={readModel.outro}
-                insertTextTemplates={insertTextTemplates}
-                insertTextTemplatesLoading={insertTextTemplatesLoading}
+                insertTextTemplatesQuery={insertTextTemplatesQuery}
                 sections={project.script.sections}
                 volumeDisabled={
                   autosaveState.status === "saving" ||
@@ -1799,6 +1827,10 @@ export function EditPage() {
     void Promise.all([projectQuery.refetch(), editQuery.refetch()]);
   };
 
+  const retryInsertTextTemplates = (): void => {
+    void insertTextTemplatesQuery.refetch();
+  };
+
   if (projectQuery.isPending || editQuery.isPending) {
     return (
       <main className="page-shell narrow-shell">
@@ -1873,8 +1905,13 @@ export function EditPage() {
         }
       }}
       editResponse={editResponse}
-      insertTextTemplates={insertTextTemplatesQuery.data ?? []}
-      insertTextTemplatesLoading={insertTextTemplatesQuery.isPending}
+      insertTextTemplatesQuery={{
+        items: insertTextTemplatesQuery.data ?? [],
+        isPending: insertTextTemplatesQuery.isPending,
+        isError: insertTextTemplatesQuery.isError,
+        error: insertTextTemplatesQuery.error,
+        onRetry: retryInsertTextTemplates
+      }}
       onRetry={retry}
       project={project}
       projectId={projectId}

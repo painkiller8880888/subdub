@@ -388,7 +388,7 @@ export class ManifestPreviewService {
           addBlocker(
             blockers,
             "INSERT_TEXT_TEMPLATE_REFERENCE_INVALID",
-            toTarget("asset", { assignmentId: element.id })
+            toTarget("edit", { elementId: element.id })
           );
         }
       }

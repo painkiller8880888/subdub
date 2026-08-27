@@ -12,6 +12,7 @@ import { computeOutlineHash } from "../../src/app/projects/script-domain.js";
 import { createStandardScreenTemplate } from "../../src/app/screen-templates/screen-template-seed.js";
 import type { ScreenTemplateSnapshotPort } from "../../src/app/projects/screen-template-selection.js";
 import type { VoicevoxAudioIndex } from "../../src/app/voicevox/audio-index.js";
+import type { InsertTextTemplate } from "../../src/schema/insert-text-template.js";
 import type { VoiceGenerationStatusData } from "../../src/schema/api.js";
 import type { RenderManifest, VideoProject } from "../../src/schema/index.js";
 import { renderManifestFixture } from "../fixtures/render-manifest.js";
@@ -82,6 +83,9 @@ async function createService(
       getStatus: (projectId: unknown) => Promise<VoiceGenerationStatusData>;
     };
     screenTemplateCatalog?: ScreenTemplateSnapshotPort;
+    insertTextTemplateCatalog?: {
+      findById: (templateId: string) => InsertTextTemplate | undefined;
+    };
   } = {}
 ): Promise<ManifestPreviewService> {
   const manifestStore = new RenderManifestStore({ workspaceRoot: root });
@@ -97,6 +101,7 @@ async function createService(
           ? createStandardScreenTemplate("2026-08-10T00:00:00.000Z")
           : undefined
     },
+    insertTextTemplateCatalog: options.insertTextTemplateCatalog,
     manifestStore,
     audioStore: audioStore(
       options.audioIndex ?? createRenderManifestAudioIndex(project)
@@ -180,6 +185,48 @@ describe("ManifestPreviewService", () => {
       ])
     );
     expect(result.canPlay).toBe(false);
+  });
+
+  it("targets invalid insert text references at the edit page", async () => {
+    const root = await createRoot();
+    const project = createProject();
+    const videoAssignment = project.visuals.assignments.find(
+      (assignment) => assignment.display.kind === "video"
+    );
+    if (videoAssignment === undefined) {
+      throw new Error("fixture video assignment is missing");
+    }
+    project.edit.videoElements = [
+      {
+        id: "edit-intro",
+        role: "intro",
+        assetId: videoAssignment.assetId,
+        assetVersion: 1,
+        assetChecksum: videoAssignment.assetChecksum,
+        projectMediaPath: videoAssignment.projectMediaPath,
+        placement: { kind: "before_first_section" },
+        volume: 1,
+        text: "表示文字",
+        textTemplateId: "missing-template"
+      }
+    ];
+    const service = await createService(root, project, {
+      manifest: createManifest(project),
+      insertTextTemplateCatalog: {
+        findById: () => undefined
+      }
+    });
+
+    const result = await service.get(projectId);
+
+    expect(result.blockers).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: "INSERT_TEXT_TEMPLATE_REFERENCE_INVALID",
+          target: { kind: "edit", elementId: "edit-intro" }
+        })
+      ])
+    );
   });
 
   it("keeps the previous manifest and reports project staleness", async () => {

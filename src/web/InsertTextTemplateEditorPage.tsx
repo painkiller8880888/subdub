@@ -114,19 +114,7 @@ export function InsertTextTemplateEditorPage() {
   if (templateId === undefined) {
     return <Navigate replace to="/insert-text-templates" />;
   }
-  if (templateQuery.isPending || draft === null) {
-    return (
-      <main className="page-shell narrow-shell">
-        <p className="back-link">
-          <Link to="/insert-text-templates">一覧へ戻る</Link>
-        </p>
-        <p className="status-message" role="status">
-          挿入文字テンプレートを読み込んでいます…
-        </p>
-      </main>
-    );
-  }
-  if (templateQuery.isError || templateQuery.data === undefined) {
+  if (templateQuery.isError) {
     return (
       <main className="page-shell narrow-shell">
         <p className="back-link">
@@ -148,6 +136,18 @@ export function InsertTextTemplateEditorPage() {
             再読み込み
           </button>
         </section>
+      </main>
+    );
+  }
+  if (templateQuery.isPending || draft === null) {
+    return (
+      <main className="page-shell narrow-shell">
+        <p className="back-link">
+          <Link to="/insert-text-templates">一覧へ戻る</Link>
+        </p>
+        <p className="status-message" role="status">
+          挿入文字テンプレートを読み込んでいます…
+        </p>
       </main>
     );
   }
