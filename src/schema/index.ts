@@ -3,6 +3,7 @@ export * from "./ai-run-log.js";
 export * from "./asset.js";
 export * from "./character-visual.js";
 export * from "./common.js";
+export * from "./edit-video.js";
 export * from "./primitives.js";
 export * from "./render-manifest.js";
 export * from "./render-run-log.js";

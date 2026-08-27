@@ -240,6 +240,15 @@ export class ProjectEditService {
         current.assetId === input.assetId &&
         current.assetVersion === input.assetVersion
       ) {
+        const asset = this.assetRepository.findAssetDetail(
+          input.assetId,
+          input.assetVersion
+        );
+        this.validateVideoTiming(
+          input.startMs,
+          asset,
+          ["edit", "videoElements", index, "startMs"]
+        );
         videoElements.push({ ...current, ...input });
         continue;
       }
@@ -250,6 +259,11 @@ export class ProjectEditService {
         "video",
         projectRoot,
         ["edit", "videoElements", index, "assetId"]
+      );
+      this.validateVideoTiming(
+        input.startMs,
+        pending.asset,
+        ["edit", "videoElements", index, "startMs"]
       );
       pendingImports.push(pending);
       videoElements.push({ ...pending.snapshot, ...input });
@@ -388,6 +402,34 @@ export class ProjectEditService {
         projectMediaPath
       }
     };
+  }
+
+  private validateVideoTiming(
+    startMs: number | null,
+    asset: AssetDetail | undefined,
+    detailPath: readonly (string | number)[]
+  ): void {
+    if (
+      asset === undefined ||
+      asset.durationMs === null ||
+      !Number.isInteger(asset.durationMs) ||
+      asset.durationMs <= 0
+    ) {
+      throw projectEditError(
+        PROJECT_EDIT_ERROR_CODE.candidateInvalid,
+        422,
+        "The selected edit video does not have a verified duration.",
+        [assetPathDetails(detailPath, "asset durationMs is required")]
+      );
+    }
+    if (startMs !== null && startMs >= asset.durationMs) {
+      throw projectEditError(
+        PROJECT_EDIT_ERROR_CODE.candidateInvalid,
+        422,
+        "The edit video start time must be within the selected asset.",
+        [assetPathDetails(detailPath, "startMs must be less than asset durationMs")]
+      );
+    }
   }
 
   private extensionForAsset(

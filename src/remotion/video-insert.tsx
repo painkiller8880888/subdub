@@ -2,38 +2,46 @@ import type { CSSProperties, ReactNode } from "react";
 
 import { AbsoluteFill, OffthreadVideo } from "remotion";
 
-import type { RenderVideoInsert, RenderVideoInsertV27 } from "../schema/index";
+import type { RenderVideoInsertV28 } from "../schema/index";
 import {
   defaultManifestAssetUrlResolver,
   resolveManifestAssetUrl,
   type ManifestAssetUrlResolver
 } from "./asset-url";
+import { mediaMillisecondsToFrames } from "../media-frame";
 
 export function videoInsertSequenceProps(
-  insert: RenderVideoInsert | RenderVideoInsertV27,
+  insert: RenderVideoInsertV28,
+  fps = 30,
   assetUrlResolver: ManifestAssetUrlResolver = defaultManifestAssetUrlResolver
 ): {
   readonly from: number;
   readonly durationInFrames: number;
   readonly src: string;
+  readonly trimBefore: number;
+  readonly playbackRate: number;
   readonly volume: number;
 } {
   return {
     from: insert.from,
     durationInFrames: insert.durationInFrames,
     src: resolveManifestAssetUrl(insert.src, assetUrlResolver),
+    trimBefore: mediaMillisecondsToFrames(insert.startMs ?? 0, fps),
+    playbackRate: insert.playbackRate,
     volume: insert.volume
   };
 }
 
 export function VideoInsert({
   insert,
+  fps = 30,
   assetUrlResolver = defaultManifestAssetUrlResolver
 }: {
-  insert: RenderVideoInsert | RenderVideoInsertV27;
+  insert: RenderVideoInsertV28;
+  fps?: number;
   assetUrlResolver?: ManifestAssetUrlResolver;
 }): ReactNode {
-  const props = videoInsertSequenceProps(insert, assetUrlResolver);
+  const props = videoInsertSequenceProps(insert, fps, assetUrlResolver);
   const text = "text" in insert ? insert.text : null;
   const textStyle: CSSProperties | undefined =
     text === null || text.text.length === 0
@@ -72,6 +80,8 @@ export function VideoInsert({
     <AbsoluteFill>
       <OffthreadVideo
         src={props.src}
+        trimBefore={props.trimBefore}
+        playbackRate={props.playbackRate}
         volume={props.volume}
         style={{
           width: "100%",

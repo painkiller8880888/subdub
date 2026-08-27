@@ -32,6 +32,7 @@ import {
   insertTextTemplateVerticalAlignSchema
 } from "./insert-text-template.js";
 import { visualPlaybackCueSchema } from "./visual-playback.js";
+import { editVideoPlaybackRateSchema } from "./edit-video.js";
 import { mediaMillisecondsToFrames } from "../media-frame.js";
 
 export const sourceAssetChecksumSchema = strictObject({
@@ -265,6 +266,14 @@ export const renderInsertV27Schema = strictObject({
   text: renderInsertTextSnapshotSchema.nullable()
 });
 export const renderVideoInsertV27Schema = renderInsertV27Schema;
+
+/** RenderManifest 2.8.0 resolves edit video timing in the insert snapshot. */
+export const renderInsertV28Schema = strictObject({
+  ...renderInsertV27Schema.shape,
+  startMs: nonNegativeIntegerSchema.nullable(),
+  playbackRate: editVideoPlaybackRateSchema
+});
+export const renderVideoInsertV28Schema = renderInsertV28Schema;
 
 const renderManifestBaseSchema = strictObject({
   manifestVersion: z.literal("2.3.0"),
@@ -1942,6 +1951,11 @@ const renderManifestV27BaseSchema = renderManifestV26BaseSchema.extend({
   inserts: z.array(renderInsertV27Schema)
 });
 
+const renderManifestV28BaseSchema = renderManifestV27BaseSchema.extend({
+  manifestVersion: z.literal("2.8.0"),
+  inserts: z.array(renderInsertV28Schema)
+});
+
 function stripV26ResolvedLayout(
   layout: z.infer<typeof resolvedScreenLayoutV26Schema>
 ): z.infer<typeof resolvedScreenLayoutSchema> {
@@ -2022,9 +2036,37 @@ export const renderManifestV27Schema = renderManifestV27BaseSchema.superRefine(
   }
 );
 
-/** Current production manifest schema. V24 remains available explicitly for
- * compatibility parsing and tests that exercise the frozen contracts. */
-export const renderManifestSchema = renderManifestV27Schema;
+export const renderManifestV28Schema = renderManifestV28BaseSchema.superRefine(
+  (manifest, ctx) => {
+    const legacy = {
+      ...manifest,
+      manifestVersion: "2.7.0" as const,
+      inserts: manifest.inserts.map(
+        ({ startMs: _startMs, playbackRate: _playbackRate, ...insert }) => {
+          void _startMs;
+          void _playbackRate;
+          return insert;
+        }
+      )
+    };
+    const result = renderManifestV27Schema.safeParse(legacy);
+    if (result.success) {
+      return;
+    }
+    for (const issue of result.error.issues) {
+      ctx.addIssue({
+        code: "custom",
+        path: issue.path,
+        message: issue.message
+      });
+    }
+  }
+);
+
+/** Current production manifest schema. Earlier versions remain available
+ * explicitly for compatibility parsing and tests that exercise frozen
+ * contracts. */
+export const renderManifestSchema = renderManifestV28Schema;
 
 export type SourceAssetChecksum = z.infer<typeof sourceAssetChecksumSchema>;
 export type RenderLineV23 = z.infer<typeof renderLineSchema>;
@@ -2058,6 +2100,10 @@ export type RenderInsertV27 = z.infer<typeof renderInsertV27Schema>;
 export type RenderVideoInsertV27 = z.infer<
   typeof renderVideoInsertV27Schema
 >;
+export type RenderInsertV28 = z.infer<typeof renderInsertV28Schema>;
+export type RenderVideoInsertV28 = z.infer<
+  typeof renderVideoInsertV28Schema
+>;
 export type RenderManifest = z.infer<typeof renderManifestSchema>;
 export type RenderManifestV23 = z.infer<typeof renderManifestV23Schema>;
 export type RenderManifestV24 = z.infer<typeof renderManifestV24Schema>;
@@ -2069,6 +2115,7 @@ export type RenderVisualV25 = z.infer<typeof renderVisualV25Schema>;
 export type RenderManifestV25 = z.infer<typeof renderManifestV25Schema>;
 export type RenderManifestV26 = z.infer<typeof renderManifestV26Schema>;
 export type RenderManifestV27 = z.infer<typeof renderManifestV27Schema>;
+export type RenderManifestV28 = z.infer<typeof renderManifestV28Schema>;
 export type ResolvedScreenElement = z.infer<typeof resolvedScreenElementSchema>;
 export type ResolvedScreenLayout = z.infer<typeof resolvedScreenLayoutSchema>;
 export type ResolvedScreenElementV26 = z.infer<

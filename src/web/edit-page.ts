@@ -6,6 +6,10 @@ import type {
   ScriptSection,
   SectionBgmAssignment
 } from "../schema/video-project.js";
+import {
+  DEFAULT_EDIT_VIDEO_PLAYBACK_RATE,
+  DEFAULT_EDIT_VIDEO_VOLUME
+} from "../schema/edit-video.js";
 
 export type EditPickerAssetKind = "video" | "bgm";
 
@@ -66,11 +70,55 @@ export function formatDurationMs(durationMs: number | null): string {
   return `${minutes}:${String(seconds).padStart(2, "0")}（${durationMs} ms）`;
 }
 
+export function editVideoStartMsToSecondsInput(startMs: number | null): string {
+  if (startMs === null) {
+    return "";
+  }
+  const wholeSeconds = Math.floor(startMs / 1000);
+  const milliseconds = String(startMs % 1000).padStart(3, "0");
+  const fractionalSeconds = milliseconds.replace(/0+$/u, "");
+  return fractionalSeconds.length === 0
+    ? String(wholeSeconds)
+    : `${wholeSeconds}.${fractionalSeconds}`;
+}
+
+export type EditVideoSecondsInputResult =
+  | { readonly kind: "empty"; readonly startMs: null }
+  | { readonly kind: "valid"; readonly startMs: number }
+  | { readonly kind: "invalid" };
+
+/** Convert a non-negative decimal seconds field to integer milliseconds. */
+export function editVideoSecondsInputToStartMs(
+  value: string
+): EditVideoSecondsInputResult {
+  const normalized = value.trim();
+  if (normalized.length === 0) {
+    return { kind: "empty", startMs: null };
+  }
+  const match = /^(\d+)(?:\.(\d+))?$/u.exec(normalized);
+  if (match === null) {
+    return { kind: "invalid" };
+  }
+  const wholeSeconds = Number(match[1]);
+  const fraction = match[2] ?? "";
+  const milliseconds = Number(fraction.slice(0, 3).padEnd(3, "0"));
+  const roundedMillisecond =
+    fraction.length > 3 && Number(fraction[3]) >= 5
+      ? milliseconds + 1
+      : milliseconds;
+  const result = wholeSeconds * 1000 + roundedMillisecond;
+  return Number.isSafeInteger(result)
+    ? { kind: "valid", startMs: result }
+    : { kind: "invalid" };
+}
+
 export function cloneEditPlan(editPlan: EditPlan): EditPlan {
   return {
     videoElements: editPlan.videoElements.map((element) => ({
       ...element,
-      placement: { ...element.placement }
+      placement: { ...element.placement },
+      startMs: element.startMs,
+      playbackRate: element.playbackRate
     })),
     sectionBgms: editPlan.sectionBgms.map((bgm) => ({ ...bgm }))
   };
@@ -87,6 +135,8 @@ export function createProjectEditInput(
       assetVersion: element.assetVersion,
       placement: { ...element.placement },
       volume: element.volume,
+      startMs: element.startMs,
+      playbackRate: element.playbackRate,
       text: element.text,
       textTemplateId: element.textTemplateId
     })),
@@ -157,7 +207,9 @@ export function addEditVideoElement(
     assetChecksum: asset.checksum,
     projectMediaPath: "media/pending-edit-asset",
     placement,
-    volume: 1,
+    startMs: null,
+    playbackRate: DEFAULT_EDIT_VIDEO_PLAYBACK_RATE,
+    volume: DEFAULT_EDIT_VIDEO_VOLUME,
     text: "",
     textTemplateId: null
   };
@@ -432,6 +484,8 @@ export function reconcileSavedEditPlan(
           id: element.id,
           role: element.role,
           placement: { ...element.placement },
+          startMs: element.startMs,
+          playbackRate: element.playbackRate,
           volume: element.volume,
           text: element.text,
           textTemplateId: element.textTemplateId

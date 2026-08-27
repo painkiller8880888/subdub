@@ -10,6 +10,7 @@ import {
   legacyVideoProjectV11Schema,
   videoProjectV14Schema,
   videoProjectV13Schema,
+  videoProjectV16Schema,
   videoProjectSchema
 } from "../../src/schema/index.js";
 import { videoProjectFixture } from "../fixtures/video-project.js";
@@ -174,8 +175,8 @@ describe("video project schema migration", () => {
     });
 
     const migrated = videoProjectSchema.parse(result.project);
-    expect(migrated.schemaVersion).toBe("1.6.0");
-    expect(migrated.revision).toBe(10);
+    expect(migrated.schemaVersion).toBe("1.7.0");
+    expect(migrated.revision).toBe(11);
     expect(
       migrated.script.sections.every(
         (section) => section.screenTemplateId === "screen-template-standard"
@@ -222,7 +223,52 @@ describe("video project schema migration", () => {
     const migrated = migrateVideoProject(current);
 
     expect(migrated).toBe(current);
-    expect((migrated as typeof current).schemaVersion).toBe("1.6.0");
+    expect((migrated as typeof current).schemaVersion).toBe("1.7.0");
+  });
+
+  it("adds edit video timing defaults when migrating 1.6.0", () => {
+    const legacy = clone(videoProjectFixture) as unknown as {
+      schemaVersion: string;
+      revision: number;
+      edit: {
+        videoElements: Array<Record<string, unknown>>;
+        sectionBgms: unknown[];
+      };
+    };
+    legacy.schemaVersion = "1.6.0";
+    legacy.revision = 8;
+    legacy.edit.videoElements = [
+      {
+        id: "edit-video-legacy",
+        role: "intro",
+        assetId: "asset-application-demo",
+        assetVersion: 1,
+        assetChecksum: "b".repeat(64),
+        projectMediaPath: "media/application-demo.mp4",
+        placement: { kind: "before_first_section" },
+        volume: 0.35,
+        text: "",
+        textTemplateId: null
+      }
+    ];
+
+    expect(videoProjectV16Schema.safeParse(legacy).success).toBe(true);
+    const migrated = videoProjectSchema.parse(migrateVideoProject(legacy));
+
+    expect(migrated).toMatchObject({
+      schemaVersion: "1.7.0",
+      revision: 9,
+      edit: {
+        videoElements: [
+          {
+            id: "edit-video-legacy",
+            startMs: null,
+            playbackRate: 1,
+            volume: 0.35
+          }
+        ]
+      }
+    });
   });
 
   it("adds empty cues to video assignments through a strict 1.4.0 boundary", () => {
@@ -248,8 +294,8 @@ describe("video project schema migration", () => {
 
     expect(result.migrated).toBe(true);
     const migrated = videoProjectSchema.parse(result.project);
-    expect(migrated.schemaVersion).toBe("1.6.0");
-    expect(migrated.revision).toBe(14);
+    expect(migrated.schemaVersion).toBe("1.7.0");
+    expect(migrated.revision).toBe(15);
     expect(migrated.visuals.assignments[0]?.display).toMatchObject({
       kind: "video",
       playbackCues: []
@@ -314,8 +360,8 @@ describe("video project schema migration", () => {
     });
 
     const migrated = videoProjectSchema.parse(result.project);
-    expect(migrated.schemaVersion).toBe("1.6.0");
-    expect(migrated.revision).toBe((project.revision as number) + 3);
+    expect(migrated.schemaVersion).toBe("1.7.0");
+    expect(migrated.revision).toBe((project.revision as number) + 4);
     expect(
       migrated.script.sections.map((section) => section.screenTemplateId)
     ).toEqual(script.sections.map((section) => section.screenTemplateId));

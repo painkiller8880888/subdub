@@ -25,6 +25,10 @@ import type {
 } from "../schema/api.js";
 import type { AssetDetail, AssetListItem } from "../schema/asset.js";
 import {
+  DEFAULT_EDIT_VIDEO_VOLUME,
+  EDIT_VIDEO_PLAYBACK_RATE_OPTIONS
+} from "../schema/edit-video.js";
+import {
   editPlanSchema,
   type EditPlan,
   type EditVideoElement,
@@ -61,6 +65,8 @@ import {
   replaceEditVideoElement,
   replaceSectionBgm,
   editAssetReferenceKey,
+  editVideoSecondsInputToStartMs,
+  editVideoStartMsToSecondsInput,
   type EditCutinDropTarget,
   type EditPlanReadModel,
   type EditSectionReadModel,
@@ -183,7 +189,10 @@ function EditVideoElementCard({
   isDragging = false,
   onReplace,
   onDelete,
+  onStartMsChange,
+  onPlaybackRateChange,
   onVolumeChange,
+  onMuteChange,
   onTextChange,
   onTextTemplateChange,
   onDragStart,
@@ -200,7 +209,12 @@ function EditVideoElementCard({
   readonly isDragging?: boolean;
   readonly onReplace: () => void;
   readonly onDelete: () => void;
+  readonly onStartMsChange: (startMs: number | null) => void;
+  readonly onPlaybackRateChange: (
+    playbackRate: EditVideoElement["playbackRate"]
+  ) => void;
   readonly onVolumeChange: (volume: number) => void;
+  readonly onMuteChange: (muted: boolean) => void;
   readonly onTextChange: (text: string) => void;
   readonly onTextTemplateChange: (templateId: string | null) => void;
   readonly onDragStart?: (event: DragEvent<HTMLButtonElement>) => void;
@@ -209,9 +223,26 @@ function EditVideoElementCard({
 }) {
   const title = assetTitle(asset, element.assetId);
   const volumeId = `${element.id}-video-volume`;
+  const startSecondsId = `${element.id}-video-start-seconds`;
+  const playbackRateId = `${element.id}-video-playback-rate`;
+  const muteId = `${element.id}-video-muted`;
   const textTemplateId = `${element.id}-text-template`;
   const textId = `${element.id}-insert-text`;
   const thumbnailAvailable = asset?.thumbnailPaths[0] !== undefined;
+  const [startSecondsInput, setStartSecondsInput] = useState(() =>
+    editVideoStartMsToSecondsInput(element.startMs)
+  );
+  useEffect(() => {
+    setStartSecondsInput(editVideoStartMsToSecondsInput(element.startMs));
+  }, [element.startMs]);
+  const startSecondsInputResult =
+    editVideoSecondsInputToStartMs(startSecondsInput);
+  const startSecondsInputInvalid = startSecondsInputResult.kind === "invalid";
+  const startMsExceedsDuration =
+    element.startMs !== null &&
+    asset?.durationMs !== null &&
+    asset?.durationMs !== undefined &&
+    element.startMs >= asset.durationMs;
   const canReorder = element.role === "cutin" && onDragStart !== undefined;
   const selectedTemplateIsUnavailable =
     element.textTemplateId !== null &&
@@ -305,6 +336,73 @@ function EditVideoElementCard({
         />
         <output htmlFor={volumeId}>{element.volume.toFixed(2)}</output>
       </div>
+
+      <div className="edit-video-timing-control">
+        <div className="form-field">
+          <label htmlFor={startSecondsId}>開始秒</label>
+          <input
+            aria-invalid={
+              startSecondsInputInvalid || startMsExceedsDuration
+                ? true
+                : undefined
+            }
+            disabled={volumeDisabled}
+            id={startSecondsId}
+            inputMode="decimal"
+            type="text"
+            value={startSecondsInput}
+            onChange={(event) => {
+              const value = event.target.value;
+              const result = editVideoSecondsInputToStartMs(value);
+              setStartSecondsInput(value);
+              if (result.kind !== "invalid") {
+                onStartMsChange(result.startMs);
+              }
+            }}
+          />
+          <small>
+            {startSecondsInputInvalid
+              ? "0以上の数字を入力してください。"
+              : startMsExceedsDuration
+                ? "開始秒は素材の長さ未満にしてください。"
+                : "空欄は素材の先頭（0秒）から再生します。保存値は整数msです。"}
+          </small>
+        </div>
+        <div className="form-field">
+          <label htmlFor={playbackRateId}>再生速度</label>
+          <select
+            disabled={volumeDisabled}
+            id={playbackRateId}
+            value={element.playbackRate}
+            onChange={(event) =>
+              onPlaybackRateChange(
+                Number(event.target.value) as EditVideoElement["playbackRate"]
+              )
+            }
+          >
+            {EDIT_VIDEO_PLAYBACK_RATE_OPTIONS.map((option) => (
+              <option key={option.label} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </div>
+      </div>
+
+      <label className="edit-muted-control" htmlFor={muteId}>
+        <input
+          checked={element.volume === 0}
+          disabled={volumeDisabled}
+          id={muteId}
+          type="checkbox"
+          onChange={(event) =>
+            onMuteChange(
+              (event.currentTarget as unknown as { checked: boolean }).checked
+            )
+          }
+        />
+        無音
+      </label>
 
       <div className="edit-insert-text-config">
         <div className="form-field">
@@ -796,6 +894,7 @@ function EditPlanEditor({
   const lastSavedRef = useRef<EditPlan>(cloneEditPlan(editResponse.data));
   const handledServerRevisionRef = useRef(editResponse.revision);
   const lastAttemptActionRef = useRef<PendingAction | null>(null);
+  const lastNonZeroVideoVolumeRef = useRef(new Map<string, number>());
   const restoreRemovalOnNextSuccessRef = useRef(false);
   const reorderRollbackDraftRef = useRef<EditPlan | null>(null);
   const coordinatorRef = useRef<AutosaveCoordinator<EditPlan> | null>(null);
@@ -999,13 +1098,67 @@ function EditPlanEditor({
 
   function updateVideoVolume(elementId: string, volume: number): void {
     const current = draftRef.current;
+    const nextVolume = clampUnitInterval(volume);
+    if (nextVolume > 0) {
+      lastNonZeroVideoVolumeRef.current.set(elementId, nextVolume);
+    }
     updateDraft(
       {
         ...current,
         videoElements: current.videoElements.map((element) =>
           element.id === elementId
-            ? { ...element, volume: clampUnitInterval(volume) }
+            ? { ...element, volume: nextVolume }
             : element
+        )
+      },
+      "saving"
+    );
+  }
+
+  function updateVideoMute(elementId: string, muted: boolean): void {
+    const current = draftRef.current;
+    const element = current.videoElements.find(
+      (candidate) => candidate.id === elementId
+    );
+    if (element === undefined) {
+      return;
+    }
+    if (!muted && element.volume > 0) {
+      return;
+    }
+    if (muted && element.volume > 0) {
+      lastNonZeroVideoVolumeRef.current.set(elementId, element.volume);
+    }
+    const volume = muted
+      ? 0
+      : (lastNonZeroVideoVolumeRef.current.get(elementId) ??
+        DEFAULT_EDIT_VIDEO_VOLUME);
+    updateVideoVolume(elementId, volume);
+  }
+
+  function updateVideoStartMs(elementId: string, startMs: number | null): void {
+    const current = draftRef.current;
+    updateDraft(
+      {
+        ...current,
+        videoElements: current.videoElements.map((element) =>
+          element.id === elementId ? { ...element, startMs } : element
+        )
+      },
+      "saving"
+    );
+  }
+
+  function updateVideoPlaybackRate(
+    elementId: string,
+    playbackRate: EditVideoElement["playbackRate"]
+  ): void {
+    const current = draftRef.current;
+    updateDraft(
+      {
+        ...current,
+        videoElements: current.videoElements.map((element) =>
+          element.id === elementId ? { ...element, playbackRate } : element
         )
       },
       "saving"
@@ -1533,6 +1686,12 @@ function EditPlanEditor({
                 }
                 sections={project.script.sections}
                 onDelete={() => removeVideo(readModel.intro!.id)}
+                onStartMsChange={(startMs) =>
+                  updateVideoStartMs(readModel.intro!.id, startMs)
+                }
+                onPlaybackRateChange={(playbackRate) =>
+                  updateVideoPlaybackRate(readModel.intro!.id, playbackRate)
+                }
                 onReplace={() =>
                   setPicker({
                     kind: "video",
@@ -1542,6 +1701,9 @@ function EditPlanEditor({
                 }
                 onVolumeChange={(volume) =>
                   updateVideoVolume(readModel.intro!.id, volume)
+                }
+                onMuteChange={(muted) =>
+                  updateVideoMute(readModel.intro!.id, muted)
                 }
                 onTextChange={(text) =>
                   updateVideoText(readModel.intro!.id, text)
@@ -1603,6 +1765,12 @@ function EditPlanEditor({
                         autosaveState.status === "conflict"
                       }
                       onDelete={() => removeVideo(cutin.id)}
+                      onStartMsChange={(startMs) =>
+                        updateVideoStartMs(cutin.id, startMs)
+                      }
+                      onPlaybackRateChange={(playbackRate) =>
+                        updateVideoPlaybackRate(cutin.id, playbackRate)
+                      }
                       onReplace={() =>
                         setPicker({
                           kind: "video",
@@ -1613,6 +1781,7 @@ function EditPlanEditor({
                       onVolumeChange={(volume) =>
                         updateVideoVolume(cutin.id, volume)
                       }
+                      onMuteChange={(muted) => updateVideoMute(cutin.id, muted)}
                       onTextChange={(text) => updateVideoText(cutin.id, text)}
                       onTextTemplateChange={(templateId) =>
                         updateVideoTextTemplate(cutin.id, templateId)
@@ -1744,6 +1913,12 @@ function EditPlanEditor({
                   autosaveState.status === "conflict"
                 }
                 onDelete={() => removeVideo(readModel.outro!.id)}
+                onStartMsChange={(startMs) =>
+                  updateVideoStartMs(readModel.outro!.id, startMs)
+                }
+                onPlaybackRateChange={(playbackRate) =>
+                  updateVideoPlaybackRate(readModel.outro!.id, playbackRate)
+                }
                 onReplace={() =>
                   setPicker({
                     kind: "video",
@@ -1753,6 +1928,9 @@ function EditPlanEditor({
                 }
                 onVolumeChange={(volume) =>
                   updateVideoVolume(readModel.outro!.id, volume)
+                }
+                onMuteChange={(muted) =>
+                  updateVideoMute(readModel.outro!.id, muted)
                 }
                 onTextChange={(text) =>
                   updateVideoText(readModel.outro!.id, text)

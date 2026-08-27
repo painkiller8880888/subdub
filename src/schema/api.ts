@@ -23,6 +23,7 @@ import {
   aiTaskKindSchema,
   characterVisualBindingSchema
 } from "./video-project.js";
+import { editVideoPlaybackRateSchema } from "./edit-video.js";
 import {
   displayInputSchema,
   displayUpdateInputSchema
@@ -835,6 +836,8 @@ export const projectEditVideoElementInputSchema = strictObject({
   assetId: idSchema,
   assetVersion: positiveIntegerSchema,
   placement: editVideoPlacementSchema,
+  startMs: nonNegativeIntegerSchema.nullable(),
+  playbackRate: editVideoPlaybackRateSchema,
   volume: unitIntervalSchema,
   text: z.string(),
   textTemplateId: idSchema.nullable()

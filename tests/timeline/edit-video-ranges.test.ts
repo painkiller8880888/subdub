@@ -1,8 +1,20 @@
 import { describe, expect, it } from "vitest";
 
+import { effectiveMediaDurationInFrames } from "../../src/media-frame.js";
 import { calculateEditVideoTimeline } from "../../src/timeline/index.js";
 
 describe("edit video timeline calculation", () => {
+  it("uses the remaining source range and playback rate for frame duration", () => {
+    const rates = [1 / 3, 1 / 2.5, 1 / 2, 1 / 1.5, 1, 1.5, 2, 2.5, 3];
+
+    expect(
+      rates.map((playbackRate) =>
+        effectiveMediaDurationInFrames(5_000, 500, playbackRate, 30)
+      )
+    ).toEqual([405, 338, 270, 203, 135, 90, 68, 54, 45]);
+    expect(effectiveMediaDurationInFrames(5_000, null, 1, 30)).toBe(150);
+  });
+
   it("orders same-boundary cutins by EditPlan order and shifts later sections", () => {
     const result = calculateEditVideoTimeline(
       [
@@ -10,6 +22,8 @@ describe("edit video timeline calculation", () => {
           id: "intro",
           role: "intro",
           placement: { kind: "before_first_section" },
+          startMs: null,
+          playbackRate: 1,
           volume: 1,
           projectMediaPath: "media/intro.mp4",
           durationInFrames: 10,
@@ -25,6 +39,8 @@ describe("edit video timeline calculation", () => {
             sectionId: "section-main",
             order: 1
           },
+          startMs: null,
+          playbackRate: 1,
           volume: 0.25,
           projectMediaPath: "media/cutin-one.mp4",
           durationInFrames: 5,
@@ -40,6 +56,8 @@ describe("edit video timeline calculation", () => {
             sectionId: "section-main",
             order: 0
           },
+          startMs: null,
+          playbackRate: 1,
           volume: 0,
           projectMediaPath: "media/cutin-zero.mp4",
           durationInFrames: 7,
@@ -51,6 +69,8 @@ describe("edit video timeline calculation", () => {
           id: "outro",
           role: "outro",
           placement: { kind: "after_last_section" },
+          startMs: null,
+          playbackRate: 1,
           volume: 1,
           projectMediaPath: "media/outro.mp4",
           durationInFrames: 11,
@@ -73,6 +93,8 @@ describe("edit video timeline calculation", () => {
         from: 0,
         durationInFrames: 10,
         src: "media/intro.mp4",
+        startMs: null,
+        playbackRate: 1,
         volume: 1,
         text: "",
         textTemplateId: null
@@ -83,6 +105,8 @@ describe("edit video timeline calculation", () => {
         from: 90,
         durationInFrames: 7,
         src: "media/cutin-zero.mp4",
+        startMs: null,
+        playbackRate: 1,
         volume: 0,
         text: "",
         textTemplateId: null
@@ -93,6 +117,8 @@ describe("edit video timeline calculation", () => {
         from: 97,
         durationInFrames: 5,
         src: "media/cutin-one.mp4",
+        startMs: null,
+        playbackRate: 1,
         volume: 0.25,
         text: "",
         textTemplateId: null
@@ -103,6 +129,8 @@ describe("edit video timeline calculation", () => {
         from: 212,
         durationInFrames: 11,
         src: "media/outro.mp4",
+        startMs: null,
+        playbackRate: 1,
         volume: 1,
         text: "",
         textTemplateId: null

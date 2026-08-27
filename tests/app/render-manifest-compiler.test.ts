@@ -17,7 +17,11 @@ import {
 } from "../../src/app/rendering/render-manifest-compiler.js";
 import { createRenderManifestInput } from "../fixtures/render-manifest-input.js";
 import { videoProjectFixture } from "../fixtures/video-project.js";
-import type { RenderVisual, VideoProject } from "../../src/schema/index.js";
+import {
+  EDIT_VIDEO_PLAYBACK_RATE_OPTIONS,
+  type RenderVisual,
+  type VideoProject
+} from "../../src/schema/index.js";
 import type { VoicevoxAudioIndex } from "../../src/app/voicevox/audio-index.js";
 import { characterVisualCatalogSnapshotSchema } from "../../src/schema/character-visual.js";
 import { mediaMillisecondsToFrames } from "../../src/media-frame.js";
@@ -297,7 +301,7 @@ describe("compileRenderManifest", () => {
     const segments = result.manifest.visuals.filter(
       (visual) => visual.sourceAssignmentId === assignment.id
     );
-    expect(result.manifest.manifestVersion).toBe("2.7.0");
+    expect(result.manifest.manifestVersion).toBe("2.8.0");
     expect(
       segments.map((segment) =>
         segment.kind === "video" ? segment.display.playbackState : segment.kind
@@ -412,7 +416,7 @@ describe("compileRenderManifest", () => {
       return;
     }
 
-    expect(result.manifest.manifestVersion).toBe("2.7.0");
+    expect(result.manifest.manifestVersion).toBe("2.8.0");
     expect(result.manifest.characterCatalogVersion).toBe(
       CHARACTER_VARIANT_CATALOG_VERSION
     );
@@ -1035,6 +1039,8 @@ describe("compileRenderManifest", () => {
         assetChecksum: videoAssignment.assetChecksum,
         projectMediaPath: videoAssignment.projectMediaPath,
         placement: { kind: "before_first_section" },
+        startMs: null,
+        playbackRate: 1,
         volume: 0,
         text: "",
         textTemplateId: null
@@ -1051,6 +1057,8 @@ describe("compileRenderManifest", () => {
           sectionId: "section-main",
           order: 1
         },
+        startMs: null,
+        playbackRate: 1,
         volume: 0.25,
         text: "",
         textTemplateId: null
@@ -1067,6 +1075,8 @@ describe("compileRenderManifest", () => {
           sectionId: "section-main",
           order: 0
         },
+        startMs: null,
+        playbackRate: 1,
         volume: 1,
         text: "",
         textTemplateId: null
@@ -1079,6 +1089,8 @@ describe("compileRenderManifest", () => {
         assetChecksum: videoAssignment.assetChecksum,
         projectMediaPath: videoAssignment.projectMediaPath,
         placement: { kind: "after_last_section" },
+        startMs: null,
+        playbackRate: 1,
         volume: 0.25,
         text: "",
         textTemplateId: null
@@ -1165,6 +1177,92 @@ describe("compileRenderManifest", () => {
     ).toBe(true);
   });
 
+  it("resolves every allowed edit playback rate from the remaining source range", () => {
+    for (const option of EDIT_VIDEO_PLAYBACK_RATE_OPTIONS) {
+      const project = structuredClone(videoProjectFixture) as VideoProject;
+      const videoAssignment = project.visuals.assignments.find(
+        (assignment) => assignment.display.kind === "video"
+      );
+      if (videoAssignment === undefined) {
+        throw new Error("fixture video assignment is missing");
+      }
+      project.edit.videoElements = [
+        {
+          id: "edit-intro-timing",
+          role: "intro",
+          assetId: videoAssignment.assetId,
+          assetVersion: 1,
+          assetChecksum: videoAssignment.assetChecksum,
+          projectMediaPath: videoAssignment.projectMediaPath,
+          placement: { kind: "before_first_section" },
+          startMs: 500,
+          playbackRate: option.value,
+          volume: 0.25,
+          text: "",
+          textTemplateId: null
+        }
+      ];
+
+      const result = compileRenderManifest(createRenderManifestInput(project));
+
+      expect(result.success).toBe(true);
+      if (!result.success) {
+        continue;
+      }
+      const insert = result.manifest.inserts[0];
+      expect(insert).toMatchObject({
+        startMs: 500,
+        playbackRate: option.value,
+        volume: 0.25
+      });
+      expect(insert?.durationInFrames).toBe(
+        Math.ceil(((5_000 - 500) / option.value / 1_000) * 30)
+      );
+      expect(result.manifest.lines[0]?.from).toBe(insert?.durationInFrames);
+    }
+  });
+
+  it("rejects an edit video start at or beyond its verified duration", () => {
+    const project = structuredClone(videoProjectFixture) as VideoProject;
+    const videoAssignment = project.visuals.assignments.find(
+      (assignment) => assignment.display.kind === "video"
+    );
+    if (videoAssignment === undefined) {
+      throw new Error("fixture video assignment is missing");
+    }
+    project.edit.videoElements = [
+      {
+        id: "edit-intro-invalid-range",
+        role: "intro",
+        assetId: videoAssignment.assetId,
+        assetVersion: 1,
+        assetChecksum: videoAssignment.assetChecksum,
+        projectMediaPath: videoAssignment.projectMediaPath,
+        placement: { kind: "before_first_section" },
+        startMs: 5_000,
+        playbackRate: 1,
+        volume: 1,
+        text: "",
+        textTemplateId: null
+      }
+    ];
+
+    const result = compileRenderManifest(createRenderManifestInput(project));
+
+    expect(result.success).toBe(false);
+    expect(diagnosticCodes(result)).toContain("ASSET_RANGE_INVALID");
+    if (!result.success) {
+      expect(result.diagnostics).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            code: "ASSET_RANGE_INVALID",
+            path: ["edit", "videoElements", 0, "startMs"]
+          })
+        ])
+      );
+    }
+  });
+
   it("invalidates the compiler hash when edit order, asset snapshot, or volume changes", () => {
     const createProject = (): VideoProject => {
       const project = structuredClone(videoProjectFixture) as VideoProject;
@@ -1187,6 +1285,8 @@ describe("compileRenderManifest", () => {
             sectionId: "section-main",
             order: 0
           },
+          startMs: null,
+          playbackRate: 1,
           volume: 0.25,
           text: "",
           textTemplateId: null
@@ -1203,6 +1303,8 @@ describe("compileRenderManifest", () => {
             sectionId: "section-main",
             order: 1
           },
+          startMs: null,
+          playbackRate: 1,
           volume: 1,
           text: "",
           textTemplateId: null
@@ -1269,6 +1371,8 @@ describe("compileRenderManifest", () => {
         assetChecksum: "1".repeat(64),
         projectMediaPath: "media/intro.avi",
         placement: { kind: "before_first_section" },
+        startMs: null,
+        playbackRate: 1,
         volume: 1,
         text: "",
         textTemplateId: null

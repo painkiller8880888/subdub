@@ -8,6 +8,8 @@ export type TimelineEditVideoElement = Readonly<
     | "id"
     | "role"
     | "placement"
+    | "startMs"
+    | "playbackRate"
     | "volume"
     | "projectMediaPath"
     | "text"
@@ -24,6 +26,8 @@ export type TimelineEditVideoInsert = Readonly<{
   readonly from: number;
   readonly durationInFrames: number;
   readonly src: string;
+  readonly startMs: number | null;
+  readonly playbackRate: EditVideoElement["playbackRate"];
   readonly volume: number;
   readonly text: string;
   readonly textTemplateId: string | null;
@@ -104,6 +108,8 @@ export function calculateEditVideoTimeline(
       from: 0,
       durationInFrames: intro.durationInFrames,
       src: intro.projectMediaPath,
+      startMs: intro.startMs,
+      playbackRate: intro.playbackRate,
       volume: intro.volume,
       text: intro.text,
       textTemplateId: intro.textTemplateId
@@ -119,6 +125,8 @@ export function calculateEditVideoTimeline(
         from: section.from + accumulatedShift,
         durationInFrames: cutin.durationInFrames,
         src: cutin.projectMediaPath,
+        startMs: cutin.startMs,
+        playbackRate: cutin.playbackRate,
         volume: cutin.volume,
         text: cutin.text,
         textTemplateId: cutin.textTemplateId
@@ -139,6 +147,8 @@ export function calculateEditVideoTimeline(
       from: outroFrom,
       durationInFrames: outro.durationInFrames,
       src: outro.projectMediaPath,
+      startMs: outro.startMs,
+      playbackRate: outro.playbackRate,
       volume: outro.volume,
       text: outro.text,
       textTemplateId: outro.textTemplateId

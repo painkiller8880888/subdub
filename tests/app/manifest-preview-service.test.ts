@@ -205,6 +205,8 @@ describe("ManifestPreviewService", () => {
         assetChecksum: videoAssignment.assetChecksum,
         projectMediaPath: videoAssignment.projectMediaPath,
         placement: { kind: "before_first_section" },
+        startMs: null,
+        playbackRate: 1,
         volume: 1,
         text: "表示文字",
         textTemplateId: "missing-template"

@@ -1,19 +1,21 @@
 import { Children, type ReactElement, type ReactNode } from "react";
 import { describe, expect, it } from "vitest";
 
-import type { RenderVideoInsertV27 } from "../../src/schema/index.js";
+import type { RenderVideoInsertV28 } from "../../src/schema/index.js";
 import { VideoInsert } from "../../src/remotion/video-insert.js";
 
 function insert(
-  role: RenderVideoInsertV27["role"],
+  role: RenderVideoInsertV28["role"],
   text: string
-): RenderVideoInsertV27 {
+): RenderVideoInsertV28 {
   return {
     id: `insert-${role}`,
     role,
     from: 0,
     durationInFrames: 30,
     src: `media/${role}.mp4`,
+    startMs: 5000,
+    playbackRate: 0.5,
     volume: 0.5,
     text:
       text.length === 0
@@ -51,7 +53,8 @@ describe("Remotion insert text overlay", () => {
   it("renders the same manifest snapshot overlay path for intro, cutin, and outro", () => {
     for (const role of ["intro", "cutin", "outro"] as const) {
       const result = VideoInsert({
-        insert: insert(role, "一行目\n二行目")
+        insert: insert(role, "一行目\n二行目"),
+        fps: 30
       });
       const children = childElements(containerChildren(result));
       expect(children).toHaveLength(2);
@@ -74,8 +77,23 @@ describe("Remotion insert text overlay", () => {
     }
   });
 
+  it("passes the manifest-resolved source offset, rate, and volume to video", () => {
+    const result = VideoInsert({ insert: insert("intro", ""), fps: 30 });
+    const video = childElements(containerChildren(result))[0] as ReactElement<{
+      trimBefore: number;
+      playbackRate: number;
+      volume: number;
+    }>;
+
+    expect(video.props).toMatchObject({
+      trimBefore: 150,
+      playbackRate: 0.5,
+      volume: 0.5
+    });
+  });
+
   it("does not add a text DOM node when the snapshot is null or empty", () => {
-    const result = VideoInsert({ insert: insert("intro", "") });
+    const result = VideoInsert({ insert: insert("intro", ""), fps: 30 });
     const children = childElements(containerChildren(result));
 
     expect(children).toHaveLength(1);
