@@ -12,6 +12,38 @@ function projectFixture(): VideoProject {
   return structuredClone(videoProjectFixture) as VideoProject;
 }
 
+function appendLines(
+  script: Script,
+  sectionIndex: number,
+  lineIds: readonly string[]
+): Script {
+  const section = script.sections[sectionIndex];
+  const template = section?.lines.at(-1);
+  if (section === undefined || template === undefined) {
+    throw new Error("The test fixture must contain a non-empty section.");
+  }
+
+  return {
+    ...script,
+    sections: script.sections.map((candidate, index) =>
+      index === sectionIndex
+        ? {
+            ...candidate,
+            lines: [
+              ...candidate.lines,
+              ...lineIds.map((id, lineIndex) => ({
+                ...template,
+                id,
+                spokenText: `追加されたセリフ${lineIndex + 1}`,
+                subtitleText: `追加された字幕${lineIndex + 1}`
+              }))
+            ]
+          }
+        : candidate
+    )
+  };
+}
+
 function editFirstLine(
   script: Script,
   patch: Partial<Script["sections"][number]["lines"][number]>
@@ -32,31 +64,7 @@ function editFirstLine(
 }
 
 function addFirstLine(script: Script): Script {
-  return {
-    ...script,
-    sections: script.sections.map((section, sectionIndex) =>
-      sectionIndex === 0
-        ? {
-            ...section,
-            lines: [
-              ...section.lines,
-              {
-                id: "added-line",
-                speakerId: "character-mentor",
-                spokenText: "追加されたセリフ",
-                subtitleText: "追加された字幕",
-                expression: "neutral",
-                characterVariantId: null,
-                pauseBeforeMs: 0,
-                pauseAfterMs: 250,
-                voiceOverrides: {},
-                pronunciation: { mode: "dictionary", excludedTermIds: [] }
-              }
-            ]
-          }
-        : section
-    )
-  };
+  return appendLines(script, 0, ["added-line"]);
 }
 
 function changeBackground(script: Script): Script {
@@ -184,7 +192,11 @@ describe("applyEditedScript", () => {
     expect(result.impact.structuralChanged).toBe(true);
     expect(result.project.visuals.status).toBe("needs_review");
     expect(result.project.visuals.assignments).toEqual(
-      project.visuals.assignments
+      project.visuals.assignments.map((assignment) =>
+        assignment.id === "visual-intro-video"
+          ? { ...assignment, endLineId: "added-line" }
+          : assignment
+      )
     );
     expect(result.project.visuals.suggestionRunIds).toEqual(
       project.visuals.suggestionRunIds
@@ -210,6 +222,133 @@ describe("applyEditedScript", () => {
     expect(result.project.thumbnail).toEqual(project.thumbnail);
     expect(result.project.revision).toBe(project.revision);
     expect(result.project.metadata).toEqual(project.metadata);
+  });
+
+  it("extends a static assignment through multiple appended lines", () => {
+    const project = projectFixture();
+    const candidate = appendLines(project.script, 1, [
+      "main-added-line-1",
+      "main-added-line-2"
+    ]);
+    const result = applyEditedScript(project, candidate);
+
+    expect(result.project.visuals.assignments).toEqual(
+      project.visuals.assignments.map((assignment) =>
+        assignment.id === "visual-main-photo"
+          ? { ...assignment, endLineId: "main-added-line-2" }
+          : assignment
+      )
+    );
+  });
+
+  it("extends a single-line section-end assignment", () => {
+    const project = projectFixture();
+    const candidate = appendLines(project.script, 2, ["outro-added-line"]);
+    const result = applyEditedScript(project, candidate);
+
+    expect(result.project.visuals.assignments).toEqual(
+      project.visuals.assignments.map((assignment) =>
+        assignment.id === "visual-outro-document"
+          ? { ...assignment, endLineId: "outro-added-line" }
+          : assignment
+      )
+    );
+  });
+
+  it("does not extend an assignment with an explicit mid-section end", () => {
+    const project = projectFixture();
+    const firstIntroLineId = project.script.sections[0]?.lines[0]?.id;
+    if (firstIntroLineId === undefined) {
+      throw new Error("The test fixture must contain an intro line.");
+    }
+    project.visuals.assignments = project.visuals.assignments.map(
+      (assignment) =>
+        assignment.id === "visual-intro-video"
+          ? { ...assignment, endLineId: firstIntroLineId }
+          : assignment
+    );
+
+    const candidate = appendLines(project.script, 0, ["added-line"]);
+    const result = applyEditedScript(project, candidate);
+
+    expect(result.project.visuals.assignments).toEqual(
+      project.visuals.assignments
+    );
+  });
+
+  it("does not extend after a line reorder even when a line is appended", () => {
+    const project = projectFixture();
+    const mainSection = project.script.sections[1];
+    if (mainSection === undefined) {
+      throw new Error("The test fixture must contain a main section.");
+    }
+    const mainEndLineId = mainSection.lines.at(-1)?.id;
+    if (mainEndLineId === undefined) {
+      throw new Error("The test fixture must contain a main line.");
+    }
+    project.visuals.assignments = project.visuals.assignments.map(
+      (assignment) =>
+        assignment.id === "visual-main-photo"
+          ? {
+              ...assignment,
+              startLineId: mainEndLineId,
+              endLineId: mainEndLineId
+            }
+          : assignment
+    );
+    const candidate: Script = {
+      ...project.script,
+      sections: project.script.sections.map((section, sectionIndex) =>
+        sectionIndex === 1
+          ? {
+              ...section,
+              lines: [
+                ...[...section.lines].reverse(),
+                {
+                  ...section.lines[0],
+                  id: "main-added-after-reorder"
+                }
+              ]
+            }
+          : section
+      )
+    };
+    const result = applyEditedScript(project, candidate);
+
+    expect(
+      result.project.visuals.assignments.find(
+        (assignment) => assignment.id === "visual-main-photo"
+      )
+    ).toEqual(
+      project.visuals.assignments.find(
+        (assignment) => assignment.id === "visual-main-photo"
+      )
+    );
+  });
+
+  it("preserves video playback cues and display settings while extending", () => {
+    const project = projectFixture();
+    const videoAssignment = project.visuals.assignments.find(
+      (assignment) => assignment.id === "visual-intro-video"
+    );
+    if (
+      videoAssignment === undefined ||
+      videoAssignment.display.kind !== "video"
+    ) {
+      throw new Error("The test fixture must contain a video assignment.");
+    }
+    videoAssignment.display.playbackCues = [
+      { lineId: "intro-learner-1", edge: "after", action: "pause" }
+    ];
+
+    const candidate = appendLines(project.script, 0, ["added-line"]);
+    const result = applyEditedScript(project, candidate);
+
+    expect(
+      result.project.visuals.assignments.find(
+        (assignment) => assignment.id === "visual-intro-video"
+      )
+    ).toEqual({ ...videoAssignment, endLineId: "added-line" });
   });
 });
 
@@ -284,7 +423,11 @@ describe("pruneInvalidatedDownstreamReferences", () => {
 
     expect(result.impact.structuralChanged).toBe(true);
     expect(result.project.visuals.assignments).toEqual(
-      project.visuals.assignments
+      project.visuals.assignments.map((assignment) =>
+        assignment.id === "visual-intro-video"
+          ? { ...assignment, endLineId: "added-line" }
+          : assignment
+      )
     );
     expect(result.project.audio.soundEffects).toEqual(
       project.audio.soundEffects

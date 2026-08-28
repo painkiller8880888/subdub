@@ -176,6 +176,82 @@ function linePositions(
   return positions;
 }
 
+type SectionEndExtension = {
+  oldEndLineId: string;
+  newEndLineId: string;
+};
+
+function appendedSectionEndExtensions(
+  current: Script,
+  candidate: Script
+): Map<string, SectionEndExtension> {
+  const candidateSections = new Map(
+    candidate.sections.map((section) => [section.id, section])
+  );
+  const extensions = new Map<string, SectionEndExtension>();
+
+  for (const currentSection of current.sections) {
+    const candidateSection = candidateSections.get(currentSection.id);
+    const oldEndLine = currentSection.lines.at(-1);
+    const newEndLine = candidateSection?.lines.at(-1);
+    if (
+      candidateSection === undefined ||
+      oldEndLine === undefined ||
+      newEndLine === undefined ||
+      candidateSection.lines.length <= currentSection.lines.length
+    ) {
+      continue;
+    }
+
+    const isAppend = currentSection.lines.every(
+      (line, index) => candidateSection.lines[index]?.id === line.id
+    );
+    if (!isAppend || oldEndLine.id === newEndLine.id) {
+      continue;
+    }
+
+    extensions.set(currentSection.id, {
+      oldEndLineId: oldEndLine.id,
+      newEndLineId: newEndLine.id
+    });
+  }
+
+  return extensions;
+}
+
+export function extendSectionEndVisualAssignments(
+  current: Script,
+  candidate: Script,
+  assignments: VideoProject["visuals"]["assignments"]
+): VideoProject["visuals"]["assignments"] {
+  const extensions = appendedSectionEndExtensions(current, candidate);
+  if (extensions.size === 0) {
+    return assignments;
+  }
+
+  const positions = linePositions(current);
+  let changed = false;
+  const updatedAssignments = assignments.map((assignment) => {
+    const start = positions.get(assignment.startLineId);
+    const end = positions.get(assignment.endLineId);
+    const extension = end === undefined ? undefined : extensions.get(end.sectionId);
+    if (
+      start === undefined ||
+      end === undefined ||
+      extension === undefined ||
+      start.sectionId !== end.sectionId ||
+      assignment.endLineId !== extension.oldEndLineId
+    ) {
+      return assignment;
+    }
+
+    changed = true;
+    return { ...assignment, endLineId: extension.newEndLineId };
+  });
+
+  return changed ? updatedAssignments : assignments;
+}
+
 export function pruneInvalidatedDownstreamReferences(
   project: VideoProject
 ): VideoProject {
@@ -226,6 +302,17 @@ export function applyEditedScript(
   }
 
   if (impact.structuralChanged) {
+    project = {
+      ...project,
+      visuals: {
+        ...project.visuals,
+        assignments: extendSectionEndVisualAssignments(
+          currentProject.script,
+          project.script,
+          project.visuals.assignments
+        )
+      }
+    };
     project = pruneInvalidatedDownstreamReferences(project);
   }
 
