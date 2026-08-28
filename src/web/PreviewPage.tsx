@@ -78,6 +78,9 @@ export function PreviewPage() {
   const previewRenderMutation = useMutation({
     mutationFn: () =>
       enqueueProjectPreviewRender(projectId ?? "", previewPreset),
+    onMutate: () => {
+      setPreviewRun(null);
+    },
     onSuccess: (accepted) => {
       setPreviewRun({
         runId: accepted.runId,
