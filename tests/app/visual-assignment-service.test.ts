@@ -23,7 +23,8 @@ import {
   videoProjectSchema,
   type AssetDetail,
   type DisplayV15,
-  type VideoProject
+  type VideoProject,
+  type VisualAssignment
 } from "../../src/schema/index.js";
 import { videoProjectFixture } from "../fixtures/video-project.js";
 
@@ -1383,6 +1384,245 @@ describe("VisualAssignmentService", () => {
     expect(removedCues.data.visuals.assignments[0]?.display).toMatchObject({
       kind: "video",
       playbackCues: []
+    });
+  });
+
+  it("splits an assignment atomically and imports the explicitly selected asset version", async () => {
+    const replacementBytes = Buffer.from("visual split replacement v2", "utf8");
+    const replacementAsset = createAsset(
+      {
+        version: 2,
+        libraryMediaPath: `media/${ASSET_ID}/v2.png`
+      },
+      replacementBytes
+    );
+    const context = await setup({
+      asset: replacementAsset,
+      bytes: replacementBytes
+    });
+    const project = await readProject(context.projectFile);
+    const mainSection = project.script.sections[1];
+    const lastLine = mainSection?.lines.at(-1);
+    if (mainSection === undefined || lastLine === undefined) {
+      throw new Error("the fixture must contain a main section");
+    }
+    mainSection.lines = [
+      ...mainSection.lines,
+      {
+        ...lastLine,
+        id: "main-line-3",
+        spokenText: "追加された三行目なのだ。",
+        subtitleText: "追加された三行目です。"
+      },
+      {
+        ...lastLine,
+        id: "main-line-4",
+        spokenText: "追加された四行目なのだ。",
+        subtitleText: "追加された四行目です。"
+      }
+    ];
+    const oldAssignment: VisualAssignment = {
+      id: "assignment-old",
+      startLineId: "main-mentor-1",
+      endLineId: "main-line-4",
+      assetId: "asset-old",
+      assetChecksum: "a".repeat(64),
+      projectMediaPath: "media/visuals/asset-old/v1.png",
+      display: photoDisplay()
+    };
+    project.visuals.assignments = [oldAssignment];
+    await fs.writeFile(
+      context.projectFile,
+      `${JSON.stringify(videoProjectSchema.parse(project), null, 2)}\n`
+    );
+
+    const lookups: Array<{ assetId: string; version?: number }> = [];
+    const splitService = new VisualAssignmentService({
+      repository: context.repository,
+      assetRepository: {
+        findAssetDetail: (assetId, version) => {
+          lookups.push({ assetId, version });
+          return assetId === replacementAsset.assetId &&
+            version === replacementAsset.version
+            ? replacementAsset
+            : undefined;
+        }
+      },
+      workspaceRoot: context.workspaceRoot,
+      libraryRoot: context.libraryRoot,
+      createId: () => "split-file-id"
+    });
+
+    const result = await splitService.split(PROJECT_ID, oldAssignment.id, {
+      expectedRevision: 0,
+      selectedLineId: "main-line-3",
+      assetVersion: 2,
+      assignment: {
+        id: "assignment-new",
+        assetId: replacementAsset.assetId
+      }
+    });
+
+    expect(lookups).toEqual([
+      { assetId: replacementAsset.assetId, version: replacementAsset.version }
+    ]);
+    expect(result.revision).toBe(1);
+    expect(result.data.visuals.assignments).toEqual([
+      { ...oldAssignment, endLineId: "main-learner-1" },
+      expect.objectContaining({
+        id: "assignment-new",
+        startLineId: "main-line-3",
+        endLineId: "main-line-4",
+        assetId: replacementAsset.assetId,
+        assetChecksum: replacementAsset.checksum,
+        projectMediaPath: "media/visuals/asset-photo/v2.png",
+        display: expect.objectContaining({ kind: "photo" })
+      })
+    ]);
+    expect(
+      await fs.readFile(
+        path.join(context.projectRoot, "media", "visuals", ASSET_ID, "v2.png")
+      )
+    ).toEqual(replacementBytes);
+  });
+
+  it("requires explicit cue cleanup confirmation when shortening a video assignment", async () => {
+    const replacementBytes = Buffer.from("visual split photo", "utf8");
+    const replacementAsset = createAsset(
+      {
+        version: 2,
+        libraryMediaPath: `media/${ASSET_ID}/v2.png`
+      },
+      replacementBytes
+    );
+    const context = await setup({
+      asset: replacementAsset,
+      bytes: replacementBytes
+    });
+    const project = await readProject(context.projectFile);
+    const mainSection = project.script.sections[1];
+    const lastLine = mainSection?.lines.at(-1);
+    if (mainSection === undefined || lastLine === undefined) {
+      throw new Error("the fixture must contain a main section");
+    }
+    mainSection.lines = [
+      ...mainSection.lines,
+      { ...lastLine, id: "main-line-3" },
+      { ...lastLine, id: "main-line-4" }
+    ];
+    const videoDisplay = clone(
+      videoProjectFixture.visuals.assignments[0]!.display
+    ) as DisplayV15;
+    if (videoDisplay.kind !== "video") {
+      throw new Error("the fixture must contain a video display");
+    }
+    videoDisplay.playbackCues = [
+      { lineId: "main-learner-1", edge: "after", action: "pause" },
+      { lineId: "main-line-3", edge: "before", action: "resume" },
+      { lineId: "main-line-4", edge: "before", action: "pause" }
+    ];
+    const oldAssignment: VisualAssignment = {
+      id: "assignment-video-old",
+      startLineId: "main-mentor-1",
+      endLineId: "main-line-4",
+      assetId: "asset-old-video",
+      assetChecksum: "a".repeat(64),
+      projectMediaPath: "media/visuals/asset-old-video/v1.mp4",
+      display: videoDisplay
+    };
+    project.visuals.assignments = [oldAssignment];
+    await fs.writeFile(
+      context.projectFile,
+      `${JSON.stringify(videoProjectSchema.parse(project), null, 2)}\n`
+    );
+    const splitService = new VisualAssignmentService({
+      repository: context.repository,
+      assetRepository: {
+        findAssetDetail: (assetId, version) =>
+          assetId === replacementAsset.assetId &&
+          version === replacementAsset.version
+            ? replacementAsset
+            : undefined
+      },
+      workspaceRoot: context.workspaceRoot,
+      libraryRoot: context.libraryRoot,
+      createId: () => "split-file-id"
+    });
+    const input = {
+      expectedRevision: 0,
+      selectedLineId: "main-line-3",
+      assetVersion: replacementAsset.version,
+      assignment: {
+        id: "assignment-photo-new",
+        assetId: replacementAsset.assetId
+      }
+    } as const;
+    const before = await fs.readFile(context.projectFile);
+
+    const error = await expectError(
+      () => splitService.split(PROJECT_ID, oldAssignment.id, input),
+      VISUAL_ASSIGNMENT_ERROR_CODE.rangeShorteningConfirmationRequired
+    );
+    expect((error as VisualAssignmentError).details).toHaveLength(2);
+    expect(await fs.readFile(context.projectFile)).toEqual(before);
+    await expect(
+      fs.access(
+        path.join(context.projectRoot, "media", "visuals", ASSET_ID, "v2.png")
+      )
+    ).rejects.toThrow();
+
+    const confirmed = await splitService.split(PROJECT_ID, oldAssignment.id, {
+      ...input,
+      removeOutsidePlaybackCues: true
+    });
+    expect(confirmed.revision).toBe(1);
+    expect(confirmed.data.visuals.assignments).toEqual([
+      {
+        ...oldAssignment,
+        endLineId: "main-learner-1",
+        display: {
+          ...oldAssignment.display,
+          playbackCues: [
+            { lineId: "main-learner-1", edge: "after", action: "pause" }
+          ]
+        }
+      },
+      expect.objectContaining({
+        id: "assignment-photo-new",
+        startLineId: "main-line-3",
+        endLineId: "main-line-4",
+        assetId: replacementAsset.assetId
+      })
+    ]);
+  });
+
+  it("replaces at the existing start boundary without creating an empty or duplicate range", async () => {
+    const context = await setup();
+    const assigned = await context.service.assign(PROJECT_ID, {
+      expectedRevision: 0,
+      assignment: createAssignment()
+    });
+    const current = assigned.data.visuals.assignments[0];
+    if (current === undefined) {
+      throw new Error("assignment was not created");
+    }
+
+    const replaced = await context.service.split(PROJECT_ID, current.id, {
+      expectedRevision: assigned.revision,
+      selectedLineId: current.startLineId,
+      assetVersion: context.asset.version,
+      assignment: {
+        id: "unused-new-id-at-start",
+        assetId: context.asset.assetId
+      }
+    });
+
+    expect(replaced.data.visuals.assignments).toHaveLength(1);
+    expect(replaced.data.visuals.assignments[0]).toMatchObject({
+      id: current.id,
+      startLineId: current.startLineId,
+      endLineId: current.endLineId,
+      assetId: context.asset.assetId
     });
   });
 

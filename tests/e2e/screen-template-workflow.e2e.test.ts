@@ -60,6 +60,12 @@ type WorkflowState = {
     assetId: string;
     assetVersion?: number;
   }>;
+  visualAssignmentSplits: Array<{
+    assignmentId: string;
+    selectedLineId: string;
+    assetId: string;
+    assetVersion?: number;
+  }>;
   assetCatalog?: readonly AssetDetail[];
   templateDetailRequests: number;
 };
@@ -305,6 +311,23 @@ function createMediaReplacementAsset(project: VideoProject): AssetDetail {
   };
 }
 
+function createMediaSplitAsset(project: VideoProject): AssetDetail {
+  const source = project.visuals.assignments.find(
+    (assignment) => assignment.id === "visual-main-photo"
+  );
+  if (source === undefined) {
+    throw new Error("media workflow photo assignment is missing");
+  }
+  return {
+    ...assetForAssignment({
+      ...source,
+      id: "media-split-source",
+      assetId: "asset-media-split"
+    }),
+    title: "境界切り替え用静止画"
+  };
+}
+
 function voiceStatus(project: VideoProject): VoiceGenerationStatusData {
   return {
     available: true,
@@ -538,6 +561,86 @@ async function installApiRoutes(
       });
       return;
     }
+    const visualAssignmentSplitMatch = pathname.match(
+      new RegExp(
+        `^/api/projects/${projectId}/visual-assignments/([^/]+)/split$`,
+        "u"
+      )
+    );
+    if (request.method() === "POST" && visualAssignmentSplitMatch !== null) {
+      const assignmentId = decodeURIComponent(visualAssignmentSplitMatch[1]!);
+      const body = JSON.parse(request.postData() ?? "{}") as {
+        assignment: Pick<VisualAssignment, "id" | "assetId" | "display">;
+        expectedRevision: number;
+        selectedLineId: string;
+        assetVersion?: number;
+        removeOutsidePlaybackCues?: boolean;
+      };
+      const currentAssignments = state.project.visuals.assignments;
+      const currentIndex = currentAssignments.findIndex(
+        (candidate) => candidate.id === assignmentId
+      );
+      const current = currentAssignments[currentIndex];
+      const asset = assets.get(body.assignment.assetId);
+      const section = state.project.script.sections.find((candidate) =>
+        candidate.lines.some((line) => line.id === body.selectedLineId)
+      );
+      const selectedIndex =
+        section?.lines.findIndex((line) => line.id === body.selectedLineId) ??
+        -1;
+      const previousLine = section?.lines[selectedIndex - 1];
+      const sectionEnd = section?.lines.at(-1);
+      if (
+        current === undefined ||
+        asset === undefined ||
+        asset.checksum === null ||
+        section === undefined ||
+        selectedIndex < 0 ||
+        sectionEnd === undefined
+      ) {
+        await route.fulfill(errorResponse(404, "visual assignment missing"));
+        return;
+      }
+      state.visualAssignmentSplits.push({
+        assignmentId,
+        selectedLineId: body.selectedLineId,
+        assetId: body.assignment.assetId,
+        assetVersion: body.assetVersion
+      });
+      const replacement: VisualAssignment = {
+        ...body.assignment,
+        startLineId: body.selectedLineId,
+        endLineId: sectionEnd.id,
+        assetChecksum: asset.checksum,
+        projectMediaPath: `media/${asset.assetId}.png`
+      };
+      const nextAssignments =
+        selectedIndex === 0 || previousLine === undefined
+          ? currentAssignments.map((candidate, index) =>
+              index === currentIndex
+                ? { ...replacement, id: current.id }
+                : candidate
+            )
+          : currentAssignments.flatMap((candidate, index) =>
+              index === currentIndex
+                ? [{ ...current, endLineId: previousLine.id }, replacement]
+                : [candidate]
+            );
+      state.project = {
+        ...state.project,
+        revision: state.project.revision + 1,
+        visuals: { ...state.project.visuals, assignments: nextAssignments }
+      };
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          data: state.project,
+          revision: state.project.revision
+        })
+      });
+      return;
+    }
     const visualAssignmentMatch = pathname.match(
       new RegExp(
         `^/api/projects/${projectId}/visual-assignments(?:/([^/]+))?$`,
@@ -711,6 +814,7 @@ describe("ScreenTemplate workflow browser E2E", () => {
       templateSaves: [],
       scriptSaves: [],
       visualAssignmentUpdates: [],
+      visualAssignmentSplits: [],
       templateDetailRequests: 0
     };
     await installApiRoutes(page, state);
@@ -747,6 +851,7 @@ describe("ScreenTemplate workflow browser E2E", () => {
       templateSaves: [],
       scriptSaves: [],
       visualAssignmentUpdates: [],
+      visualAssignmentSplits: [],
       assetCatalog,
       templateDetailRequests: 0
     };
@@ -874,7 +979,8 @@ describe("ScreenTemplate workflow browser E2E", () => {
           onPause: () => undefined,
           onResume: () => undefined,
           onEnd: () => undefined,
-          onReplace: () => undefined
+          onReplace: () => undefined,
+          onSplit: () => undefined
         })
       );
     }, webUrl);
@@ -1908,6 +2014,95 @@ describe("ScreenTemplate workflow browser E2E", () => {
             { lineId: "main-mentor-2", edge: "before", action: "resume" }
           ]
         });
+      } finally {
+        await context.close();
+      }
+    }
+  );
+
+  it(
+    "splits a same-section visual assignment from the selected line and reloads the boundary state",
+    { timeout: 60_000 },
+    async () => {
+      const splitProject = createScreenTemplateProjectFixture();
+      const splitAsset = createMediaSplitAsset(splitProject);
+      const original = splitProject.visuals.assignments.find(
+        (assignment) => assignment.id === "visual-main-photo"
+      );
+      if (original === undefined) {
+        throw new Error("media workflow photo assignment is missing");
+      }
+      const { context, page, state } = await openScript(splitProject, [
+        splitAsset
+      ]);
+      try {
+        const boundaryLineCard = page.locator(
+          '.script-line-card[aria-label="セリフ main-learner-1"]'
+        );
+        const pane = boundaryLineCard.locator(".script-line-media-pane");
+        await pane.waitFor({ state: "visible" });
+        expect(
+          await pane.getByRole("button", { name: "この行から変更" }).count()
+        ).toBe(1);
+
+        await pane.getByRole("button", { name: "この行から変更" }).click();
+        const picker = page.getByRole("dialog", {
+          name: "この行から表示素材を変更"
+        });
+        await picker.waitFor({ state: "visible" });
+        const replacementItem = picker.locator("li").filter({
+          hasText: splitAsset.title
+        });
+        const splitSave = page.waitForResponse(
+          (response) =>
+            response.request().method() === "POST" &&
+            new URL(response.url()).pathname ===
+              `/api/projects/${projectId}/visual-assignments/${original.id}/split`
+        );
+        await replacementItem
+          .getByRole("button", { name: "この素材を選択" })
+          .click();
+        await splitSave;
+
+        expect(state.visualAssignmentSplits).toEqual([
+          {
+            assignmentId: original.id,
+            selectedLineId: "main-learner-1",
+            assetId: splitAsset.assetId,
+            assetVersion: splitAsset.version
+          }
+        ]);
+        expect(
+          state.project.visuals.assignments.find(
+            (assignment) => assignment.id === original.id
+          )
+        ).toEqual({
+          ...original,
+          endLineId: "main-mentor-1"
+        });
+        expect(
+          state.project.visuals.assignments.find(
+            (assignment) =>
+              assignment.startLineId === "main-learner-1" &&
+              assignment.assetId === splitAsset.assetId
+          )
+        ).toMatchObject({
+          startLineId: "main-learner-1",
+          endLineId: "main-mentor-2",
+          assetId: splitAsset.assetId
+        });
+
+        await page.reload({ waitUntil: "domcontentloaded" });
+        await page.locator("#section-main-screen-template").waitFor({
+          state: "visible"
+        });
+        const reloadedPane = page
+          .locator('.script-line-card[aria-label="セリフ main-learner-1"]')
+          .locator(".script-line-media-pane");
+        await reloadedPane.waitFor({ state: "visible" });
+        expect(
+          await reloadedPane.locator("img[src*='asset-media-split']").count()
+        ).toBe(1);
       } finally {
         await context.close();
       }

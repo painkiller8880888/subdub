@@ -11,6 +11,10 @@ export const VISUAL_ASSIGNMENT_ERROR_CODE = {
   assignmentIdConflict: "VISUAL_ASSIGNMENT_ID_CONFLICT",
   assignmentNotFound: "VISUAL_ASSIGNMENT_NOT_FOUND",
   assignmentIdMismatch: "VISUAL_ASSIGNMENT_ID_MISMATCH",
+  assignmentRangeInvalid: "VISUAL_ASSIGNMENT_RANGE_INVALID",
+  assignmentOverlap: "VISUAL_ASSIGNMENT_OVERLAP",
+  rangeShorteningConfirmationRequired:
+    "VISUAL_ASSIGNMENT_RANGE_SHORTENING_CONFIRMATION_REQUIRED",
   assignmentAssetReplacementUnsupported:
     "VISUAL_ASSIGNMENT_ASSET_REPLACEMENT_UNSUPPORTED",
   libraryPathInvalid: "VISUAL_ASSIGNMENT_LIBRARY_PATH_INVALID",

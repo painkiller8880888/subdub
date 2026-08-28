@@ -67,6 +67,7 @@ import {
   visualAssignmentDeleteRequestSchema,
   visualAssignmentRequestSchema,
   visualAssignmentResponseSchema,
+  visualAssignmentSplitRequestSchema,
   visualAssignmentUpdateRequestSchema,
   visualApprovalRequestSchema,
   visualSuggestionRequestSchema,
@@ -129,6 +130,7 @@ import {
   type VisualSuggestionCandidateRejectRequest,
   type ImprovementDecisionResponse,
   type VisualAssignmentRequest,
+  type VisualAssignmentSplitRequestInput,
   type VisualAssignmentUpdateRequest,
   type VisualAssignmentDeleteRequest,
   type VisualApprovalRequest,
@@ -1019,6 +1021,24 @@ export async function assignProjectVisual(
     visualAssignmentResponseSchema,
     {
       method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(validatedInput)
+    }
+  );
+  return response.data;
+}
+
+export async function splitProjectVisualAssignment(
+  projectId: string,
+  assignmentId: string,
+  input: VisualAssignmentSplitRequestInput
+): Promise<VideoProject> {
+  const validatedInput = visualAssignmentSplitRequestSchema.parse(input);
+  const response = await fetchApi(
+    `/api/projects/${encodeURIComponent(projectId)}/visual-assignments/${encodeURIComponent(assignmentId)}/split`,
+    visualAssignmentResponseSchema,
+    {
+      method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(validatedInput)
     }

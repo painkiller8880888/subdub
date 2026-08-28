@@ -276,6 +276,42 @@ describe("applyEditedScript", () => {
     );
   });
 
+  it("extends only the new section-end assignment after a mid-section split", () => {
+    const project = projectFixture();
+    const original = project.visuals.assignments.find(
+      (assignment) => assignment.id === "visual-main-photo"
+    );
+    if (original === undefined) {
+      throw new Error("The test fixture must contain a main visual.");
+    }
+    project.visuals.assignments = project.visuals.assignments
+      .filter((assignment) => assignment.id !== original.id)
+      .concat([
+        {
+          ...original,
+          id: "visual-main-photo-prefix",
+          endLineId: "main-mentor-1"
+        },
+        {
+          ...original,
+          id: "visual-main-photo-suffix",
+          startLineId: "main-learner-1",
+          endLineId: "main-learner-1"
+        }
+      ]);
+
+    const candidate = appendLines(project.script, 1, ["main-added-line"]);
+    const result = applyEditedScript(project, candidate);
+
+    expect(result.project.visuals.assignments).toEqual(
+      project.visuals.assignments.map((assignment) =>
+        assignment.id === "visual-main-photo-suffix"
+          ? { ...assignment, endLineId: "main-added-line" }
+          : assignment
+      )
+    );
+  });
+
   it("does not extend after a line reorder even when a line is appended", () => {
     const project = projectFixture();
     const mainSection = project.script.sections[1];

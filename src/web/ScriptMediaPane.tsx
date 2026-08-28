@@ -17,7 +17,7 @@ import {
   type PersistentVisualPresentationState
 } from "./screen-template-preview";
 
-export type ScriptMediaPickerAction = "start" | "replace";
+export type ScriptMediaPickerAction = "start" | "replace" | "split";
 
 const mediaDialogFocusableSelector =
   'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])';
@@ -241,6 +241,7 @@ export type ScriptMediaPaneProps = {
   readonly onResume: (assignmentId: string) => void;
   readonly onEnd: (assignmentId: string) => void;
   readonly onReplace: (assignmentId: string) => void;
+  readonly onSplit: (assignmentId: string) => void;
 };
 
 export function ScriptMediaPane({
@@ -253,7 +254,8 @@ export function ScriptMediaPane({
   onPause,
   onResume,
   onEnd,
-  onReplace
+  onReplace,
+  onSplit
 }: ScriptMediaPaneProps) {
   if (assignments.length === 0) {
     return (
@@ -311,6 +313,11 @@ export function ScriptMediaPane({
       : undefined;
   const boundaryCueDisabled = boundaryCue !== undefined;
   const endDisabled = actionDisabled || assignment.endLineId === line.id;
+  const canSplit =
+    lifecycle === "static-visible" ||
+    lifecycle === "playing" ||
+    lifecycle === "paused" ||
+    lifecycle === "ended";
   const paneLabel = `${line.id}の素材操作。${lifecycleLabel(lifecycle)}${
     hasPlaybackConflict ? `。${playbackIssueText(issues)}` : ""
   }`;
@@ -385,6 +392,16 @@ export function ScriptMediaPane({
         >
           変更
         </button>
+        {canSplit ? (
+          <button
+            className="button button-small"
+            disabled={actionDisabled}
+            type="button"
+            onClick={() => onSplit(assignment.id)}
+          >
+            この行から変更
+          </button>
+        ) : null}
       </div>
     </aside>
   );
@@ -436,11 +453,16 @@ export function ScriptMediaAssetPicker({
         <div>
           <p className="eyebrow">登録済み素材から選択</p>
           <h2 id={titleId}>
-            {action === "start" ? "表示素材を選択" : "表示素材を差し替え"}
+            {action === "start"
+              ? "表示素材を選択"
+              : action === "split"
+                ? "この行から表示素材を変更"
+                : "表示素材を差し替え"}
           </h2>
           <p id={`${titleId}-description`}>
-            video / photo / document_scan の active
-            Assetだけを候補にしています。OS pathは入力できません。
+            {action === "split"
+              ? "選択したセリフから同じセクションの末尾まで表示素材を切り替えます。"
+              : "video / photo / document_scan の active Assetだけを候補にしています。OS pathは入力できません。"}
           </p>
         </div>
         <button
