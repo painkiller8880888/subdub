@@ -53,7 +53,6 @@ const compileDiagnosticTitles: Readonly<Record<string, string>> = {
   SCRIPT_EMPTY: "台本にセリフがありません。",
   SCRIPT_SECTION_EMPTY: "セリフがないセクションがあります。",
   AUDIO_INDEX_ENTRY_MISSING: "セリフに必要な音声が未生成です。",
-  AUDIO_INDEX_ENTRY_EXTRA: "削除済みまたは不明なセリフの音声が残っています。",
   AUDIO_ASSET_MISSING: "音声ファイルの素材情報が不足しています。",
   AUDIO_ASSET_CHECKSUM_MISMATCH: "音声ファイルが更新されています。",
   AUDIO_ASSET_KIND_MISMATCH: "音声素材の種類が正しくありません。",

@@ -39,6 +39,28 @@ function diagnosticCodes<T>(result: RenderManifestCompileResult<T>) {
   return result.diagnostics.map((diagnostic) => diagnostic.code);
 }
 
+function inputWithOrphanAudioEntry(): ReturnType<typeof validInput> {
+  const input = validInput();
+  const audioIndex = input.audioIndex as VoicevoxAudioIndex;
+  const sourceEntry = audioIndex["intro-learner-1"];
+  if (sourceEntry === undefined) {
+    throw new Error("fixture audio entry is missing");
+  }
+  const orphanLineId = "deleted-line-b";
+  return {
+    ...input,
+    audioIndex: {
+      ...audioIndex,
+      [orphanLineId]: {
+        ...sourceEntry,
+        lineId: orphanLineId,
+        audioPath: `audio/voice/${orphanLineId}.wav`,
+        queryPath: `cache/voicevox-query/${orphanLineId}.json`
+      }
+    }
+  };
+}
+
 function snapshotCatalogInput(input: ReturnType<typeof validInput>): {
   readonly catalog: unknown;
   readonly assetMetadata: readonly RenderManifestAssetMetadata[];
@@ -166,6 +188,99 @@ function compileTemplateBoundaryVideoSegments(playbackRate: number) {
 }
 
 describe("compileRenderManifest", () => {
+  it("ignores orphan audio entries in the manifest and compiler input hash", () => {
+    const input = validInput();
+    const withOrphan = inputWithOrphanAudioEntry();
+    const orphanResult = compileRenderManifest(withOrphan);
+
+    expect(orphanResult.success).toBe(true);
+    expect(diagnosticCodes(orphanResult)).not.toContain(
+      "AUDIO_INDEX_ENTRY_EXTRA"
+    );
+    if (!orphanResult.success) {
+      return;
+    }
+    expect(orphanResult.manifest.lines.map((line) => line.id)).not.toContain(
+      "deleted-line-b"
+    );
+
+    const orphanAudioIndex = withOrphan.audioIndex as VoicevoxAudioIndex;
+    const orphanEntry = orphanAudioIndex["deleted-line-b"];
+    if (orphanEntry === undefined) {
+      throw new Error("orphan audio entry is missing");
+    }
+    const changedOrphan = compileRenderManifest({
+      ...withOrphan,
+      audioIndex: {
+        ...orphanAudioIndex,
+        "deleted-line-b": {
+          ...orphanEntry,
+          audioPath: "audio/voice/deleted-line-b-v2.wav",
+          queryPath: "cache/voicevox-query/deleted-line-b-v2.json"
+        }
+      }
+    });
+
+    expect(changedOrphan.success).toBe(true);
+    if (!changedOrphan.success) {
+      return;
+    }
+    expect(changedOrphan.manifest.compilerInputHash).toBe(
+      orphanResult.manifest.compilerInputHash
+    );
+
+    const currentEntry = (input.audioIndex as VoicevoxAudioIndex)[
+      "intro-learner-1"
+    ];
+    if (currentEntry === undefined) {
+      throw new Error("current audio entry is missing");
+    }
+    const changedCurrent = compileRenderManifest({
+      ...input,
+      audioIndex: {
+        ...(input.audioIndex as VoicevoxAudioIndex),
+        "intro-learner-1": {
+          ...currentEntry,
+          cacheKey: "c".repeat(64)
+        }
+      }
+    });
+
+    expect(changedCurrent.success).toBe(true);
+    if (!changedCurrent.success) {
+      return;
+    }
+    expect(changedCurrent.manifest.compilerInputHash).not.toBe(
+      orphanResult.manifest.compilerInputHash
+    );
+  });
+
+  it("ignores malformed orphan audio entries", () => {
+    const input = inputWithOrphanAudioEntry();
+    const audioIndex = {
+      ...(input.audioIndex as VoicevoxAudioIndex),
+      "deleted-line-b": {
+        lineId: "deleted-line-b"
+      }
+    };
+
+    const result = compileRenderManifest({ ...input, audioIndex });
+
+    expect(result.success).toBe(true);
+  });
+
+  it("keeps current-line audio validation with orphan entries present", () => {
+    const input = inputWithOrphanAudioEntry();
+    const audioIndex = { ...(input.audioIndex as VoicevoxAudioIndex) };
+    delete audioIndex["intro-learner-1"];
+
+    const result = compileRenderManifest({ ...input, audioIndex });
+
+    expect(result.success).toBe(false);
+    expect(diagnosticCodes(result)).toContain("AUDIO_INDEX_ENTRY_MISSING");
+    expect(diagnosticCodes(result)).not.toContain("AUDIO_INDEX_ENTRY_EXTRA");
+  });
+
   it("validates the checksum carried by a SQLite catalog snapshot", () => {
     const input = validInput();
     const snapshot = snapshotCatalogInput(input);

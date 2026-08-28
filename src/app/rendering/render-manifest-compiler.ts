@@ -126,7 +126,6 @@ export const RENDER_MANIFEST_ERROR_CODE = {
   emptyScript: "SCRIPT_EMPTY",
   emptySection: "SCRIPT_SECTION_EMPTY",
   audioMissing: "AUDIO_INDEX_ENTRY_MISSING",
-  audioExtra: "AUDIO_INDEX_ENTRY_EXTRA",
   audioAssetMissing: "AUDIO_ASSET_MISSING",
   audioAssetKindMismatch: "AUDIO_ASSET_KIND_MISMATCH",
   audioAssetChecksumMismatch: "AUDIO_ASSET_CHECKSUM_MISMATCH",
@@ -2185,7 +2184,24 @@ export function compileRenderManifestV24(
   const projectRaw = input.project ?? input.videoProject;
   const audioRaw = input.audioIndex ?? input.audio;
   const projectResult = videoProjectSchema.safeParse(projectRaw);
-  const audioResult = voicevoxAudioIndexSchema.safeParse(audioRaw);
+  const currentLineIds = projectResult.success
+    ? new Set(
+        projectResult.data.script.sections.flatMap((section) =>
+          section.lines.map((line) => line.id)
+        )
+      )
+    : undefined;
+  const effectiveAudioIndexRaw =
+    currentLineIds === undefined || !isPlainRecord(audioRaw)
+      ? audioRaw
+      : Object.fromEntries(
+          Object.entries(audioRaw).filter(([lineId]) =>
+            currentLineIds.has(lineId)
+          )
+        );
+  const audioResult = voicevoxAudioIndexSchema.safeParse(
+    effectiveAudioIndexRaw
+  );
   const assets = normalizeAssets(recordInputAssets(input), diagnostics);
   const assetLookup = getAssetLookup(assets);
   const screenTemplates = normalizeScreenTemplates(
@@ -2243,7 +2259,7 @@ export function compileRenderManifestV24(
   }
 
   const project = projectResult.data;
-  const audioIndex = audioResult.data;
+  const effectiveAudioIndex = audioResult.data;
   const sourceProjectHash = sha256CanonicalJson(project);
 
   for (const [
@@ -2320,7 +2336,6 @@ export function compileRenderManifestV24(
         line
       }))
   );
-  const lineIds = new Set(lineEntries.map(({ line }) => line.id));
   const lineIndexById = new Map(
     lineEntries.map((entry) => [entry.line.id, entry])
   );
@@ -2424,7 +2439,7 @@ export function compileRenderManifestV24(
   const sourceAssets = new Map<string, string>();
   const lineAudio = new Map<string, VoicevoxAudioIndexEntry>();
   for (const entry of lineEntries) {
-    const audioEntry = audioIndex[entry.line.id];
+    const audioEntry = effectiveAudioIndex[entry.line.id];
     if (audioEntry === undefined) {
       addDiagnostic(
         diagnostics,
@@ -2473,18 +2488,6 @@ export function compileRenderManifestV24(
       addSourceAsset(sourceAssets, audioAsset, diagnostics, {
         lineId: entry.line.id
       });
-    }
-  }
-  for (const [lineId, entry] of Object.entries(audioIndex)) {
-    if (!lineIds.has(lineId)) {
-      addDiagnostic(
-        diagnostics,
-        RENDER_MANIFEST_ERROR_CODE.audioExtra,
-        ["audioIndex", lineId],
-        "audio index contains an entry for a deleted or unknown line",
-        { lineId }
-      );
-      void entry;
     }
   }
 
@@ -3153,7 +3156,7 @@ export function compileRenderManifestV24(
   );
   const compilerInputHash = computeCompilerInputHash({
     project,
-    audioIndex,
+    audioIndex: effectiveAudioIndex,
     assets: normalizedAssetsForHash,
     characterCatalogVersion,
     characterMappingVersion,
