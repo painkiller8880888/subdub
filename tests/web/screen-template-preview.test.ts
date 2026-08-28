@@ -296,6 +296,53 @@ describe("script ScreenTemplate preview resolution", () => {
     );
   });
 
+  it("resolves consecutive same-section assignments to the correct line-boundary asset", () => {
+    const template = createStandardScreenTemplate(TIMESTAMP);
+    const section = createSection("screen-template-standard", [
+      createLine("line-one"),
+      createLine("line-two"),
+      createLine("line-three"),
+      createLine("line-four")
+    ]);
+    const first = {
+      ...createAssignment("assignment-first", "line-one", "line-two"),
+      assetId: "asset-first",
+      projectMediaPath: "media/visuals/asset-first/v1.png"
+    };
+    const second = {
+      ...createAssignment("assignment-second", "line-three", "line-four"),
+      assetId: "asset-second",
+      projectMediaPath: "media/visuals/asset-second/v1.png"
+    };
+    const states = resolveScriptLinePreviewStates({
+      script: { sections: [section] },
+      templates: new Map([[template.templateId, template]]),
+      assignments: [first, second],
+      assets: new Map()
+    });
+
+    expect(
+      states
+        .get(previewLineKey(section.id, "line-one"))
+        ?.assignments.map((assignment) => assignment.id)
+    ).toEqual(["assignment-first"]);
+    expect(
+      states
+        .get(previewLineKey(section.id, "line-two"))
+        ?.assignments.map((assignment) => assignment.id)
+    ).toEqual(["assignment-first"]);
+    expect(
+      states
+        .get(previewLineKey(section.id, "line-three"))
+        ?.assignments.map((assignment) => assignment.id)
+    ).toEqual(["assignment-second"]);
+    expect(
+      states
+        .get(previewLineKey(section.id, "line-four"))
+        ?.assignments.map((assignment) => assignment.id)
+    ).toEqual(["assignment-second"]);
+  });
+
   it("uses the line variant for the speaker and the bound idle variant for the other slot", () => {
     const project = createEmptyVideoProject({
       projectId: "preview-project",

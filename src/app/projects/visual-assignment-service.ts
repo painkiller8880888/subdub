@@ -5,9 +5,11 @@ import {
   visualAssignmentRequestSchema,
   visualAssignmentUpdateRequestSchema,
   visualAssignmentDeleteRequestSchema,
+  visualAssignmentSplitRequestSchema,
   visualApprovalRequestSchema,
   type VisualAssignmentUpdateRequest,
-  type VisualAssignmentRequest
+  type VisualAssignmentRequest,
+  type VisualAssignmentSplitRequest
 } from "../../schema/api.js";
 import {
   displayV15Schema,
@@ -22,6 +24,11 @@ import {
   type VisualAssignment,
   type VideoProject
 } from "../../schema/index.js";
+import {
+  removeVisualPlaybackCuesOutsideRange,
+  splitVisualAssignmentAtLine,
+  type VisualAssignmentReplacementSnapshot
+} from "./visual-assignment-range.js";
 import { normalizeImprovementReason } from "../../schema/improvement-log.js";
 import {
   ASSET_FORMATS,
@@ -393,6 +400,38 @@ export class VisualAssignmentService {
     );
   }
 
+  async split(
+    projectId: unknown,
+    assignmentId: unknown,
+    input: unknown
+  ): Promise<VisualAssignmentServiceResult> {
+    const projectIdResult = idSchema.safeParse(projectId);
+    if (!projectIdResult.success) {
+      throw visualAssignmentError(
+        VISUAL_ASSIGNMENT_ERROR_CODE.projectPathInvalid,
+        400,
+        "The project path is invalid."
+      );
+    }
+    const assignmentIdResult = idSchema.safeParse(assignmentId);
+    if (!assignmentIdResult.success) {
+      throw visualAssignmentError(
+        VISUAL_ASSIGNMENT_ERROR_CODE.assignmentNotFound,
+        404,
+        "The visual assignment does not exist."
+      );
+    }
+    const request = visualAssignmentSplitRequestSchema.parse(input);
+    return this.repository.withProjectLock(projectIdResult.data, (repository) =>
+      this.splitLocked(
+        projectIdResult.data,
+        assignmentIdResult.data,
+        request,
+        repository
+      )
+    );
+  }
+
   async remove(
     projectId: unknown,
     assignmentId: unknown,
@@ -476,7 +515,8 @@ export class VisualAssignmentService {
     );
 
     const asset = this.assetRepository.findAssetDetail(
-      request.assignment.assetId
+      request.assignment.assetId,
+      request.assetVersion
     );
     if (asset === undefined) {
       throw visualAssignmentError(
@@ -580,6 +620,192 @@ export class VisualAssignmentService {
           createdAt: new Date().toISOString()
         });
       }
+      return { data: saved, revision: saved.revision };
+    } catch (error) {
+      if (placement.createdFinalFile) {
+        await this.cleanupFinalFileIfUnreferenced(
+          repository,
+          projectPaths.projectRoot,
+          placement.finalPath,
+          placement.projectMediaPath
+        );
+      }
+      throw error;
+    }
+  }
+
+  private async splitLocked(
+    safeProjectId: string,
+    assignmentId: string,
+    request: VisualAssignmentSplitRequest,
+    repository: ProjectRepositoryLockedOperations
+  ): Promise<VisualAssignmentServiceResult> {
+    const currentProject = await repository.read();
+    if (currentProject.revision !== request.expectedRevision) {
+      throw projectRevisionConflict();
+    }
+
+    const assignmentIndex = currentProject.visuals.assignments.findIndex(
+      (assignment) => assignment.id === assignmentId
+    );
+    const currentAssignment = currentProject.visuals.assignments[assignmentIndex];
+    if (currentAssignment === undefined) {
+      throw visualAssignmentError(
+        VISUAL_ASSIGNMENT_ERROR_CODE.assignmentNotFound,
+        404,
+        "The visual assignment does not exist."
+      );
+    }
+
+    const section = currentProject.script.sections.find((candidate) =>
+      candidate.lines.some((line) => line.id === request.selectedLineId)
+    );
+    if (section === undefined) {
+      throw visualAssignmentError(
+        VISUAL_ASSIGNMENT_ERROR_CODE.assignmentRangeInvalid,
+        422,
+        "The selected script line does not exist.",
+        [
+          {
+            path: ["selectedLineId"],
+            message: "selected line must reference a script line"
+          }
+        ]
+      );
+    }
+
+    const asset = this.assetRepository.findAssetDetail(
+      request.assignment.assetId,
+      request.assetVersion
+    );
+    if (asset === undefined) {
+      throw visualAssignmentError(
+        VISUAL_ASSIGNMENT_ERROR_CODE.assetNotFound,
+        404,
+        "The selected asset does not exist.",
+        [{ path: ["assignment", "assetId"], message: "asset not found" }]
+      );
+    }
+
+    const display = this.normalizeDisplay(
+      request.assignment.display ?? this.createDefaultDisplay(asset),
+      "content-slot-relative"
+    );
+    this.assertAssetUsable(asset, display.kind);
+    this.assertDisplayWithinAsset(asset, display);
+    const confirmedChecksum = this.assertChecksum(asset.checksum);
+    const extension = extensionForAsset(asset);
+    const projectRoot = await this.resolveProjectRoot(safeProjectId);
+    const sourcePath = await this.resolveLibrarySource(asset.libraryMediaPath);
+    const projectPaths = this.resolveProjectMediaPaths(
+      projectRoot,
+      asset,
+      extension
+    );
+    const replacement: VisualAssignmentReplacementSnapshot = {
+      id: request.assignment.id,
+      assetId: asset.assetId,
+      assetChecksum: confirmedChecksum,
+      projectMediaPath: projectPaths.projectMediaPath,
+      display
+    };
+
+    const plan = splitVisualAssignmentAtLine({
+      assignment: currentAssignment,
+      selectedLineId: request.selectedLineId,
+      replacement,
+      section,
+      existingAssignments: currentProject.visuals.assignments
+    });
+    if (!plan.ok) {
+      const code =
+        plan.code === "replacement-overlap"
+          ? VISUAL_ASSIGNMENT_ERROR_CODE.assignmentOverlap
+          : plan.code === "replacement-id-conflict"
+            ? VISUAL_ASSIGNMENT_ERROR_CODE.assignmentIdConflict
+            : VISUAL_ASSIGNMENT_ERROR_CODE.assignmentRangeInvalid;
+      throw visualAssignmentError(code, 422, plan.message, [
+        {
+          path:
+            plan.code === "replacement-id-conflict"
+              ? ["assignment", "id"]
+              : ["selectedLineId"],
+          message: plan.message
+        }
+      ]);
+    }
+
+    if (
+      plan.outsidePlaybackCues.length > 0 &&
+      !request.removeOutsidePlaybackCues
+    ) {
+      throw visualAssignmentError(
+        VISUAL_ASSIGNMENT_ERROR_CODE.rangeShorteningConfirmationRequired,
+        409,
+        "Shortening the visual assignment requires confirmation to remove playback cues outside the new range.",
+        plan.outsidePlaybackCues.map((cue) => ({
+          path: ["assignment", "display", "playbackCues"],
+          message: `${cue.lineId} / ${cue.edge} / ${cue.action}`
+        }))
+      );
+    }
+
+    const shortenedAssignment =
+      plan.shortenedAssignment === undefined ||
+      plan.outsidePlaybackCues.length === 0 ||
+      !request.removeOutsidePlaybackCues
+        ? plan.shortenedAssignment
+        : removeVisualPlaybackCuesOutsideRange(
+            plan.shortenedAssignment,
+            section,
+            plan.shortenedAssignment.endLineId
+          );
+    const assignments = currentProject.visuals.assignments.flatMap(
+      (assignment) => {
+        if (assignment.id !== assignmentId) {
+          return [assignment];
+        }
+        if (plan.mode === "replace") {
+          return [plan.replacementAssignment];
+        }
+        if (shortenedAssignment === undefined) {
+          return [];
+        }
+        return [shortenedAssignment, plan.replacementAssignment];
+      }
+    );
+    const candidate = {
+      ...currentProject,
+      visuals: {
+        ...currentProject.visuals,
+        status: visualMutationStatus(
+          currentProject,
+          currentProject.visuals.assignments,
+          assignments
+        ),
+        assignments
+      }
+    };
+    const candidateResult = videoProjectSchema.safeParse(candidate);
+    if (!candidateResult.success) {
+      throw visualAssignmentError(
+        VISUAL_ASSIGNMENT_ERROR_CODE.candidateInvalid,
+        422,
+        "The visual assignment split does not produce a valid project.",
+        validationDetails(candidateResult.error.issues)
+      );
+    }
+
+    const placement = await this.placeFile(
+      sourcePath,
+      projectPaths,
+      normalizeChecksum(confirmedChecksum)
+    );
+    try {
+      const saved = await repository.save(
+        candidateResult.data,
+        request.expectedRevision
+      );
       return { data: saved, revision: saved.revision };
     } catch (error) {
       if (placement.createdFinalFile) {

@@ -5,6 +5,7 @@ import {
   createApiSuccessResponse,
   visualAssignmentRequestSchema,
   visualAssignmentResponseSchema,
+  visualAssignmentSplitRequestSchema,
   visualAssignmentUpdateRequestSchema,
   visualAssignmentDeleteRequestSchema,
   visualApprovalRequestSchema,
@@ -15,7 +16,9 @@ export type VisualAssignmentServicePort = Pick<
   VisualAssignmentService,
   "assign"
 > &
-  Partial<Pick<VisualAssignmentService, "update" | "remove" | "approve">>;
+  Partial<
+    Pick<VisualAssignmentService, "split" | "update" | "remove" | "approve">
+  >;
 
 export function registerVisualAssignmentRoutes(
   app: FastifyInstance,
@@ -34,6 +37,29 @@ export function registerVisualAssignmentRoutes(
       );
     }
   );
+
+  if (visualAssignmentService.split !== undefined) {
+    app.post<{ Params: { projectId: string; assignmentId: string } }>(
+      "/api/projects/:projectId/visual-assignments/:assignmentId/split",
+      async (request) => {
+        const params = visualAssignmentParamsSchema.parse({
+          assignmentId: request.params.assignmentId
+        });
+        const input = visualAssignmentSplitRequestSchema.parse(request.body);
+        const result = await visualAssignmentService.split?.(
+          request.params.projectId,
+          params.assignmentId,
+          input
+        );
+        if (result === undefined) {
+          throw new Error("Visual assignment split service is unavailable.");
+        }
+        return visualAssignmentResponseSchema.parse(
+          createApiSuccessResponse(result.data, result.revision)
+        );
+      }
+    );
+  }
 
   if (
     visualAssignmentService.update !== undefined &&

@@ -82,6 +82,9 @@ describe("ScriptPage workflow navigation", () => {
     expect(paneSource).toContain('lifecycle === "ended"');
     expect(paneSource).toContain("停止");
     expect(paneSource).toContain("変更");
+    expect(paneSource).toContain("この行から変更");
+    expect(pageSource).toContain("splitProjectVisualAssignment");
+    expect(pageSource).toContain("mediaSplitConfirmation");
     expect(paneSource).not.toContain("素材を表示 / 再生開始");
     expect(paneSource).not.toContain("script-media-details");
     expect(paneSource).not.toContain("script-media-conflict-message");

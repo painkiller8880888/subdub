@@ -153,6 +153,11 @@ export const API_ERROR_CODE = {
     VISUAL_ASSIGNMENT_ERROR_CODE.assignmentNotFound,
   visualAssignmentAssignmentIdMismatch:
     VISUAL_ASSIGNMENT_ERROR_CODE.assignmentIdMismatch,
+  visualAssignmentAssignmentRangeInvalid:
+    VISUAL_ASSIGNMENT_ERROR_CODE.assignmentRangeInvalid,
+  visualAssignmentOverlap: VISUAL_ASSIGNMENT_ERROR_CODE.assignmentOverlap,
+  visualAssignmentRangeShorteningConfirmationRequired:
+    VISUAL_ASSIGNMENT_ERROR_CODE.rangeShorteningConfirmationRequired,
   visualAssignmentAssetReplacementUnsupported:
     VISUAL_ASSIGNMENT_ERROR_CODE.assignmentAssetReplacementUnsupported,
   visualAssignmentLibraryPathInvalid:

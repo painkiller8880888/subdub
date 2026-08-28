@@ -14,7 +14,8 @@ import {
 import {
   apiErrorResponseSchema,
   projectMutationResponseSchema,
-  visualAssignmentResponseSchema
+  visualAssignmentResponseSchema,
+  visualAssignmentSplitRequestSchema
 } from "../../src/schema/api.js";
 import { videoProjectFixture } from "../fixtures/video-project.js";
 
@@ -91,6 +92,54 @@ describe("visual assignments API", () => {
     expect(projectMutationResponseSchema.parse(response.json()).revision).toBe(
       4
     );
+  });
+
+  it("accepts the line-boundary split request and preserves the exact asset version", async () => {
+    let receivedProjectId: unknown;
+    let receivedAssignmentId: unknown;
+    let receivedInput: unknown;
+    const app = buildApp({
+      visualAssignmentService: {
+        assign: async () => ({ data: videoProjectFixture, revision: 1 }),
+        split: async (projectId, assignmentId, input) => {
+          receivedProjectId = projectId;
+          receivedAssignmentId = assignmentId;
+          receivedInput = input;
+          return { data: videoProjectFixture, revision: 5 };
+        }
+      }
+    });
+    apps.push(app);
+
+    const payload = {
+      expectedRevision: 4,
+      selectedLineId: "main-learner-1",
+      assetVersion: 2,
+      assignment: {
+        id: "api-split-replacement",
+        assetId: "asset-photo"
+      }
+    };
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/projects/api-project/visual-assignments/api-visual-assignment/split",
+      payload
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(visualAssignmentResponseSchema.parse(response.json()).revision).toBe(
+      5
+    );
+    expect(receivedProjectId).toBe("api-project");
+    expect(receivedAssignmentId).toBe("api-visual-assignment");
+    expect(receivedInput).toEqual({
+      ...payload,
+      removeOutsidePlaybackCues: false
+    });
+    expect(visualAssignmentSplitRequestSchema.parse(payload)).toEqual({
+      ...payload,
+      removeOutsidePlaybackCues: false
+    });
   });
 
   it("rejects client-owned checksum and project paths as unknown fields", async () => {
@@ -218,6 +267,9 @@ describe("visual assignments API", () => {
   it.each([
     [VISUAL_ASSIGNMENT_ERROR_CODE.assetNotFound, 404],
     [VISUAL_ASSIGNMENT_ERROR_CODE.displayKindMismatch, 422],
+    [VISUAL_ASSIGNMENT_ERROR_CODE.assignmentRangeInvalid, 422],
+    [VISUAL_ASSIGNMENT_ERROR_CODE.assignmentOverlap, 422],
+    [VISUAL_ASSIGNMENT_ERROR_CODE.rangeShorteningConfirmationRequired, 409],
     [VISUAL_ASSIGNMENT_ERROR_CODE.copyFailed, 500],
     [VISUAL_ASSIGNMENT_ERROR_CODE.cleanupFailed, 500]
   ] as const)(

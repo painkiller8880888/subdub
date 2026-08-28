@@ -8,6 +8,7 @@ import {
   rejectProjectOutline,
   approveProjectScript,
   assignProjectVisual,
+  splitProjectVisualAssignment,
   createProject,
   compileProjectManifest,
   fetchModels,
@@ -496,6 +497,48 @@ describe("web API client", () => {
     expect(JSON.parse(String(calls[1]?.init?.body))).toEqual({
       expectedRevision: project.revision,
       assignment
+    });
+  });
+
+  it("encodes the visual assignment split endpoint and its asset version", async () => {
+    const project = createEmptyVideoProject({
+      projectId: "visual-split-client-project",
+      createdAt: "2026-08-04T00:00:00.000Z"
+    });
+    const calls: Array<{ input: string; init: RequestInit | undefined }> = [];
+    globalThis.fetch = async (input, init) => {
+      calls.push({ input: String(input), init });
+      return jsonResponse({ data: project, revision: 7 }, 200);
+    };
+
+    await expect(
+      splitProjectVisualAssignment(project.metadata.id, "assignment-old", {
+        expectedRevision: 6,
+        selectedLineId: "line-three",
+        assetVersion: 3,
+        assignment: {
+          id: "assignment-new",
+          assetId: "asset-photo"
+        }
+      })
+    ).resolves.toEqual(project);
+
+    expect(calls[0]?.input).toBe(
+      "/api/projects/visual-split-client-project/visual-assignments/assignment-old/split"
+    );
+    expect(calls[0]?.init?.method).toBe("POST");
+    expect(calls[0]?.init?.headers).toEqual({
+      "content-type": "application/json"
+    });
+    expect(JSON.parse(String(calls[0]?.init?.body))).toEqual({
+      expectedRevision: 6,
+      selectedLineId: "line-three",
+      assetVersion: 3,
+      removeOutsidePlaybackCues: false,
+      assignment: {
+        id: "assignment-new",
+        assetId: "asset-photo"
+      }
     });
   });
 

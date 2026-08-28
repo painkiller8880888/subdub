@@ -929,9 +929,25 @@ export const visualAssignmentCreateInputSchema = strictObject({
 
 export const visualAssignmentRequestSchema = strictObject({
   expectedRevision: nonNegativeIntegerSchema,
+  /** An explicit picker selection can request an exact asset snapshot. */
+  assetVersion: positiveIntegerSchema.optional(),
   assignment: visualAssignmentCreateInputSchema,
   suggestionRunId: idSchema.optional(),
   reason: optionalImprovementReasonSchema
+});
+
+export const visualAssignmentSplitInputSchema = strictObject({
+  id: idSchema,
+  assetId: idSchema,
+  display: displayInputSchema.optional()
+});
+
+export const visualAssignmentSplitRequestSchema = strictObject({
+  expectedRevision: nonNegativeIntegerSchema,
+  selectedLineId: idSchema,
+  assetVersion: positiveIntegerSchema.optional(),
+  removeOutsidePlaybackCues: z.boolean().optional().default(false),
+  assignment: visualAssignmentSplitInputSchema
 });
 
 export const visualAssignmentUpdateRequestSchema = strictObject({
@@ -1410,6 +1426,15 @@ export type VisualAssignmentCreateInput = z.infer<
 >;
 export type VisualAssignmentRequest = z.infer<
   typeof visualAssignmentRequestSchema
+>;
+export type VisualAssignmentSplitInput = z.infer<
+  typeof visualAssignmentSplitInputSchema
+>;
+export type VisualAssignmentSplitRequest = z.infer<
+  typeof visualAssignmentSplitRequestSchema
+>;
+export type VisualAssignmentSplitRequestInput = z.input<
+  typeof visualAssignmentSplitRequestSchema
 >;
 export type VisualAssignmentUpdateRequest = z.infer<
   typeof visualAssignmentUpdateRequestSchema

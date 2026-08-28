@@ -49,6 +49,7 @@ import {
   initializeProjectScript,
   searchAssets,
   saveProjectScript,
+  splitProjectVisualAssignment,
   updateProjectVisualAssignment
 } from "./lib/api-client";
 import {
@@ -343,6 +344,7 @@ function ScriptLineCard({
   onResumeMedia,
   onEndMedia,
   onReplaceMedia,
+  onSplitMedia,
   mediaMutationPending
 }: {
   readonly line: ScriptLine;
@@ -371,6 +373,7 @@ function ScriptLineCard({
   readonly onResumeMedia: (assignmentId: string) => void;
   readonly onEndMedia: (assignmentId: string) => void;
   readonly onReplaceMedia: (assignmentId: string) => void;
+  readonly onSplitMedia: (assignmentId: string) => void;
   readonly mediaMutationPending: boolean;
 }) {
   const lineIssues = lineIssueText(issues, sectionIndex, lineIndex);
@@ -756,6 +759,7 @@ function ScriptLineCard({
           onEnd={onEndMedia}
           onPause={onPauseMedia}
           onReplace={onReplaceMedia}
+          onSplit={onSplitMedia}
           onResume={onResumeMedia}
           onStart={onStartMedia}
           presentationStates={
@@ -810,6 +814,14 @@ type MediaRangeConfirmation = Readonly<{
   outsideCues: readonly VisualPlaybackCue[];
 }>;
 
+type MediaSplitConfirmation = Readonly<{
+  assignmentId: string;
+  line: MediaLineReference;
+  asset: SelectableGenericVisualAsset;
+  replacementAssignmentId: string;
+  outsideCues: readonly VisualPlaybackCue[];
+}>;
+
 type MediaKindChangeConfirmation = Readonly<{
   assignmentId: string;
   asset: SelectableGenericVisualAsset;
@@ -830,6 +842,13 @@ type MediaMutationInput =
       assignmentId: string;
       projectGeneration: number;
       input: Parameters<typeof updateProjectVisualAssignment>[2];
+    }
+  | {
+      kind: "split";
+      projectId: string;
+      assignmentId: string;
+      projectGeneration: number;
+      input: Parameters<typeof splitProjectVisualAssignment>[2];
     };
 
 const scriptMediaAssetKinds = ["video", "photo", "document_scan"] as const;
@@ -899,6 +918,8 @@ export function ScriptPage() {
   const [mediaError, setMediaError] = useState<unknown>(null);
   const [mediaRangeConfirmation, setMediaRangeConfirmation] =
     useState<MediaRangeConfirmation | null>(null);
+  const [mediaSplitConfirmation, setMediaSplitConfirmation] =
+    useState<MediaSplitConfirmation | null>(null);
   const [mediaKindChangeConfirmation, setMediaKindChangeConfirmation] =
     useState<MediaKindChangeConfirmation | null>(null);
   const [mediaActionPending, setMediaActionPending] = useState(false);
@@ -988,11 +1009,17 @@ export function ScriptPage() {
     mutationFn: (input: MediaMutationInput) =>
       input.kind === "create"
         ? assignProjectVisual(input.projectId, input.input)
-        : updateProjectVisualAssignment(
-            input.projectId,
-            input.assignmentId,
-            input.input
-          ),
+        : input.kind === "split"
+          ? splitProjectVisualAssignment(
+              input.projectId,
+              input.assignmentId,
+              input.input
+            )
+          : updateProjectVisualAssignment(
+              input.projectId,
+              input.assignmentId,
+              input.input
+            ),
     onSuccess: (project, variables) => {
       if (
         !isProjectContextCurrent(
@@ -1154,6 +1181,7 @@ export function ScriptPage() {
     setMediaPickerSearch("");
     setMediaError(null);
     setMediaRangeConfirmation(null);
+    setMediaSplitConfirmation(null);
     setMediaKindChangeConfirmation(null);
     coordinator.reset();
   }, [coordinator, projectId]);
@@ -1574,10 +1602,122 @@ export function ScriptPage() {
       );
       if (isCurrent) {
         setMediaRangeConfirmation(null);
+        setMediaSplitConfirmation(null);
         setMediaKindChangeConfirmation(null);
       }
       return isCurrent;
     } catch (error) {
+      if (
+        isProjectContextCurrent(
+          projectIdRef.current,
+          projectGenerationRef.current,
+          requestProjectId,
+          requestGeneration
+        )
+      ) {
+        setMediaError(error);
+      }
+      return false;
+    }
+  }
+
+  async function submitSplitMediaAssignment(
+    currentProject: VideoProject,
+    line: MediaLineReference,
+    selectedLineId: string,
+    assignmentId: string,
+    asset: SelectableGenericVisualAsset,
+    replacementAssignmentId: string,
+    removeOutsidePlaybackCues: boolean
+  ): Promise<boolean> {
+    const currentAssignment = currentProject.visuals.assignments.find(
+      (candidate) => candidate.id === assignmentId
+    );
+    const section = currentProject.script.sections.find(
+      (candidate) => candidate.id === line.sectionId
+    );
+    if (currentAssignment === undefined || section === undefined) {
+      setMediaError(new Error("対象セリフまたは表示素材を解決できません。"));
+      return false;
+    }
+
+    const displayResult =
+      currentAssignment.startLineId === selectedLineId
+        ? replacementDisplayForAsset(currentAssignment, asset)
+        : defaultDisplayForAsset(asset);
+    if (displayResult.display === undefined) {
+      setMediaError(
+        new Error(displayResult.reason ?? "切替用の表示設定を作成できません。")
+      );
+      return false;
+    }
+
+    const selectedIndex = section.lines.findIndex(
+      (candidate) => candidate.id === selectedLineId
+    );
+    const previousLine = section.lines[selectedIndex - 1];
+    const outsideCues =
+      previousLine === undefined
+        ? []
+        : playbackCuesOutsideRange(currentAssignment, section, previousLine.id);
+    const requestProjectId = currentProject.metadata.id;
+    const requestGeneration = projectGenerationRef.current;
+    try {
+      await mediaMutation.mutateAsync({
+        kind: "split",
+        projectId: requestProjectId,
+        assignmentId,
+        projectGeneration: requestGeneration,
+        input: {
+          expectedRevision: currentProject.revision,
+          selectedLineId,
+          assetVersion: asset.version,
+          removeOutsidePlaybackCues,
+          assignment: {
+            id: replacementAssignmentId,
+            assetId: asset.assetId,
+            display: displayResult.display
+          }
+        }
+      });
+      const isCurrent = isProjectContextCurrent(
+        projectIdRef.current,
+        projectGenerationRef.current,
+        requestProjectId,
+        requestGeneration
+      );
+      if (isCurrent) {
+        setMediaPicker(null);
+        setMediaPickerSearch("");
+        setMediaSplitConfirmation(null);
+        setMediaError(null);
+      }
+      return isCurrent;
+    } catch (error) {
+      if (
+        isProjectContextCurrent(
+          projectIdRef.current,
+          projectGenerationRef.current,
+          requestProjectId,
+          requestGeneration
+        ) &&
+        error instanceof ApiClientError &&
+        error.code ===
+          "VISUAL_ASSIGNMENT_RANGE_SHORTENING_CONFIRMATION_REQUIRED" &&
+        !removeOutsidePlaybackCues
+      ) {
+        setMediaSplitConfirmation({
+          assignmentId,
+          line: { sectionId: section.id, lineId: selectedLineId },
+          asset,
+          replacementAssignmentId,
+          outsideCues
+        });
+        setMediaPicker(null);
+        setMediaPickerSearch("");
+        setMediaError(null);
+        return false;
+      }
       if (
         isProjectContextCurrent(
           projectIdRef.current,
@@ -1736,6 +1876,32 @@ export function ScriptPage() {
     }
   }
 
+  async function confirmSplitMedia(): Promise<void> {
+    const confirmation = mediaSplitConfirmation;
+    if (confirmation === null || !beginMediaAction()) {
+      return;
+    }
+    try {
+      const currentProject = await flushBeforeMediaMutation(
+        "台本を保存できないため、セリフ境界で素材を切り替えできません。"
+      );
+      if (currentProject === undefined) {
+        return;
+      }
+      await submitSplitMediaAssignment(
+        currentProject,
+        confirmation.line,
+        confirmation.line.lineId,
+        confirmation.assignmentId,
+        confirmation.asset,
+        confirmation.replacementAssignmentId,
+        true
+      );
+    } finally {
+      endMediaAction();
+    }
+  }
+
   async function confirmMediaKindChange(): Promise<void> {
     const confirmation = mediaKindChangeConfirmation;
     if (confirmation === null || !beginMediaAction()) {
@@ -1831,6 +1997,29 @@ export function ScriptPage() {
         return;
       }
 
+      if (picker.action === "split") {
+        const currentAssignment = currentProject.visuals.assignments.find(
+          (candidate) => candidate.id === picker.assignmentId
+        );
+        if (
+          currentAssignment === undefined ||
+          picker.assignmentId === undefined
+        ) {
+          setMediaError(new Error("切替対象の表示素材を解決できません。"));
+          return;
+        }
+        await submitSplitMediaAssignment(
+          currentProject,
+          picker.line,
+          resolvedLineId,
+          picker.assignmentId,
+          asset,
+          nextVisualAssignmentId(currentProject.visuals.assignments),
+          false
+        );
+        return;
+      }
+
       let assignment: VisualAssignment;
       if (picker.action === "start") {
         const requestGeneration = projectGenerationRef.current;
@@ -1860,6 +2049,7 @@ export function ScriptPage() {
             projectGeneration: requestGeneration,
             input: {
               expectedRevision: currentProject.revision,
+              assetVersion: asset.version,
               assignment: assignmentInput(assignment)
             }
           });
@@ -2584,6 +2774,16 @@ export function ScriptPage() {
                               assignmentId
                             )
                           }
+                          onSplitMedia={(assignmentId) =>
+                            openMediaPicker(
+                              {
+                                sectionId: section.id,
+                                lineId: line.id
+                              },
+                              "split",
+                              assignmentId
+                            )
+                          }
                         />
                       );
                     })}
@@ -2594,6 +2794,51 @@ export function ScriptPage() {
           })}
         </section>
       </section>
+
+      {mediaSplitConfirmation !== null ? (
+        <ScriptMediaDialog
+          className="script-media-confirm-dialog"
+          describedById="script-media-split-confirm-description"
+          onClose={() => {
+            if (!mediaMutationPending) {
+              setMediaSplitConfirmation(null);
+            }
+          }}
+          titleId="script-media-split-confirm-title"
+        >
+          <h2 id="script-media-split-confirm-title">
+            この行から変更するためcueを削除しますか？
+          </h2>
+          <p id="script-media-split-confirm-description">
+            旧素材の表示範囲をこのセリフの直前まで短縮すると、範囲外になるcueが削除されます。旧素材の設定は保持し、新素材をこの行からセクション末尾まで表示します。
+          </p>
+          <ul>
+            {mediaSplitConfirmation.outsideCues.map((cue) => (
+              <li key={`${cue.lineId}-${cue.edge}-${cue.action}`}>
+                {cue.lineId} / {cue.edge} / {cue.action}
+              </li>
+            ))}
+          </ul>
+          <div className="script-media-confirm-actions">
+            <button
+              className="button"
+              disabled={mediaMutationPending}
+              type="button"
+              onClick={() => setMediaSplitConfirmation(null)}
+            >
+              キャンセル
+            </button>
+            <button
+              className="button button-primary"
+              disabled={mediaMutationPending}
+              type="button"
+              onClick={() => void confirmSplitMedia()}
+            >
+              {mediaMutationPending ? "保存中…" : "cueを削除して切り替え"}
+            </button>
+          </div>
+        </ScriptMediaDialog>
+      ) : null}
 
       {mediaRangeConfirmation !== null ? (
         <ScriptMediaDialog
