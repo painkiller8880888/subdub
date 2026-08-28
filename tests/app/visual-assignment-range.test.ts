@@ -36,6 +36,20 @@ function sectionWithFourLines(): ScriptSection {
   return section;
 }
 
+function sectionWithSixLines(): ScriptSection {
+  const section = sectionWithFourLines();
+  const template = section.lines[0];
+  if (template === undefined) {
+    throw new Error("the fixture must contain a main line");
+  }
+  section.lines = [
+    ...section.lines,
+    { ...clone(template), id: "main-line-5" },
+    { ...clone(template), id: "main-line-6" }
+  ];
+  return section;
+}
+
 function createAssignment(
   display: VisualAssignment["display"] = clone(
     videoProjectFixture.visuals.assignments[1]!.display
@@ -121,6 +135,59 @@ describe("splitVisualAssignmentAtLine", () => {
     });
   });
 
+  it("caps a further split before the next assignment in an existing series", () => {
+    const section = sectionWithSixLines();
+    const first: VisualAssignment = {
+      ...createAssignment(),
+      id: "assignment-a",
+      startLineId: "main-line-1",
+      endLineId: "main-line-2"
+    };
+    const middle: VisualAssignment = {
+      ...createAssignment(),
+      id: "assignment-b",
+      startLineId: "main-line-3",
+      endLineId: "main-line-4"
+    };
+    const following: VisualAssignment = {
+      ...createAssignment(),
+      id: "assignment-c",
+      startLineId: "main-line-5",
+      endLineId: "main-line-6"
+    };
+    const replacementAssignment = {
+      ...replacement(),
+      id: "assignment-d"
+    };
+    const result = splitVisualAssignmentAtLine({
+      assignment: middle,
+      selectedLineId: "main-line-4",
+      replacement: replacementAssignment,
+      section,
+      existingAssignments: [first, middle, following]
+    });
+
+    expect(result).toMatchObject({ ok: true, mode: "split" });
+    if (!result.ok || result.shortenedAssignment === undefined) {
+      throw new Error("the series split plan was not created");
+    }
+    expect(result.shortenedAssignment).toEqual({
+      ...middle,
+      endLineId: "main-line-3"
+    });
+    expect(result.replacementAssignment).toEqual({
+      ...replacementAssignment,
+      startLineId: "main-line-4",
+      endLineId: "main-line-4"
+    });
+    expect(following).toEqual({
+      ...createAssignment(),
+      id: "assignment-c",
+      startLineId: "main-line-5",
+      endLineId: "main-line-6"
+    });
+  });
+
   it.each([
     ["missing-line", "selected-line-not-found"],
     ["main-line-1", "selected-line-outside-assignment"]
@@ -168,8 +235,8 @@ describe("splitVisualAssignmentAtLine", () => {
     const other: VisualAssignment = {
       ...createAssignment(),
       id: "assignment-existing",
-      startLineId: "main-line-4",
-      endLineId: "main-line-4"
+      startLineId: "main-line-3",
+      endLineId: "main-line-3"
     };
     const result = splitVisualAssignmentAtLine({
       assignment,

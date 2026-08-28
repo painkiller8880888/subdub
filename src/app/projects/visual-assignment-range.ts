@@ -56,6 +56,26 @@ function rangesOverlap(left: LineRange, right: LineRange): boolean {
   return left.start <= right.end && right.start <= left.end;
 }
 
+function nextAssignmentStartIndex(
+  assignments: readonly VisualAssignment[],
+  currentAssignmentId: string,
+  lines: readonly ScriptSection["lines"][number][],
+  selectedIndex: number
+): number | undefined {
+  return assignments.reduce<number | undefined>((nextIndex, assignment) => {
+    if (assignment.id === currentAssignmentId) {
+      return nextIndex;
+    }
+    const range = lineRange(assignment, lines);
+    if (range === undefined || range.start <= selectedIndex) {
+      return nextIndex;
+    }
+    return nextIndex === undefined || range.start < nextIndex
+      ? range.start
+      : nextIndex;
+  }, undefined);
+}
+
 function failure(
   code: VisualAssignmentSplitFailureCode,
   message: string,
@@ -135,9 +155,19 @@ export function splitVisualAssignmentAtLine(input: {
   }
 
   const isReplacement = selectedIndex === currentRange.start;
+  const existingAssignmentNextStartIndex = isReplacement
+    ? undefined
+    : nextAssignmentStartIndex(
+        existingAssignments,
+        input.assignment.id,
+        input.section.lines,
+        selectedIndex
+      );
   const replacementEndIndex = isReplacement
     ? currentRange.end
-    : input.section.lines.length - 1;
+    : existingAssignmentNextStartIndex === undefined
+      ? input.section.lines.length - 1
+      : existingAssignmentNextStartIndex - 1;
   const replacementEnd = input.section.lines[replacementEndIndex];
   if (replacementEnd === undefined) {
     return failure(

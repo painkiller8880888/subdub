@@ -113,7 +113,7 @@ VP-02 の resolved video display は、`playbackState: "playing" | "paused" | "e
 
 後続 version boundary は明示的に分ける。VP-01 は `VideoProject 1.4.0 → 1.5.0` を導入し、既存 video assignment の `playbackCues` を `[]` として migration する。VP-02 は pause / resume と natural source end を解決済み render contract へ追加するため `RenderManifest 2.5.0` を導入し、`RenderManifest 2.4.0` の parser、cache、run log の意味を変更しない。2.5.0 では cue を resolved media state へ固定し、playing branch は source trim pair、paused / ended branch は一点の `sourceFrame` を持つ。preview と Remotion は同じ結果を使う。
 
-現行 `/projects/{projectId}/script` では、VP-03（#154）の media pane を SW-04（#169）の表示契約で扱う。素材挿入済みの visible UI は preview と状態に応じた操作だけとし、video の playing / paused / ended ではそれぞれ `[一時停止]` / `[再開]` / `[停止] [変更]`、natural source end 後の ended は最終描画フレーム preview と `[停止] [変更]` を表示し、pause / resume は表示しない。photo / `document_scan` では `[停止] [変更]`、未挿入では `[素材を挿入]` だけを表示する。assignment、lifecycle、cue の read model と操作可否は保持するが、状態説明や technical metadata の文章を pane に常設しない。V25 の serialized video segment state は playing / paused / ended に限定し、`PersistentScreenState` へは action 名ではなく cue と source-end を解決した media state を渡す。
+現行 `/projects/{projectId}/script` では、VP-03（#154）の media pane を SW-04（#169）の表示契約で扱う。素材挿入済みの visible UI は preview と状態に応じた操作だけとし、video の playing / paused / ended ではそれぞれ `[一時停止] [停止] [変更] [この行から変更]` / `[再開] [停止] [変更] [この行から変更]` / `[停止] [変更] [この行から変更]`、natural source end 後の ended は最終描画フレーム preview と `[停止] [変更] [この行から変更]` を表示し、pause / resume は表示しない。photo / `document_scan` では `[停止] [変更] [この行から変更]`、未挿入では `[素材を挿入]` だけを表示する。assignment、lifecycle、cue の read model と操作可否は保持するが、状態説明や technical metadata の文章を pane に常設しない。V25 の serialized video segment state は playing / paused / ended に限定し、`PersistentScreenState` へは action 名ではなく cue と source-end を解決した media state を渡す。
 
 対象外は line 内任意 millisecond cue、waveform / NLE timeline、reverse playback、scrubbing keyframe、video transition、speed keyframe、automatic slide / AI slide generation、dedicated presentation parser である。Asset library CRUD UI は VP-03 の ScriptPage media pane（VP-00〜VP-02 の cue semantics を接続する UI）には含めず、次節の Issue #155（AL-00）で `/assets` のワークスペース管理画面として別に定義する。
 
@@ -122,7 +122,7 @@ VP-02 の resolved video display は、`playbackState: "playing" | "paused" | "e
 本書で「右ペイン」と記述する場合、CV-05 が除去した旧 UI と、#154 で追加された現行 UI を混同しない。
 
 - **Legacy CV-05 right pane（標準 ScriptPage から削除済み）**: 「現在の編集対象」「制作 ビジュアル候補」「AI によるビジュアル候補 UI」「手順3-3 素材検索」「素材検索結果」「素材制作・表示設定カード」からなる旧導線。これらは標準 `/projects/{projectId}/script` に復活させない。generic Asset Search、AI suggestion、`VisualAssignment` の backend・保存データを維持することや、別画面・補助導線を提供することは、この旧 pane の復活を意味しない。
-- **VP-03 line-card media cue pane（現行標準 UI／実装済み）**: Issue #154 で追加された compact line card 右側の pane。current generic `VisualAssignment`、active な managed Asset の選択、video playback state、pause / resume / end cue 操作、asset replacement を扱う。Asset picker からの明示的な選択・差し替えは選択 `assetVersion` を含む mutation として扱い、同じ stable `assetId` でも選択 version の checksum / `projectMediaPath` を project snapshot へ反映する。cue 編集や表示変更だけで live Asset の current version へ自動 upgrade はしない。
+- **VP-03 line-card media cue pane（現行標準 UI／実装済み）**: Issue #154 で追加された compact line card 右側の pane。current generic `VisualAssignment`、active な managed Asset の選択、video playback state、pause / resume / end cue 操作、asset replacement、line-boundary asset switching を扱う。Asset picker からの明示的な選択・差し替えは選択 `assetVersion` を含む mutation として扱い、同じ stable `assetId` でも選択 version の checksum / `projectMediaPath` を project snapshot へ反映する。cue 編集や表示変更だけで live Asset の current version へ自動 upgrade はしない。
 
 `VP-00〜VP-02` は表示素材 cue、resolver、render contract の共有仕様を定義し、`VP-03` はそれを ScriptPage の line-card UI へ接続する実装境界である。VP-00〜VP-02 の後段説明にある「後続」「追加する」は、仕様作成時点の設計・実装境界を示す履歴であり、現行実装で VP-03 が存在しないという意味ではない。将来 target として読むべき記述は、target / 後続実装であることを明示した箇所に限る。
 
@@ -179,7 +179,7 @@ photo / document_scan: [ image preview ]       [停止] [変更]
 
 素材欄から visible warning を外しても validation、conflict detection、revision safety は削除しない。不正な action は生成せず disabled にする。mutation failure、revision conflict、range-shortening confirmation などユーザー判断が必要な feedback は modal / dialog、page-level feedback、toast など素材欄外の surface で扱う。状態と button の accessible name は `aria-label` などで保持し、説明文を pane 内へ増やさない。
 
-`PersistentScreenState`、`VisualAssignment` range、video pause / resume cue、static media の start / end、full / compact preview trigger、project snapshot、`RenderManifest 2.5.0`、Web preview / Remotion の semantics は変更しない。version bump、Zod schema / migration、Asset CRUD、assignment / cue data model、arbitrary timeline / waveform、ScreenTemplate geometry、VOICEVOX adjustment format、他フェーズの width 拡張は対象外とする。受入時には実ブラウザで約 `1500px` の content pane、4行カード、簡潔な素材 pane、non-overflow を確認し、参照画像と同等の情報密度でスクリーンショットを残す。
+`PersistentScreenState`、`VisualAssignment` の line-boundary range semantics、video pause / resume cue、static media の start / end、full / compact preview trigger、project snapshot、`RenderManifest 2.5.0`、Web preview / Remotion の semantics は変更しない。version bump、Zod schema / migration、Asset CRUD、assignment / cue data model、arbitrary timeline / waveform、ScreenTemplate geometry、VOICEVOX adjustment format、他フェーズの width 拡張は対象外とする。受入時には実ブラウザで約 `1500px` の content pane、4行カード、簡潔な素材 pane、non-overflow を確認し、参照画像と同等の情報密度でスクリーンショットを残す。
 
 ### 1.6.3 Issue #179 / RF-00 による4件の改修の現行契約
 
@@ -230,6 +230,17 @@ PreviewPage は Player と同じ current `RenderManifest 2.8.0` を使い、既�
 共通 encode contract は MP4、H.264、`yuv420p`、30 fps、AAC / 48 kHz / stereo / 128 kbps、CRF 23、`veryfast` 相当とする。保存先は production MP4 と分離し、`projects/{projectId}/output/previews/{runId}-{sd|hd|fhd}.mp4` とする。PreviewPage は preset selector と `[プレビューを保存]` を提供し、current manifest が再生可能で validation を通過した場合だけ実行できる。RF-04 は project / manifest schema の version bump を行わない。
 
 RF-01〜RF-04 は、ScreenTemplate と InsertTextTemplate、generic `VisualAssignment` と `EditVideoElement`、production output と preview export の責務を混在させない。後続 Issue は前段が main に入った後の最新 main から branch を作成する。
+
+### 1.6.4 Issue #193 によるセリフ境界の表示素材切替
+
+Issue #193 では、現行の `VisualAssignment` と line-boundary playback semantics を維持したまま、同一 section 内でセリフ境界ごとに表示素材を切り替える標準操作を追加する。ScriptPage の media pane には、素材が挿入済みで操作可能な場合に `[この行から変更]` を表示し、選択 line の BEFORE 境界で切り替える。line 内の任意 millisecond や timeline editor は追加しない。
+
+- 選択 line が現在 assignment の `startLineId` と同じ場合は、既存 assignment をその場で置き換え、空の range や重複 assignment を作らない。
+- 選択 line が assignment の途中の場合は、旧 assignment を選択 line の直前まで短縮し、新しい assignment を選択 line から作る。後続 assignment が同じ section に存在する場合、新しい assignment の `endLineId` は最も近い後続 assignment の `startLineId` の直前に cap する。後続 assignment がなければ section の最終 line までとする。したがって `A: 1→2、B: 3→4、C: 5→6` の B を line 4 から D に切り替えると、`B: 3→3、D: 4→4、C: 5→6` になる。
+- mutation は `POST /api/projects/{projectId}/visual-assignments/{assignmentId}/split` とし、`expectedRevision`、選択 line、選択した Asset の exact `assetVersion`、表示設定を受ける。サーバーは active Asset の checksum / `projectMediaPath` を解決し、既存 assignment の asset snapshot、display、playback settings を勝手に書き換えない。
+- 旧 assignment の range 短縮で video の `playbackCues` が範囲外になる場合は、範囲外 cue を削除する明示確認が必要である。確認前は project と managed file を変更せず、確認後に範囲外 cue だけを削除する。範囲不正、空 range、他 assignment との overlap は保存せず拒否する。
+
+この操作は section / outline の構造を変更せず、`VideoProject` / `RenderManifest` の version bump を行わない。既存の preview、compiler、Remotion が同じ assignment array と line-boundary semantics を使用する。
 
 ### 1.7 Issue #155 / AL-00 による素材ライブラリ管理の正本仕様
 
@@ -1022,7 +1033,7 @@ AI に素材そのもの、完成スライド、図解を生成させない。AI
 4. 選択時に素材を `projects/{projectId}/media/visuals/` へコピーし、プロジェクト JSON に `assetId`、チェックサム、相対パスを保存する。これをレンダリング用スナップショットとし、以後の素材DB変更から切り離す。
 5. 動画は使用区間、写真・帳票はページまたは切り抜き範囲を指定し、必要に応じて拡大、位置、注釈を設定する。
 6. 素材を大きく見せたい generic assignment では、保存値 `display.prioritizeVisual: boolean` により ScreenTemplate 解決後の互換表示ポリシーを適用できる。初期版の有効区間では template の character element を縮小するだけで、非表示にはしない。この値は generic `VisualAssignment` の表示設定として維持するが、ScreenTemplate の outer geometry を上書きしたり、CV-04 後の標準 `/projects/{projectId}/script` に旧「キャラクターペイン」のトグルや素材制作・表示設定カードを置いたりすることは意味しない。編集 UI は別画面または補助導線で扱う。
-7. 同じ台本範囲への割り当て変更、解除、前後の範囲への延長・短縮を行えるようにする。
+7. 同じ台本範囲への割り当て変更、解除、前後の範囲への延長・短縮を行えるようにする。さらに、ScriptPage の「この行から変更」は選択した line の BEFORE 境界で表示素材を切り替える。
 
 #### 6.4.3.1 表示素材の line-boundary playback cue（VP-00）
 
@@ -1034,7 +1045,9 @@ source position が `sourceEndFrame` に到達または超過した最初の pre
 
 pause 中は pause 境界の source frame を保持し、source media time と video 内音声を進めない。line speech、BGM、sound effect 等の別 audio layer は進める。resume は同じ source position から継続し、`playbackRate` は playing interval の source-time accumulation にだけ適用する。source end 到達後は assignment の終了まで最終描画フレームを保持する `ended` state とし、pause / resume は無効である。photo / `document_scan` は cue を持たず、range 中は同じ static display を維持する。
 
-ScriptPage の media pane は SW-04（#169）の minimal UI contract に従う。video は playing 時に `[一時停止] [停止] [変更]`、paused 時に `[再開] [停止] [変更]`、ended 時に最終描画フレーム preview と `[停止] [変更]`、photo / `document_scan` は `[停止] [変更]`、未挿入時は `[素材を挿入]` だけを表示する。ended では pause / resume を表示しない。preview は常設するが、assignment range、cue、playing / paused / ended / static-visible の説明、asset metadata の文章、通常時の warning は pane 内へ表示しない。停止は assignment の current line 境界での表示・再生終了であり、素材削除ではない。
+ScriptPage の media pane は SW-04（#169）の minimal UI contract に従う。video は playing 時に `[一時停止] [停止] [変更] [この行から変更]`、paused 時に `[再開] [停止] [変更] [この行から変更]`、ended 時に最終描画フレーム preview と `[停止] [変更] [この行から変更]`、photo / `document_scan` は `[停止] [変更] [この行から変更]`、未挿入時は `[素材を挿入]` だけを表示する。ended では pause / resume を表示しない。preview は常設するが、assignment range、cue、playing / paused / ended / static-visible の説明、asset metadata の文章、通常時の warning は pane 内へ表示しない。停止は assignment の current line 境界での表示・再生終了であり、素材削除ではない。
+
+`この行から変更` は選択 line の BEFORE 境界で実行する。選択 line が既存 assignment の開始 line なら既存 assignment を置換し、途中なら旧 assignment を直前 line まで短縮して新素材を選択 line から適用する。後続 assignment が同じ section にある場合は、その開始 line の直前までを新素材の範囲とし、後続 assignment がなければ section 末尾までとする。旧 assignment の範囲外になる video cue がある場合は、明示確認なしに削除せず、確認後に範囲外 cue だけを削除する。
 
 #### 6.4.4 確認と validation
 
@@ -1594,7 +1607,7 @@ editor のサイドバーでは active な CharacterVisualSet / variant と必�
 - 2・3 行目は通常時に compact な 1 行表示とし、選択・編集時だけ textarea 等の入力領域へ expand する。編集終了後は compact 表示へ戻す。
 - 音声は compact status indicator と `[再生] [再生成] [音声調整]` を置き、native `<audio controls>` は通常カードに表示しない。current audio がない場合は再生操作を disabled 等で表す。
 - `[詳細設定]` は modal / dialog を開き、`expression`、`pauseBeforeMs`、`pauseAfterMs` を編集する。keyboard 操作、Escape close、focus restore を満たし、保存・autosave・revision・validation semantics は変更しない。
-- 現場素材の generic assignment が存在する場合、media pane の visible UI は SW-04 の preview と状態に応じた `[一時停止]` / `[再開]` / `[停止]` / `[変更]` に限定する。video ended は最終描画フレーム preview と `[停止] [変更]`、photo / `document_scan` は `[停止] [変更]`、未挿入時は `[素材を挿入]` だけを表示し、ended 中の pause / resume は表示しない。説明文、状態説明、常設 warning、asset metadata summary は置かない。
+- 現場素材の generic assignment が存在する場合、media pane の visible UI は SW-04 の preview と状態に応じた `[一時停止]` / `[再開]` / `[停止]` / `[変更]` / `[この行から変更]` に限定する。video ended は最終描画フレーム preview と `[停止] [変更] [この行から変更]`、photo / `document_scan` は `[停止] [変更] [この行から変更]`、未挿入時は `[素材を挿入]` だけを表示し、ended 中の pause / resume は表示しない。説明文、状態説明、常設 warning、asset metadata summary は置かない。
 
 読み上げテキストは、ひらがなだけでなくカタカナや読み方調整用の表記を入力する可能性があるため、UI 上では「よみがな」ではなく「読み上げ」と表記する。字幕プレビューには最終動画と同じ Remotion 字幕コンポーネントを使用し、改行、文字サイズ、はみ出しの判定を一致させる。
 
