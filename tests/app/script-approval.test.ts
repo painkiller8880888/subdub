@@ -457,8 +457,15 @@ describe("ProjectService script approval and stale invalidation", () => {
 
     expect(structured.script.status).toBe("needs_review");
     expect(structured.visuals.status).toBe("needs_review");
+    const appendedLineId = structured.script.sections[0]?.lines.at(-1)?.id;
+    if (appendedLineId === undefined) {
+      throw new Error("appended line is missing");
+    }
     expect(structured.visuals.assignments).toEqual(
-      approved.visuals.assignments
+      approved.visuals.assignments.map((assignment) => ({
+        ...assignment,
+        endLineId: appendedLineId
+      }))
     );
   });
 
