@@ -12,6 +12,7 @@ import { createServer, type ViteDevServer } from "vite";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { screenTemplateContentHash } from "../../src/app/screen-templates/screen-template-hash.js";
+import { applyEditedScript } from "../../src/app/projects/script-invalidation.js";
 import { browserExecutable } from "../../src/app/rendering/remotion-mp4-renderer.js";
 import type {
   AssetDetail,
@@ -271,6 +272,21 @@ function createMediaWorkflowProjectFixture(): VideoProject {
   return project;
 }
 
+function createSectionEndAppendMediaWorkflowProjectFixture(): VideoProject {
+  const project = createScreenTemplateProjectFixture();
+  const main = project.script.sections.find(
+    (section) => section.id === "section-main"
+  );
+  if (main === undefined) {
+    throw new Error("section-end append main section is missing");
+  }
+  main.lines = main.lines.filter((line) => line.id !== "main-mentor-2");
+  project.visuals.assignments = project.visuals.assignments.filter(
+    (assignment) => assignment.id !== "visual-main-photo"
+  );
+  return project;
+}
+
 function createMediaReplacementAsset(project: VideoProject): AssetDetail {
   const videoAssignment = project.visuals.assignments.find(
     (assignment) => assignment.display.kind === "video"
@@ -475,10 +491,13 @@ async function installApiRoutes(
         expectedRevision: number;
       };
       state.scriptSaves.push(body);
+      const { project: editedProject } = applyEditedScript(
+        state.project,
+        body.script
+      );
       state.project = {
-        ...state.project,
-        revision: state.project.revision + 1,
-        script: body.script
+        ...editedProject,
+        revision: state.project.revision + 1
       };
       await route.fulfill({
         status: 200,
@@ -1619,6 +1638,122 @@ describe("ScreenTemplate workflow browser E2E", () => {
           "音声状態: 再生成が必要"
         );
         expect(await page.locator(".message-panel-warning").count()).toBe(1);
+      } finally {
+        await context.close();
+      }
+    }
+  );
+
+  it(
+    "extends a started video assignment through ScriptPage appends and reload",
+    { timeout: 60_000 },
+    async () => {
+      const project = createSectionEndAppendMediaWorkflowProjectFixture();
+      const { context, page, state } = await openScript(project);
+      try {
+        const startLineCard = page.locator(
+          '.script-line-card[aria-label="セリフ main-mentor-1"]'
+        );
+        await startLineCard.getByRole("button", { name: "素材を挿入" }).click();
+        const startPicker = page.getByRole("dialog", {
+          name: "表示素材を選択"
+        });
+        await startPicker.waitFor({ state: "visible" });
+        const startItem = startPicker.locator("li").filter({
+          hasText: "visual-intro-video browser asset"
+        });
+        const startSave = page.waitForResponse(
+          (response) =>
+            response.request().method() === "PUT" &&
+            new URL(response.url()).pathname.startsWith(
+              `/api/projects/${projectId}/visual-assignments`
+            )
+        );
+        await startItem.getByRole("button", { name: "この素材を選択" }).click();
+        await startSave;
+
+        const createdAssignment = state.project.visuals.assignments.find(
+          (assignment) => assignment.startLineId === "main-mentor-1"
+        );
+        if (createdAssignment === undefined) {
+          throw new Error("section-end append assignment was not created");
+        }
+        const createdAssignmentId = createdAssignment.id;
+        expect(createdAssignment.endLineId).toBe("main-learner-1");
+
+        const mainSectionCard = page
+          .locator(".script-section-card")
+          .filter({ hasText: "section-main" })
+          .first();
+        const waitForScriptSave = () =>
+          page.waitForResponse(
+            (response) =>
+              response.request().method() === "PUT" &&
+              new URL(response.url()).pathname ===
+                `/api/projects/${projectId}/script`
+          );
+        const appendLine = async (lineId: string): Promise<void> => {
+          await mainSectionCard
+            .getByRole("button", { name: "セリフを追加" })
+            .click();
+          const lineCard = page.locator(
+            `.script-line-card[aria-label="セリフ ${lineId}"]`
+          );
+          await lineCard.waitFor({ state: "visible" });
+          const scriptSave = waitForScriptSave();
+          await lineCard.locator(`#${lineId}-subtitle`).fill("追加字幕");
+          await lineCard
+            .locator(`#${lineId}-spoken`)
+            .fill("追加された読み上げ");
+          await scriptSave;
+        };
+
+        await appendLine("draft-line-1");
+        expect(
+          state.project.visuals.assignments.find(
+            (assignment) => assignment.id === createdAssignmentId
+          )
+        ).toMatchObject({
+          id: createdAssignmentId,
+          startLineId: "main-mentor-1",
+          endLineId: "draft-line-1"
+        });
+
+        await appendLine("draft-line-2");
+        expect(
+          state.project.visuals.assignments.find(
+            (assignment) => assignment.id === createdAssignmentId
+          )
+        ).toMatchObject({
+          id: createdAssignmentId,
+          startLineId: "main-mentor-1",
+          endLineId: "draft-line-2"
+        });
+        expect(state.visualAssignmentUpdates).toHaveLength(1);
+
+        await page.reload({ waitUntil: "domcontentloaded" });
+        await page.locator("#section-main-screen-template").waitFor({
+          state: "visible"
+        });
+        for (const lineId of ["draft-line-1", "draft-line-2"]) {
+          const mediaPane = page
+            .locator(`.script-line-card[aria-label="セリフ ${lineId}"]`)
+            .locator(".script-line-media-pane");
+          await mediaPane.waitFor({ state: "visible" });
+          expect(await mediaPane.getAttribute("aria-label")).toContain(
+            "playing（再生中）"
+          );
+          expect(await mediaPane.locator("video").count()).toBe(1);
+        }
+        expect(
+          state.project.visuals.assignments.find(
+            (assignment) => assignment.id === createdAssignmentId
+          )
+        ).toMatchObject({
+          id: createdAssignmentId,
+          startLineId: "main-mentor-1",
+          endLineId: "draft-line-2"
+        });
       } finally {
         await context.close();
       }
