@@ -168,10 +168,10 @@ Issue #169（SW-04）は `doc/doc.md` と `implementation-spec.md` だけを更�
 line に対応する generic `VisualAssignment` / playback control pane は、素材が挿入済みなら preview と次の操作だけを基本表示とする。
 
 ```text
-video playing:  [ video / thumbnail preview ]  [一時停止] [停止] [変更]
-video paused:   [ paused frame / thumbnail ]   [再開] [停止] [変更]
-video ended:    [ last frame / thumbnail preview ] [停止] [変更]
-photo / document_scan: [ image preview ]       [停止] [変更]
+video playing:  [ video / thumbnail preview ]  [一時停止] [停止] [変更] [この行から変更]
+video paused:   [ paused frame / thumbnail ]   [再開] [停止] [変更] [この行から変更]
+video ended:    [ last frame / thumbnail preview ] [停止] [変更] [この行から変更]
+photo / document_scan: [ image preview ]       [停止] [変更] [この行から変更]
 未挿入:                                      [素材を挿入]
 ```
 
