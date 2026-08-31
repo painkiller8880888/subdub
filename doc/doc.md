@@ -1169,19 +1169,19 @@ BGM は音声生成の一部ではなく、次の 6.6 で定義する編集フ�
 
 処理の責務は次のとおりとする。
 
-1. Zod で正本 JSON を検証し、section / line / assignment の stable ID、重複、参照、同一 section 内 range、line order など構造データの整合性を enabled 状態にかかわらず確認する。
-2. enabled section の effective view について、参照している音声とビジュアル素材の存在、チェックサム、有効範囲を検証する。キャラクタービジュアルについては、バックエンドが SQLite と管理領域から取得した snapshot、登録済みファイル、PNG 構造、透過情報、visual 基準キャンバスとの一致を専用検証で確認する。無効 section の downstream output dependency はここで要求しない。
-3. `project.characters[].characterVisual.visualId`、`project.characters[].characterVisual.idleVariantId`、各 line の `characterVariantId` を、検証済み `CharacterVisualCatalogSnapshot` と照合する。`ScriptLine.expression`、tag、label から物理 variant を暗黙に自動変換・代替しない。コンパイラは SQLite を直接参照しない。
-4. 各音声ファイルの再生時間を取得し、セリフ ID と対応付ける。
+1. Zod で正本 JSON を検証し、section / line / assignment の stable ID、重複、参照、同一 section 内 range、line order など構造データの整合性を enabled 状態にかかわらず確認する。この段階では disabled section も含めて構造だけを検証し、音声、素材、template、snapshot などの output dependency は検証しない。
+2. enabled section の effective view を作り、そこに含まれる line、generic visual、line overlay、sound effect、section BGM、および enabled section の境界へ解決される `edit.videoElements` だけを output readiness の対象にする。音声 index / file、line の character variant と catalog snapshot、active / resolvable ScreenTemplate、managed render input、`EditPlan` の asset snapshot、チェックサム、有効範囲、実ファイル形式をこの effective view から到達可能な範囲で検証する。無効 section 内の音声、line variant、generic visual、overlay、sound effect、section BGM、その他の render input が missing / stale でも blocker にせず、無効 section を target にする `before_section` edit element も resolve / validation の対象にしない。構造上の参照整合性は手順1で確認する。
+3. enabled section の effective view から参照される `project.characters[].characterVisual.visualId`、`project.characters[].characterVisual.idleVariantId`、各 enabled line の `characterVariantId` を、検証済み `CharacterVisualCatalogSnapshot` と照合する。`ScriptLine.expression`、tag、label から物理 variant を暗黙に自動変換・代替しない。コンパイラは SQLite を直接参照しない。
+4. enabled section の effective view に含まれる各音声ファイルの再生時間を取得し、セリフ ID と対応付ける。
 5. `pauseBeforeMs`、音声長、`pauseAfterMs` を fps に基づいてフレームへ変換する。
 6. セリフを表示順に累積し、各セリフの `from`、`durationInFrames`、`speechFrom`、`speechDurationInFrames` を確定する。
 7. enabled section の `startLineId` と `endLineId` で指定された generic ビジュアル割り当てについて、現行 `VideoProject 1.9.0` / `RenderManifest 2.9.0` の range・section template・resolved media state 契約を維持する。無効 section の assignment は effective view から除外する。section 境界、#151 の persistent media state boundary、または source-end boundary で segment を分け、同一 section 内の line template 差分を新しい分割理由にしない。source-end boundary は presentation frame 単位なので line の途中にも置く。`sourceAssignmentId`、決定論的な segment ID、segment 順序、line 境界を記録し、最終 `from` / `durationInFrames` は timeline shift 後に確定する。
 8. enabled section の最初と最後のセリフから、背景の表示範囲を確定する。無効 section の背景は manifest に出力しない。
-9. 本編セクションの境界へ `edit.videoElements` の cutin を配置する。ただし最初のセクションの直前境界は validation error とし、同じ境界内の `order` を維持する。
+9. 最初の enabled section を除く `before_section` 境界へ `edit.videoElements` の cutin を配置する。ただし enabled section の最初の直前境界は validation error とし、同じ境界内の `order` を維持する。
 10. enabled section 集合の先頭へ `intro`、末尾へ `outro` を配置する。無効 section を参照する `before_section` edit element は出力しない。intro / outro / cutin の実素材、開始位置、再生尺、音量を `RenderVideoInsert` として解決する。
 11. 動画要素の挿入によって後続の section / line / visual / background の frame range を shift する。
-12. shift 後の section 範囲へ `edit.sectionBgms` を割り当てる。各 BGM はそのセクション全区間で loop し、intro / outro / cutin の区間では再生しない。編集 Asset は project snapshot と project 内ファイルだけから解決し、live な Asset `status` や SQLite を出力時に参照しない。
-13. 効果音をセリフ基準の位置へ割り当てる。
+12. shift 後の enabled section 範囲へ `edit.sectionBgms` を割り当てる。各 BGM はそのセクション全区間で loop し、intro / outro / cutin の区間では再生しない。編集 Asset は project snapshot と project 内ファイルだけから解決し、live な Asset `status` や SQLite を出力時に参照しない。disabled section の BGM の missing / stale は output blocker にしない。
+13. enabled section の effective view に含まれる line を基準に効果音を割り当てる。disabled section の sound effect は resolve / validation の対象にしない。
 14. section の ScreenTemplate と `ScriptSection.name` からの `sectionTitle`、`speaker-1` / `speaker-2` の character mapping、resolved geometry、transform、font size、`flipX`、content slot、segment ごとの generic visual の `outerFrame` / `contentClip` / `fit` / `crop` / annotation を共有 resolver で確定する。current `VideoProject 1.9.0` は enabled section の section-only selection を入力とし、`RenderManifest 2.9.0` の section / line / visual shape、visual、全体 duration、resolved playback state を生成する。動画 segment の provenance `startMs` / `endMs` は元 assignment range を保持し、`playing` branch は playing presentation frames だけを反映した `sourceTrimBeforeFrame` / `sourceTrimAfterFrame`、`paused` branch は source end 前の一点の `sourceFrame`、`ended` branch は `lastDrawableSourceFrame`（整数 frame では `sourceEndFrame - 1`）を解決する。
 15. enabled section の effective view、`sourceProjectHash` と参照素材のチェックサムを記録し、入力が同一の場合だけ生成済みキャッシュを再利用する。enabled section が 0 件なら `NO_ENABLED_SECTION` で compile を終了する。
 
