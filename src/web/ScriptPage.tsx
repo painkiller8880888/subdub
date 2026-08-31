@@ -2817,13 +2817,6 @@ export function ScriptPage() {
                       </code>
                     </div>
                   </div>
-                  <button
-                    className="button"
-                    type="button"
-                    onClick={() => addLine(sectionIndex)}
-                  >
-                    セリフを追加
-                  </button>
                 </header>
                 {section.lines.length === 0 ? (
                   <p className="status-message">セリフはまだありません。</p>
@@ -2956,6 +2949,13 @@ export function ScriptPage() {
                     })}
                   </div>
                 )}
+                <button
+                  className="button script-section-add-line"
+                  type="button"
+                  onClick={() => addLine(sectionIndex)}
+                >
+                  セリフを追加
+                </button>
               </section>
             );
           })}
