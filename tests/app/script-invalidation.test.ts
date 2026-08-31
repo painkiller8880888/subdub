@@ -391,6 +391,23 @@ describe("applyEditedScript", () => {
 describe("pruneInvalidatedDownstreamReferences", () => {
   it("drops a visual assignment and sound effect whose line was deleted", () => {
     const project = projectFixture();
+    project.overlays.lineOverlays = [
+      {
+        id: "overlay-outro-box",
+        lineId: "outro-mentor-1",
+        kind: "box",
+        transform: {
+          x: 0.1,
+          y: 0.1,
+          width: 0.2,
+          height: 0.2,
+          rotationDeg: 0
+        },
+        colorToken: "warning",
+        text: null,
+        animation: "none"
+      }
+    ];
     const candidate = {
       ...project.script,
       sections: project.script.sections.map((section, index) =>
@@ -410,6 +427,7 @@ describe("pruneInvalidatedDownstreamReferences", () => {
         (effect) => effect.id === "effect-attention"
       )
     ).toBe(false);
+    expect(result.project.overlays.lineOverlays).toEqual([]);
     expect(
       result.project.visuals.assignments.some(
         (assignment) => assignment.id === "visual-intro-video"

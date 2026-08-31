@@ -4,7 +4,7 @@ const EMPTY_HASH =
   "0000000000000000000000000000000000000000000000000000000000000000";
 
 export const defaultRenderManifest: RenderManifest = {
-  manifestVersion: "2.8.0",
+  manifestVersion: "2.9.0",
   sourceProjectHash: EMPTY_HASH,
   compilerInputHash: EMPTY_HASH,
   characterCatalogVersion: "default",
@@ -23,5 +23,6 @@ export const defaultRenderManifest: RenderManifest = {
   backgrounds: [],
   audioTracks: [],
   soundEffects: [],
-  inserts: []
+  inserts: [],
+  lineOverlays: []
 };

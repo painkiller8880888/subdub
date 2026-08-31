@@ -290,14 +290,15 @@ export function resolveScriptLineScreenPreview({
   assets
 }: {
   readonly projectId: string;
-  readonly project: Pick<VideoProject, "characters">;
+  readonly project: Pick<VideoProject, "characters"> &
+    Partial<Pick<VideoProject, "overlays">>;
   readonly section: Pick<ScriptSection, "name" | "background">;
   readonly line: Pick<
     ScriptLine,
-    "speakerId" | "characterVariantId" | "subtitleText"
+    "id" | "speakerId" | "characterVariantId" | "subtitleText"
   >;
   readonly catalog: CharacterVisualCatalogSnapshot | undefined;
-  /** RenderManifest 2.6.0 character snapshot; never resolve glow from catalog. */
+  /** Render manifest character snapshot; never resolve glow from catalog. */
   readonly manifest: RenderManifestGlowSnapshot | null | undefined;
   readonly assignments: readonly VisualAssignment[];
   readonly assets: ReadonlyMap<string, AssetDetail | undefined>;
@@ -313,6 +314,10 @@ export function resolveScriptLineScreenPreview({
     contents,
     dialogueGlowColor: manifestCharacter?.glowColor,
     dialogueText: line.subtitleText,
+    lineOverlays:
+      project.overlays?.lineOverlays.filter(
+        (overlay) => overlay.lineId === line.id
+      ) ?? [],
     speakerNameText:
       project.characters.find((character) => character.id === line.speakerId)
         ?.name ?? "",

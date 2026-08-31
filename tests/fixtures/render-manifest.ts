@@ -609,7 +609,7 @@ function toV25FixtureLine(
 
 export const renderManifestFixture: RenderManifest = {
   ...manifestHeader,
-  manifestVersion: "2.8.0",
+  manifestVersion: "2.9.0",
   characters: manifestHeader.characters.map((character) => ({
     ...character,
     glowColor: character.visualId === "character-mentor" ? "#e78ac3" : "#75c97a"
@@ -641,5 +641,6 @@ export const renderManifestFixture: RenderManifest = {
     startMs: null,
     playbackRate: 1,
     text: null
-  }))
+  })),
+  lineOverlays: []
 };

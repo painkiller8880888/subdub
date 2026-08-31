@@ -14,6 +14,7 @@ import {
   projectEditResponseSchema,
   projectEditSaveRequestSchema,
   projectListResponseSchema,
+  projectLineOverlaysSaveRequestSchema,
   projectMutationResponseSchema,
   projectSourceReadResponseSchema,
   projectSourceSaveRequestSchema,
@@ -142,6 +143,20 @@ export function registerProjectRoutes(
     async (request) => {
       const input = scriptSaveRequestSchema.parse(request.body);
       const project = await projectService.saveScript(
+        request.params.projectId,
+        input
+      );
+      return projectMutationResponseSchema.parse(
+        createApiSuccessResponse(project, project.revision)
+      );
+    }
+  );
+
+  app.put<{ Params: { projectId: string } }>(
+    "/api/projects/:projectId/overlays",
+    async (request) => {
+      const input = projectLineOverlaysSaveRequestSchema.parse(request.body);
+      const project = await projectService.saveLineOverlays(
         request.params.projectId,
         input
       );

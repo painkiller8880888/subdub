@@ -25,6 +25,7 @@ import {
 } from "./primitives.js";
 import { editVideoPlaybackRateSchema } from "./edit-video.js";
 import { validateVisualPlaybackSequence } from "../timeline/visual-playback.js";
+import { lineOverlayPlanSchema } from "./line-overlay.js";
 
 export const outputSettingsSchema = strictObject({
   width: z.literal(1920),
@@ -545,6 +546,11 @@ const videoProjectV17BaseSchema = strictObject({
   thumbnail: thumbnailPlanSchema
 });
 
+const videoProjectV18BaseSchema = videoProjectV17BaseSchema.extend({
+  schemaVersion: z.literal("1.8.0"),
+  overlays: lineOverlayPlanSchema
+});
+
 const legacyVideoProjectV11BaseSchema = strictObject({
   schemaVersion: z.literal("1.1.0"),
   revision: finiteNumberSchema.int().nonnegative(),
@@ -623,7 +629,8 @@ type VideoProjectDomainShape =
   | z.infer<typeof videoProjectV14BaseSchema>
   | z.infer<typeof videoProjectV15BaseSchema>
   | z.infer<typeof videoProjectV16BaseSchema>
-  | z.infer<typeof videoProjectV17BaseSchema>;
+  | z.infer<typeof videoProjectV17BaseSchema>
+  | z.infer<typeof videoProjectV18BaseSchema>;
 
 function refineVideoProject(
   project: VideoProjectDomainShape,
@@ -906,6 +913,32 @@ function refineVideoProject(
     );
     addDuplicateIssues(annotationEntries, ctx, "annotation id");
 
+    if ("overlays" in project) {
+      const lineOverlayEntries = project.overlays.lineOverlays.map(
+        (overlay, index) => ({
+          overlay,
+          path: ["overlays", "lineOverlays", index]
+        })
+      );
+      addDuplicateIssues(
+        lineOverlayEntries.map((entry) => ({
+          value: entry.overlay.id,
+          path: [...entry.path, "id"]
+        })),
+        ctx,
+        "line overlay id"
+      );
+      for (const entry of lineOverlayEntries) {
+        if (!lineById.has(entry.overlay.lineId)) {
+          addReferenceIssue(
+            ctx,
+            [...entry.path, "lineId"],
+            "line overlay lineId must reference a script line"
+          );
+        }
+      }
+    }
+
     const scriptSectionIds = new Set(
       project.script.sections.map((section) => section.id)
     );
@@ -1082,7 +1115,9 @@ export const videoProjectV16Schema =
   videoProjectV16BaseSchema.superRefine(refineVideoProject);
 export const videoProjectV17Schema =
   videoProjectV17BaseSchema.superRefine(refineVideoProject);
-export const videoProjectSchema = videoProjectV17Schema;
+export const videoProjectV18Schema =
+  videoProjectV18BaseSchema.superRefine(refineVideoProject);
+export const videoProjectSchema = videoProjectV18Schema;
 
 export type AiTaskKind = z.infer<typeof aiTaskKindSchema>;
 export type OutputSettings = z.infer<typeof outputSettingsSchema>;
@@ -1162,4 +1197,5 @@ export type VideoProjectV14 = z.infer<typeof videoProjectV14Schema>;
 export type VideoProjectV15 = z.infer<typeof videoProjectV15Schema>;
 export type VideoProjectV16 = z.infer<typeof videoProjectV16Schema>;
 export type VideoProjectV17 = z.infer<typeof videoProjectV17Schema>;
+export type VideoProjectV18 = z.infer<typeof videoProjectV18Schema>;
 export type VideoProject = z.infer<typeof videoProjectSchema>;

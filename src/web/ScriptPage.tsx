@@ -26,6 +26,7 @@ import type {
   AssetDetail,
   CharacterVisualCatalogSnapshot,
   CharacterVisualSet,
+  LineOverlay,
   Script,
   ScriptLine,
   ScriptSection,
@@ -48,6 +49,7 @@ import {
   generateProjectVoice,
   initializeProjectScript,
   searchAssets,
+  saveProjectLineOverlays,
   saveProjectScript,
   splitProjectVisualAssignment,
   updateProjectVisualAssignment
@@ -78,6 +80,7 @@ import {
   type ScriptDraftIssue
 } from "./script-editor";
 import { CharacterVisualPickerModal } from "./CharacterVisualPicker";
+import { LineOverlayEditor } from "./LineOverlayEditor";
 import { VoiceAdjustmentEditor } from "./VoiceAdjustmentEditor";
 import { visualAssignmentsPath } from "./VisualAssignmentsPage";
 import {
@@ -100,6 +103,7 @@ import {
   replacementDisplayForAsset,
   type SelectableGenericVisualAsset
 } from "./visual-assignment-editor";
+import { replaceLineOverlays } from "./line-overlay-editor";
 import {
   previewLineKey,
   projectAssetVersion,
@@ -338,6 +342,7 @@ function ScriptLineCard({
   onDuplicate,
   onDelete,
   onGenerateVoice,
+  onOpenOverlayEditor,
   onOpenPicker,
   onStartMedia,
   onPauseMedia,
@@ -367,6 +372,7 @@ function ScriptLineCard({
   readonly onDuplicate: () => void;
   readonly onDelete: () => void;
   readonly onGenerateVoice: () => void;
+  readonly onOpenOverlayEditor: () => void;
   readonly onOpenPicker: () => void;
   readonly onStartMedia: () => void;
   readonly onPauseMedia: (assignmentId: string) => void;
@@ -453,39 +459,46 @@ function ScriptLineCard({
           aria-label={`${line.id}の画面プレビュー`}
           className="script-line-card-preview"
         >
-          {resolvedTemplate.status === "ready" &&
-          resolvedTemplate.template !== undefined ? (
-            <ScreenLayoutFrame
-              ariaLabel={
-                mode === "full-screen"
-                  ? `${line.id}の16対9画面プレビュー`
-                  : `${line.id}の字幕コンパクトプレビュー`
-              }
-              className={`script-line-card-screen-preview${
-                mode === "full-screen"
-                  ? " script-line-card-full-preview"
-                  : " script-line-card-dialogue-preview"
-              }`}
-              mode={mode === "full-screen" ? "full" : "dialogue-only"}
-              preview={linePreview}
-              template={resolvedTemplate.template}
-            />
-          ) : (
-            <div
-              aria-label={
-                templateReferenceError ?? "画面テンプレートを読み込み中"
-              }
-              className="script-line-card-preview-state"
-              role="img"
-            >
-              <strong>
-                {templateReferenceError ?? "テンプレートを読み込み中…"}
-              </strong>
-              {templateReferenceError !== null ? (
-                <span>activeなテンプレートを選び直してください。</span>
-              ) : null}
-            </div>
-          )}
+          <button
+            aria-label={`${line.id}のオーバーレイを編集`}
+            className="script-line-card-preview-trigger"
+            type="button"
+            onClick={onOpenOverlayEditor}
+          >
+            {resolvedTemplate.status === "ready" &&
+            resolvedTemplate.template !== undefined ? (
+              <ScreenLayoutFrame
+                ariaLabel={
+                  mode === "full-screen"
+                    ? `${line.id}の16対9画面プレビュー`
+                    : `${line.id}の字幕コンパクトプレビュー`
+                }
+                className={`script-line-card-screen-preview${
+                  mode === "full-screen"
+                    ? " script-line-card-full-preview"
+                    : " script-line-card-dialogue-preview"
+                }`}
+                mode={mode === "full-screen" ? "full" : "dialogue-only"}
+                preview={linePreview}
+                template={resolvedTemplate.template}
+              />
+            ) : (
+              <div
+                aria-label={
+                  templateReferenceError ?? "画面テンプレートを読み込み中"
+                }
+                className="script-line-card-preview-state"
+                role="img"
+              >
+                <strong>
+                  {templateReferenceError ?? "テンプレートを読み込み中…"}
+                </strong>
+                {templateReferenceError !== null ? (
+                  <span>activeなテンプレートを選び直してください。</span>
+                ) : null}
+              </div>
+            )}
+          </button>
         </aside>
 
         <div className="script-line-card-editor">
@@ -923,6 +936,10 @@ export function ScriptPage() {
   const [mediaKindChangeConfirmation, setMediaKindChangeConfirmation] =
     useState<MediaKindChangeConfirmation | null>(null);
   const [mediaActionPending, setMediaActionPending] = useState(false);
+  const [overlayEditorLineId, setOverlayEditorLineId] = useState<string | null>(
+    null
+  );
+  const [overlayError, setOverlayError] = useState<unknown>(null);
   const projectIdRef = useRef(projectId ?? "");
   const projectGenerationRef = useRef(0);
   const revisionRef = useRef(0);
@@ -1034,6 +1051,51 @@ export function ScriptPage() {
       updateMutationCaches(project);
       revisionRef.current = project.revision;
       setMediaError(null);
+    },
+    retry: false
+  });
+
+  const lineOverlayMutation = useMutation({
+    mutationFn: ({
+      projectId: savingProjectId,
+      overlays,
+      expectedRevision
+    }: {
+      projectId: string;
+      projectGeneration: number;
+      overlays: readonly LineOverlay[];
+      expectedRevision: number;
+    }) =>
+      saveProjectLineOverlays(savingProjectId, {
+        overlays: { lineOverlays: [...overlays] },
+        expectedRevision
+      }),
+    onSuccess: (savedProject, variables) => {
+      if (
+        isProjectContextCurrent(
+          projectIdRef.current,
+          projectGenerationRef.current,
+          variables.projectId,
+          variables.projectGeneration
+        )
+      ) {
+        updateMutationCaches(savedProject);
+        revisionRef.current = savedProject.revision;
+        setOverlayEditorLineId(null);
+        setOverlayError(null);
+      }
+    },
+    onError: (error, variables) => {
+      if (
+        isProjectContextCurrent(
+          projectIdRef.current,
+          projectGenerationRef.current,
+          variables.projectId,
+          variables.projectGeneration
+        )
+      ) {
+        setOverlayError(error);
+      }
     },
     retry: false
   });
@@ -1183,6 +1245,8 @@ export function ScriptPage() {
     setMediaRangeConfirmation(null);
     setMediaSplitConfirmation(null);
     setMediaKindChangeConfirmation(null);
+    setOverlayEditorLineId(null);
+    setOverlayError(null);
     coordinator.reset();
   }, [coordinator, projectId]);
 
@@ -1508,6 +1572,72 @@ export function ScriptPage() {
         projectIdRef.current
       ]) ?? projectQuery.data
     );
+  }
+
+  async function openLineOverlayEditor(
+    sectionId: string,
+    lineId: string
+  ): Promise<void> {
+    const draftScript = draftRef.current;
+    const locator =
+      draftScript === null
+        ? undefined
+        : createScriptLineLocator(draftScript, sectionId, lineId);
+    const flushed = await coordinatorRef.current?.flush();
+    if (flushed !== true) {
+      setOverlayError(
+        new Error("台本を保存できないため注釈を編集できません。")
+      );
+      return;
+    }
+    const currentProject = latestProject();
+    if (currentProject === undefined) {
+      setOverlayError(
+        new Error("プロジェクトを読み込んでから操作してください。")
+      );
+      return;
+    }
+    const resolvedLineId =
+      locator === undefined
+        ? currentProject.script.sections
+            .find((section) => section.id === sectionId)
+            ?.lines.find((line) => line.id === lineId)?.id
+        : resolveScriptLineId(currentProject.script, locator);
+    if (resolvedLineId === undefined) {
+      setOverlayError(
+        new Error("対象セリフを保存後の台本から解決できません。")
+      );
+      return;
+    }
+    setOverlayError(null);
+    setOverlayEditorLineId(resolvedLineId);
+  }
+
+  function saveLineOverlayDraft(
+    lineId: string,
+    lineOverlays: readonly LineOverlay[]
+  ): void {
+    if (lineOverlayMutation.isPending) {
+      return;
+    }
+    const currentProject = latestProject();
+    if (currentProject === undefined) {
+      setOverlayError(
+        new Error("プロジェクトを読み込んでから保存してください。")
+      );
+      return;
+    }
+    setOverlayError(null);
+    lineOverlayMutation.mutate({
+      projectId: currentProject.metadata.id,
+      projectGeneration: projectGenerationRef.current,
+      overlays: replaceLineOverlays(
+        currentProject.overlays.lineOverlays,
+        lineId,
+        lineOverlays
+      ),
+      expectedRevision: currentProject.revision
+    });
   }
 
   function beginMediaAction(): boolean {
@@ -2335,6 +2465,40 @@ export function ScriptPage() {
     assets,
     assetLoadingKeys
   });
+  const overlayEditorSection =
+    overlayEditorLineId === null
+      ? undefined
+      : draft.sections.find((section) =>
+          section.lines.some((line) => line.id === overlayEditorLineId)
+        );
+  const overlayEditorLine = overlayEditorSection?.lines.find(
+    (line) => line.id === overlayEditorLineId
+  );
+  const overlayEditorPreviewState =
+    overlayEditorSection === undefined || overlayEditorLine === undefined
+      ? undefined
+      : previewStates.get(
+          previewLineKey(overlayEditorSection.id, overlayEditorLine.id)
+        );
+  const overlayEditorTemplate =
+    overlayEditorSection === undefined
+      ? undefined
+      : templateDetails.get(overlayEditorSection.screenTemplateId);
+  const overlayEditorPreview =
+    overlayEditorSection === undefined ||
+    overlayEditorLine === undefined ||
+    overlayEditorPreviewState === undefined
+      ? undefined
+      : resolveScriptLineScreenPreview({
+          projectId: project.metadata.id,
+          project,
+          section: overlayEditorSection,
+          line: overlayEditorLine,
+          catalog,
+          manifest,
+          assignments: overlayEditorPreviewState.assignments,
+          assets
+        });
 
   return (
     <main className="page-shell script-editor-page">
@@ -2736,6 +2900,9 @@ export function ScriptPage() {
                           onGenerateVoice={() =>
                             void generateVoiceLine(section.id, line.id)
                           }
+                          onOpenOverlayEditor={() =>
+                            void openLineOverlayEditor(section.id, line.id)
+                          }
                           onOpenPicker={() => openVisualPicker(line.id)}
                           onStartMedia={() =>
                             openMediaPicker(
@@ -2948,6 +3115,61 @@ export function ScriptPage() {
           onSelect={(asset) => void selectMediaAsset(asset)}
           search={mediaPickerSearch}
         />
+      ) : null}
+
+      {overlayEditorLineId !== null &&
+      overlayEditorLine !== undefined &&
+      overlayEditorSection !== undefined ? (
+        <ScriptMediaDialog
+          className="line-overlay-editor-dialog"
+          describedById="line-overlay-editor-description"
+          onClose={() => {
+            if (!lineOverlayMutation.isPending) {
+              setOverlayEditorLineId(null);
+              setOverlayError(null);
+            }
+          }}
+          titleId="line-overlay-editor-title"
+        >
+          {overlayEditorTemplate !== undefined &&
+          overlayEditorPreview !== undefined ? (
+            <LineOverlayEditor
+              key={overlayEditorLine.id}
+              initialOverlays={project.overlays.lineOverlays.filter(
+                (overlay) => overlay.lineId === overlayEditorLine.id
+              )}
+              line={overlayEditorLine}
+              onCancel={() => {
+                setOverlayEditorLineId(null);
+                setOverlayError(null);
+              }}
+              onSave={(lineOverlays) =>
+                saveLineOverlayDraft(overlayEditorLine.id, lineOverlays)
+              }
+              pending={lineOverlayMutation.isPending}
+              preview={overlayEditorPreview}
+              template={overlayEditorTemplate}
+              error={overlayError}
+            />
+          ) : (
+            <div className="message-panel message-panel-warning">
+              <h2 id="line-overlay-editor-title">画面注釈を編集できません</h2>
+              <p id="line-overlay-editor-description">
+                セリフの画面テンプレートを読み込めないため、注釈エディターを開けません。
+              </p>
+              <button
+                className="button"
+                type="button"
+                onClick={() => {
+                  setOverlayEditorLineId(null);
+                  setOverlayError(null);
+                }}
+              >
+                閉じる
+              </button>
+            </div>
+          )}
+        </ScriptMediaDialog>
       ) : null}
 
       <CharacterVisualPickerModal

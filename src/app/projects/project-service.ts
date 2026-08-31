@@ -8,6 +8,7 @@ import {
   projectBriefSaveRequestSchema,
   projectCharactersSaveRequestSchema,
   projectCreateRequestSchema,
+  projectLineOverlaysSaveRequestSchema,
   projectSourceSaveRequestSchema,
   scriptApproveRequestSchema,
   scriptInitializeRequestSchema,
@@ -527,6 +528,22 @@ export class ProjectService {
     return this.repository.save(
       projectId,
       updatedProjectResult.data,
+      request.expectedRevision
+    );
+  }
+
+  async saveLineOverlays(
+    projectId: unknown,
+    input: unknown
+  ): Promise<VideoProject> {
+    const request = projectLineOverlaysSaveRequestSchema.parse(input);
+    const currentProject = await this.repository.read(projectId);
+    return this.repository.save(
+      projectId,
+      {
+        ...currentProject,
+        overlays: request.overlays
+      },
       request.expectedRevision
     );
   }

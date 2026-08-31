@@ -5,6 +5,7 @@ import type {
   DisplayCoordinateSpace,
   StaticAnnotation
 } from "../schema/common";
+import type { LineOverlay } from "../schema/line-overlay";
 import {
   SCREEN_TEMPLATE_CANVAS_WIDTH,
   type ScreenTemplate,
@@ -21,6 +22,7 @@ import {
   dialogueWindowTextShadow
 } from "../screen-template-style";
 import { AnnotationLayer } from "./layout";
+import { LineOverlayLayer } from "./line-overlay-layer";
 import {
   SECTION_TITLE_HORIZONTAL_PADDING_PER_SIDE_PX,
   SECTION_TITLE_LINE_HEIGHT,
@@ -68,6 +70,8 @@ export type ScreenLayoutPreview = Readonly<{
   content: ScreenLayoutContentPreview;
   contents?: readonly ScreenLayoutContentPreview[];
   background?: ScreenLayoutBackground;
+  lineOverlays?: readonly LineOverlay[];
+  frame?: number;
 }>;
 
 export const DEFAULT_SCREEN_LAYOUT_PREVIEW: ScreenLayoutPreview = {
@@ -480,6 +484,10 @@ function renderDialogueOnlyFrame({
         style={innerStyle}
       >
         {renderScreenTemplateElement(dialogueElement, preview)}
+        <LineOverlayLayer
+          overlays={preview.lineOverlays ?? []}
+          frame={preview.frame ?? 0}
+        />
       </div>
     </div>
   );
@@ -541,6 +549,10 @@ export function ScreenLayoutFrame({
         resolvedLayout.elements,
         contentPreviewsForLayout
       )}
+      <LineOverlayLayer
+        overlays={resolvedPreview.lineOverlays ?? []}
+        frame={resolvedPreview.frame ?? 0}
+      />
     </div>
   );
 }

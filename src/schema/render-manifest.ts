@@ -34,6 +34,10 @@ import {
 import { visualPlaybackCueSchema } from "./visual-playback.js";
 import { editVideoPlaybackRateSchema } from "./edit-video.js";
 import { mediaMillisecondsToFrames } from "../media-frame.js";
+import {
+  lineOverlayAnimationSchema,
+  lineOverlayColorTokenSchema
+} from "./line-overlay.js";
 
 export const sourceAssetChecksumSchema = strictObject({
   path: relativePosixPathSchema,
@@ -53,6 +57,49 @@ export const renderLineSchema = strictObject({
   expression: expressionSchema,
   characterVariantId: idSchema
 });
+
+const renderLineOverlayTransformSchema = strictObject({
+  x: finiteNumberSchema,
+  y: finiteNumberSchema,
+  width: positiveNumberSchema,
+  height: positiveNumberSchema,
+  rotationDeg: finiteNumberSchema
+});
+
+const renderLineOverlayBaseFields = {
+  id: idSchema,
+  lineId: idSchema,
+  from: nonNegativeIntegerSchema,
+  durationInFrames: positiveIntegerSchema,
+  resolvedTransform: renderLineOverlayTransformSchema,
+  colorToken: lineOverlayColorTokenSchema,
+  animation: lineOverlayAnimationSchema
+};
+
+export const renderLineOverlaySchema = z.discriminatedUnion("kind", [
+  strictObject({
+    ...renderLineOverlayBaseFields,
+    kind: z.literal("circle"),
+    text: z.null()
+  }),
+  strictObject({
+    ...renderLineOverlayBaseFields,
+    kind: z.literal("box"),
+    text: z.null()
+  }),
+  strictObject({
+    ...renderLineOverlayBaseFields,
+    kind: z.literal("arrow"),
+    text: z.null()
+  }),
+  strictObject({
+    ...renderLineOverlayBaseFields,
+    kind: z.literal("label"),
+    text: z.string().refine((value) => value.trim().length > 0, {
+      message: "label overlay text must not be blank"
+    })
+  })
+]);
 
 const renderCharacterFileSchema = strictObject({
   path: relativePosixPathSchema,
@@ -1956,6 +2003,35 @@ const renderManifestV28BaseSchema = renderManifestV27BaseSchema.extend({
   inserts: z.array(renderInsertV28Schema)
 });
 
+const renderManifestV29BaseSchema = renderManifestV28BaseSchema.extend({
+  manifestVersion: z.literal("2.9.0"),
+  lineOverlays: z.array(renderLineOverlaySchema)
+});
+
+function renderLineOverlayTransformIntersectsCanvas(
+  transform: z.infer<typeof renderLineOverlayTransformSchema>,
+  canvasWidth: number,
+  canvasHeight: number
+): boolean {
+  const centerX = transform.x + transform.width / 2;
+  const centerY = transform.y + transform.height / 2;
+  const halfWidth = transform.width / 2;
+  const halfHeight = transform.height / 2;
+  const radians = (transform.rotationDeg * Math.PI) / 180;
+  const boundsWidth =
+    Math.abs(Math.cos(radians)) * halfWidth +
+    Math.abs(Math.sin(radians)) * halfHeight;
+  const boundsHeight =
+    Math.abs(Math.sin(radians)) * halfWidth +
+    Math.abs(Math.cos(radians)) * halfHeight;
+  return (
+    centerX - boundsWidth < canvasWidth &&
+    centerX + boundsWidth > 0 &&
+    centerY - boundsHeight < canvasHeight &&
+    centerY + boundsHeight > 0
+  );
+}
+
 function stripV26ResolvedLayout(
   layout: z.infer<typeof resolvedScreenLayoutV26Schema>
 ): z.infer<typeof resolvedScreenLayoutSchema> {
@@ -2063,10 +2139,81 @@ export const renderManifestV28Schema = renderManifestV28BaseSchema.superRefine(
   }
 );
 
+export const renderManifestV29Schema = renderManifestV29BaseSchema.superRefine(
+  (manifest, ctx) => {
+    const { lineOverlays: _lineOverlays, ...legacyFields } = manifest;
+    void _lineOverlays;
+    const legacy = {
+      ...legacyFields,
+      manifestVersion: "2.8.0" as const
+    };
+    const result = renderManifestV28Schema.safeParse(legacy);
+    if (!result.success) {
+      for (const issue of result.error.issues) {
+        ctx.addIssue({
+          code: "custom",
+          path: issue.path,
+          message: issue.message
+        });
+      }
+    }
+
+    const lineById = new Map(manifest.lines.map((line) => [line.id, line]));
+    const seenOverlayIds = new Set<string>();
+    for (const [index, overlay] of manifest.lineOverlays.entries()) {
+      if (seenOverlayIds.has(overlay.id)) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["lineOverlays", index, "id"],
+          message: "line overlay id must be unique"
+        });
+      }
+      seenOverlayIds.add(overlay.id);
+
+      const line = lineById.get(overlay.lineId);
+      if (line === undefined) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["lineOverlays", index, "lineId"],
+          message: "line overlay lineId must reference a render line"
+        });
+        continue;
+      }
+      if (overlay.from !== line.from) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["lineOverlays", index, "from"],
+          message: "line overlay from must match its render line"
+        });
+      }
+      if (overlay.durationInFrames !== line.durationInFrames) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["lineOverlays", index, "durationInFrames"],
+          message: "line overlay duration must match its render line"
+        });
+      }
+      if (
+        !renderLineOverlayTransformIntersectsCanvas(
+          overlay.resolvedTransform,
+          manifest.width,
+          manifest.height
+        )
+      ) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["lineOverlays", index, "resolvedTransform"],
+          message: "line overlay must intersect the composition canvas"
+        });
+      }
+    }
+  }
+);
+
 /** Current production manifest schema. Earlier versions remain available
  * explicitly for compatibility parsing and tests that exercise frozen
  * contracts. */
-export const renderManifestSchema = renderManifestV28Schema;
+export const renderManifestSchema = renderManifestV29Schema;
 
 export type SourceAssetChecksum = z.infer<typeof sourceAssetChecksumSchema>;
 export type RenderLineV23 = z.infer<typeof renderLineSchema>;
@@ -2116,6 +2263,8 @@ export type RenderManifestV25 = z.infer<typeof renderManifestV25Schema>;
 export type RenderManifestV26 = z.infer<typeof renderManifestV26Schema>;
 export type RenderManifestV27 = z.infer<typeof renderManifestV27Schema>;
 export type RenderManifestV28 = z.infer<typeof renderManifestV28Schema>;
+export type RenderLineOverlay = z.infer<typeof renderLineOverlaySchema>;
+export type RenderManifestV29 = z.infer<typeof renderManifestV29Schema>;
 export type ResolvedScreenElement = z.infer<typeof resolvedScreenElementSchema>;
 export type ResolvedScreenLayout = z.infer<typeof resolvedScreenLayoutSchema>;
 export type ResolvedScreenElementV26 = z.infer<
