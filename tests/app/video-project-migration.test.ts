@@ -11,6 +11,7 @@ import {
   videoProjectV14Schema,
   videoProjectV13Schema,
   videoProjectV16Schema,
+  videoProjectV17Schema,
   videoProjectSchema
 } from "../../src/schema/index.js";
 import { videoProjectFixture } from "../fixtures/video-project.js";
@@ -26,6 +27,7 @@ function legacyProject(
     string,
     unknown
   >;
+  delete legacy.overlays;
   const edit = legacy.edit as {
     sectionBgms: Array<{
       id: string;
@@ -175,8 +177,8 @@ describe("video project schema migration", () => {
     });
 
     const migrated = videoProjectSchema.parse(result.project);
-    expect(migrated.schemaVersion).toBe("1.7.0");
-    expect(migrated.revision).toBe(11);
+    expect(migrated.schemaVersion).toBe("1.8.0");
+    expect(migrated.revision).toBe(12);
     expect(
       migrated.script.sections.every(
         (section) => section.screenTemplateId === "screen-template-standard"
@@ -223,7 +225,27 @@ describe("video project schema migration", () => {
     const migrated = migrateVideoProject(current);
 
     expect(migrated).toBe(current);
-    expect((migrated as typeof current).schemaVersion).toBe("1.7.0");
+    expect((migrated as typeof current).schemaVersion).toBe("1.8.0");
+  });
+
+  it("adds an empty line overlay plan when migrating 1.7.0", () => {
+    const legacy = clone(videoProjectFixture) as unknown as Record<
+      string,
+      unknown
+    >;
+    const visuals = clone(legacy.visuals);
+    delete legacy.overlays;
+    legacy.schemaVersion = "1.7.0";
+    legacy.revision = 4;
+
+    expect(videoProjectV17Schema.safeParse(legacy).success).toBe(true);
+    const migrated = videoProjectSchema.parse(migrateVideoProject(legacy));
+
+    expect(migrated.schemaVersion).toBe("1.8.0");
+    expect(migrated.revision).toBe(5);
+    expect(migrated.overlays).toEqual({ lineOverlays: [] });
+    expect(migrated.visuals).toEqual(visuals);
+    expect(legacy).not.toHaveProperty("overlays");
   });
 
   it("adds edit video timing defaults when migrating 1.6.0", () => {
@@ -235,6 +257,7 @@ describe("video project schema migration", () => {
         sectionBgms: unknown[];
       };
     };
+    delete (legacy as unknown as Record<string, unknown>).overlays;
     legacy.schemaVersion = "1.6.0";
     legacy.revision = 8;
     legacy.edit.videoElements = [
@@ -256,8 +279,8 @@ describe("video project schema migration", () => {
     const migrated = videoProjectSchema.parse(migrateVideoProject(legacy));
 
     expect(migrated).toMatchObject({
-      schemaVersion: "1.7.0",
-      revision: 9,
+      schemaVersion: "1.8.0",
+      revision: 10,
       edit: {
         videoElements: [
           {
@@ -276,6 +299,7 @@ describe("video project schema migration", () => {
       string,
       unknown
     >;
+    delete legacy.overlays;
     legacy.schemaVersion = "1.4.0";
     legacy.revision = 12;
     const visuals = legacy.visuals as {
@@ -294,8 +318,8 @@ describe("video project schema migration", () => {
 
     expect(result.migrated).toBe(true);
     const migrated = videoProjectSchema.parse(result.project);
-    expect(migrated.schemaVersion).toBe("1.7.0");
-    expect(migrated.revision).toBe(15);
+    expect(migrated.schemaVersion).toBe("1.8.0");
+    expect(migrated.revision).toBe(16);
     expect(migrated.visuals.assignments[0]?.display).toMatchObject({
       kind: "video",
       playbackCues: []
@@ -314,6 +338,7 @@ describe("video project schema migration", () => {
       string,
       unknown
     >;
+    delete project.overlays;
     project.schemaVersion = "1.3.0";
     const script = project.script as {
       sections: Array<{
@@ -360,8 +385,8 @@ describe("video project schema migration", () => {
     });
 
     const migrated = videoProjectSchema.parse(result.project);
-    expect(migrated.schemaVersion).toBe("1.7.0");
-    expect(migrated.revision).toBe((project.revision as number) + 4);
+    expect(migrated.schemaVersion).toBe("1.8.0");
+    expect(migrated.revision).toBe((project.revision as number) + 5);
     expect(
       migrated.script.sections.map((section) => section.screenTemplateId)
     ).toEqual(script.sections.map((section) => section.screenTemplateId));
@@ -400,6 +425,7 @@ describe("video project schema migration", () => {
       string,
       unknown
     >;
+    delete project.overlays;
     project.schemaVersion = "1.2.0";
     const script = project.script as {
       sections: Array<{
@@ -436,6 +462,7 @@ describe("video project schema migration", () => {
       string,
       unknown
     >;
+    delete project.overlays;
     project.schemaVersion = "1.2.0";
     const script = project.script as {
       sections: Array<{

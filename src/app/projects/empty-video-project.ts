@@ -78,7 +78,7 @@ export function createEmptyVideoProject(
   const manualVersion = options.manualVersion ?? "";
 
   const project: VideoProject = {
-    schemaVersion: "1.7.0",
+    schemaVersion: "1.8.0",
     revision: 0,
     metadata: {
       id: options.projectId,
@@ -151,6 +151,9 @@ export function createEmptyVideoProject(
       status: "draft",
       suggestionRunIds: [],
       assignments: []
+    },
+    overlays: {
+      lineOverlays: []
     },
     audio: {
       soundEffects: []

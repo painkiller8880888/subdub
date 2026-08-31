@@ -8,13 +8,16 @@ import {
   videoProjectV13Schema,
   videoProjectV14Schema,
   videoProjectV15Schema,
-  videoProjectV16Schema
+  videoProjectV16Schema,
+  videoProjectV17Schema
 } from "../../schema/video-project.js";
 import { STANDARD_SCREEN_TEMPLATE_ID } from "../screen-templates/screen-template-seed.js";
 import type { ScreenTemplateCatalogPort } from "./screen-template-selection.js";
 
-export const CURRENT_VIDEO_PROJECT_SCHEMA_VERSION = "1.7.0" as const;
-export const PREVIOUS_VIDEO_PROJECT_SCHEMA_VERSION = "1.6.0" as const;
+export const CURRENT_VIDEO_PROJECT_SCHEMA_VERSION = "1.8.0" as const;
+export const PREVIOUS_VIDEO_PROJECT_SCHEMA_VERSION = "1.7.0" as const;
+export const EDIT_VIDEO_TIMING_PREVIOUS_VIDEO_PROJECT_SCHEMA_VERSION =
+  "1.6.0" as const;
 export const INSERT_TEXT_PREVIOUS_VIDEO_PROJECT_SCHEMA_VERSION =
   "1.5.0" as const;
 export const PLAYBACK_CUE_PREVIOUS_VIDEO_PROJECT_SCHEMA_VERSION =
@@ -163,6 +166,7 @@ function migrationId(
     | typeof LINE_SCREEN_TEMPLATE_PREVIOUS_VIDEO_PROJECT_SCHEMA_VERSION
     | typeof PLAYBACK_CUE_PREVIOUS_VIDEO_PROJECT_SCHEMA_VERSION
     | typeof INSERT_TEXT_PREVIOUS_VIDEO_PROJECT_SCHEMA_VERSION
+    | typeof EDIT_VIDEO_TIMING_PREVIOUS_VIDEO_PROJECT_SCHEMA_VERSION
     | typeof PREVIOUS_VIDEO_PROJECT_SCHEMA_VERSION
 ): string {
   const digest = createHash("sha256")
@@ -558,7 +562,8 @@ function migrateInsertTextTemplateProject(
       textTemplateId: null
     };
   });
-  migrated.schemaVersion = PREVIOUS_VIDEO_PROJECT_SCHEMA_VERSION;
+  migrated.schemaVersion =
+    EDIT_VIDEO_TIMING_PREVIOUS_VIDEO_PROJECT_SCHEMA_VERSION;
   migrated.revision = v15Result.data.revision + (incrementRevision ? 1 : 0);
   return migrated;
 }
@@ -589,8 +594,27 @@ function migrateEditVideoTimingProject(
       playbackRate: 1
     };
   });
-  migrated.schemaVersion = CURRENT_VIDEO_PROJECT_SCHEMA_VERSION;
+  migrated.schemaVersion = PREVIOUS_VIDEO_PROJECT_SCHEMA_VERSION;
   migrated.revision = v16Result.data.revision + (incrementRevision ? 1 : 0);
+  return migrated;
+}
+
+function migrateLineOverlaysProject(
+  project: unknown,
+  incrementRevision: boolean
+): unknown | undefined {
+  const v17Result = videoProjectV17Schema.safeParse(project);
+  if (!v17Result.success) {
+    return undefined;
+  }
+
+  const migrated = cloneJson(v17Result.data);
+  if (!isRecord(migrated)) {
+    return undefined;
+  }
+  migrated.overlays = { lineOverlays: [] };
+  migrated.schemaVersion = CURRENT_VIDEO_PROJECT_SCHEMA_VERSION;
+  migrated.revision = v17Result.data.revision + (incrementRevision ? 1 : 0);
   return migrated;
 }
 
@@ -610,7 +634,32 @@ export function migrateVideoProjectWithDiagnostics(
       input,
       PREVIOUS_VIDEO_PROJECT_SCHEMA_VERSION
     );
-    const migrated = migrateEditVideoTimingProject(input, true);
+    const migrated = migrateLineOverlaysProject(input, true);
+    if (migrated === undefined) {
+      return noMigration(input);
+    }
+    return {
+      project: migrated,
+      migrated: true,
+      migrationId: currentMigrationId,
+      logEntries: [],
+      blockedReason: undefined
+    };
+  }
+
+  if (
+    input.schemaVersion ===
+    EDIT_VIDEO_TIMING_PREVIOUS_VIDEO_PROJECT_SCHEMA_VERSION
+  ) {
+    const currentMigrationId = migrationId(
+      input,
+      EDIT_VIDEO_TIMING_PREVIOUS_VIDEO_PROJECT_SCHEMA_VERSION
+    );
+    const editVideoTimingMigration = migrateEditVideoTimingProject(input, true);
+    if (editVideoTimingMigration === undefined) {
+      return noMigration(input);
+    }
+    const migrated = migrateLineOverlaysProject(editVideoTimingMigration, true);
     if (migrated === undefined) {
       return noMigration(input);
     }
@@ -635,7 +684,14 @@ export function migrateVideoProjectWithDiagnostics(
     if (insertTextMigration === undefined) {
       return noMigration(input);
     }
-    const migrated = migrateEditVideoTimingProject(insertTextMigration, true);
+    const editVideoTimingMigration = migrateEditVideoTimingProject(
+      insertTextMigration,
+      true
+    );
+    if (editVideoTimingMigration === undefined) {
+      return noMigration(input);
+    }
+    const migrated = migrateLineOverlaysProject(editVideoTimingMigration, true);
     if (migrated === undefined) {
       return noMigration(input);
     }
@@ -674,8 +730,15 @@ export function migrateVideoProjectWithDiagnostics(
     if (editVideoTimingMigration === undefined) {
       return noMigration(input);
     }
+    const lineOverlayMigration = migrateLineOverlaysProject(
+      editVideoTimingMigration,
+      true
+    );
+    if (lineOverlayMigration === undefined) {
+      return noMigration(input);
+    }
     return {
-      project: editVideoTimingMigration,
+      project: lineOverlayMigration,
       migrated: true,
       migrationId: currentMigrationId,
       logEntries: [],
@@ -771,8 +834,16 @@ export function migrateVideoProjectWithDiagnostics(
     return noMigration(input);
   }
 
+  const lineOverlayMigration = migrateLineOverlaysProject(
+    editVideoTimingMigration,
+    true
+  );
+  if (lineOverlayMigration === undefined) {
+    return noMigration(input);
+  }
+
   return {
-    project: editVideoTimingMigration,
+    project: lineOverlayMigration,
     migrated: true,
     migrationId: currentMigrationId,
     logEntries: [

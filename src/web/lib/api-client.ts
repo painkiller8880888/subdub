@@ -36,6 +36,7 @@ import {
   projectEditResponseSchema,
   projectEditSaveRequestSchema,
   projectListResponseSchema,
+  projectLineOverlaysSaveRequestSchema,
   projectMutationResponseSchema,
   projectSourceReadResponseSchema,
   projectSourceSaveRequestSchema,
@@ -103,6 +104,7 @@ import {
   type ProjectCreateRequest,
   type ProjectEditResponse,
   type ProjectEditSaveRequest,
+  type ProjectLineOverlaysSaveRequest,
   type ModelsResponse,
   type ProjectSourceContent,
   type ProjectSourceSaveRequest,
@@ -840,6 +842,25 @@ export async function saveProjectScript(
   const validatedInput = scriptSaveRequestSchema.parse(input);
   const response = await fetchApi(
     `/api/projects/${encodeURIComponent(projectId)}/script`,
+    projectMutationResponseSchema,
+    {
+      method: "PUT",
+      headers: {
+        "content-type": "application/json"
+      },
+      body: JSON.stringify(validatedInput)
+    }
+  );
+  return response.data;
+}
+
+export async function saveProjectLineOverlays(
+  projectId: string,
+  input: ProjectLineOverlaysSaveRequest
+): Promise<VideoProject> {
+  const validatedInput = projectLineOverlaysSaveRequestSchema.parse(input);
+  const response = await fetchApi(
+    `/api/projects/${encodeURIComponent(projectId)}/overlays`,
     projectMutationResponseSchema,
     {
       method: "PUT",

@@ -73,7 +73,7 @@ function diagnosticCodes(result: RenderManifestCompileResult): string[] {
   return result.success ? [] : result.diagnostics.map(({ code }) => code);
 }
 
-describe("RenderManifest 2.8.0 insert text snapshots", () => {
+describe("RenderManifest 2.9.0 insert text snapshots", () => {
   it("snapshots multiline text and resolved template layout for intro, cutin, and outro", () => {
     const project = structuredClone(videoProjectFixture) as VideoProject;
     const videoAssignment = project.visuals.assignments.find(
@@ -125,7 +125,7 @@ describe("RenderManifest 2.8.0 insert text snapshots", () => {
     if (!result.success) {
       return;
     }
-    expect(result.manifest.manifestVersion).toBe("2.8.0");
+    expect(result.manifest.manifestVersion).toBe("2.9.0");
     expect(result.manifest.inserts.map((insert) => insert.role)).toEqual([
       "intro",
       "cutin",

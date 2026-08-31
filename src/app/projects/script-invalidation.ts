@@ -270,10 +270,14 @@ export function pruneInvalidatedDownstreamReferences(
   const soundEffects = project.audio.soundEffects.filter((effect) =>
     positions.has(effect.lineId)
   );
+  const lineOverlays = project.overlays.lineOverlays.filter((overlay) =>
+    positions.has(overlay.lineId)
+  );
   return {
     ...project,
     visuals: { ...project.visuals, assignments },
-    audio: { ...project.audio, soundEffects }
+    audio: { ...project.audio, soundEffects },
+    overlays: { ...project.overlays, lineOverlays }
   };
 }
 

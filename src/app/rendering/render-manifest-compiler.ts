@@ -26,6 +26,7 @@ import {
   renderManifestV25Schema,
   renderManifestV26Schema,
   renderManifestV28Schema,
+  renderManifestV29Schema,
   renderManifestSchema,
   sha256Schema,
   characterVisualCatalogSnapshotSchema,
@@ -46,6 +47,8 @@ import {
   type RenderManifestV26,
   type RenderManifestV27,
   type RenderManifestV28,
+  type RenderManifestV29,
+  type RenderLineOverlay,
   type RenderResolvedVideoDisplayV25,
   type RenderInsert,
   type RenderInsertV27,
@@ -86,7 +89,8 @@ import {
 import { validateVisualPlaybackSequence } from "../../timeline/visual-playback.js";
 import type { VisualPlaybackCue } from "../../schema/visual-playback.js";
 
-export const RENDER_MANIFEST_VERSION = "2.8.0" as const;
+export const RENDER_MANIFEST_VERSION = "2.9.0" as const;
+export const RENDER_MANIFEST_V28_VERSION = "2.8.0" as const;
 export const RENDER_MANIFEST_V27_VERSION = "2.7.0" as const;
 export const RENDER_MANIFEST_V26_VERSION = "2.6.0" as const;
 export const RENDER_MANIFEST_V25_VERSION = "2.5.0" as const;
@@ -2126,9 +2130,39 @@ function orderedManifestV28(manifest: RenderManifestV28): RenderManifestV28 {
   };
 }
 
+function orderedManifestV29(manifest: RenderManifestV29): RenderManifestV29 {
+  const orderedLegacy = orderedManifestV28(
+    manifest as unknown as RenderManifestV28
+  );
+  return {
+    ...orderedLegacy,
+    manifestVersion: manifest.manifestVersion,
+    lineOverlays: manifest.lineOverlays.map(
+      (overlay): RenderLineOverlay =>
+        ({
+          id: overlay.id,
+          lineId: overlay.lineId,
+          from: overlay.from,
+          durationInFrames: overlay.durationInFrames,
+          kind: overlay.kind,
+          resolvedTransform: {
+            x: overlay.resolvedTransform.x,
+            y: overlay.resolvedTransform.y,
+            width: overlay.resolvedTransform.width,
+            height: overlay.resolvedTransform.height,
+            rotationDeg: overlay.resolvedTransform.rotationDeg
+          },
+          colorToken: overlay.colorToken,
+          text: overlay.text,
+          animation: overlay.animation
+        }) as RenderLineOverlay
+    )
+  };
+}
+
 export function serializeRenderManifest(manifest: unknown): string {
   const parsed = renderManifestSchema.parse(manifest);
-  return `${JSON.stringify(orderedManifestV28(parsed), null, 2)}\n`;
+  return `${JSON.stringify(orderedManifestV29(parsed), null, 2)}\n`;
 }
 
 export function serializeRenderManifestV24(manifest: unknown): string {
@@ -4039,14 +4073,14 @@ function successV28(
   };
 }
 
-export function compileRenderManifest(
+export function compileRenderManifestV28(
   input: RenderManifestCompilerInput
-): RenderManifestCompileResult<RenderManifest> {
+): RenderManifestCompileResult<RenderManifestV28> {
   const baseResult = compileRenderManifestV26(input, {
     resolveEditVideoTiming: true
   });
   if (!baseResult.success) {
-    return baseResult as RenderManifestCompileResult<RenderManifest>;
+    return baseResult as RenderManifestCompileResult<RenderManifestV28>;
   }
 
   const projectResult = videoProjectSchema.safeParse(
@@ -4163,14 +4197,14 @@ export function compileRenderManifest(
       }
     }));
   const compilerInputHash = sha256CanonicalJson({
-    manifestVersion: RENDER_MANIFEST_VERSION,
+    manifestVersion: RENDER_MANIFEST_V28_VERSION,
     baseCompilerInputHash: baseResult.manifest.compilerInputHash,
     insertTextTemplates: dependencySnapshot,
     inserts
   });
   const manifest = {
     ...baseResult.manifest,
-    manifestVersion: RENDER_MANIFEST_VERSION,
+    manifestVersion: RENDER_MANIFEST_V28_VERSION,
     compilerInputHash,
     inserts
   } satisfies RenderManifestV28;
@@ -4185,6 +4219,144 @@ export function compileRenderManifest(
     return failure(diagnostics, baseResult.warnings);
   }
   return successV28(manifestResult.data, baseResult.warnings);
+}
+
+function resolveLineOverlays(
+  project: ReturnType<typeof videoProjectSchema.parse>,
+  manifest: RenderManifestV28,
+  diagnostics: RenderManifestDiagnostic[]
+): RenderLineOverlay[] {
+  const lineOrder = new Map(
+    manifest.lines.map((line, index) => [line.id, index] as const)
+  );
+  const resolved: Array<{ overlay: RenderLineOverlay; sourceIndex: number }> =
+    [];
+
+  for (const [
+    sourceIndex,
+    overlay
+  ] of project.overlays.lineOverlays.entries()) {
+    const line = manifest.lines.find(
+      (candidate) => candidate.id === overlay.lineId
+    );
+    if (line === undefined) {
+      addDiagnostic(
+        diagnostics,
+        RENDER_MANIFEST_ERROR_CODE.manifestSchema,
+        ["overlays", "lineOverlays", sourceIndex, "lineId"],
+        "line overlay lineId must reference a compiled line",
+        { assignmentId: overlay.id }
+      );
+      continue;
+    }
+
+    resolved.push({
+      sourceIndex,
+      overlay: {
+        id: overlay.id,
+        lineId: overlay.lineId,
+        from: line.from,
+        durationInFrames: line.durationInFrames,
+        kind: overlay.kind,
+        resolvedTransform: {
+          x: overlay.transform.x * manifest.width,
+          y: overlay.transform.y * manifest.height,
+          width: overlay.transform.width * manifest.width,
+          height: overlay.transform.height * manifest.height,
+          rotationDeg: overlay.transform.rotationDeg
+        },
+        colorToken: overlay.colorToken,
+        text: overlay.text,
+        animation: overlay.animation
+      } as RenderLineOverlay
+    });
+  }
+
+  return resolved
+    .sort((left, right) => {
+      const lineDifference =
+        (lineOrder.get(left.overlay.lineId) ?? Number.MAX_SAFE_INTEGER) -
+        (lineOrder.get(right.overlay.lineId) ?? Number.MAX_SAFE_INTEGER);
+      return lineDifference !== 0
+        ? lineDifference
+        : left.sourceIndex - right.sourceIndex;
+    })
+    .map(({ overlay }) => overlay);
+}
+
+export function compileRenderManifestV29(
+  input: RenderManifestCompilerInput
+): RenderManifestCompileResult<RenderManifestV29> {
+  const baseResult = compileRenderManifestV28(input);
+  if (!baseResult.success) {
+    return baseResult as RenderManifestCompileResult<RenderManifestV29>;
+  }
+
+  const projectResult = videoProjectSchema.safeParse(
+    input.project ?? input.videoProject
+  );
+  if (!projectResult.success) {
+    const diagnostics: RenderManifestDiagnostic[] = [];
+    addZodDiagnostics(
+      diagnostics,
+      RENDER_MANIFEST_ERROR_CODE.videoProjectSchema,
+      projectResult.error,
+      []
+    );
+    return failure(diagnostics, baseResult.warnings);
+  }
+
+  const diagnostics: RenderManifestDiagnostic[] = [];
+  const lineOverlays = resolveLineOverlays(
+    projectResult.data,
+    baseResult.manifest,
+    diagnostics
+  );
+  if (diagnostics.length > 0) {
+    return failure(diagnostics, baseResult.warnings);
+  }
+
+  const compilerInputHash = sha256CanonicalJson({
+    manifestVersion: RENDER_MANIFEST_VERSION,
+    baseCompilerInputHash: baseResult.manifest.compilerInputHash,
+    lineOverlays
+  });
+  const manifest = {
+    ...baseResult.manifest,
+    manifestVersion: RENDER_MANIFEST_VERSION,
+    compilerInputHash,
+    lineOverlays
+  } satisfies RenderManifestV29;
+  const manifestResult = renderManifestV29Schema.safeParse(manifest);
+  if (!manifestResult.success) {
+    addZodDiagnostics(
+      diagnostics,
+      RENDER_MANIFEST_ERROR_CODE.manifestSchema,
+      manifestResult.error,
+      []
+    );
+    return failure(diagnostics, baseResult.warnings);
+  }
+  return {
+    success: true,
+    ok: true,
+    manifest: orderedManifestV29(manifestResult.data),
+    diagnostics: [],
+    errors: [],
+    warnings: baseResult.warnings.map((warning) => ({
+      ...warning,
+      soundEffectIds: [...warning.soundEffectIds],
+      lineIds: [...warning.lineIds]
+    }))
+  };
+}
+
+export function compileRenderManifest(
+  input: RenderManifestCompilerInput
+): RenderManifestCompileResult<RenderManifest> {
+  return compileRenderManifestV29(
+    input
+  ) as RenderManifestCompileResult<RenderManifest>;
 }
 
 export class RenderManifestCompiler {

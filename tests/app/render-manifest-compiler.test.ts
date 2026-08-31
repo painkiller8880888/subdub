@@ -416,7 +416,7 @@ describe("compileRenderManifest", () => {
     const segments = result.manifest.visuals.filter(
       (visual) => visual.sourceAssignmentId === assignment.id
     );
-    expect(result.manifest.manifestVersion).toBe("2.8.0");
+    expect(result.manifest.manifestVersion).toBe("2.9.0");
     expect(
       segments.map((segment) =>
         segment.kind === "video" ? segment.display.playbackState : segment.kind
@@ -531,7 +531,7 @@ describe("compileRenderManifest", () => {
       return;
     }
 
-    expect(result.manifest.manifestVersion).toBe("2.8.0");
+    expect(result.manifest.manifestVersion).toBe("2.9.0");
     expect(result.manifest.characterCatalogVersion).toBe(
       CHARACTER_VARIANT_CATALOG_VERSION
     );
@@ -2012,6 +2012,82 @@ describe("compileRenderManifest", () => {
     );
     expect(diagnosticCodes(inactiveVisual)).toContain(
       "CHARACTER_VISUAL_INACTIVE"
+    );
+  });
+
+  it("resolves line overlays to line timing and final canvas coordinates", () => {
+    const emptyResult = compileRenderManifest(validInput());
+    const project = structuredClone(videoProjectFixture) as VideoProject;
+    const targetLine = project.script.sections[0]?.lines[0];
+    const labelLine = project.script.sections[1]?.lines[0];
+    if (targetLine === undefined || labelLine === undefined) {
+      throw new Error("line overlay fixture is incomplete");
+    }
+    project.overlays.lineOverlays = [
+      {
+        id: "overlay-highlight-box",
+        lineId: targetLine.id,
+        kind: "box",
+        transform: {
+          x: 0.1,
+          y: 0.2,
+          width: 0.3,
+          height: 0.25,
+          rotationDeg: 15
+        },
+        colorToken: "warning",
+        text: null,
+        animation: "pulse"
+      },
+      {
+        id: "overlay-label",
+        lineId: labelLine.id,
+        kind: "label",
+        transform: {
+          x: 0.55,
+          y: 0.1,
+          width: 0.2,
+          height: 0.1,
+          rotationDeg: 0
+        },
+        colorToken: "accent",
+        text: "確認",
+        animation: "blink"
+      }
+    ];
+
+    const result = compileRenderManifest(createRenderManifestInput(project));
+    expect(result.success).toBe(true);
+    if (!result.success || !emptyResult.success) {
+      return;
+    }
+
+    expect(result.manifest.lineOverlays).toEqual([
+      expect.objectContaining({
+        id: "overlay-highlight-box",
+        lineId: targetLine.id,
+        from: result.manifest.lines.find((line) => line.id === targetLine.id)
+          ?.from,
+        durationInFrames: result.manifest.lines.find(
+          (line) => line.id === targetLine.id
+        )?.durationInFrames,
+        resolvedTransform: expect.objectContaining({
+          x: 192,
+          y: 216,
+          width: 576,
+          height: 270,
+          rotationDeg: 15
+        })
+      }),
+      expect.objectContaining({
+        id: "overlay-label",
+        lineId: labelLine.id,
+        kind: "label",
+        text: "確認"
+      })
+    ]);
+    expect(result.manifest.compilerInputHash).not.toBe(
+      emptyResult.manifest.compilerInputHash
     );
   });
 });

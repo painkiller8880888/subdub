@@ -155,6 +155,7 @@ export function createLineOverrideScreenTemplateProjectFixture(): unknown {
       }>;
     };
   };
+  delete (project as unknown as Record<string, unknown>).overlays;
   project.schemaVersion = "1.3.0";
   removeEditInsertTextFields(project);
   for (const section of project.script.sections) {
@@ -197,6 +198,7 @@ export function createLegacyScreenTemplateProjectFixture(): unknown {
       }>;
     };
   };
+  delete (project as unknown as Record<string, unknown>).overlays;
   project.schemaVersion = "1.2.0";
   removeEditInsertTextFields(project);
   for (const section of project.script.sections) {

@@ -14,6 +14,10 @@ import { DocumentVisual } from "./document-visual";
 import { REMOTION_FONT_FAMILY, RemotionFontLoader } from "./font";
 import { DESIGN_COLORS } from "./layout";
 import {
+  LineOverlayLayer,
+  renderManifestLineOverlayToLayerItem
+} from "./line-overlay-layer";
+import {
   selectActiveBackground,
   selectActiveInsert,
   selectActiveLines,
@@ -108,6 +112,16 @@ export function RenderManifestComposition(
   const activeVisuals = selectActiveVisuals(manifest, frame);
   const activeLines = selectActiveLines(manifest, frame);
   const activeLayout = selectActiveScreenLayout(manifest, frame, activeLines);
+  const activeLineId = activeLines[0]?.id;
+  const activeLineOverlays = manifest.lineOverlays
+    .filter((overlay) => overlay.lineId === activeLineId)
+    .map((overlay) =>
+      renderManifestLineOverlayToLayerItem(
+        overlay,
+        manifest.width,
+        manifest.height
+      )
+    );
   const activeSectionId = activeLines[0]?.sectionId ?? background?.sectionId;
   const sectionTitle = manifest.sectionLayouts.find(
     (layout) => layout.sectionId === activeSectionId
@@ -141,6 +155,11 @@ export function RenderManifestComposition(
           <RenderVisual visual={visual} assetUrlResolver={assetUrlResolver} />
         </Sequence>
       ))}
+      <LineOverlayLayer
+        overlays={activeLineOverlays}
+        frame={frame}
+        from={activeLines[0]?.from ?? 0}
+      />
       <CharacterLayer
         manifest={manifest}
         frame={frame}

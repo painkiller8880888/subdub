@@ -60,7 +60,9 @@ describe("renderManifestSchema", () => {
     const legacy = structuredClone(renderManifestFixture) as unknown as {
       manifestVersion: string;
       inserts: Array<Record<string, unknown>>;
+      lineOverlays: unknown;
     };
+    Reflect.deleteProperty(legacy, "lineOverlays");
     legacy.manifestVersion = "2.7.0";
     for (const insert of legacy.inserts) {
       Reflect.deleteProperty(insert, "startMs");
@@ -75,7 +77,9 @@ describe("renderManifestSchema", () => {
     const legacy = structuredClone(renderManifestFixture) as unknown as {
       manifestVersion: string;
       inserts: Array<Record<string, unknown>>;
+      lineOverlays: unknown;
     };
+    Reflect.deleteProperty(legacy, "lineOverlays");
     legacy.manifestVersion = "2.6.0";
     for (const insert of legacy.inserts) {
       Reflect.deleteProperty(insert, "text");
@@ -98,7 +102,9 @@ describe("renderManifestSchema", () => {
       layoutIntervals: Array<{
         resolvedLayout: { elements: Array<Record<string, unknown>> };
       }>;
+      lineOverlays: unknown;
     };
+    Reflect.deleteProperty(legacy, "lineOverlays");
     legacy.manifestVersion = "2.5.0";
     for (const character of legacy.characters) {
       Reflect.deleteProperty(character, "glowColor");

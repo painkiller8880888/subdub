@@ -26,6 +26,7 @@ function clone(value: unknown): unknown {
 
 function legacyVideoProjectV11(): Record<string, unknown> {
   const legacy = clone(videoProjectFixture) as Record<string, unknown>;
+  delete legacy.overlays;
   const edit = legacy.edit as {
     sectionBgms: Array<{
       id: string;
@@ -97,6 +98,7 @@ function lineScreenTemplateOverrideProject(): Record<string, unknown> {
     string,
     unknown
   >;
+  delete project.overlays;
   project.schemaVersion = "1.3.0";
   const script = project.script as {
     sections: Array<{ lines: Array<Record<string, unknown>> }>;
@@ -371,7 +373,7 @@ describe("ProjectRepository", () => {
     candidate.metadata.title = "migration と同時の保存";
     let saveCompleted = false;
     const savePromise = repository
-      .save(projectId, candidate, 11)
+      .save(projectId, candidate, 12)
       .then((saved) => {
         saveCompleted = true;
         return saved;
@@ -382,14 +384,14 @@ describe("ProjectRepository", () => {
 
     releaseMigrationRename();
     const [migrated, saved] = await Promise.all([readPromise, savePromise]);
-    expect(migrated.revision).toBe(11);
-    expect(saved.revision).toBe(12);
+    expect(migrated.revision).toBe(12);
+    expect(saved.revision).toBe(13);
     expect(saved.metadata.title).toBe("migration と同時の保存");
 
     const finalProject = JSON.parse(
       await fs.readFile(projectFile, "utf8")
     ) as VideoProject;
-    expect(finalProject.revision).toBe(12);
+    expect(finalProject.revision).toBe(13);
     expect(finalProject.metadata.title).toBe("migration と同時の保存");
   });
 
@@ -523,8 +525,8 @@ describe("ProjectRepository", () => {
     const repository = new ProjectRepository(workspaceRoot);
 
     const migrated = await repository.read(projectId);
-    expect(migrated.schemaVersion).toBe("1.7.0");
-    expect(migrated.revision).toBe(11);
+    expect(migrated.schemaVersion).toBe("1.8.0");
+    expect(migrated.revision).toBe(12);
     expect(migrated.edit).toEqual({ videoElements: [], sectionBgms: [] });
     expect(migrated.audio).not.toHaveProperty("sectionBgms");
 
@@ -557,7 +559,7 @@ describe("ProjectRepository", () => {
     const migratedBytes = await readProjectBytes();
     expect(migratedBytes).not.toEqual(before);
     expect(JSON.parse(migratedBytes.toString("utf8")).schemaVersion).toBe(
-      "1.7.0"
+      "1.8.0"
     );
 
     await repository.read(projectId);
@@ -570,8 +572,8 @@ describe("ProjectRepository", () => {
     const repository = new ProjectRepository(workspaceRoot);
 
     const migrated = await repository.read(projectId);
-    expect(migrated.schemaVersion).toBe("1.7.0");
-    expect(migrated.revision).toBe((project.revision as number) + 4);
+    expect(migrated.schemaVersion).toBe("1.8.0");
+    expect(migrated.revision).toBe((project.revision as number) + 5);
     for (const line of migrated.script.sections.flatMap((section) => section.lines)) {
       expect(line).not.toHaveProperty("screenTemplateId");
     }

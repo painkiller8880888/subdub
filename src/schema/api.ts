@@ -23,6 +23,7 @@ import {
   aiTaskKindSchema,
   characterVisualBindingSchema
 } from "./video-project.js";
+import { lineOverlayPlanSchema } from "./line-overlay.js";
 import { editVideoPlaybackRateSchema } from "./edit-video.js";
 import {
   displayInputSchema,
@@ -889,6 +890,11 @@ export const projectMutationResponseSchema = z
   })
   .strict();
 
+export const projectLineOverlaysSaveRequestSchema = strictObject({
+  overlays: lineOverlayPlanSchema,
+  expectedRevision: nonNegativeIntegerSchema
+});
+
 export const projectCharacterBindingInputSchema = strictObject({
   characterId: idSchema,
   characterVisual: characterVisualBindingSchema
@@ -1416,6 +1422,9 @@ export type ProjectEditSaveRequest = z.infer<
 export type ProjectEditResponse = z.infer<typeof projectEditResponseSchema>;
 export type ProjectMutationResponse = z.infer<
   typeof projectMutationResponseSchema
+>;
+export type ProjectLineOverlaysSaveRequest = z.infer<
+  typeof projectLineOverlaysSaveRequestSchema
 >;
 export type ProjectCharactersSaveRequest = z.infer<
   typeof projectCharactersSaveRequestSchema
