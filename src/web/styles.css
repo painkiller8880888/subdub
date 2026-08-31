@@ -1144,7 +1144,8 @@ input:focus-visible {
 .form-field select,
 .form-field textarea,
 .outline-question textarea,
-.outline-question select {
+.outline-question select,
+.line-overlay-editor-field-grid input {
   background: #fff;
   border: 1px solid #aeb8ca;
   border-radius: 0.45rem;
@@ -1790,7 +1791,8 @@ input:focus-visible {
 
 .script-media-picker,
 .script-media-confirm-dialog,
-.script-line-details-dialog {
+.script-line-details-dialog,
+.line-overlay-editor-dialog {
   background: #fff;
   border: 1px solid #aeb8ca;
   border-radius: 0.8rem;
@@ -1812,7 +1814,9 @@ input:focus-visible {
 }
 
 .line-overlay-editor-dialog {
+  box-sizing: border-box;
   max-width: 82rem;
+  width: min(82rem, 100%);
 }
 
 .line-overlay-editor-content {
@@ -1967,6 +1971,14 @@ input:focus-visible {
 .line-overlay-editor-inspector .form-field {
   display: grid;
   gap: 0.25rem;
+}
+
+.line-overlay-editor-field-grid label {
+  min-width: 0;
+}
+
+.line-overlay-editor-field-grid input {
+  min-width: 0;
 }
 
 .line-overlay-editor-field-grid label span,
@@ -2752,7 +2764,8 @@ input:focus-visible {
 
 .form-field input,
 .form-field select,
-.outline-question select {
+.outline-question select,
+.line-overlay-editor-field-grid input {
   min-height: 2.75rem;
 }
 

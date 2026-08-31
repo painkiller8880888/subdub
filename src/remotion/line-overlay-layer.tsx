@@ -90,10 +90,12 @@ function renderOverlayShape(
   color: string
 ): ReactNode {
   const strokeStyle: CSSProperties = {
+    backgroundColor: "transparent",
     borderColor: color,
     borderStyle: "solid",
     borderWidth: "0.35cqw",
     boxSizing: "border-box",
+    display: "block",
     height: "100%",
     width: "100%"
   };
@@ -111,38 +113,19 @@ function renderOverlayShape(
   }
   if (overlay.kind === "arrow") {
     return (
-      <span
+      <svg
         aria-hidden="true"
+        focusable="false"
+        preserveAspectRatio="none"
         style={{
-          alignItems: "center",
-          display: "flex",
+          display: "block",
           height: "100%",
-          justifyContent: "center",
           width: "100%"
         }}
+        viewBox="0 0 100 100"
       >
-        <span
-          style={{
-            backgroundColor: color,
-            height: "0.5cqw",
-            position: "relative",
-            width: "100%"
-          }}
-        >
-          <span
-            style={{
-              borderBottom: "0.7cqw solid transparent",
-              borderLeft: `1.2cqw solid ${color}`,
-              borderTop: "0.7cqw solid transparent",
-              height: 0,
-              position: "absolute",
-              right: "-0.1cqw",
-              top: "-0.45cqw",
-              width: 0
-            }}
-          />
-        </span>
-      </span>
+        <path d="M4 35 H70 V10 L100 50 L70 90 V65 H4 Z" fill={color} />
+      </svg>
     );
   }
 

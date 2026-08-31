@@ -82,6 +82,7 @@ type BrowserRect = {
 
 type BrowserFocusable = {
   hasAttribute(name: string): boolean;
+  getBoundingClientRect(): BrowserRect;
 };
 
 type BrowserComputedStyle = {
@@ -1261,6 +1262,77 @@ describe("ScreenTemplate workflow browser E2E", () => {
             .click();
           const item = dialog.locator(".line-overlay-editor-item");
           await item.waitFor({ state: "visible" });
+          const editorLayout = await dialog.evaluate((element) => {
+            const dialogElement = element as unknown as BrowserElement;
+            const inspector = dialogElement.querySelector(
+              ".line-overlay-editor-inspector"
+            );
+            const title = dialogElement.querySelector(
+              ".line-overlay-editor-header h2"
+            );
+            const circle = dialogElement.querySelector(
+              ".line-overlay-circle span"
+            );
+            const selectedItem = dialogElement.querySelector(
+              ".line-overlay-editor-item"
+            );
+            const view = dialogElement.ownerDocument.defaultView;
+            if (
+              inspector === null ||
+              title === null ||
+              circle === null ||
+              selectedItem === null ||
+              view === null
+            ) {
+              throw new Error("line overlay editor layout markup is missing");
+            }
+            const dialogStyle = view.getComputedStyle(dialogElement);
+            const titleStyle = view.getComputedStyle(title);
+            const circleStyle = view.getComputedStyle(circle);
+            const inspectorRect = inspector.getBoundingClientRect();
+            const selectedItemRect = selectedItem.getBoundingClientRect();
+            const circleRect = circle.getBoundingClientRect();
+            return {
+              circleBackgroundColor:
+                circleStyle.getPropertyValue("background-color"),
+              circleDisplay: circleStyle.getPropertyValue("display"),
+              circleHeight: circleRect.height,
+              circleWidth: circleRect.width,
+              dialogBackgroundColor:
+                dialogStyle.getPropertyValue("background-color"),
+              dialogClientWidth: dialogElement.clientWidth,
+              dialogScrollWidth: dialogElement.scrollWidth,
+              inspectorRight: inspectorRect.right,
+              numberInputRights: Array.from(
+                dialogElement.querySelectorAll(
+                  ".line-overlay-editor-field-grid input"
+                )
+              ).map((input) => input.getBoundingClientRect().right),
+              selectedItemHeight: selectedItemRect.height,
+              selectedItemWidth: selectedItemRect.width,
+              titleColor: titleStyle.getPropertyValue("color")
+            };
+          });
+          expect(editorLayout.dialogBackgroundColor).toBe("rgb(255, 255, 255)");
+          expect(editorLayout.titleColor).toBe("rgb(23, 32, 51)");
+          expect(editorLayout.dialogScrollWidth).toBe(
+            editorLayout.dialogClientWidth
+          );
+          expect(
+            editorLayout.numberInputRights.every(
+              (right) => right <= editorLayout.inspectorRight + 1
+            )
+          ).toBe(true);
+          expect(editorLayout.circleDisplay).toBe("block");
+          expect(editorLayout.circleBackgroundColor).toBe("rgba(0, 0, 0, 0)");
+          expect(editorLayout.circleWidth).toBeCloseTo(
+            editorLayout.selectedItemWidth,
+            0
+          );
+          expect(editorLayout.circleHeight).toBeCloseTo(
+            editorLayout.selectedItemHeight,
+            0
+          );
           const itemLabel = await item.getAttribute("aria-label");
           const idMatch = /^円 (.+)$/u.exec(itemLabel ?? "");
           if (idMatch?.[1] === undefined) {
