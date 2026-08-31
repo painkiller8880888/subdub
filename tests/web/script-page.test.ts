@@ -17,6 +17,36 @@ describe("ScriptPage workflow navigation", () => {
     expect(source).not.toContain("制作 台本・ビジュアル・音声");
   });
 
+  it("places the section line-add action after the section lines", async () => {
+    const source = await fs.readFile("src/web/ScriptPage.tsx", "utf8");
+    const sectionHeaderStart = source.indexOf(
+      'className="script-section-header"'
+    );
+    const sectionHeaderEnd = source.indexOf("</header>", sectionHeaderStart);
+    const lineListStart = source.indexOf('className="script-line-list"');
+    const addLineButtonStart = source.indexOf(
+      'className="button script-section-add-line"'
+    );
+
+    expect(sectionHeaderStart).toBeGreaterThanOrEqual(0);
+    expect(sectionHeaderEnd).toBeGreaterThan(sectionHeaderStart);
+    expect(lineListStart).toBeGreaterThan(sectionHeaderEnd);
+    expect(addLineButtonStart).toBeGreaterThan(lineListStart);
+  });
+
+  it("shrinks UI font declarations while preserving the compact label size", async () => {
+    const styles = await fs.readFile("src/web/styles.css", "utf8");
+
+    expect(styles).toContain("--ui-font-size-minimum: 0.82rem;");
+    expect(styles).toContain(
+      "font-size: max(calc(1rem - 2px), var(--ui-font-size-minimum));"
+    );
+    expect(styles).toContain(
+      "font-size: max(calc(0.82rem - 2px), var(--ui-font-size-minimum));"
+    );
+    expect(styles).not.toMatch(/font-size:\s*\d+(?:\.\d+)?rem\s*;/);
+  });
+
   it("keeps line cards compact and expands text only while editing", async () => {
     const source = await fs.readFile("src/web/ScriptPage.tsx", "utf8");
 
