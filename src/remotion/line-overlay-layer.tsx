@@ -81,7 +81,7 @@ function overlayFrameStyle(
     transform: `rotate(${rotationDeg}deg)`,
     transformOrigin: "center center",
     width: `${width * 100}%`,
-    zIndex: 4
+    zIndex: 2
   };
 }
 

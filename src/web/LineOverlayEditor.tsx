@@ -44,6 +44,7 @@ export type LineOverlayEditorProps = Readonly<{
   template: Pick<ScreenTemplate, "canvasWidth" | "canvasHeight" | "elements">;
   preview: ScreenLayoutPreview;
   initialOverlays: readonly LineOverlay[];
+  existingOverlayIds?: ReadonlySet<string>;
   onSave: (overlays: readonly LineOverlay[]) => void;
   onCancel: () => void;
   pending?: boolean;
@@ -91,12 +92,17 @@ function animationLabel(animation: LineOverlayAnimation): string {
 
 function overlayIdForKind(
   overlays: readonly LineOverlay[],
-  kind: LineOverlayKind
+  lineId: string,
+  kind: LineOverlayKind,
+  existingOverlayIds: ReadonlySet<string>
 ): string {
-  const prefix = `line-overlay-${kind}`;
+  const prefix = `line-overlay-${lineId}-${kind}`;
   let suffix = 1;
   let candidate = `${prefix}-${suffix}`;
-  const ids = new Set(overlays.map((overlay) => overlay.id));
+  const ids = new Set(existingOverlayIds);
+  for (const overlay of overlays) {
+    ids.add(overlay.id);
+  }
   while (ids.has(candidate)) {
     suffix += 1;
     candidate = `${prefix}-${suffix}`;
@@ -153,6 +159,7 @@ export function LineOverlayEditor({
   template,
   preview,
   initialOverlays,
+  existingOverlayIds = new Set(),
   onSave,
   onCancel,
   pending = false,
@@ -278,7 +285,7 @@ export function LineOverlayEditor({
     if (pending) {
       return;
     }
-    const id = overlayIdForKind(overlays, kind);
+    const id = overlayIdForKind(overlays, line.id, kind, existingOverlayIds);
     const overlay = createDefaultLineOverlay(
       id,
       line.id,
@@ -303,7 +310,12 @@ export function LineOverlayEditor({
     if (selected === undefined || pending) {
       return;
     }
-    const id = overlayIdForKind(overlays, selected.kind);
+    const id = overlayIdForKind(
+      overlays,
+      line.id,
+      selected.kind,
+      existingOverlayIds
+    );
     const duplicate = {
       ...selected,
       id,

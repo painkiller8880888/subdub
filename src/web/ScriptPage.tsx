@@ -3135,6 +3135,11 @@ export function ScriptPage() {
           overlayEditorPreview !== undefined ? (
             <LineOverlayEditor
               key={overlayEditorLine.id}
+              existingOverlayIds={
+                new Set(
+                  project.overlays.lineOverlays.map((overlay) => overlay.id)
+                )
+              }
               initialOverlays={project.overlays.lineOverlays.filter(
                 (overlay) => overlay.lineId === overlayEditorLine.id
               )}

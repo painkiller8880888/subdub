@@ -56,6 +56,10 @@ type WorkflowState = {
     script: VideoProject["script"];
     expectedRevision: number;
   }>;
+  overlaySaves: Array<{
+    overlays: VideoProject["overlays"];
+    expectedRevision: number;
+  }>;
   visualAssignmentUpdates: Array<{
     assetId: string;
     assetVersion?: number;
@@ -478,6 +482,30 @@ async function installApiRoutes(
       return;
     }
     if (
+      request.method() === "PUT" &&
+      pathname === `/api/projects/${projectId}/overlays`
+    ) {
+      const body = JSON.parse(request.postData() ?? "{}") as {
+        overlays: VideoProject["overlays"];
+        expectedRevision: number;
+      };
+      state.overlaySaves.push(body);
+      state.project = {
+        ...state.project,
+        overlays: body.overlays,
+        revision: state.project.revision + 1
+      };
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          data: state.project,
+          revision: state.project.revision
+        })
+      });
+      return;
+    }
+    if (
       request.method() === "GET" &&
       pathname === `/api/projects/${projectId}/voice/status`
     ) {
@@ -813,6 +841,7 @@ describe("ScreenTemplate workflow browser E2E", () => {
       project: createScreenTemplateProjectFixture(),
       templateSaves: [],
       scriptSaves: [],
+      overlaySaves: [],
       visualAssignmentUpdates: [],
       visualAssignmentSplits: [],
       templateDetailRequests: 0
@@ -850,6 +879,7 @@ describe("ScreenTemplate workflow browser E2E", () => {
       voiceStatusOverride,
       templateSaves: [],
       scriptSaves: [],
+      overlaySaves: [],
       visualAssignmentUpdates: [],
       visualAssignmentSplits: [],
       assetCatalog,
@@ -1198,6 +1228,127 @@ describe("ScreenTemplate workflow browser E2E", () => {
         ).toBe("asset-application-form");
         expect(await page.getByLabel("flipX（左右反転）").isChecked()).toBe(
           false
+        );
+      } finally {
+        await context.close();
+      }
+    }
+  );
+
+  it(
+    "saves the same overlay kind on two ScriptPage lines with project-wide unique ids",
+    { timeout: 60_000 },
+    async () => {
+      const { context, page, state } = await openScript();
+      try {
+        const saveOverlayForLine = async (lineId: string): Promise<string> => {
+          const lineCard = page.locator(
+            `.script-line-card[aria-label="セリフ ${lineId}"]`
+          );
+          await lineCard
+            .getByRole("button", {
+              name: `${lineId}のオーバーレイを編集`,
+              exact: true
+            })
+            .click();
+          const dialog = page.getByRole("dialog", {
+            name: `${lineId} の画面注釈`,
+            exact: true
+          });
+          await dialog.waitFor({ state: "visible" });
+          await dialog
+            .getByRole("button", { name: "+ 円", exact: true })
+            .click();
+          const item = dialog.locator(".line-overlay-editor-item");
+          await item.waitFor({ state: "visible" });
+          const itemLabel = await item.getAttribute("aria-label");
+          const idMatch = /^円 (.+)$/u.exec(itemLabel ?? "");
+          if (idMatch?.[1] === undefined) {
+            throw new Error(`overlay id is missing for ${lineId}`);
+          }
+
+          const saveResponse = page.waitForResponse(
+            (response) =>
+              response.request().method() === "PUT" &&
+              new URL(response.url()).pathname ===
+                `/api/projects/${projectId}/overlays`
+          );
+          await dialog
+            .getByRole("button", {
+              name: "このセリフの注釈を保存",
+              exact: true
+            })
+            .click();
+          await saveResponse;
+          await dialog.waitFor({ state: "hidden" });
+          return idMatch[1];
+        };
+
+        const firstId = await saveOverlayForLine("main-mentor-1");
+        const secondId = await saveOverlayForLine("main-learner-1");
+
+        expect(firstId).not.toBe(secondId);
+        expect(state.overlaySaves).toHaveLength(2);
+        expect(state.overlaySaves.map((save) => save.expectedRevision)).toEqual(
+          [0, 1]
+        );
+        expect(state.project.overlays.lineOverlays).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({
+              id: firstId,
+              kind: "circle",
+              lineId: "main-mentor-1"
+            }),
+            expect.objectContaining({
+              id: secondId,
+              kind: "circle",
+              lineId: "main-learner-1"
+            })
+          ])
+        );
+        expect(
+          new Set(
+            state.project.overlays.lineOverlays.map((overlay) => overlay.id)
+          )
+        ).toHaveLength(2);
+
+        await page.reload({ waitUntil: "domcontentloaded" });
+        await page.locator("#section-main-screen-template").waitFor({
+          state: "visible"
+        });
+
+        const persistedOverlayIdForLine = async (
+          lineId: string
+        ): Promise<string> => {
+          const lineCard = page.locator(
+            `.script-line-card[aria-label="セリフ ${lineId}"]`
+          );
+          await lineCard
+            .getByRole("button", {
+              name: `${lineId}のオーバーレイを編集`,
+              exact: true
+            })
+            .click();
+          const dialog = page.getByRole("dialog", {
+            name: `${lineId} の画面注釈`,
+            exact: true
+          });
+          await dialog.waitFor({ state: "visible" });
+          const itemLabel = await dialog
+            .locator(".line-overlay-editor-item")
+            .getAttribute("aria-label");
+          await dialog.getByRole("button", { name: "キャンセル" }).click();
+          await dialog.waitFor({ state: "hidden" });
+          const idMatch = /^円 (.+)$/u.exec(itemLabel ?? "");
+          if (idMatch?.[1] === undefined) {
+            throw new Error(`persisted overlay id is missing for ${lineId}`);
+          }
+          return idMatch[1];
+        };
+
+        expect(await persistedOverlayIdForLine("main-mentor-1")).toBe(firstId);
+        expect(await persistedOverlayIdForLine("main-learner-1")).toBe(
+          secondId
         );
       } finally {
         await context.close();
