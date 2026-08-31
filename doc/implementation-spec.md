@@ -2,7 +2,7 @@
 
 文書版: 0.4
 作成日: 2026-07-28  
-更新日: 2026-08-21<br>
+更新日: 2026-08-31<br>
 上位仕様: [`doc.md`](./doc.md)
 
 現在の正本は `doc/doc.md` と本書の 2 文書に固定する。要求、目的、機能、ユーザー体験は `doc/doc.md` を優先し、データモデル、API、保存、validation、アーキテクチャ、実装詳細は本書を正本とする。実装詳細が要求と矛盾する場合は、本書を更新して `doc/doc.md` と整合させる。`doc/legacy/` 配下は履歴資料であり、新規実装の仕様根拠または実装順序の根拠には使用しない。legacy 文書と現在の正本が矛盾する場合は、現在の正本を採用する。
@@ -21,11 +21,11 @@
 
 `doc.md` と本書が矛盾する場合は、要求と目的については `doc.md` を優先し、実装の具体的詳細については本書を正本として更新し、両者を整合させる。
 
-### 1.1 Issue #87 による台本工程の更新
+### 1.1 Issue #87 による台本工程の更新（履歴）
 
 Issue #87 以降、`/projects/{projectId}/script` を台本・ビジュアル・音声の一体型台本画面とし、3 つのデータを引き続き同じ `project.json` に保存する。台本工程中の承認操作を後工程の開始条件にはしない。
 
-- `outline.status === "approved"` かつ `outline.sourceHash === source.sha256` であることは、台本の初期化と現在の制作コンテキストの前提として維持する。この文書の対象範囲では、構成案の承認が唯一の明示的な工程境界である。
+- （Issue #200 以前の履歴）`outline.status === "approved"` かつ `outline.sourceHash === source.sha256` であることを、当時は台本の初期化と制作コンテキストの前提としていた。current workflow では構成案の承認を工程境界にしない。
 - `script/approve` と `visuals/approve` は新しい通常台本フローから外す。既存データ、旧クライアント、レビュー履歴との互換性のため API や `approved` status を残す場合でも、台本画面、音声操作、候補利用、素材割り当て、`RenderManifest` 生成の前提に使用しない。
 - `Script.status` と `VisualPlan.status` の `draft`、`needs_review`、`approved` は、互換性、レビュー結果、stale、再生成要否の表示に使える。ただし `approved` は出力可能を意味せず、`draft` や `needs_review` だけを理由に編集や候補利用を拒否しない。
 - プレビュー、`RenderManifest` 生成、MP4 レンダリングのゲートは、保存済み正本に対する validation とする。Zod、台本構造、話者・発話、`outlineHash`、音声の current/stale/missing、ビジュアル参照・適用範囲・checksum、revision、Manifest の整合性を機械検証し、失敗時は該当する操作だけを無効化して理由を表示する。
@@ -294,15 +294,15 @@ POST /api/assets/{assetId}/activate      reactivate (expectedRevision)
 
 ### 1.8.1 Issue #179 / RF-00 の現行 version chain と実装契約
 
-Issue #179（RF-00）は `doc.md` と本書だけを更新する docs-only Issue である。この節は RF-01〜RF-04 の current contract であり、コード、Zod schema、SQLite migration、API、React UI、compiler、Remotion、テストコードはこの Issue では変更しない。#151 / #169 までの `1.4.0 / 2.4.0`、および `2.5.0` を target と記述した箇所は、履歴・互換境界と明記された場合を除き、ここで定義する現行契約へ読み替える。
+Issue #179（RF-00）は `doc.md` と本書だけを更新する docs-only Issue である。この節の RF-01〜RF-04 は current 2.9.0 に引き継ぐ feature semantics と、過去の version boundary を記録する。current workflow、project shape、section lifecycle は後続の PC-00 契約を優先し、コード、Zod schema、SQLite migration、API、React UI、compiler、Remotion、テストコードはこの Issue では変更しない。#151 / #169 までの `1.4.0 / 2.4.0`、および `2.5.0` を target と記述した箇所は、履歴・互換境界として扱う。
 
 | 境界 | VideoProject | RenderManifest | 実装責務 |
 |---|---:|---:|---|
-| main baseline | `1.5.0` | `2.5.0` | VP-01 / VP-02 後の section-only + generic visual playback |
-| RF-01（#180） | `1.5.0` | `2.6.0` | 固定 dialogue window、CharacterVisualSet glow color |
-| RF-02（#181） | `1.6.0` | `2.7.0` | InsertTextTemplate と挿入文字の snapshot |
-| RF-03（#182） | `1.7.0` | `2.8.0` | EditVideoElement の startMs / playbackRate / volume |
-| RF-04（#183） | `1.7.0` | `2.8.0` | preview export。schema version bump なし |
+| current baseline（PC-00） | `1.9.0` | `2.9.0` | section lifecycle、enabled effective view、RF-01〜RF-04 の feature semantics |
+| RF-01（#180 / history） | `1.5.0` | `2.6.0` | 固定 dialogue window、CharacterVisualSet glow color |
+| RF-02（#181 / history） | `1.6.0` | `2.7.0` | InsertTextTemplate と挿入文字の snapshot |
+| RF-03（#182 / history） | `1.7.0` | `2.8.0` | EditVideoElement の startMs / playbackRate / volume |
+| RF-04（#183 / history） | `1.7.0` | `2.8.0` | preview export。schema version bump なし |
 
 #### RF-01: ScreenTemplate と CharacterVisualSet
 
@@ -424,16 +424,167 @@ PreviewPage の Player と preview export は、同じ current `RenderManifest 2
 
 RF-00 の後続実装境界は、RF-01 が `RenderManifest 2.6.0`、RF-02 が `VideoProject 1.6.0 / RenderManifest 2.7.0`、RF-03 が `VideoProject 1.7.0 / RenderManifest 2.8.0`、RF-04 がその 2.8.0 を利用する形で分離する。ScreenTemplate と InsertTextTemplate、generic `VisualAssignment` と `EditVideoElement`、production output と preview export の resolver / storage を相互に代用しない。
 
+### 1.8.2 Issue #200 / PC-00 の現行 version boundary と実装契約
+
+Issue #200（PC-00）は、企画・構成案を current project workflow の契約から外し、`script.sections[]` を動画構造の唯一の authority として確定する docs-only の仕様改訂である。この節を本書の最新 current contract とする。1.1〜1.8.1 と 7〜16 章に残る古い企画・構成案・承認・script initialization の記述は、明示的に履歴または compatibility とされた場合を除き、この節へ整合させる。PC-00 ではコード、Zod schema、SQLite migration、API、React UI、compiler、Remotion、テストコードを変更しない。
+
+PC-00 の入力 baseline は main の `VideoProject 1.8.0` / `RenderManifest 2.9.0` である。PC-01 が `VideoProject 1.8.0 → 1.9.0` の persistent project shape migration を実装する。`RenderManifest` の serialized shape はこの series で変更せず、PC-01 以降の current manifest version は `2.9.0` のままとする。
+
+#### Current workflow
+
+```text
+project create
+  -> ScriptPage (/projects/{projectId}/script)
+  -> section / line / visual / voice mutation
+  -> EditPage (/projects/{projectId}/edit)
+  -> output validation
+  -> RenderManifest 2.9.0 compile
+  -> Web preview / MP4
+```
+
+project create は作成直後に ScriptPage へ遷移できる project snapshot を返す。outline approval、outline freshness、`/script/initialize` は current route の前提条件にしない。`source` / brief / outline の企画 contract は current API、SPA navigation、AI instruction assembly から外し、既存 project を読む legacy input または既存 `source/source.md` file の compatibility boundary としてのみ扱う。`source/source.md` は migration で物理削除しない。
+
+#### Current `VideoProject 1.9.0` shape
+
+```ts
+type VideoProject = {
+  schemaVersion: "1.9.0";
+  revision: number;
+  metadata: ProjectMetadata;
+  // source may be accepted only at the legacy input/file boundary.
+  aiSettings: AiSettings;
+  characters: Character[];
+  script: Script;
+  visuals: VisualPlan;
+  audio: AudioPlan;
+  edit: EditPlan;
+  thumbnail: ThumbnailPlan;
+};
+
+type Script = {
+  sections: ScriptSection[];
+};
+
+type ScriptSection = {
+  id: string;
+  name: string;
+  enabled: boolean;
+  background: BackgroundDefinition;
+  screenTemplateId: string;
+  lines: ScriptLine[];
+};
+```
+
+`brief`、`outline`、`Script.status`、`Script.origin`、`Script.outlineHash`、`ScriptSection.outlineSectionId` は 1.9.0 の current serialized shape に含めない。`source` は current editor / API / AI input の contract ではなく、legacy reader と `source/source.md` のファイル保持境界である。`OutlineSection` を current project の別 entity として新設せず、section の name、order、lifecycle、line content は `script.sections[]` だけで管理する。
+
+#### Starter section と section lifecycle
+
+新規 project と、1.8.0 migration で `script.sections.length === 0` の project は、次の 3 つの通常 section から開始する。
+
+| 初期名 | enabled | background | screenTemplateId | lines |
+|---|---|---|---|---|
+| `導入` | `true` | current canonical default | `screen-template-standard` | `[]` |
+| `本編` | `true` | current canonical default | `screen-template-standard` | `[]` |
+| `締め` | `true` | current canonical default | `screen-template-standard` | `[]` |
+
+starter ID は project identity と固定 starter slot から決定論的に導出し、name、表示順、enabled state の変更で変化させない。具体的な ID prefix は PC-01 の schema / migration 実装で固定するが、name から ID を再生成する実装は許可しない。seed / migration は既存 ID を先に照合してから insert し、再実行で section を増殖させない。
+
+`導入` / `本編` / `締め` は初期 name であり、`intro` / `main` / `outro` の role enum ではない。current schema は 3 件の固定 cardinality、固定順序、固定 name を validation しない。section mutation は create、rename、reorder、deactivate、reactivate とし、通常 API に hard delete command を追加しない。deactivate / reactivate は既存 row の `enabled` だけを変更し、section ID と line ID を維持する。
+
+section mutation の domain/service boundary は次を満たす。
+
+- create は新しい stable section ID、name、`enabled: true`、canonical background、active `screen-template-standard` または選択された明示 template、空の lines を作る。
+- rename は name だけを変更し、ID、lines、downstream reference を変更しない。
+- reorder は section array の順序だけを変更し、ID と section 内 line order を変更しない。
+- deactivate は `enabled: false` にし、reactivate は同じ ID を `enabled: true` に戻す。
+- 既存 section ID が candidate から消えた場合は hard delete とみなし、保存を fail-closed で拒否する。missing ID を無効化として補完しない。
+- 無効化・再有効化で lines、generic `VisualAssignment`、`LineOverlay`、voice/audio cache reference、sound effect、section BGM、`before_section` edit element reference を cascade delete / rewrite しない。
+- line の通常 delete semantics は PC-00 で変更しない。
+
+既存 `PUT /api/projects/{projectId}/script` を section mutation の transport として安全に拡張してよい。section 専用 command を追加する場合も、すべて同じ domain/service invariant、`expectedRevision`、atomic project save を通す。UI 内で section array を直接削除して保存するだけの経路は current contract としない。
+
+#### Structural save validation と output readiness validation
+
+保存処理と output 処理では validation の対象 view を分ける。
+
+| validation | 対象 | 主な検査 | disabled output dependency |
+|---|---|---|---|
+| structural save | 全 section と project data | strict schema / type、stable ID、duplicate ID、line reference、同一 section 内の assignment range、line order、保存データの内部整合性 | 保存を blocker にし得る。ただし disabled であること自体はエラーではない |
+| output readiness | enabled section の effective view | active / resolvable ScreenTemplate、current line audio、active render input、Manifest compile、timeline / MP4 要件 | blocker にしない |
+
+保存時は disabled section も構造データとして parse、参照検査、same-section / order 検査の対象にする。disabled section 内の template、audio、managed file、visual assignment、overlay、sound effect、BGM の missing / stale は保存を拒否する理由にしないが、構造自体が不正なら通常どおり拒否する。
+
+output validation は `enabledSections = project.script.sections.filter(section => section.enabled)` に相当する effective view を入力にする。enabled section が 0 件の場合、project save は成功可能だが compile、Preview、MP4 は `NO_ENABLED_SECTION` の validation error で停止する。enabled section がある場合、disabled section のみを理由に output を停止しない。
+
+#### Compiler / RenderManifest boundary
+
+timeline compiler は strict current project を読み込んだ後、最初に enabled section effective view を作る。無効 section を Remotion へ渡して CSS `display: none` で隠す方式は採用しない。disabled section を effective view から除いた結果を、line、background、generic visual、overlay、sound effect、BGM、edit placement の全下流計算へ渡す。
+
+`RenderManifest 2.9.0` の serialized shape は変更しない。compiler は無効 section に由来する次の項目を manifest へ生成しない。
+
+- section layout / section title / background
+- lines
+- generic visuals と line overlays
+- sound effects
+- section BGM
+- disabled section を target にする `before_section` video element
+
+`before_first_section` と `after_last_section` は raw section array ではなく enabled section 集合の先頭・末尾を基準にする。disabled section を跨いだ enabled section の timeline は隣接する effective section として再計算する。manifest version と field shape は維持し、effective view / validation semantics の変更だけを PC-03 の実装責務とする。Web preview と Remotion は同一の enabled-only `RenderManifest 2.9.0` を使用する。
+
+#### `1.8.0 -> 1.9.0` migration contract
+
+PC-01 は strict な 1.8.0 input を検証し、migration diagnostics と atomic write を含む明示的な 1.9.0 migration を実装する。
+
+- `script.sections[]` を authority とし、各 section の ID、name、background、`screenTemplateId`、lines を保持する。
+- section ID、line ID、downstream の sectionId / lineId reference を変更しない。
+- 既存 section へ `enabled: true` を追加する。starter section の初期 name を再適用しない。
+- `outlineSectionId` の link だけを切り、`Script.status`、`Script.origin`、`Script.outlineHash` を current shape へ持ち越さない。
+- `brief` と `outline` は current `project.json` へ持ち越さない。diagnostics に残す場合も `fromSchemaVersion`、removed field 名、件数、migration ID などの metadata に限定し、本文や prompt を複製しない。
+- `source` の legacy input と `source/source.md` の実ファイルは物理削除しない。source を current ScriptPage / AI instruction input として再公開しない。
+- `script.sections.length > 0` の project には starter section を追加しない。
+- `script.sections.length === 0` の project は deterministic な 3 starter section へ移行してよい。ID/default は新規 project と同じ関数を使い、再実行で重複を作らない。
+- migration 後の downstream `sectionId` / `lineId` は unchanged とし、無効 section の downstream data も保持する。
+
+migration は temp file、schema parse、必要な diagnostics の保存、atomic rename の順で行い、失敗時に元の `project.json` を壊さない。旧 project の planning content を current JSON の legacy field として退避しない。
+
+#### OpenRouter / legacy AI boundary
+
+OpenRouter adapter、認証、model catalog、model read route、ZDR / provider capability validation、今回対象外の AI task は維持する。`AiTaskKind` と `taskModelOverrides` の current contract からは次を除く。
+
+```text
+outline_generation
+script_generation
+script_review
+```
+
+`visual_search_intent`、`layout_review`、`opencode` など、企画・構成案・台本生成の廃止と直接関係しない task は廃止しない。current runtime は source / brief を planning prompt として組み立てず、AI 結果で `script.sections[]` を自動置換しない。
+
+outline generate / save / review / approve / reject、source / brief edit、outline-to-script initialize の legacy code、route、run log は、旧 project / 旧 client / 履歴再生の compatibility のため残してよい。ただし標準 Fastify route、SPA navigation、ScriptPage の生成 UI、current project contract から到達できない状態にする。OpenRouter の transport と model catalog をこの legacy boundary のために削除してはならない。
+
+#### PC-01〜PC-05 の implementation boundary
+
+| Issue | 実装責務 | 非対象 / 境界 |
+|---|---|---|
+| PC-01 | `VideoProject 1.8.0 → 1.9.0` strict schema、migration、`enabled`、starter seed、legacy field removal。 | RenderManifest shape / version、OpenRouter transport、section mutation API の本実装は担当しない。 |
+| PC-02 | section create / rename / reorder / deactivate / reactivate の domain invariant、API、expectedRevision、fail-closed mutation。 | hard delete、line deletion semantics、output compiler semantics は担当しない。 |
+| PC-03 | enabled section effective view、structural save / enabled-only output validation、`NO_ENABLED_SECTION`、compiler / `RenderManifest 2.9.0` integration。 | manifest serialized shape redesign、planning route removal、section UI は担当しない。 |
+| PC-04 | planning / outline / script-generation backend route を current runtime から外し、OpenRouter transport / model catalog / 対象外 task を維持する。 | project schema migration、section domain mutation、ScriptPage UI は担当しない。 |
+| PC-05 | project create → ScriptPage、section controls、planning / outline / generation UI の退避、browser acceptance。 | schema / migration / compiler / OpenRouter adapter の再設計は担当しない。 |
+
+各 Issue は前段が main に入った後の最新 main から branch を作成する。PC-00 は上記契約の正本化だけを行い、実装は PC-01〜PC-05 へ分割する。
+
 ## 2. 今回確定した判断
 
 ### 2.1 JSON の編集経路
 
 - `projects/{projectId}/project.json` を動画制作データの正本とする。
-- 通常の作成、編集、並べ替え、承認は WebUI から行う。
+- 通常の作成、section / line の編集、section の並べ替え・無効化・再有効化は WebUI から行う。outline approval や script initialization は current project workflow に含めない。
 - WebUI は JSON を直接ブラウザーで編集する画面ではなく、用途別フォームを通じて編集する。
 - バックエンドは全変更を Zod で検証してから保存する。
 - 障害調査、移行、復旧用の CLI は将来追加できるが、通常運用の編集経路にはしない。
 - 人間によるファイルの直接編集はサポート対象外とする。直接編集されたファイルも読み込み時に検証し、不正な場合は上書きせずエラーにする。
+- `PUT /api/projects/{projectId}/script` または同じ service boundary を使う section command は、既存 section ID の消失を hard delete として拒否し、deactivate / reactivate を `enabled` の変更として保存する。
+- project create は `VideoProject 1.9.0` の 3 starter section を持つ ScriptPage 編集状態を返す。`source`、brief、outline は current API/UI/AI input ではなく legacy compatibility boundary とする。
 
 ### 2.2 JSON Schema の扱い
 
@@ -471,12 +622,12 @@ RF-00 の後続実装境界は、RF-01 が `RenderManifest 2.6.0`、RF-02 が `V
 - OpenRouter の初期モデル ID は `google/gemma-4-31b-it` とする。
 - `:free` variant は既定にせず、人間がモデル選択画面から明示的に選択した場合だけ使用する。
 - モデル選択画面では、入力単価と出力単価がともに `0` のモデルを `free`、それ以外を `paid` として絞り込める。これは表示上のフィルターであり、サーバーは選択されたモデル ID を既存の能力、有効期限、ZDR 条件で検証する。
-- AI 呼び出しは用途を `AiTaskKind` で識別するが、現行の用途別上書きは空とし、すべて共通モデルへ解決する。
+- AI 呼び出しは用途を `AiTaskKind` で識別する。current contract では `visual_search_intent`、`layout_review`、`opencode` などを残し、`outline_generation`、`script_generation`、`script_review` を current enum / task override から外す。legacy run の読取・再生に必要な過去 task は compatibility boundary に限定する。
 - 用途別モデルへの分離は将来の評価事項とする。各機能の実装前に別モデルを決める必要はない。
 - 用途別の評価では、スキーマ検証通過率、人間による修正量、根拠のない情報を追加した回数、応答時間、入出力トークン数と料金、画像入力またはツール利用の必要性を記録する。
 - モデルの差し替えに生成ロジックの変更を必要としない構造にする。
 - モデル ID を生成ロジックへハードコードしない。
-- モデル未選択の場合、AI を使う操作だけを実行不可にする。非 AI の編集、素材管理、音声生成、プレビュー、レンダリングは利用可能とする。
+- モデル未選択の場合、current AI task を使う操作だけを実行不可にする。section / line の非 AI 編集、素材管理、音声生成、プレビュー、レンダリングは利用可能とする。
 - 実行ごとに選択されたモデル ID、プロバイダー、プライバシー設定、用途別評価に必要な計測値を実行ログへ記録する。
 
 ### 2.6 その他の推奨案
@@ -489,17 +640,17 @@ RF-00 の後続実装境界は、RF-01 が `RenderManifest 2.6.0`、RF-02 が `V
 
 | データ | 正本または性質 | 現在の扱い |
 |---|---|---|
-| `projects/{projectId}/project.json` | 人間が編集する動画制作データの正本。構成案の承認と、台本・ビジュアル・音声のレビュー状態、編集フェーズの `EditPlan`、project-specific な section template selection もここに保持する | 現行保存形式は `VideoProject 1.5.0`。`schemaVersion: "1.0.0"`〜`1.4.0` は legacy input boundary として検証し、明示的な migration で `1.5.0` へ変換する |
+| `projects/{projectId}/project.json` | 人間が編集する動画制作データの正本。`script.sections[]`、section lifecycle、台本・ビジュアル・音声、編集フェーズの `EditPlan`、project-specific な section template selection を保持する | current target は `VideoProject 1.9.0`。`1.8.0` 以下は legacy input boundary として検証し、明示的な migration で 1.9.0 へ変換する。brief / outline は current shape へ持ち越さない |
 | `CharacterVisualSet` | ワークスペース共通の登録済みキャラクタービジュアルと variant/file メタデータ、visual 単位の字幕 glow color の正本 | workspace SQLite の現行カタログ。`glowColor` は visual 全体へ一つだけ保持し、P2-01 の初期 seed と RF-01 migration は決定論的に扱う。静的カタログを現行の正本にしない |
-| `CharacterVisualBinding` | `project.json` に保存する、プロジェクト内の VOICEVOX 話者と visual / idle variant の選択 | 現行 `VideoProject 1.5.0` の project-specific な保存データ。SQLite に project binding は持たせない |
-| `ScriptLine.characterVariantId` | `project.json` に保存する、line ごとの人間が選択した physical variant 参照 | 現行 `VideoProject 1.5.0` の explicit reference。新規 line は未選択から開始する |
+| `CharacterVisualBinding` | `project.json` に保存する、プロジェクト内の VOICEVOX 話者と visual / idle variant の選択 | current `VideoProject 1.9.0` の project-specific な保存データ。SQLite に project binding は持たせない |
+| `ScriptLine.characterVariantId` | `project.json` に保存する、line ごとの人間が選択した physical variant 参照 | current `VideoProject 1.9.0` の explicit reference。新規 line は未選択から開始する |
 | `ScreenTemplate` | workspace 共通の再利用可能な画面構成、element、geometry、status、revision | workspace SQLite の正本。`screen-template-standard` を stable ID として seed し、project ID / section ID / line ID は持たせない |
 | `InsertTextTemplate` | ScreenTemplate と分離した、挿入動画の text layout を再利用する workspace catalog | workspace SQLite の正本。title / subtitle の分割や本編用 element cardinality は持たせない |
-| `ScriptSection.screenTemplateId` | `project.json` に保存する section default / section authority | 現行 `VideoProject 1.5.0` では section 内の全 line の唯一の authority。`1.3.0` では line override の fallback だった |
+| `ScriptSection.screenTemplateId` | `project.json` に保存する section default / section authority | current `VideoProject 1.9.0` では section 内の全 line の唯一の authority。`1.3.0` では line override の fallback だった |
 | `ScriptLine.screenTemplateId` | `project.json` に保存する nullable line-level ScreenTemplate override | `VideoProject 1.3.0` の legacy input にだけ存在し、#148 の `1.4.0` migration で削除して削除ログを残す |
-| `EditVideoElement` | `project.json` の `edit.videoElements[]` に保存する intro / outro / cutin の asset snapshot、text、source start、playback rate、volume | 現行 `VideoProject 1.5.0` では RF-02 / RF-03 前の fields を含まない baseline。`1.6.0` / `1.7.0` migration で `text` / `textTemplateId` / `startMs` / `playbackRate` を段階的に追加する |
+| `EditVideoElement` | `project.json` の `edit.videoElements[]` に保存する intro / outro / cutin の asset snapshot、text、source start、playback rate、volume | current `VideoProject 1.9.0` は RF-02 / RF-03 の fields を引き継いだ shape とする。`1.6.0` / `1.7.0` は migration history として扱う |
 | `characterVariantCatalog` | `CharacterVisualSet` から生成する型、検証入力、または純粋な catalog snapshot | DB から取得した検証済み snapshot または純粋な view model。実在項目を静的ソースへ二重管理しない |
-| `RenderManifest` | 特定レンダリングへ使う解決済み派生データ | 現行 `RenderManifest 2.5.0` は explicit variant、実動画 insert、最終 section BGM、section layout、line / visual resolved fields、resolved playback state を保持する。`2.4.0` は compatibility input、RF-01〜RF-03 は `2.6.0`〜`2.8.0` へ段階的に拡張する |
+| `RenderManifest` | 特定レンダリングへ使う解決済み派生データ | current `RenderManifest 2.9.0` は explicit variant、実動画 insert、最終 enabled section BGM、section layout、line / visual resolved fields、resolved playback state を保持する。`2.3.0`〜`2.8.0` は compatibility / history boundary とする |
 
 `CharacterVisualSet` と配下の物理 variant は別エンティティとして扱う。visual 全体は一部の表情・ポーズ variant が未登録でも登録できるが、`single-image` は `single`、`mouth-pair` は `closed` と `open` が揃った場合だけ完成 variant とする。最初の完成 variant のキャンバスサイズを visual 単位の基準とし、同じ visual へ異なるサイズの画像を追加しない。
 
@@ -514,10 +665,9 @@ PNG は `CharacterVisualSet` の file slot から参照されるファイル実�
 ### 3.1 現在サポートする範囲
 
 1. ローカル単一ユーザー向け WebUI
-2. プロジェクトの作成、一覧、読み込み
-3. Markdown と企画条件の編集、自動保存
-4. OpenRouter による構成案生成、編集、承認
-5. 2 キャラクター形式の台本編集と、ビジュアル・音声を含む一体型の台本画面
+2. プロジェクトの作成、一覧、読み込みと、作成直後の ScriptPage 遷移
+3. `script.sections[]` の section create / rename / reorder / deactivate / reactivate と line 編集、自動保存
+4. 2 キャラクター形式の台本編集と、ビジュアル・音声を含む一体型の台本画面
 6. P2-01 の初期 2 キャラクター設定と、CV-01〜CV-03 で追加済みの `CharacterVisualSet` の動的カタログ、PNG 検証、登録・確認画面
 7. プロジェクトごとの VOICEVOX ↔ `CharacterVisualSet` binding、待機用 idle variant、セリフごとの explicit physical variant 選択
 8. セクション・セリフカード中心の 1 ペイン `/projects/{projectId}/script` と、speaker に binding された active variant だけを表示する modal picker
@@ -532,14 +682,14 @@ PNG は `CharacterVisualSet` の file slot から参照されるファイル実�
 17. サムネイルのプレビューと画像出力
 18. 機械検証、互換 status・レビュー結果・stale 状態、意味のある操作のログ（出力ゲートは validation）
 
-`EditPlan`、`bgm` Asset、`/projects/{projectId}/edit`、ScreenTemplate、`RenderManifest 2.5.0` は現行仕様である。`RenderManifest 2.4.0`、ED-00、ST-00〜ST-08 の version boundary は履歴・互換境界として保持し、SW-01〜SW-03 および VP-01 / VP-02 の実装境界は current contract と矛盾しない範囲で参照する。
+`EditPlan`、`bgm` Asset、`/projects/{projectId}/edit`、ScreenTemplate、`VideoProject 1.9.0`、`RenderManifest 2.9.0` は current target である。`VideoProject 1.8.0`、`RenderManifest 2.8.0` 以下、ED-00、ST-00〜ST-08、SW-01〜SW-03、VP-01 / VP-02、RF-01〜RF-04 の過去 version boundary は履歴・互換境界として保持し、PC-00 の current contract と矛盾しない範囲で参照する。
 
 ### 3.2 現在対象外・将来拡張
 
 - 複数ユーザー、ログイン、権限管理
 - 外部公開および配布用パッケージ
 - AI による完成映像、スライド、図解、素材の生成
-- AI による台本初稿生成
+- current runtime における企画・構成案・台本／セリフ生成
 - ベクトル検索
 - OCR、音声文字起こし
 - VOICEVOX のイントネーション編集 UI
@@ -548,6 +698,7 @@ PNG は `CharacterVisualSet` の file slot から参照されるファイル実�
 - JSON Schema の外部公開
 - AI による physical character variant の自動選択、タグ・label・expression による代替
 - AI visual suggestion、Asset Search、generic `VisualAssignment` backend の削除
+- OpenRouter adapter、model catalog、`visual_search_intent`、`layout_review`、`opencode` の削除
 - 口パク方式の変更、VOICEVOX 話者設定の変更
 - 現場動画・写真・帳票素材ライブラリとの統合
 
@@ -822,25 +973,24 @@ project-root/
 - フォーム変更後、短い debounce を経てセクションまたは画面単位で保存する。
 - 保存中、保存済み、失敗、競合の状態を常時表示する。
 - 自動保存と、プレビュー・`RenderManifest`・レンダリング時の validation を分離する。
-- script/visual の保存は承認操作を要求せず、保存済み status は互換性、レビュー結果、stale、再生成要否の表示に使う。
-- 出力実行時は、構成案の承認・最新性と、台本、音声、素材参照、assignment 範囲、checksum、Manifest の整合性を validation する。script/visual の `approved` status は要求しない。
+- script/visual/section の保存は承認操作を要求せず、current Script の planning status / origin / outline hash を保存しない。
+- 保存時は disabled section を含む全 project の structural validation を行う。出力実行時は enabled section の effective view だけについて、台本、音声、素材参照、assignment 範囲、checksum、Manifest の整合性を validation する。
+- disabled section 内の missing / stale output dependency は出力 blocker にしない。enabled section が 0 件の場合は保存を許可し、compile / Preview / MP4 だけを `NO_ENABLED_SECTION` で拒否する。
 
 ## 7. 正本データ `VideoProject`
 
-以下の型例では、現行実装の `schemaVersion: "1.5.0"`、RF-01〜RF-03 の `1.6.0` / `1.7.0` target、line override を含む `schemaVersion: "1.3.0"`、編集移行前の `schemaVersion: "1.1.0"`、MVP 開発初期の `schemaVersion: "1.0.0"` 互換境界を実装引き継ぎのために同じ場所に示している。`1.4.0` は VP-01 前の section-only legacy input、`1.3.0` は section default と nullable line override を含むさらに古い legacy input である。`characterVisual`、`characterVariantId`、`edit`、section の `screenTemplateId` は、明示的な version bump と migration を通過した schema で保存する。`schemaVersion: "1.0.0"` または `"1.1.0"` のデータへ新しい意味を暗黙に追加してはならない。
+以下の型例では、current target の `schemaVersion: "1.9.0"` と、PC-01 前の `schemaVersion: "1.8.0"`、それ以前の legacy compatibility boundary を区別する。`1.8.0` 以下のデータへ `enabled` や current section semantics を暗黙に追加せず、strict input の検証後に明示的な migration を行う。`characterVisual`、`characterVariantId`、`edit`、section の `screenTemplateId` は、各 version boundary の migration を通過した schema で保存する。`brief`、`outline`、Script の planning status / origin / hash、section の `outlineSectionId` は 1.9.0 current shape へ持ち越さない。
 
 ### 7.1 ルート
 
 ```ts
 type VideoProject = {
-  schemaVersion: "1.5.0";
+  schemaVersion: "1.9.0";
   revision: number;
   metadata: ProjectMetadata;
-  source: ProjectSource;
-  brief: ProjectBrief;
+  // source is a legacy input/file boundary, not a current editor contract.
   aiSettings: AiSettings;
   characters: Character[];
-  outline: Outline;
   script: Script;
   visuals: VisualPlan;
   audio: AudioPlan;
@@ -849,7 +999,7 @@ type VideoProject = {
 };
 ```
 
-すべてのオブジェクトは既知でないキーを拒否する strict object とする。スキーマを変更する場合は `schemaVersion` 単位で明示的なマイグレーション関数を追加する。MVP 開発初期の `1.0.0`、編集移行前の `1.1.0`、ScreenTemplate 導入前の `1.2.0`、line override を持つ `1.3.0`、VP-01 前の section-only `1.4.0` は legacy input として検証する。現行実装 schema は `1.5.0` であり、line override を保持しない。
+すべてのオブジェクトは既知でないキーを拒否する strict object とする。スキーマを変更する場合は `schemaVersion` 単位で明示的なマイグレーション関数を追加する。MVP 開発初期の `1.0.0`、編集移行前の `1.1.0`、ScreenTemplate 導入前の `1.2.0`、line override を持つ `1.3.0`、VP-01 前の `1.4.0`、RF-03 後の `1.7.0`、PC-01 前の `1.8.0` は legacy input として検証する。current target schema は `1.9.0` であり、line override、outline link、planning field を保持しない。`source/source.md` は legacy file として保持できるが、migration で物理削除しない。
 
 ED-01 では `1.1.0` から `1.2.0` へ migration する。`1.1.0` の `audio.sectionBgms` と `inserts` は legacy input として読み取るが、現行 schema の `edit` へ暗黙に拡張しない。migration が完了した後の BGM と動画要素の正本は `edit` だけとする。
 
@@ -933,7 +1083,7 @@ type VideoProjectV14 = Omit<
 };
 ```
 
-`VideoProject 1.4.0` を入力にしていた compatibility compiler は `RenderManifest 2.4.0` を生成した。2.4.0 の line / visual resolved shape、cache、run log の意味はこの migration で変更しない。VP-01 の `1.4.0 → 1.5.0` と VP-02 の `RenderManifest 2.4.0 → 2.5.0` は完了済みの version boundary であり、現行 baseline は `VideoProject 1.5.0` / `RenderManifest 2.5.0` とする。
+`VideoProject 1.4.0` を入力にしていた compatibility compiler は `RenderManifest 2.4.0` を生成した。2.4.0 の line / visual resolved shape、cache、run log の意味はこの migration で変更しない。VP-01 の `1.4.0 → 1.5.0` と VP-02 の `RenderManifest 2.4.0 → 2.5.0` は完了済みの version boundary であり、current baseline は `VideoProject 1.9.0` / `RenderManifest 2.9.0` とする。1.5.0〜1.8.0 / 2.5.0〜2.8.0 は migration / compatibility history として保持する。
 
 ### 7.1.4 `VideoProject 1.4.0 → 1.5.0` playback cue migration 方針（VP-01）
 
@@ -968,6 +1118,39 @@ RF-03 の `1.6.0 → 1.7.0` migration は strict な `VideoProject 1.6.0` input 
 - effective duration は `startMs` が null なら source duration、それ以外は `(source duration - startMs) / playbackRate` とし、frame 化後の duration が後続 section / line の timeline を shift する。
 - mute shortcut は `volume = 0` の保存だけであり、`muted` field は追加しない。解除時の直前 non-zero volume は UI local state に限る。
 
+### 7.1.7 `VideoProject 1.8.0 → 1.9.0` PC-01 migration 方針
+
+PC-01 は strict な `VideoProject 1.8.0` input を検証してから、`schemaVersion: "1.9.0"` へ明示的に migration する。新規 project の seed と migration の空 script seed は同じ deterministic starter factory を使う。
+
+- `script.sections[]` を authority とし、既存 section の ID、name、background、`screenTemplateId`、lines をそのまま保持する。
+- 全既存 section に `enabled: true` を追加する。既存 section の名前、配列順、section ID、line ID を starter default で上書きしない。
+- `outlineSectionId` との link だけを切り、`Script.status`、`Script.origin`、`Script.outlineHash` を current `Script` へ持ち越さない。
+- `brief` と `outline` は 1.9.0 の `project.json` に残さない。migration diagnostics を出す場合も schema version、removed field 名、件数、migration ID などに限定し、本文・prompt・source の内容を複製しない。
+- `source` は legacy input/file compatibility boundary として読み取り可能にし、`projects/{projectId}/source/source.md` の実ファイルを物理削除しない。current ScriptPage や AI instruction assembly の入力へ戻さない。
+- `script.sections.length > 0` なら starter section を一件も追加しない。既存 section が disabled であっても non-empty と数える。
+- `script.sections.length === 0` なら `導入`、`本編`、`締め` の 3 starter section を作成してよい。各 section は `enabled: true`、canonical background、`screen-template-standard`、`lines: []` とする。
+- empty script seed の ID は project identity と starter slot から決定論的に導出し、migration 再実行や crash recovery で重複しない。名前変更後に名前から再生成しない。
+- visuals、audio、edit などが保持する downstream `sectionId` / `lineId` reference は変更しない。section の downstream data を migration で cascade delete / rewrite しない。
+
+1.9.0 の strict root は次の current fields を持つ。`source`、brief、outline を legacy compatibility として読み込む parser と、current JSON に保存する shape を混同しない。
+
+```ts
+type VideoProjectV19 = {
+  schemaVersion: "1.9.0";
+  revision: number;
+  metadata: ProjectMetadata;
+  aiSettings: AiSettings;
+  characters: Character[];
+  script: { sections: ScriptSection[] };
+  visuals: VisualPlan;
+  audio: AudioPlan;
+  edit: EditPlan;
+  thumbnail: ThumbnailPlan;
+};
+```
+
+具体的な migration は temp file への書き出し、strict parse、必要な最小 diagnostics の保存、atomic rename の順序で行う。どの段階で失敗しても元の `project.json` を変更せず、migration を再実行して同じ diagnostics や starter section を重複生成しない。
+
 ### 7.2 メタデータ
 
 ```ts
@@ -992,7 +1175,7 @@ type ProjectMetadata = {
 };
 ```
 
-### 7.3 入力資料と企画条件
+### 7.3 入力資料と企画条件（legacy compatibility）
 
 ```ts
 type ProjectSource = {
@@ -1012,17 +1195,12 @@ type ProjectBrief = {
 };
 ```
 
-- `targetDurationSec` は正の整数とする。
-- Markdown 保存と `sha256` 更新は 1 回のアプリケーション操作として扱う。
-- 構成案の `sourceHash` が現在の `source.sha256` と異なる場合、構成案を stale と表示し、再承認を要求する。
+この型は既存 project の読み込み、過去ログ、`projects/{projectId}/source/source.md` の保持に使う legacy boundary であり、`VideoProject 1.9.0` の current editor/API/AI input ではない。PC-00 以降の migration は source file を物理削除せず、`brief` や `outline` の本文を current `project.json` へ持ち越さない。`targetDurationSec`、Markdown hash、outline freshness を current workflow の gate にしない。
 
 ### 7.4 AI 設定
 
 ```ts
 type AiTaskKind =
-  | "outline_generation"
-  | "script_generation"
-  | "script_review"
   | "visual_search_intent"
   | "layout_review"
   | "opencode";
@@ -1037,13 +1215,15 @@ type AiSettings = {
 ```
 
 - 新規プロジェクトの `defaultModelId` は `google/gemma-4-31b-it` とする。
-- 新規プロジェクトの `taskModelOverrides` は空オブジェクトとする。したがって現行仕様では、すべての `AiTaskKind` が `google/gemma-4-31b-it` へ解決される。
+- 新規プロジェクトの `taskModelOverrides` は空オブジェクトとする。したがって current task は `google/gemma-4-31b-it` へ解決される。
 - 実行モデルは「実行時の明示上書き、`taskModelOverrides[taskKind]`、`defaultModelId`」の優先順で決定する。
 - プロンプト、入力組み立て、structured output schema、評価指標は `AiTaskKind` ごとに分離し、モデル ID とは独立して管理する。
 - `null` は AI を使用しないプロジェクトまたは移行中データのために許可する。
 - ZDR の初期値は `true` とする。
 - AI 実行画面ではプロジェクトの現行既定値を初期選択し、人間が実行ごとに変更できる。
 - 設定されたモデルがモデル一覧に存在しない、structured output に非対応、または ZDR 条件を満たさない場合は自動代替せず実行を拒否する。
+
+`outline_generation`、`script_generation`、`script_review` は current `AiTaskKind` / `taskModelOverrides` に含めない。過去 run を読むための legacy log や compatibility parser に現れる同名値は削除対象ではないが、current runtime の task selector、route、SPA navigation、ScriptPage の生成 UI から到達させない。OpenRouter adapter、認証、model catalog、ZDR / provider capability validation と、`visual_search_intent`、`layout_review`、`opencode` は維持する。
 
 ### 7.5 キャラクター
 
@@ -1189,7 +1369,9 @@ P2-01 の当時の静的カタログには各キャラクター 3 variant、5 �
 
 初期 seed / migration では `doc/assets` の既存 10 PNG を管理領域へコピーし、checksum と技術情報を DB へ保存する。新規登録では未登録 variant の存在をエラーにせず、`single-image` の `single`、`mouth-pair` の `closed` / `open` を揃えた作成リクエストだけを永続化する。必須 slot 欠落、形式不正、checksum 不一致、基準キャンバス不一致は、variant 行や最終ファイルを残さず操作全体を失敗させる。既存の完成 variant の差し替えは complete file set 単位で行い、必須 slot を削除する操作は提供しない。PNG の完全デコードによる透明ピクセル量や alpha bounding box の数値解析は行わない。身体の基準位置は、同じ visual の代表画像を並べた手動確認で扱い、根拠のない alpha bounding box 許容値は導入しない。
 
-### 7.6 構成案
+### 7.6 構成案（legacy compatibility）
+
+この節の `Outline`、`OutlineSection`、`SectionRole`、承認条件、source hash は既存 project と過去 run を読むための legacy contract である。PC-00 以降の current project 作成、ScriptPage、保存、output validation、AI instruction assembly はこの節を参照しない。current の section authority は 1.8.2 と 7.7 の `script.sections[]` である。
 
 ```ts
 type ApprovalStatus = "draft" | "needs_review" | "approved";
@@ -1245,22 +1427,19 @@ type OpenQuestion = {
 - 未解決の `openQuestions` がない。
 - `sourceHash` が現在の入力資料のハッシュと一致する。
 
-構成案は、AI 生成または人間の手入力から開始できる。手入力で保存した構成案は `generationRunId: null` とし、AI 生成を経由しない。どちらの経路も同じ編集、自動保存、構成案の承認条件を使用する。構成案の承認・最新性確認は、この仕様で制作の前提として残す唯一の明示的な承認境界である。
+構成案の AI 生成・手入力・承認・最新性確認は legacy compatibility のみとする。current runtime の標準 route、SPA navigation、ScriptPage の開始条件、Manifest compile 条件へ接続しない。legacy data を current `project.json` の field として保存・再生成しない。
 
 ### 7.7 台本
 
 ```ts
 type Script = {
-  status: ApprovalStatus;
-  origin: "manual" | "ai" | "imported";
-  outlineHash: string;
   sections: ScriptSection[];
 };
 
 type ScriptSection = {
   id: string;
-  outlineSectionId: string;
   name: string;
+  enabled: boolean;
   background: BackgroundDefinition;
   screenTemplateId: string;
   lines: ScriptLine[];
@@ -1269,8 +1448,6 @@ type ScriptSection = {
 type ScriptLine = {
   id: string;
   speakerId: string;
-  /** VideoProject 1.3.0 compatibility input の nullable line-level ScreenTemplate override。1.4.0 で削除済み。 */
-  screenTemplateId: string | null;
   spokenText: string;
   subtitleText: string;
   expression: "neutral" | "smile" | "explain" | "caution";
@@ -1286,15 +1463,15 @@ type ScriptLine = {
 };
 ```
 
-- `origin` の初期値は `manual` とする。
-- `outlineHash` は台本作成元となった承認済み・最新の構成案の内容ハッシュとする。現在の構成案と一致しない台本は stale とするが、編集やビジュアル・音声操作を承認待ちに戻すゲートにはしない。
+- section は `script.sections[]` の配列順を動画構造の authority とし、`enabled` を lifecycle state として保存する。`導入`、`本編`、`締め` は初期 name であり、role enum や固定 cardinality / order ではない。
+- section は create、rename、reorder、deactivate、reactivate できる。通常の delete は hard delete ではなく `enabled: false` とし、既存 section ID / line ID と downstream data を保持する。
 - `pauseBeforeMs` の初期値は `0`、`pauseAfterMs` の初期値は `250` とする。
 - `spokenText` と `subtitleText` は別々に保存する。
 - `speakerId` は `characters[].id` を参照する。
 - `characterVariantId` は、line の speaker に `project.json` 上で binding された `CharacterVisualSet` 配下の variant を人間が選択した参照とする。新規 line の初期値は `null` とし、`expression`、tag、label から自動設定しない。
 - `characterVariantId` が missing、inactive、speaker の binding と異なる visual 所属の場合は、別 variant を推測せず保存・出力時の validation error とする。編集中の未選択は許可できるが、通常レンダリングの入力にはしない。
 - 1 セクション内の line ID は重複不可とし、プロジェクト全体でも一意にする。
-- 構成案・台本の変更時は、対象ビジュアル範囲、音声生成物、`RenderManifest` の freshness/status を再計算し、stale または `needs_review` を表示する。これは承認ゲートへ戻す処理ではなく、出力時 validation が検出・ブロックするための状態である。
+- line、visual、voice の変更時は対象の dependency freshness を再計算する。section の enabled state は構造データとして保存し、output readiness は enabled section の effective view に対してだけ評価する。
 
 ### 7.8 ビジュアル
 
@@ -1318,7 +1495,7 @@ type VisualAssignment = {
 
 `VisualPlan.status` は既存データ互換、レビュー結果、stale 表示のために保持できる。素材検索、AI 候補表示、割り当て、差し替え、解除、表示設定の更新、音声操作、`RenderManifest` のコンパイルは、ビジュアル承認を要求しない。
 
-現行 `VideoProject 1.5.0` の `VisualAssignment.display` は、Remotion の `MediaFrame` における canvas-relative な表示設定である。`position` は frame の中心、frame の基準サイズは幅 82%・高さ 62%、`scale` はその frame 全体の中心回りの倍率であり、`crop` / `fit` / annotation は frame 内へ適用する。ST-03 の履歴 migration はこの意味を既存 project に対して変更せず、`CommonDisplayV13` の `displayCoordinateSpace: "legacy-media-frame"` として compatibility adapter を通す。
+current `VideoProject 1.9.0` の `VisualAssignment.display` は、Remotion の `MediaFrame` における canvas-relative な表示設定である。`position` は frame の中心、frame の基準サイズは幅 82%・高さ 62%、`scale` はその frame 全体の中心回りの倍率であり、`crop` / `fit` / annotation は frame 内へ適用する。ST-03 の履歴 migration はこの意味を既存 project に対して変更せず、`CommonDisplayV13` の `displayCoordinateSpace: "legacy-media-frame"` として compatibility adapter を通す。
 
 新規の `VideoDisplayV13`、`ImageDisplayV13`、`DocumentDisplayV13` は `CommonDisplayV13` を共通部として使用し、`content-slot-relative` では `position` を content slot 内の正規化された frame 中心、`scale` を slot-local frame の倍率として解釈する。`legacy-media-frame` の assignment を content-slot-relative へ変更する場合は、選択した slot の outer rect に対する明示的な変換操作とし、既存値を migration で推測変換しない。
 
@@ -1668,7 +1845,7 @@ type ScreenTemplateElement =
 
 - `elements` は dialogue window 1、section title 1、character visual 2、content slot 1 でなければならない。character slot は `speaker-1` / `speaker-2` を重複なく持ち、content slot は `primary` であること。
 - `canvasWidth` / `canvasHeight` は 1920 / 1080 に固定する。contained element の rect は finite な 0..1 値、正の size、canvas containment を満たす。character rect は finite な x / y（負値・1 超を許可）、finite positive な size（1 超を許可）を満たす。すべての `rotationDeg` は finite、font size は finite かつ `> 0` とする。
-- RF-01 の `metadata.dialogueWindow.backgroundColor` は `#RRGGBB`、`backgroundOpacity` は 0〜1 とする。未指定の legacy/current metadata は migration で `#000000` / `0.4` を補い、`RenderManifest 2.6.0` で dialogue-window を常時表示する。dialogue text の horizontal / vertical alignment は center、speaker name の visible layer は存在しない。`RenderManifest 2.5.0` はこの metadata を snapshot しない。
+- RF-01 の `metadata.dialogueWindow.backgroundColor` は `#RRGGBB`、`backgroundOpacity` は 0〜1 とする。未指定の legacy/current metadata は migration で `#000000` / `0.4` を補い、current `RenderManifest 2.9.0` で dialogue-window を常時表示する。dialogue text の horizontal / vertical alignment は center、speaker name の visible layer は存在しない。`RenderManifest 2.5.0` はこの metadata を snapshot しない compatibility history とする。
 - rotation は rect の中心を回転中心とし、pixel canvas へ解決した後の `transform-origin: 50% 50%` と同じ結果に固定する。別の transform origin を element ごとに保存しない。contained element の回転後 AABB が canvas 外へ出る場合は editor / API の validation error とし、character は AABB と canvas が全く交差しない場合だけ error とする。要素の重なりが主要な要素を不可視にする場合も validation detail に含める。
 - template の element は固定型だけを許可し、arbitrary HTML / React component、custom CSS、animation、keyframe、element の追加・削除を受け付けない。
 - `revision` は更新ごとに増加し、project mutation と template mutation はそれぞれ expected revision を検証する。active / inactive の切替で row や element を削除しない。
@@ -1681,13 +1858,15 @@ ST-01 の standard seed 値は、dialogue-window を `x: 0.03125`、`y: 0.055555
 
 section-title は現行 composition に存在しないため、上端用の新規 canonical top band として `x: 0.05`、`y: 0.03`、`width: 0.9`、`height: 0.1`、`rotationDeg: 0`、`fontSize: 48` を採用する。5% の左右 inset、3% の上 inset、10% の領域、字幕本文 38px より一段上の 48px は ST-01 の設計定数であり、既存実値の抽出結果や目測値として扱わない。実際の seed input は `src/app/screen-templates/screen-template-seed.ts` に置き、SQLite に同じ stable ID がある場合は既存の user-editable row を変更しない。
 
-template selection は `project.json` にだけ保存する。現行 `1.5.0` では `script.sections[].screenTemplateId` が section 内全 line の authority であり、`ScriptLine.screenTemplateId` は保存しない。`1.4.0` は VP-01 前の legacy input、`1.3.0` は line override を持つ legacy input として #148 の migration で変換し、missing / inactive な明示参照は自動代替せず validation / repair 対象とする。現行 `1.5.0` の section-only project は `RenderManifest 2.5.0` へ compileし、2.4.0 は compatibility boundary とする。
+template selection は `project.json` にだけ保存する。current `1.9.0` では `script.sections[].screenTemplateId` が section 内全 line の authority であり、`ScriptLine.screenTemplateId` は保存しない。`1.8.0` は PC-01 前の legacy input、`1.4.0` 以下と `1.3.0` は line override を持つさらに古い legacy input として #148 / PC-01 の migration で変換し、missing / inactive な明示参照は自動代替せず validation / repair 対象とする。current `1.9.0` の section-only project は `RenderManifest 2.9.0` へ compileし、2.4.0〜2.8.0 は compatibility boundary とする。
 
 ## 8. 派生データ
 
-### 8.1 `RenderManifest`（現行 `2.5.0`）
+### 8.1 `RenderManifest`（現行 `2.9.0`）
 
-現行の `RenderManifest 2.5.0` を使用する。`RenderManifest 2.3.0` / `2.4.0`、`1.0.0` 型、既存 `2.2.0` キャッシュは、MVP / ED-00 / ST-06 前の互換性確認のために履歴として保持するものであり、新規実装の正本ではない。特に既存 `2.2.0` の generic video display は `muted: boolean` の意味を凍結し、現行 `VideoProject 1.5.0` の `volume` schema と共有しない。現行の ScreenTemplate + playback model は 8.1.3 に示し、8.1.2 は V24 compatibility boundary として扱う。
+8.1.3 までの `2.5.0`、8.1.4 の `2.6.0`〜`2.8.0` は versioned compatibility / history detail である。PC-00 の current manifest は `2.9.0` で、serialized shape は変更しない。current compiler は enabled section effective view だけを `2.9.0` に解決する。
+
+current `RenderManifest 2.9.0` を使用する。`RenderManifest 2.3.0`〜`2.8.0`、`1.0.0` 型、既存 `2.2.0` キャッシュは、MVP / ED-00 / ST-06 前の互換性確認または versioned history のために保持するものであり、新規実装の正本ではない。特に既存 `2.2.0` の generic video display は `muted: boolean` の意味を凍結し、current `VideoProject 1.9.0` の `volume` schema と共有しない。current の ScreenTemplate + playback model は `2.9.0` が引き継ぎ、8.1.2〜8.1.4 は versioned compatibility / history detail として扱う。
 
 ```ts
 type LegacyRenderManifestV1 = {
@@ -1970,7 +2149,7 @@ compiler は explicit reference を snapshot と照合し、解決元 `visualId`
 
 ### 8.1.2 `RenderManifest 2.4.0` ScreenTemplate model（compatibility boundary）
 
-互換用の geometry resolver / layout component が作った V24 の解決結果を `manifestVersion: "2.4.0"` として固定する。2.4.0 は template ID だけでなく、compile 時に解決した section layout、line ごとの resolved layout、表示文字列を保持し、Remotion が SQLite や ScreenTemplate repository を参照せずに描画できるようにする。2.3.0 からの移行経緯は 8.1.1 の履歴として扱う。section-only の `VideoProject 1.4.0` は compatibility input として保存・読込するが、現行の serialized media contract は `VideoProject 1.5.0` / `RenderManifest 2.5.0` とする。
+互換用の geometry resolver / layout component が作った V24 の解決結果を `manifestVersion: "2.4.0"` として固定する。2.4.0 は template ID だけでなく、compile 時に解決した section layout、line ごとの resolved layout、表示文字列を保持し、Remotion が SQLite や ScreenTemplate repository を参照せずに描画できるようにする。2.3.0 からの移行経緯は 8.1.1 の履歴として扱う。section-only の `VideoProject 1.4.0` は compatibility input として保存・読込するが、current の serialized media contract は `VideoProject 1.9.0` / `RenderManifest 2.9.0` とする。
 
 ```ts
 type ResolvedScreenElement = {
@@ -2119,7 +2298,7 @@ const previewModeForLine = (
 
 `RenderVisualV24.display` は `RenderVisual.display` の raw `VideoDisplay` / `ImageDisplay` / `DocumentDisplay` を引き継がない。`outerFrame` は legacy-media-frame または content-slot-relative の計算後に得た最終 canvas-relative frame、`contentClip.transform` は選択された primary content slot、`contentClip.enabled` はその slot clipping を適用するかどうかを表す。`fit`、`crop`、annotation はこの `outerFrame` に対する表示値として保存し、`position` / `scale` / `displayCoordinateSpace` は resolved display に含めない。legacy adapter では既存 MediaFrame の frame を `outerFrame` にし、既存見た目互換のため `contentClip.enabled` を false とする。content-slot-relative では inner transform を `outerFrame` へ焼き込み、`contentClip.enabled` を true とする。したがって Remotion は coordinate space を判定したり resolver を再実行したりせず、`RenderVisualV24.display` の値だけで描画できる。
 
-`VisualAssignment` と `RenderVisualV24` は 1 対 1 ではない。互換 2.4.0 では `startLineId` から `endLineId` までの範囲を既存の section / template boundary と persistent canvas state boundary で partition し、各 segment の `screenTemplateId` / revision / hash を保存する。現行 2.5.0 では line template 差分を新たな分割理由にせず、section の template snapshot、`VisualPlaybackCue` が解決した persistent media state boundary、または source-end boundary をその区間の authority とする。legacy-media-frame / content-slot-relative の inner transform は対象 section の content slot へ解決する。
+`VisualAssignment` と `RenderVisualV24` は 1 対 1 ではない。互換 2.4.0 では `startLineId` から `endLineId` までの範囲を既存の section / template boundary と persistent canvas state boundary で partition し、各 segment の `screenTemplateId` / revision / hash を保存する。current 2.9.0 では line template 差分を新たな分割理由にせず、enabled section の template snapshot、`VisualPlaybackCue` が解決した persistent media state boundary、または source-end boundary をその区間の authority とする。legacy-media-frame / content-slot-relative の inner transform は対象 section の content slot へ解決する。
 
 各 segment は `sourceAssignmentId`、0 始まりの `segmentIndex`、`segmentStartLineId`、`segmentEndLineId`、対象 section の template ID / revision / hash、最終 timeline 上の `from` / `durationInFrames`、resolved `display` を持つ。`id` は `sourceAssignmentId`、segment の開始・終了 line ID、対象 section template snapshot、必要な cue state を canonical JSON 化して hash した決定論的な segment ID とする。同じ assignment の segment は line 順に並べ、segment の半開区間が隣接して重複・欠落しないようにする。`from` と `durationInFrames` は intro / outro / cutin の shift 後に確定した line timeline と assignment 範囲の交差から計算し、section または cue state の境界を segment 境界にする。
 
@@ -2183,18 +2362,18 @@ speaker mapping は resolver の固定規則とする。`speaker-1` は `project
 
 layout resolver の順序は次のとおりとする。
 
-1. 互換 1.4.0 では `ScriptSection.name` を section title source として保持し、`section.screenTemplateId` を section 内の全 line の template authority とする。1.3.0 input の `line.screenTemplateId` は migration で削除済みで、1.4.0 line に ScreenTemplate ID が存在しないことを要求する。現行 1.5.0 も同じ section-only authority を継承する。
+1. 互換 1.4.0 では `ScriptSection.name` を section title source として保持し、`section.screenTemplateId` を section 内の全 line の template authority とする。1.3.0 input の `line.screenTemplateId` は migration で削除済みで、1.4.0 line に ScreenTemplate ID が存在しないことを要求する。current 1.9.0 も同じ section-only authority を継承する。
 2. ScreenTemplate snapshot の status、revision、element cardinality、element type 別 geometry policy、font size `> 0`、rect center rotation、回転後の canvas 範囲または character の canvas 交差を検証する。missing / inactive は自動代替せず error とする。
 3. template の outer geometry を 1920 × 1080 canvas へ解決する。
 4. `speaker-1` / `speaker-2` を project character の配列先頭2件へ解決し、`characterId` を resolved layout へ固定する。
-5. generic `VisualAssignment` がある場合、互換 2.4.0 は start / end line 範囲を既存 section / template boundary と persistent state boundary で partition する。現行 2.5.0 は section 境界、`VisualPlaybackCue` が解決した persistent media state boundary、または source-end boundary だけで partition し、同一 section 内の line template 差分では分割しない。各 segment について `displayCoordinateSpace` に応じて legacy adapter または content-slot-relative の `fit`、`crop`、`scale`、`position`、annotation を解決し、version に応じた `RenderVisualV24.display` / `RenderVisualV25.display` の `outerFrame`、`contentClip`、`fit`、`crop`、annotation として保存する。legacy adapter は full-canvas の既存 MediaFrame semantics を `outerFrame` に焼き込み、`contentClip.enabled: false` とする。content-slot-relative は対象 section の content slot の内側へ inner transform を適用して `outerFrame` を確定し、`contentClip.enabled: true` とする。assignment の inner transform は template element の outer geometry を変更せず、raw `position` / `scale` / `displayCoordinateSpace` を Remotion 用 manifest に残さない。動画は元の `startMs` / `endMs` を provenance として保持し、`playing` branch は segment 境界の authoritative source trim pair を playing presentation frames の累積から fractional frame のまま解決し、`paused` branch は source end より前の一点の `sourceFrame`、`ended` branch は `lastDrawableSourceFrame`（整数 frame では `sourceEndFrame - 1`）を保持する。
+5. generic `VisualAssignment` がある場合、互換 2.4.0 は start / end line 範囲を既存 section / template boundary と persistent state boundary で partition する。current 2.9.0 は enabled section の section 境界、`VisualPlaybackCue` が解決した persistent media state boundary、または source-end boundary だけで partition し、同一 section 内の line template 差分では分割しない。各 segment について `displayCoordinateSpace` に応じて legacy adapter または content-slot-relative の `fit`、`crop`、`scale`、`position`、annotation を解決し、version に応じた `RenderVisualV24.display` / `RenderVisualV25.display` の `outerFrame`、`contentClip`、`fit`、`crop`、annotation として保存する。legacy adapter は full-canvas の既存 MediaFrame semantics を `outerFrame` に焼き込み、`contentClip.enabled: false` とする。content-slot-relative は対象 section の content slot の内側へ inner transform を適用して `outerFrame` を確定し、`contentClip.enabled: true` とする。assignment の inner transform は template element の outer geometry を変更せず、raw `position` / `scale` / `displayCoordinateSpace` を Remotion 用 manifest に残さない。動画は元の `startMs` / `endMs` を provenance として保持し、`playing` branch は segment 境界の authoritative source trim pair を playing presentation frames の累積から fractional frame のまま解決し、`paused` branch は source end より前の一点の `sourceFrame`、`ended` branch は `lastDrawableSourceFrame`（整数 frame では `sourceEndFrame - 1`）を保持する。
 6. `prioritizeVisual` が true の場合だけ、既存互換 policy により解決済み character element を縮小する。初期版では非表示にせず、新しい固定座標も生成せず、適用後の状態を resolved layout に固定する。将来非表示を導入する場合は `visible` などを manifest 契約へ追加する。
-7. `sectionTitle`、実際の subtitle、speaker / character variant、background、generic assignment と共に version に応じた section / line resolved layout を生成し、互換 2.4.0 は `RenderLineV24` / `RenderVisualV24`、現行 2.5.0 は parent section を参照する `RenderLineV25` / `RenderVisualV25` と video の resolved playback state（playing の source trim pair / paused・ended の `sourceFrame`）を同じ compiler 出力へ追加する。RF-01〜RF-03 はこの current output へ glow、insert text、EditVideoElement の timing を段階的に追加する。frame-level source-end partition は line の途中にも置けるが、line-level preview sample は別の fixed rule を使う。
+7. `sectionTitle`、実際の subtitle、speaker / character variant、background、generic assignment と共に version に応じた section / line resolved layout を生成し、互換 2.4.0 は `RenderLineV24` / `RenderVisualV24`、current 2.9.0 は parent section を参照する `RenderLineV25` / `RenderVisualV25` と video の resolved playback state（playing の source trim pair / paused・ended の `sourceFrame`）を同じ compiler 出力へ追加する。RF-01〜RF-03 で導入した glow、insert text、EditVideoElement の timing は current output へ引き継ぐ。frame-level source-end partition は line の途中にも置けるが、line-level preview sample は別の fixed rule を使う。
 8. line-card preview / Remotion は同じ resolved layout を描画し、section-title layer は `RenderSectionLayout.sectionTitle` を表示する。2.4.0 と 2.5.0 の cache は manifest version に応じた schema を使う。
 
 `ScreenTemplate` の preview 素材選択は template snapshot / manifest へ保存しない。preview は active な CharacterVisualSet / variant と generic Asset の一時 view model で行い、production compile は project の明示参照と validated snapshot から再解決する。
 
-### 8.1.3 `RenderManifest 2.5.0` section-only + playback model（現行）
+### 8.1.3 `RenderManifest 2.5.0` section-only + playback model（履歴 / compatibility）
 
 `VideoProject 1.5.0` の section-only + playback cue contract を compile する場合は `manifestVersion: "2.5.0"` を必須とする。`RenderManifest 2.4.0` の line / visual resolved fields、parser、cache key、run log の意味を変更せず、2.5.0 で section reference と video playback state を追加する。V25 の video display は `playing` branch の source trim pair、`paused` branch の source end 前の一点 `sourceFrame`、または `ended` branch の `lastDrawableSourceFrame`（整数 frame では `sourceEndFrame - 1`）を持ち、`sourceEndFrame` は exclusive endpoint として別に扱う。同じ `manifestVersion` のまま shape を変更せず、2.4.0 cache を 2.5.0 として暗黙変換しない。RF-01〜RF-03 はこの current manifest を 2.6.0、2.7.0、2.8.0 へ明示的に拡張する。
 
@@ -2335,6 +2514,25 @@ const previewExportProfile = {
 ```
 
 `PreviewPage` は current manifest の playback availability と validation status を確認してから、既存 render job / `renderMedia()` を呼び出す。出力 path は `projects/{projectId}/output/previews/{runId}-{preset}.mp4` とし、production MP4 の path と混在させない。RF-04 は `VideoProject` / `RenderManifest` の version を変更しない。
+
+### 8.1.5 `RenderManifest 2.9.0` enabled section boundary（PC-03）
+
+`RenderManifest 2.9.0` は既存の serialized field shape を維持したまま、compiler input の effective view を current contract とする。compiler は `project.script.sections` から `enabled === true` の section だけを取り出し、raw project の disabled section を Remotion へ渡さない。
+
+disabled section に由来する次の項目は `2.9.0` manifest に存在してはならない。
+
+- section layout、section title、background
+- lines
+- generic `VisualAssignment` と `LineOverlay`
+- sound effect
+- section BGM
+- disabled section を参照する `before_section` edit video element
+
+`before_first_section` / `after_last_section` は enabled section の effective array の先頭・末尾を基準に解決する。disabled section の内部データは project JSON に保持するが、disabled section の missing / stale template、audio、render input、manifest dependency は output readiness の blocker にしない。
+
+保存時の structural validation は全 section を対象にする。section / line の stable ID、duplicate ID、line reference、VisualAssignment の same-section / order、その他 project JSON の内部整合性を検証する。output readiness validation は enabled section だけを対象とし、enabled section が 0 件の場合は project save を許可したうえで `NO_ENABLED_SECTION` を返し、compile / Preview / MP4 を実行しない。
+
+Web preview と Remotion は同じ enabled-only `RenderManifest 2.9.0` を入力にする。無効 section を CSS `display: none` で隠す専用分岐や、preview と production で異なる effective section resolver は作らない。
 
 ### 8.2 音声インデックス
 
@@ -2644,38 +2842,30 @@ GET    /api/projects
 POST   /api/projects
 GET    /api/projects/{projectId}
 PUT    /api/projects/{projectId}/metadata
-PUT    /api/projects/{projectId}/source
-PUT    /api/projects/{projectId}/brief
 PUT    /api/projects/{projectId}/characters
 PUT    /api/projects/{projectId}/audio
 PUT    /api/projects/{projectId}/edit
 GET    /api/projects/{projectId}/validation
 ```
 
+`PUT /api/projects/{projectId}/source` と `PUT /api/projects/{projectId}/brief` は、既存 project / client の読み書きを壊さないために残る場合だけ legacy compatibility route として扱う。current project create、ScriptPage、AI instruction、Manifest compile、Preview、MP4 はこれらを呼び出さない。
+
 現行の project character mutation（CV-05 実装）は、VOICEVOX 話者と `CharacterVisualBinding` を `project.json` へ保存する責務を持つ。`CharacterVisualSet` の visual / variant / file metadata は `GET /api/character-visuals` 系の workspace catalog から取得し、project API が SQLite へ project binding を保存する設計にはしない。
 
 ED-03〜ED-05 の edit mutation は `EditPlan` を `expectedRevision` 付きで保存する。`PUT /api/projects/{projectId}/edit` は台本の section order を受け付けず、video element の role / placement / order、登録済み Asset の `assetId` / `assetVersion` / `assetChecksum` / `projectMediaPath` snapshot、section BGM 0/1、volume だけを更新する。編集候補は `GET /api/assets?kind=video&format=mp4&status=active` または `GET /api/assets?kind=bgm&format=mp3&status=active` で取得し、`format` は最新 Asset version の MIME と library path 拡張子を同時に絞る。picker が送る `assetVersion` は選択した版の識別子として exact lookup し、backend が別の最新版へ置き換えない。Asset の選択・差し替え時には `active` を要求するが、snapshot 後の live な status は出力条件にしない。Asset の取り込みと `project.json` 更新は、片方だけが成功した状態を残さない。
 
-### 11.3 構成案と台本
+### 11.3 section と台本（current）／構成案（legacy compatibility）
 
 ```text
 GET    /api/models
-POST   /api/projects/{projectId}/outline/generate
-POST   /api/projects/{projectId}/outline/regenerate-section
-PUT    /api/projects/{projectId}/outline
-POST   /api/projects/{projectId}/outline/review
-POST   /api/projects/{projectId}/outline/approve
 PUT    /api/projects/{projectId}/script
-POST   /api/projects/{projectId}/script/review
-POST   /api/projects/{projectId}/script/approve
 ```
 
-AI 生成 API はエンドポイントに対応する `taskKind` をサーバー側で確定し、リクエストの `modelId` は実行時上書きとして任意に受け取る。上書きがない場合はプロジェクト設定から上記の優先順で解決し、解決結果が `null` の場合は実行を拒否する。生成に失敗した場合、既存の構成案または台本を変更しない。
+`PUT /api/projects/{projectId}/script` は `expectedRevision` と current `Script` candidate を受け、section / line の structural validation、既存 section ID の保持、同一 section 内の reference / range / order validation、atomic project save を通す。section 専用 command を追加する場合も同じ domain/service invariant を共有する。deactivate / reactivate は `enabled` の変更として保存し、candidate から既存 section ID が消えた場合は hard delete として fail-closed にする。
 
-構成案生成は任意の開始経路である。AI を使わない場合は WebUI の手入力開始操作から `PUT /api/projects/{projectId}/outline` で構成案を保存し、その後は AI 生成時と同じ編集・承認フローを使用する。台本の保存、現場素材用の generic 候補・Asset Search の利用、素材割り当て、音声生成は、台本承認を要求しない。generic 素材の検索 UI は CV-05 が除去した legacy `/script` right pane を前提にせず、別画面または補助導線で扱う。VP-03 の line-card media cue pane はこの除去対象とは別の現行標準 UI である。キャラクタービジュアルの physical variant は別途 `project.json` の explicit reference を人間が選択する。
+project create は 3 starter section を持つ current project を返し、ScriptPage は作成直後から `PUT /api/projects/{projectId}/script` を利用できる。台本の保存、現場素材用の generic 候補・Asset Search の利用、素材割り当て、音声生成は outline approval / script approval を要求しない。generic 素材の検索 UI は CV-05 が除去した legacy `/script` right pane を前提にせず、別画面または補助導線で扱う。VP-03 の line-card media cue pane はこの除去対象とは別の現行標準 UI である。キャラクタービジュアルの physical variant は別途 `project.json` の explicit reference を人間が選択する。
 
-`script/approve` は旧クライアントおよび既存履歴との互換性のため残せるが、成功しても台本・ビジュアル・音声・出力の実行条件を変えない。通常の UI からは呼び出さず、保存後のレビュー結果または status 表示に限定して扱う。
-`visuals/approve` も同じ互換扱いとする。通常の UI からは呼び出さず、素材検索、候補表示、割り当て、差し替え、解除、音声操作、`RenderManifest`、プレビュー、レンダリングの前提にしない。
+outline generate / save / review / approve / reject、source / brief edit、outline-to-script initialize、`script/approve`、`visuals/approve` は legacy compatibility route として残せる。ただし標準 Fastify route、SPA navigation、ScriptPage、音声操作、Manifest compile、Preview、MP4 の前提にはしない。legacy route が残る場合も current `script.sections[]` を置換せず、旧 payload は旧 schema としてだけ検証する。
 
 ### 11.4 用語
 
@@ -2804,12 +2994,12 @@ POST   /api/projects/{projectId}/thumbnail/render
 
 - API キーは `OPENROUTER_API_KEY` からバックエンドだけが読む。
 - 現行の既定モデルは `google/gemma-4-31b-it` とする。
-- 構成案生成、台本生成、台本レビュー、ビジュアル検索意図、レイアウトレビュー、OpenCode の各用途は、用途識別のための `AiTaskKind` として定義済みである。これは各機能が利用可能または実装済みであることを意味しない。特に AI による台本初稿生成は現在対象外・将来拡張であり、本仕様では実装済みとして扱わない。用途別評価を行うまでは同じ共通モデルを使用する。
+- current `AiTaskKind` は `visual_search_intent`、`layout_review`、`opencode` など、企画・構成案・台本生成の廃止と直接関係しない task に限定する。`outline_generation`、`script_generation`、`script_review` は current enum / task override に含めない。用途別評価を行うまでは current task を同じ共通モデルで処理する。
 - OpenCode のエージェントは役割別に分けても、初期設定ではすべて `google/gemma-4-31b-it` を参照する。
 - 実行ログには `taskKind`、解決されたモデル ID、モデル選択元 `run_override | task_override | default` を記録する。
 - モデル一覧は認証済み利用可能モデルを取得し、text 出力と structured output 対応で絞り込む。
 - WebUI のモデル選択では、入出力単価がともに `0` の `free` と、それ以外の `paid` を切り替えて表示できる。
-- 構成案生成は非ストリーミングとする。
+- legacy の構成案生成を読む必要がある場合も、current route / SPA navigation / `script.sections[]` の作成経路として扱わない。
 - structured output は strict JSON Schema を使用し、受信後に Zod で再検証する。
 - ZDR 有効時はリクエストへ ZDR を指定する。
 - data collection は常に deny とする。
@@ -2817,6 +3007,8 @@ POST   /api/projects/{projectId}/thumbnail/render
 - 別モデルへの自動 fallback はしない。
 - 429、502、503 は上限付きで再試行し、`Retry-After` を優先する。
 - 入力超過時に Markdown を暗黙に切り捨てない。
+
+OpenRouter adapter、認証、model catalog、model read route、ZDR / provider capability validation は維持する。planning / outline / script-generation route、source / brief の current edit route、outline-to-script initialize は legacy compatibility として残せるが、標準 Fastify route と current project contract から到達させない。legacy payload や過去 run を current project の section authority へ自動反映しない。
 
 ### 12.2 VOICEVOX
 
@@ -2843,46 +3035,47 @@ POST   /api/projects/{projectId}/thumbnail/render
 
 ## 13. タイムラインコンパイラ
 
-以下の `RenderManifest.characters[]`、`RenderManifest.lines[].characterVariantId`、`RenderManifest.characterVariants[]` は、現行 `RenderManifest 2.5.0` model の出力である。ScreenTemplate の pure geometry resolver / shared layout component は現行 `VideoProject 1.5.0` の section-only selection を解決し、その resolved layout と section title を 8.1.3 の manifest へ渡す。`RenderManifest 2.4.0` は compatibility input として保持し、RF-01〜RF-03 では `2.6.0`〜`2.8.0` の strict manifest shape へ段階的に拡張する。旧 `RenderManifest 1.0.0` / `2.2.0` / `2.3.0` の互換モデルへ新しい意味を追加する仕様ではない。
+以下の `RenderManifest.characters[]`、`RenderManifest.lines[].characterVariantId`、`RenderManifest.characterVariants[]` は、current `RenderManifest 2.9.0` model の出力である。2.5.0〜2.8.0 の記述は versioned compatibility / history detail として保持する。ScreenTemplate の pure geometry resolver / shared layout component は current `VideoProject 1.9.0` の section selection を解決し、その resolved layout と section title を 2.9.0 manifest へ渡す。旧 `RenderManifest 1.0.0` / `2.2.0` / `2.3.0` の互換モデルへ新しい意味を追加する仕様ではない。
 
 ED-08 完了前の compile 経路では、既存 `RenderManifest 2.2.0` の generic video 契約を維持するため、assignment の `display` をそのまま manifest の `display` へ渡さない。project 側の `VideoDisplay.volume` は 8.1.0 の adapter で 0 / 1 のみ `muted` へ変換し、0 / 1 以外は 2.3.0 が必要な validation error とする。ED-08 完了後は 2.3.0 の `volume` schema へ直接解決し、ED-07 はその経路が存在する状態で任意 volume の UI / API を公開する。
 
 入力:
 
 - 検証済み `VideoProject`
+- `project.script.sections[]` から作る enabled section effective view。disabled section は compiler input に含めない
 - `audio-index.json`
 - プロジェクトへ取り込んだ素材
 - 素材の技術メタデータ
 - `project.json` の `CharacterVisualBinding` と各 line の `characterVariantId`
 - `EditPlan` の `assetId` / `assetVersion` / `assetChecksum` / `projectMediaPath` snapshot と project 内の動画・BGMファイル
 - バックエンドが SQLite から取得して検証した `CharacterVisualCatalogSnapshot`
-- 現行 1.5.0 は、バックエンドが SQLite から取得して検証した `ScreenTemplate` snapshot と、`project.json` の section template selection を入力とする。CharacterVisualSet の visual-level `glowColor` は RF-01 の `RenderManifest 2.6.0` compile input / snapshot として追加する
-- 現行 1.5.0 は、`edit.videoElements[]` の asset snapshot と volume を入力とし、RF-02 / RF-03 では text template、`startMs`、canonical `playbackRate` を追加する
+- 現行 1.9.0 は、バックエンドが SQLite から取得して検証した `ScreenTemplate` snapshot と、enabled section の section template selection を入力とする。CharacterVisualSet の visual-level `glowColor` は current manifest input として解決する
+- 現行 1.9.0 は、`edit.videoElements[]` の asset snapshot と volume、既存 version boundary の text template / `startMs` / canonical `playbackRate` を入力とする
 - VP-01 / VP-02 の完了済み契約は、`project.json` の generic video `playbackCues` と line order / edge order を解決するための cue input
 - `ScriptSection.name` を compiler が `RenderSectionLayout.sectionTitle` へ固定するための section metadata
 
 処理:
 
-1. project schema を検証する。CV-05 の binding / line reference と ST-03 の template reference を含むデータは、明示的に bump された schema version と migration を通過したものだけを受け付ける。
-2. 出力条件と参照整合性を検証する。構成案の承認・最新性は確認するが、台本・ビジュアルの `approved` status は要求しない。
+1. current `VideoProject 1.9.0` を検証する。`1.8.0` 以下の input は明示 migration を通過したものだけを current compiler に渡す。
+2. 全 section / line / assignment の structural integrity を検証し、その後 enabled section effective view の output readiness を検証する。構成案の承認・最新性、Script の planning status / origin / outline hash は要求しない。enabled section が 0 件なら `NO_ENABLED_SECTION` を返す。
 3. 全セリフに有効な音声インデックスがあることを確認する。
 4. `CharacterVisualBinding.visualId` / `idleVariantId` と各 `ScriptLine.characterVariantId` を catalog snapshot と照合する。missing、inactive、cross-visual、speaker 不一致、必須 file slot 欠落、checksum 不一致は validation error とする。未選択 line に対して expression、tag、label、旧固定 mapping から代替しない。
-5. 現行 1.5.0 では section の `screenTemplateId` だけを検証し、section 内の全 line の authority とする。1.3.0 input の line-level ID は migration で削除済みであり、明示参照が missing / inactive の場合は自動代替せず validation error とする。
+5. 現行 1.9.0 では section の `screenTemplateId` だけを検証し、section 内の全 line の authority とする。`outlineSectionId` と line-level template ID は current shape に保存しない。明示参照が missing / inactive の場合は自動代替せず validation error とする。disabled section の参照切れは output readiness の blocker にしない。
 6. ScreenTemplate snapshot の revision、element cardinality、contained element の 0..1 canvas-contained rect、character の finite x / y・positive size・部分 overflow / 完全 off-canvas、rect center rotation、`fontSize > 0`、`flipX` を検証する。`screen-template-standard` と catalog は SQLite から取得した snapshot として扱う。RF-01 の `RenderManifest 2.6.0` compile では、追加された dialogue-window metadata（`backgroundColor` は `^#[0-9A-Fa-f]{6}$`、`backgroundOpacity` は 0..1）と `CharacterVisualSet.glowColor` の `#RRGGBB` 形式を検証する。
 7. valid な explicit reference から `RenderManifest.characters[].idleVariantId`、`RenderManifest.lines[].characterVariantId`、`RenderManifest.characterVariants[]` を解決する。compiler は SQLite を直接検索せず、渡された snapshot だけを使う。RF-01 の `RenderManifest 2.6.0` compile では、selected visual の glow snapshot もここで解決する。
-8. 共有 resolver を使い、`ScriptSection.name` から `sectionTitle` を固定し、`speaker-1` / `speaker-2` を `project.characters[0]` / `[1]` へ解決する。valid な section template snapshot から outer geometry を解決し、`ResolvedScreenLayout` を組み立てる。現行 2.5.0 の generic assignment は section 境界、`VisualPlaybackCue` が解決した persistent media state boundary、または source-end boundary だけで segment 化し、同一 section 内の line template 差分では分割しない。2.4.0 はこの shape の compatibility input である。各 segment を `displayCoordinateSpace` に応じ、legacy mode は full-canvas compatibility adapter、content-slot-relative は対象 section の content slot 内の inner transform として解決し、version に応じた `RenderVisualV24.display` / `RenderVisualV25.display` の最終 `outerFrame` / `contentClip` / `fit` / `crop` / annotation へ固定する。outer template geometry を変更せず、Remotion が raw display を再解釈する余地を残さない。
+8. enabled section のみを共有 resolver へ渡し、`ScriptSection.name` から `sectionTitle` を固定し、`speaker-1` / `speaker-2` を `project.characters[0]` / `[1]` へ解決する。valid な section template snapshot から outer geometry を解決し、`ResolvedScreenLayout` を組み立てる。current 2.9.0 の generic assignment は section 境界、`VisualPlaybackCue` が解決した persistent media state boundary、または source-end boundary だけで segment 化し、同一 section 内の line template 差分では分割しない。disabled section に由来する layout、title、background、line、visual、overlay、sound effect、BGM は生成しない。各 segment を `displayCoordinateSpace` に応じ、legacy mode は full-canvas compatibility adapter、content-slot-relative は対象 section の content slot 内の inner transform として解決し、2.9.0 の最終 `outerFrame` / `contentClip` / `fit` / `crop` / annotation へ固定する。outer template geometry を変更せず、Remotion が raw display を再解釈する余地を残さない。
 9. `prioritizeVisual` が true の場合だけ既存互換の character 縮小 policy を resolved layout へ適用する。初期版では非表示にせず、新しい固定座標へ戻さず、適用後の geometry を manifest に固定する。
 10. `EditPlan` の snapshot について、project 内 `projectMediaPath` の存在、`assetChecksum` との一致、MP4 / MP3 の実ファイル形式を検証する。snapshot 作成後の live な Asset `status` は確認せず、Asset Service の SQLite を再検索しない。
 11. 無音時間と音声長をフレームへ変換する。
 12. セリフを累積して line range を作る。
-13. visual assignment の line ID 範囲を frame range へ解決し、現行 2.5.0 では section、`VisualPlaybackCue` が解決した persistent state、または source-end boundary の境界だけを使い、同一 section 内の line template 差分は新しい segment 境界にしない。2.4.0 は compatibility shape として別 parser / cache key で扱う。各 segment の最終 `from` / `durationInFrames` は後続の timeline shift を反映して確定する。
+13. visual assignment の line ID 範囲を frame range へ解決し、current 2.9.0 では enabled section の section 境界、`VisualPlaybackCue` が解決した persistent state、または source-end boundary の境界だけを使い、同一 section 内の line template 差分は新しい segment 境界にしない。2.4.0〜2.8.0 は compatibility shape として別 parser / cache key で扱う。各 segment の最終 `from` / `durationInFrames` は後続の timeline shift を反映して確定する。
 13.1. video cue を line order + edge order で解決する。同じ boundary の event は `startLineId` BEFORE では implicit play → cue、source-end boundary では implicit source-end → ended → cue validation、`endLineId` AFTER では cue → implicit hide / end の順に適用し、state 不一致または no-op / redundant cue は validation error とする。再生開始（再起動）は `startLineId` の更新、終了は `endLineId` の更新であり、再開 / 一時停止は cue の resume / pause だけを表す。cue に play / end action は追加しない。`pause` は playing state、`resume` は paused state でだけ有効とし、ended state ではどちらも無効とする。paused presentation frames は source-time accumulation に加算しない。video 内 audio は pause / ended 中に停止し、speech / BGM / sound effect は継続する。photo / `document_scan` は static-visible state だけを持つ。
-14. section background を frame range へ解決する。
-15. `EditPlan.videoElements` の cutin を、最初のセクションを除く `before_section` 境界へ `order` 順に挿入する。最初のセクション直前の cutin は validation error とする。
+14. enabled section の background を frame range へ解決する。disabled section の background は出力しない。
+15. `EditPlan.videoElements` の cutin を、enabled section の最初を除く `before_section` 境界へ `order` 順に挿入する。disabled section を target にする `before_section` element は出力せず、enabled section の最初の直前への cutin は validation error とする。
 16. `EditPlan.videoElements[]` の role / placement と current baseline の source duration から intro / outro / cutin の frame range を解決し、後続 section / line の frame range を shift する。RF-03 後は `startMs`、canonical `playbackRate`、source duration から `effective duration` を解決する。generic VisualAssignment の動画 `startMs` / `endMs` は元 assignment の provenance として保持し、EditVideoElement の source start / rate と混同しない。shift 後も assignment 開始後の playing presentation frames だけを累積する。source-end boundary で generic assignment を `playing` と `ended` に分け、`playing` segment は authoritative `sourceTrimBeforeFrame` / `sourceTrimAfterFrame` を再計算し、`paused` segment は一点の `sourceFrame`、`ended` segment は `lastDrawableSourceFrame`（整数 frame では `sourceEndFrame - 1`）を解決する。`sourceEndFrame` は playing trim の exclusive endpoint として別に扱い、pause 中の frame を source range へ加算せず、segment 境界で再生を先頭へ戻さない。
-17. shift 後の section range へ `EditPlan.sectionBgms` を解決し、動画要素の区間では BGM を再生しない。効果音をセリフ基準の位置へ統合する。
-18. 現行 `RenderManifest 2.5.0` では `RenderVideoInsert`、`RenderAudioTrack`、`sectionLayouts`（`sectionTitle` と resolved layout）、section を参照する line、version に応じた segment 化済み `RenderVisualV24[]` / `RenderVisualV25[]`（`sourceAssignmentId`、segment ID、`from` / `durationInFrames`、section template snapshot、resolved display、generic video の resolved playback state、provenance range、V24 / V25 playing の source trim pair または V25 paused / ended の `sourceFrame` を含む）、全体 duration、hash、checksum を確定し、Zod で検証する。2.5.0 の manifest では section title、template revision / hash、speaker mapping、入力 display coordinate space、section / persistent media state partition、source-end boundary、resolved visual の outer frame / content clip / fit / crop / annotation、動画 segment の provenance、resolved cue、resolved video branch を `compilerInputHash` に含める。RF-01 の `2.6.0` では dialogue metadata と selected CharacterVisualSet glow、RF-02 の `2.7.0` では insert text snapshot、RF-03 の `2.8.0` では insert source start / canonical rate / effective duration と insert timing をそれぞれ追加する。現行 1.5.0 input は `manifestVersion: "2.5.0"` を使用し、2.4.0 cache と混在させない。
-19. 一時ファイルから `cache/render-manifest.json` へ置換する。
+17. shift 後の enabled section range へ `EditPlan.sectionBgms` を解決し、動画要素の区間では BGM を再生しない。disabled section の BGM は出力せず、効果音も enabled section の line 基準でだけ統合する。
+18. 現行 `RenderManifest 2.9.0` では `RenderVideoInsert`、`RenderAudioTrack`、enabled section の `sectionLayouts`（`sectionTitle` と resolved layout）、section を参照する line、segment 化済み `RenderVisualV25[]`、全体 duration、hash、checksum を確定し、Zod で検証する。無効 section 由来の layout / title / background / line / visual / overlay / sound effect / BGM / `before_section` element は含めない。`compilerInputHash` には enabled section effective view、section title、template revision / hash、speaker mapping、resolved visual display、cue canonical order、resolved media state、source-end boundary、Asset snapshot を含める。2.9.0 は既存 manifest serialized shape を維持し、2.5.0〜2.8.0 の parser / cache / run log を暗黙に再解釈しない。
+19. enabled section が 1 件以上ある場合だけ、一時ファイルから `cache/render-manifest.json` へ置換する。0 件の場合は新しい manifest を保存しない。
 
 失敗時は新しいマニフェストを保存せず、全エラーを line ID、assignment ID、パスと関連付けて返す。
 
@@ -2903,8 +3096,6 @@ ED-08 完了前の compile 経路では、既存 `RenderManifest 2.2.0` の gene
 ```text
 /projects
 /projects/new
-/projects/{projectId}/brief
-/projects/{projectId}/outline
 /projects/{projectId}/script
 /projects/{projectId}/edit
 /projects/{projectId}/characters
@@ -2923,6 +3114,7 @@ ED-08 完了前の compile 経路では、既存 `RenderManifest 2.2.0` の gene
 ルーティング表現は採用フレームワークに合わせて変更してよいが、画面責務は維持する。
 
 `/projects/{projectId}/script` はセクションと compact line card を中心とする 1 ペインの台本画面であり、usable content pane の上限は SW-04（#169）により `1500px` とする。各カードの「ビジュアルを変更」から modal picker を開き、speaker に project 上で binding された `CharacterVisualSet` の active variant だけを表示する。`project.json` の binding / line reference と、バックエンドが解決した `CharacterVisualCatalogSnapshot` を組み合わせ、選択結果を扱う。通常カードには大きな variant preview / label / `renderType` block を常設せず、picker 内で確認する。画像読込失敗時は管理された配信 URL と対象 ID を表示し、DB に登録されていない物理素材を表示しない。台本、generic 素材 assignment、音声状態、section の template selection は同じ `project.json` の revision と自動保存で扱い、ワークスペース共通の visual metadata / ScreenTemplate 定義は `project.json` へ保存しない。VP-03 の line-card media cue pane はこの line card の右側で current generic `VisualAssignment`、managed Asset、playback state、cue 操作、明示的な asset replacement を扱うが、visible UI は SW-04 の preview / minimal actions に限定する。
+`/projects/{projectId}/script` はセクションと compact line card を中心とする 1 ペインの台本画面であり、usable content pane の上限は SW-04（#169）により `1500px` とする。project create 直後から開け、section / line / visual / voice を編集する。各カードの「ビジュアルを変更」から modal picker を開き、speaker に project 上で binding された `CharacterVisualSet` の active variant だけを表示する。`project.json` の binding / line reference と、バックエンドが解決した `CharacterVisualCatalogSnapshot` を組み合わせ、選択結果を扱う。通常カードには大きな variant preview / label / `renderType` block を常設せず、picker 内で確認する。画像読込失敗時は管理された配信 URL と対象 ID を表示し、DB に登録されていない物理素材を表示しない。台本、generic 素材 assignment、音声状態、section の lifecycle / template selection は同じ `project.json` の revision と自動保存で扱い、ワークスペース共通の visual metadata / ScreenTemplate 定義は `project.json` へ保存しない。section は create / rename / reorder / deactivate / reactivate を行えるが、通常の delete は `enabled=false` として保存する。VP-03 の line-card media cue pane はこの line card の右側で current generic `VisualAssignment`、managed Asset、playback state、cue 操作、明示的な asset replacement を扱うが、visible UI は SW-04 の preview / minimal actions に限定する。
 
 `/projects/{projectId}/edit` は独立した編集画面である。`script.sections` から導出した section card の順番と内容を読み取り専用で表示し、編集対象の video element card と BGM を追加で表示する。未編集状態では section card だけを表示する。
 
@@ -2942,23 +3134,22 @@ editor のサイドバーは active な CharacterVisualSet / variant と、必�
 ### 14.2 ワークフローステップ
 
 ```text
-企画
-  → 構成案（承認・最新性確認）
-  → 台本（台本・キャラクタービジュアル・音声）
+project create
+  → 台本（/projects/{projectId}/script: section・line・visual・voice）
   → 編集（動画要素・セクション BGM）
   → 出力 validation
-  → `RenderManifest` 生成
+  → `RenderManifest 2.9.0` 生成
   → プレビュー／レンダリング
 ```
 
-台本画面は台本承認・ビジュアル承認なしで、台本、セリフカード上のキャラクタービジュアル、音声生成・調整を行える。編集画面は台本の section 順を変更せず、登録済み Asset から video element と BGM を選択する。generic 素材の候補表示・素材割り当ては backend と保存データを維持し、必要な UI は別画面または補助導線で扱う。プレビュー、`RenderManifest` 生成、レンダリングは、構成案の承認・最新性、入力内容、編集要素、音声、素材参照、範囲、checksum、実ファイル形式などの validation に失敗した場合だけ無効化し、理由と修正先へのリンクを表示する。
+台本画面は outline approval、script initialization、台本承認・ビジュアル承認なしで、台本、セリフカード上のキャラクタービジュアル、音声生成・調整を行える。編集画面は台本の effective section 順を読み取り、登録済み Asset から video element と BGM を選択する。generic 素材の候補表示・素材割り当ては backend と保存データを維持し、必要な UI は別画面または補助導線で扱う。保存時は全 section の structural validation、プレビュー、`RenderManifest 2.9.0` 生成、レンダリングは enabled section の output readiness validation に失敗した場合だけ無効化し、理由と修正先へのリンクを表示する。無効 section だけの missing / stale dependency は blocker にせず、enabled section 0 件は `NO_ENABLED_SECTION` とする。
 
 ### 14.3 台本画面
 
-以下は current `VideoProject 1.5.0` / `RenderManifest 2.5.0` baseline `/script` 制作画面の基本責務である。`VideoProject 1.4.0` / `RenderManifest 2.4.0` は compatibility input / manifest として別境界で扱う。VP-01 / VP-02 の cue / render contract は完了済みであり、RF-01〜RF-03 の glow、InsertTextTemplate、EditVideoElement timing は後続 version boundary で追加する。CV-05 で実装済みの画面は、台本・ビジュアル・音声を別々の承認工程へ戻さない。`ScriptLine.expression` は論理表情として編集し、physical variant は explicit `characterVariantId` として人間が選択する。
+以下は current `VideoProject 1.9.0` / `RenderManifest 2.9.0` baseline `/script` 制作画面の基本責務である。`VideoProject 1.8.0` 以下と `RenderManifest 2.8.0` 以下は compatibility input / manifest として別境界で扱う。PC-00 は企画・構成案の approval gate と script initialization を current UI から外し、section / line / visual / voice を作成直後から編集する。`ScriptLine.expression` は論理表情として編集し、physical variant は explicit `characterVariantId` として人間が選択する。
 
 - 1 ペイン: セクションとセリフカードを主役にする。プレビュー、保存状態、validation は補助表示として統合してよい。
-- 各セクション見出し: 台本の背景、セクション情報、音声状態の確認。BGM の編集は `/projects/{projectId}/edit` で行う
+- 各セクション見出し: name、enabled、背景、ScreenTemplate、音声状態の確認。create / rename / reorder / deactivate / reactivate を行う。BGM の編集は `/projects/{projectId}/edit` で行う
 - セリフカード: metadata / controls block を第1行として数える4行 compact layout。1 行目は ID subline と control subline（speaker name-only、`ビジュアルを変更`、compact voice status、再生、再生成、音声調整）、2 行目は `subtitleText`、3 行目は visible label `[読み上げ]` と保存 field `spokenText`、4 行目は `詳細設定` と上へ移動、下へ移動、複製、削除。visible label に `よみがな` は使用しない
 - subtitle / 読み上げ表示は通常時に compact な 1 行とし、選択・編集時だけ input area へ expand する。音声調整の詳細は card 内へ常時展開せず modal / dialog で編集する。
 - 「ビジュアルを変更」modal picker: speaker に binding された `CharacterVisualSet` の active variant だけを表示し、preview、label、renderType、tags、選択中状態を表示する。通常カードにはこれらを常設せず、`mouth-pair` は `closed` / `open` を picker 内で表示する。
@@ -2981,9 +3172,9 @@ editor のサイドバーは active な CharacterVisualSet / variant と、必�
 
 - 未編集状態では `script.sections` から導出した section card だけを表示する。
 - `intro` は先頭セクション前に最大 1 件、`outro` は末尾セクション後に最大 1 件、`cutin` は最初のセクションを除く `before_section` 境界に 0 件以上配置する。同じ境界の cutin は video element card の順序だけを drag & drop で変更できる。最初のセクション直前への cutin は許可しない。
-- section 自体の追加、削除、並べ替え、内部任意時刻への cutin 配置はこの画面の責務に含めない。
+- section 自体の追加、削除、並べ替え、内部任意時刻への cutin 配置はこの画面の責務に含めない。section の lifecycle は ScriptPage の domain mutation として扱い、通常の削除は `enabled=false` とする。
 - video element picker は選択・差し替え時点で active な `video` Asset のうち `.mp4`、`video/mp4`、MP4 container を満たすものだけを候補にする。BGM picker も選択・差し替え時点で active な `bgm` Asset のうち `.mp3`、`audio/mpeg`、MP3 を満たすものだけを候補にする。OS path と任意ファイルは受け付けない。
-- video element は current 1.5.0 baseline では追加、差し替え、削除、音量調整を行う。RF-02 / RF-03 後は template selection、複数行 text 編集、`startMs`、固定候補からの `playbackRate` 選択を段階的に追加し、BGM はセクションごとに追加、差し替え、解除、単体試聴、音量調整を行う。
+- video element は current 1.9.0 baseline で追加、差し替え、削除、音量調整を行い、RF-02 / RF-03 の template selection、複数行 text 編集、`startMs`、固定候補からの `playbackRate` 選択を引き継ぐ。BGM はセクションごとに追加、差し替え、解除、単体試聴、音量調整を行う。
 - 動画と BGM の volume は 0〜1 とする。BGM は対象 section の全区間を固定 loop し、動画要素の区間では前後 section の BGM を再生しない。BGM の開始オフセット、トリム、フェード、音量キーフレーム、自動ダッキング、クロスフェードは提供しない。動画要素の `startMs` は RF-03 の source start、`playbackRate` は x1/3〜x3.0 の固定候補だけを提供する。
 - RF-03 後の `startMs: null` は source 開始、指定値は `0 <= startMs < sourceDuration` の source position からの開始とする。`startMs === sourceDuration` および sourceDuration 超は reject する。Preview Player の stopped state では指定 frame を表示し、EditVideoElement に generic `playbackCues`、persistent `muted`、playing / paused / ended state は保存しない。effective duration は `(source duration - startMs) / playbackRate`（null は source duration）で決定し、後続 timeline を shift する。
 - RF-02 後の `InsertTextTemplate` は ScreenTemplate と別の workspace catalog から選択し、編集 field は一つの複数行 text に限定する。既存 element の default は `text: ""`、`textTemplateId: null` とし、manifest には指定時だけ template revision / hash / resolved text layout を snapshot する。
@@ -3000,26 +3191,30 @@ editor のサイドバーは active な CharacterVisualSet / variant と、必�
 
 - 入力不正
 - revision 競合
-- 構成案の未承認または source hash の不一致
-- 台本の構造不正、`outlineHash` 不一致、話者・発話の欠落
+- current project の structural validation エラー
+- enabled section の template / audio / render input 不備、`NO_ENABLED_SECTION`
+- 話者・発話の欠落
 - 素材参照切れ、assignment 範囲外、checksum 不一致
 - 音声の missing、stale、生成失敗、VOICEVOX 接続不可
 - `RenderManifest` の生成・検証エラー
 
 - script/visual の `approved` status は、上記 validation blocker とはみなさない。
-- 未解決の要確認事項
 - モデル未選択
 - OpenRouter 認証、残高、非対応、入力超過、一時障害
 - VOICEVOX 未起動、対象話者または標準スタイルの解決失敗、合成失敗
 - 素材参照切れ、チェックサム不一致、範囲外
 - レンダリング失敗
 
+legacy project の outline 未承認、source hash 不一致、`Script.status` / `outlineHash` は current output blocker として表示しない。disabled section のみの missing / stale dependency も blocker としない。
+
 ## 15. 検証と依存アーティファクトの stale 規則
+
+PC-00 current rule は、`script.sections[]` を authority とし、section の `enabled` を effective output membership として扱うことである。section / line / visual / voice の変更は project revision と該当する依存生成物を更新するが、outline approval、source hash、Script の planning status / origin / outline hash を current workflow の gate として再計算しない。disabled section の downstream data は保持し、output compiler / readiness だけが enabled section effective view を使用する。enabled section が 0 件の場合は project save を許可し、compile / Preview / MP4 に `NO_ENABLED_SECTION` を返す。
 
 | 変更 | stale または再検証が必要になる依存アーティファクト |
 |---|---|
-| Markdown または企画条件 | 構成案と、その下流の台本・ビジュアル・音声・Manifest |
-| 構成案の内容または source hash | 台本の `outlineHash`、ビジュアル候補の検索コンテキスト、出力 validation |
+| legacy source / brief / outline | legacy read / migration diagnostics だけ。current project の stale gate、AI input、output blocker にはしない |
+| section の create / rename / reorder / `enabled` 変更 | project revision、section structural validation、enabled effective view、Manifest / Preview / MP4 の readiness |
 | 台本のセリフ追加・削除・順序変更 | ビジュアル assignment の範囲、音声、Manifest |
 | `spokenText`、話者、音声設定 | 対象音声、Manifest |
 | `subtitleText`、表情 | Manifest |
@@ -3027,11 +3222,11 @@ editor のサイドバーは active な CharacterVisualSet / variant と、必�
 | line の `characterVariantId` | 該当 line、Manifest |
 | CharacterVisualSet の status、variant files、checksum | binding / line variant validation、Manifest |
 | ScreenTemplate の element、geometry、font size、`flipX`、status | template revision、section layout、section 内 line-card preview、Manifest |
-| ScreenTemplate の revision / deterministic hash | 現行 `RenderManifest 2.5.0` の `compilerInputHash`、preview / render freshness |
-| RF-01 の ScreenTemplate dialogue metadata / CharacterVisualSet glow | `RenderManifest 2.6.0` の `compilerInputHash`、preview / render freshness |
+| ScreenTemplate の revision / deterministic hash | current `RenderManifest 2.9.0` の `compilerInputHash`、preview / render freshness |
+| RF-01 の ScreenTemplate dialogue metadata / CharacterVisualSet glow | current `RenderManifest 2.9.0` の `compilerInputHash`、preview / render freshness |
 | section の `screenTemplateId` | 該当 section の resolved layout、section 内 line の preview、Manifest |
 | ビジュアル割り当て、`startLineId` / `endLineId`、display 設定 | Manifest、該当 line の preview |
-| video `playbackCues`、cue order、pause / resume state | VP-01 project validation、VP-02 `RenderManifest 2.5.0`、該当 line 以降の `PersistentScreenState` preview |
+| video `playbackCues`、cue order、pause / resume state | current `RenderManifest 2.9.0`、該当 line 以降の `PersistentScreenState` preview |
 | 背景、`EditPlan.videoElements`、`EditPlan.sectionBgms`、BGM / 動画の volume、効果音 | Manifest |
 | `EditVideoElement` の text / textTemplateId / startMs / playbackRate | RF-02 / RF-03 の manifest、insert text layout、後続 timeline |
 | Preview export preset / encode profile | preview render job と `output/previews/` の成果物 |
@@ -3040,12 +3235,15 @@ editor のサイドバーは active な CharacterVisualSet / variant と、必�
 
 「見直し対象」は既存ファイルの削除を意味しない。古い生成物を stale と表示し、新しい生成が成功するまで保持する。
 
-`needs_review`、`stale`、`missing` は依存生成物の再生成や出力 validation のための状態であり、script/visual の人間による承認を再要求するための状態ではない。構成案の承認・最新性だけは台本の作成元と現在の制作コンテキストを確認するために維持する。
+`needs_review`、`stale`、`missing` は依存生成物の再生成や出力 validation のための状態であり、section / script / visual の人間による承認を再要求するための状態ではない。legacy outline の承認・最新性は過去 project / log の compatibility 情報として保持できるが、current project の作成、保存、Manifest compile、Preview、MP4 の条件にはしない。disabled section の stale output artifact は enabled section の出力を blocker にしない。
 
 ## 16. 検証
 
 ### 16.1 保存前
 
+- current `VideoProject 1.9.0` の strict root、`script.sections[]` の stable ID / `enabled` / `name` / background / `screenTemplateId` / lines を検証する。`brief`、`outline`、`Script.status`、`Script.origin`、`Script.outlineHash`、`ScriptSection.outlineSectionId` は current shape に保存しない。
+- 保存 validation は全 section を対象とし、disabled section の構造も検証する。section の通常 delete は `enabled=false` であり、candidate から既存 section ID が消えた場合は hard delete として拒否する。create / rename / reorder / deactivate / reactivate は同じ domain invariant と expectedRevision を通す。
+- enabled section が 0 件でも structural save は許可する。output readiness は別 validation とし、0 件の場合にだけ `NO_ENABLED_SECTION` で compile / Preview / MP4 を拒否する。
 - Zod strict schema
 - ID の形式、重複、不正参照
 - 数値範囲
@@ -3066,19 +3264,21 @@ editor のサイドバーは active な CharacterVisualSet / variant と、必�
 - `mouth-pair` の `closed` / `open` キャンバス一致
 - 未登録 variant が set 全体のエラーになっていないこと
 - セクションとセリフの順序
-- 現行 `VideoProject 1.5.0` が section `screenTemplateId` だけを持ち、section 内全 line の authority とすること。`1.4.0` は VP-01 前の legacy input、`1.3.0` の nullable line override は migration input にだけ存在し、line に ScreenTemplate ID を保存しないこと
+- 現行 `VideoProject 1.9.0` が section `screenTemplateId` だけを持ち、section 内全 line の authority とすること。`1.8.0` 以下の line override / outline link は migration input にだけ存在し、line に ScreenTemplate ID や `outlineSectionId` を保存しないこと
 - VP-01 の `VideoDisplayV15.playbackCues` が video kind にだけ存在し、cue `lineId` が同一 section の assignment range 内、`edge` が before / after、`action` が pause / resume であること。range 外、state 不一致、ended 後の pause / resume、相反重複、photo / `document_scan` cue、initial / final の synthetic cue を拒否すること。assignment の presentation duration が source duration を超える場合は拒否せず、source-end boundary の implicit source-end → ended と `lastDrawableSourceFrame` の保持を解決すること
 - missing / inactive template の明示参照を自動代替しないこと、rotation 後の dialogue/title/content slot の canvas 外拒否、character の完全 off-canvas 拒否と部分 overflow 許可
 - `EditPlan` の video element の role / placement / order、cutin の最初のセクション直前配置拒否、intro / outro の最大 1 件制約、section BGM の 0/1 重複
 - 編集 Asset の `assetId`、`assetVersion`、`assetChecksum`、`projectMediaPath`、選択・差し替え時の active 状態、MP4 / MP3 の MIME・実ファイル形式。出力時に live な Asset `status` を要求しないこと
-- 動画要素と BGM の volume が 0〜1 であること。RF-02 / RF-03 の project version では `EditVideoElement` の text / textTemplateId / `startMs` / 固定候補 playbackRate を検証する。current 1.5.0 の `EditPlan` へ `muted`、generic playback cue、BGM の loop / 開始オフセット / トリム / fade を保存しないこと
+- 動画要素と BGM の volume が 0〜1 であること。current 1.9.0 の `EditVideoElement` では RF-02 / RF-03 の text / textTemplateId / `startMs` / 固定候補 playbackRate を検証し、`muted`、generic playback cue、BGM の loop / 開始オフセット / トリム / fade を `EditPlan` へ保存しないこと
 - 効果音の素材種別、参照先、チェックサム、カテゴリ、オフセット、音量
 - サムネイルの必須タイトルと部門・対象システム名
 
 ### 16.2 制作・出力前 validation
 
-- 構成案の role 順序、未解決質問、承認状態、source hash の最新性
-- 台本の空セリフ、話者、`outlineHash`、section/line 参照
+- enabled section の effective view を作り、active / resolvable template、current line audio、active render input、Manifest compile、timeline / MP4 要件だけを output readiness として検証する。
+- disabled section の missing / stale template、audio、render input、assignment、overlay、sound effect、BGM は output blocker にしない。enabled section が 0 件の場合は `NO_ENABLED_SECTION` を返す。
+- legacy project の構成案 role 順序、未解決質問、承認状態、source hash、`outlineHash` は current output 条件にしない。
+- 台本の空セリフ、話者、section/line 参照は enabled section の effective view と、全 project の structural integrity の境界に従って検証する。
 - ビジュアルの割り当て範囲、素材状態、チェックサム、機密区分
 - ScreenTemplate snapshot の status、revision、element cardinality、element type 別 geometry policy、rect center rotation、`fontSize > 0`、`flipX`、template hash
 - section の template selection、resolved outer geometry、generic assignment inner transform、`prioritizeVisual` の適用順
@@ -3104,16 +3304,19 @@ editor のサイドバーは active な CharacterVisualSet / variant と、必�
 
 ### 16.4 レンダリング前
 
+- current `RenderManifest 2.9.0` を enabled section effective view から生成し、serialized shape を維持すること。2.5.0〜2.8.0 の記述は carried-forward field semantics または versioned compatibility / history として扱う。
+- 保存時は全 section の structural validation、出力時は enabled section だけの readiness validation を行うこと。disabled section の missing / stale output dependency は blocker にせず、enabled section が 0 件なら `NO_ENABLED_SECTION` で compile / Preview / MP4 を停止すること。
+- `RenderManifest 2.9.0` に disabled section 由来の layout / title / background、line、generic visual、line overlay、sound effect、section BGM、disabled section を参照する `before_section` element を含めないこと。`before_first_section` / `after_last_section` は enabled section の先頭・末尾を基準にすること。
 - 最新 `RenderManifest` を validation 済みの入力から生成できること（script/visual の `approved` status は不要）
 - 全素材と音声の存在、チェックサム
-- 現行 `RenderManifest 2.5.0` の `RenderLine.expression` は論理表情であり、物理ファイルパスとして解釈しない。
-- 現行 `RenderManifest 2.5.0` の `characters[].idleVariantId`、`lines[].characterVariantId`、`characterVariants[]` が project の explicit reference と validated CharacterVisualSet snapshot から解決されていることを確認する。expression、tag、label、themeColorToken、旧固定 mapping からの自動代替は許可しない。RF-01 の `RenderManifest 2.6.0` では、これに visual-level `glowColor` snapshot を追加する。
-- 現行 `RenderManifest 2.5.0` の `inserts[]` が `EditPlan.videoElements` の実尺、src、role、volume を持ち、placeholder の `kind` や固定 2000 ms を持たないことを確認する。RF-02 / RF-03 後は text template snapshot、startMs、canonical playbackRate、effective duration、resolved text layout を version ごとの insert shape で持つことも確認する。
-- 現行 `RenderManifest 2.5.0` の `audioTracks[]` が shift 後の section 範囲、BGM src、`volume`、固定 loop を持ち、fade fields を持たないことを確認する。`sectionLayouts[]` が sectionTitle、resolved layout、template revision / hash を持ち、line が parent section layout を参照することを確認する。
-- `RenderManifest 2.5.0` の `sectionLayouts[]` が `sectionId` と `sectionTitle`、resolved layout を持ち、section-title と VP-02 の current section layout を同じ snapshot から描画できることを確認する。RF-01 の `RenderManifest 2.6.0` で初めて dialogue-window metadata（常時表示、中央揃え、speaker name 非表示）を追加する。
-- `RenderManifest 2.5.0` の `visuals[]` が `RenderVisualV25.display` を使い、`outerFrame`、`contentClip`、`fit`、`crop`、annotation と resolved playback state を最終値として持つこと、Remotion が raw `displayCoordinateSpace` / `position` / `scale` を再解釈しないことを確認する。RF-01〜RF-03 の 2.6.0〜2.8.0 は同じ strict boundary で glow、insert text、insert timing を追加する。
-- 現行 `RenderManifest 2.5.0` の `VisualAssignment` が section 境界、cue boundary、source-end boundary で `RenderVisualV25` segment へ分割されることを確認する。同一 section 内の line template 差分では分割しない。video segment は `playing` branch の strict source trim pair、`paused` branch の source end 前の一点 `sourceFrame`、`ended` branch の `lastDrawableSourceFrame` を持ち、`sourceEndFrame` は exclusive endpoint として別に扱う。video segment に `hidden` / `static-visible` を保存しないことを確認する。
-- `RenderManifest 2.5.0` の `compilerInputHash` が section selection、section title、template revision / hash、resolved geometry、speaker mapping、generic inner transform、resolved visual display、cue canonical order、resolved media state、source-end boundary、Asset snapshot を含むことを確認する。RF-01 の `2.6.0` では dialogue metadata と CharacterVisualSet glow snapshot、RF-02 / RF-03 の manifest では insert text layout / source start / playbackRate / effective duration も各 version の hash に追加する。更新後に旧 manifest を current と誤認しないことを確認する。
+- current `RenderManifest 2.9.0` の `RenderLine.expression` は論理表情であり、物理ファイルパスとして解釈しない。
+- current `RenderManifest 2.9.0` の `characters[].idleVariantId`、`lines[].characterVariantId`、`characterVariants[]` が project の explicit reference と validated CharacterVisualSet snapshot から解決されていることを確認する。expression、tag、label、themeColorToken、旧固定 mapping からの自動代替は許可しない。RF-01 の `2.6.0` は current 2.9.0 に引き継がれた glow snapshot の導入境界として扱う。
+- current `RenderManifest 2.9.0` の `inserts[]` が `EditPlan.videoElements` の実尺、src、role、volume を持ち、placeholder の `kind` や固定 2000 ms を持たないことを確認する。RF-02 / RF-03 の text template snapshot、startMs、canonical playbackRate、effective duration、resolved text layout も current shape に引き継ぐ。
+- current `RenderManifest 2.9.0` の `audioTracks[]` が shift 後の enabled section 範囲、BGM src、`volume`、固定 loop を持ち、fade fields を持たないことを確認する。`sectionLayouts[]` が sectionTitle、resolved layout、template revision / hash を持ち、line が parent section layout を参照することを確認する。
+- current `RenderManifest 2.9.0` の `sectionLayouts[]` が enabled section の `sectionId` と `sectionTitle`、resolved layout を持ち、section-title と current section layout を同じ snapshot から描画できることを確認する。RF-01 の dialogue-window metadata（常時表示、中央揃え、speaker name 非表示）は current 2.9.0 に含める。
+- current `RenderManifest 2.9.0` の `visuals[]` が `RenderVisualV25.display` を使い、`outerFrame`、`contentClip`、`fit`、`crop`、annotation と resolved playback state を最終値として持つこと、Remotion が raw `displayCoordinateSpace` / `position` / `scale` を再解釈しないことを確認する。2.6.0〜2.8.0 の glow、insert text、insert timing は current 2.9.0 に引き継ぐ。
+- current `RenderManifest 2.9.0` の `VisualAssignment` が enabled section の section 境界、cue boundary、source-end boundary で `RenderVisualV25` segment へ分割されることを確認する。同一 section 内の line template 差分では分割しない。video segment は `playing` branch の strict source trim pair、`paused` branch の source end 前の一点 `sourceFrame`、`ended` branch の `lastDrawableSourceFrame` を持ち、`sourceEndFrame` は exclusive endpoint として別に扱う。video segment に `hidden` / `static-visible` を保存しないことを確認する。
+- current `RenderManifest 2.9.0` の `compilerInputHash` が enabled section selection、section title、template revision / hash、resolved geometry、speaker mapping、generic inner transform、resolved visual display、cue canonical order、resolved media state、source-end boundary、Asset snapshot を含むことを確認する。RF-01〜RF-03 の versioned additions も current hash に反映し、更新後に旧 manifest を current と誤認しないことを確認する。
 - 解決済み `variantId`、character ID、renderType、ファイルパス、checksum、mouth slot が manifest に固定されていることを確認する。
 - 正の duration
 - フレーム範囲の境界
@@ -3145,7 +3348,7 @@ AI、音声、マニフェスト、レンダリングの各実行は `projects/{
 
 ### 17.2 改善ログ
 
-SQLite にはキー入力単位ではなく、保存、構成案の承認、レビュー判断、status/stale の変化、音声再生成、候補採否など意味のあるイベントだけを保存する。修正前後、理由、対象の安定 ID、生成元、モデル、プロンプト版を関連付ける。
+SQLite にはキー入力単位ではなく、section / line の保存、レビュー判断、status/stale の変化、音声再生成、候補採否など意味のあるイベントだけを保存する。過去 project の構成案承認を記録する legacy event は互換・履歴情報として残してよいが、current project の gate にはしない。修正前後、理由、対象の安定 ID、生成元、モデル、プロンプト版を関連付ける。
 
 ## 18. セキュリティとローカル運用
 
@@ -3162,6 +3365,12 @@ SQLite にはキー入力単位ではなく、保存、構成案の承認、レ�
 ### 19.1 単体テスト
 
 - 全 Zod スキーマの正常・異常系
+- `VideoProject 1.8.0 → 1.9.0` の strict migration が既存 section / line / downstream reference を保持し、`enabled` を追加し、brief / outline / Script planning fields / `outlineSectionId` を current shape へ持ち込まないこと
+- 新規 project と empty-script migration が決定論的な `導入` / `本編` / `締め` starter section を一度だけ seed し、non-empty script へ starter を追加しないこと
+- section の create / rename / reorder / deactivate / reactivate が stable ID と downstream reference を保持し、candidate から既存 ID が消える hard delete を fail-closed で拒否すること
+- 全 section の structural save validation と enabled-only output readiness validation を分離し、disabled dependency を output blocker にせず、0 enabled を `NO_ENABLED_SECTION` とすること
+- `RenderManifest 2.9.0` が enabled section だけを compile し、disabled section の layout / title / background / line / visual / overlay / sound effect / BGM / `before_section` element を含めず、enabled collection の先頭・末尾で anchors を解決すること
+- current `AiTaskKind` が `outline_generation`、`script_generation`、`script_review` を受理せず、OpenRouter transport / model catalog / unrelated task は維持すること
 - SQLite の `CharacterVisualSet` へ variant を追加すると、API の snapshot、検証結果、確認画面の view model へ反映されること
 - `single-image` と `mouth-pair` の完全な作成、必須 slot 欠落リクエストの拒否
 - 既存の完成 variant の complete file set 差し替え、差し替え失敗時の旧ファイル維持、必須 slot 削除の拒否
@@ -3175,7 +3384,7 @@ SQLite にはキー入力単位ではなく、保存、構成案の承認、レ�
 - `speaker-1` → `project.characters[0]`、`speaker-2` → `project.characters[1]`、`characterId` の resolved layout 固定
 - `ScriptSection.name` → `RenderSectionLayout.sectionTitle` の固定と、section-title layer の preview / Remotion 表示
 - `RenderVisualV24.display` の `outerFrame` / `contentClip` / `fit` / `crop` / annotation の固定、legacy mode の clipping 無効、content-slot-relative の clipping 有効、raw display の再解釈なし
-- 現行 2.5.0 の VisualAssignment segment が section / cue / source-end boundary、決定論的 ID / sourceAssignmentId / frame range、動画の authoritative source trim range を保持すること。2.4.0 compatibility では旧 template boundary を保持し、2.5.0 では同一 section 内の line template 差分で segment 化しないこと
+- current 2.9.0 の VisualAssignment segment が enabled section の section / cue / source-end boundary、決定論的 ID / sourceAssignmentId / frame range、動画の authoritative source trim range を保持すること。2.4.0〜2.8.0 compatibility では各旧 template boundary を保持し、current 2.9.0 では同一 section 内の line template 差分で segment 化しないこと
 - `prioritizeVisual` の初期版が character element の縮小だけを行い、非表示を要求しないこと
 - template editor の contained element の clamp、character の drag / resize / rotation / numeric input / keyboard による partial overflow、overflow 状態の interaction recovery、実素材 preview の一時 state と template data 非保存
 - template-level の「デフォルトに戻す」が 1 個だけ存在し、canonical seed default を使って全 element の rect / rotation / font size / `flipX` を一括復元すること、metadata / preview state を保持すること、個別 reset control を追加しないこと
@@ -3211,14 +3420,18 @@ SQLite にはキー入力単位ではなく、保存、構成案の承認、レ�
 - `1.3.0 → 1.4.0` migration が section の `screenTemplateId` を維持し、line override を削除し、section を分割せず、多数決で template を変更せず、`lineId` / old template ID / section template ID / `migrationId` を migration log へ記録すること
 - `1.3.0 → 1.4.0` migration 後の `ScriptLine` に `screenTemplateId` がなく、section template だけで全 line の resolved layout を決定できること
 - 既存 `1.2.0 → 1.3.0` migration が `legacy-media-frame` を付与し、standard content slot で現行 `MediaFrame` の見た目を保つこと（履歴互換テスト）
-- source/project/asset hash
-- 構成案の承認・最新性、status/stale の遷移、依存生成物の validation
+- legacy source / brief / outline を current project contract へ再公開せず、legacy read が current save / output gate にならないこと
+- source/project/asset hash のうち current output に必要な project / asset hash だけを検証し、legacy outline hash を blocker にしないこと
 - パストラバーサル拒否
 
 ### 19.2 統合テスト
 
 - project revision 競合
-- Markdown と hash の一体保存
+- `VideoProject 1.8.0 → 1.9.0` migration の atomic save、保持対象 ID / reference、legacy field removal、empty-script seed の idempotency
+- section lifecycle mutation の expectedRevision、stable ID、downstream reference retention、hard-delete fail-closed
+- structural save と enabled-only output validation の分離、disabled dependency の非 blocker、0 enabled の `NO_ENABLED_SECTION`
+- `RenderManifest 2.9.0` の enabled-only compile、disabled section output omission、enabled collection の first / last anchor、Web preview / Remotion parity
+- current AI task enum から planning / script-generation task を除外し、OpenRouter transport / model catalog / unrelated task を維持すること
 - 素材コピーと project update の成功、ロールバック
 - 全 5 Asset kind の initial upload、kind-specific validation、thumbnail / technical metadata processing、processing / error の状態保持
 - Asset replacement の staged file、candidate version、旧 current version 維持、ready 後の revision-aware atomic activation、activation failure / revision conflict の rollback
@@ -3240,11 +3453,11 @@ SQLite にはキー入力単位ではなく、保存、構成案の承認、レ�
 - RF-02 の `InsertTextTemplate` が ScreenTemplate と別 catalog で、editor が一つの multiline text field だけを保存し、既存 video element の `text: ""` / `textTemplateId: null` migration と manifest の revision / hash / resolved layout snapshot が成立すること
 - RF-03 の `startMs: null` または `0 <= startMs < sourceDuration` の source position、`startMs === sourceDuration` / sourceDuration 超の reject、canonical playbackRate、effective duration、後続 timeline shift、stopped player の start frame、`volume = 0` mute shortcut を検証し、EditVideoElement に persistent playback state / cue / muted を保存しないこと
 - RF-04 の SD / HD / FHD preset、current manifest validation、既存 `renderMedia()` 再利用、production output と分離した `output/previews/{runId}-{preset}.mp4`、固定 encode profile、version bump 不在を検証すること
-- explicit character binding / line variant と validated catalog snapshot から、現行 `RenderManifest 2.5.0` の `characters[].idleVariantId`、`lines[].characterVariantId`、`characterVariants[]`、`inserts[]`、`audioTracks[]`、resolved playback state を解決すること。2.4.0 は compatibility manifest として別 parser / cache key で扱うこと。RF-01 の `2.6.0` では visual-level `glowColor` snapshot を追加すること
-- ScreenTemplate snapshot と現行 1.5.0 の section selection から `RenderManifest 2.5.0` の section `resolvedLayout`、section authority、template revision / hash、`compilerInputHash` を解決し、2.4.0 compatibility input を別 parser / cache key で扱うこと。RF-01 では `2.6.0` の manifest に dialogue metadata と CharacterVisualSet glow snapshot、RF-02 / RF-03 では `2.7.0` / `2.8.0` の manifest snapshot を段階的に追加すること
+- explicit character binding / line variant と validated catalog snapshot から、current `RenderManifest 2.9.0` の `characters[].idleVariantId`、`lines[].characterVariantId`、`characterVariants[]`、`inserts[]`、`audioTracks[]`、resolved playback state を解決すること。2.4.0〜2.8.0 は compatibility manifest として別 parser / cache key で扱うこと。RF-01〜RF-03 の additions は current 2.9.0 に引き継ぐこと
+- ScreenTemplate snapshot と current 1.9.0 の enabled section selection から `RenderManifest 2.9.0` の section `resolvedLayout`、section authority、template revision / hash、`compilerInputHash` を解決し、disabled section を omission すること。2.4.0〜2.8.0 の compatibility input は別 parser / cache key で扱うこと
 - `ScriptSection.name`、speaker mapping、legacy/content-slot-relative display の resolved layout、`section-title` の preview / Remotion 描画を同じ shared resolver / layout component で解決すること
 - `RenderVisualV24.display` の最終 geometry と raw display 値の非依存性、line-card preview / production render の generic visual parity
-- 現行 2.5.0 の section / playback state boundary による VisualAssignment segment と、2.4.0 compatibility の template boundary による segment について、line-card preview / production render の frame range、paused frame、video audio state、source position の parityを検証する。同一 section 内の line template 差分では 2.5.0 segment 化しない
+- current 2.9.0 の section / playback state boundary による VisualAssignment segment と、2.4.0〜2.8.0 compatibility の template boundary による segment について、line-card preview / production render の frame range、paused frame、video audio state、source position の parityを検証する。同一 section 内の line template 差分では current 2.9.0 segment 化しない
 - template outer geometry と generic VisualAssignment inner transform の分離、`prioritizeVisual` の適用順、line-card preview / Remotion の resolved layout parity
 - partial-overflow character の editor preview、line-card preview、Web preview、Remotion、MP4 の composition-boundary clipping parity と、resolved geometry / manifest の unclamped 保持
 - reset 後の canonical content hash、revision-aware update、stale 判定、revision conflict / save failure 時の既存 template 保持
@@ -3256,9 +3469,9 @@ SQLite にはキー入力単位ではなく、保存、構成案の承認、レ�
 
 最低 1 つの fixture project で次を自動化する。
 
-1. プロジェクト作成
-2. Markdown と企画条件保存
-3. 構成案の取り込み、編集、承認・最新性確認
+1. プロジェクト作成直後に ScriptPage を開き、3 starter section を確認する
+2. section の rename / create / reorder / deactivate / reactivate と line / visual / voice 編集を行い、stable ID と downstream reference の保持を確認する
+3. `VideoProject 1.8.0 → 1.9.0` migration fixture を読み込み、既存 non-empty section の保持、empty-script seed の idempotency、brief / outline / planning field の removal、source file の非削除を確認する
 4. ワークスペース準備として `/character-visuals` の初期 seed を確認し、一部 variant が未登録の visual と完全な mouth-pair variant を再読込する
 5. 2 キャラクター、複数セリフの台本作成と、セリフカードからのキャラクタービジュアル・音声制作
 6. 台本・ビジュアルの承認操作なしで制作を続け、stale/missing validation を確認する
@@ -3267,12 +3480,12 @@ SQLite にはキー入力単位ではなく、保存、構成案の承認、レ�
 9. `/assets` で title / description / confidentiality / department / system / tagIds を編集し、kind / checksum / duration / width / height / MIME などを編集できないこと、利用停止・再有効化で inactive candidate が検索から外れることを確認する
 10. `/assets` で同じ Asset の file replacement を実行し、candidate processing 中に旧 current version が表示され、失敗時は旧 version / status / history が維持され、成功時だけ currentVersion が切り替わることを確認する。stale revision では切替されないことも確認する
 11. 編集画面で登録済み MP4 の intro / cutin / outro と MP3 BGM を選び、section card を固定したまま video element card だけを並べ替える
-12. fixture WAV と編集 Asset snapshot から validation を通した現行 `RenderManifest 2.4.0` 生成、および VP-02 の playback cue input から `RenderManifest 2.5.0` 生成
+12. fixture WAV と編集 Asset snapshot から enabled section effective view を使って validation を通した現行 `RenderManifest 2.9.0` を生成し、disabled section の output omission、enabled collection の first / last anchor、0 enabled の `NO_ENABLED_SECTION` を確認する
 13. `/screen-templates` で `screen-template-standard` と active / inactive template を確認し、実素材を一時 preview として選択する
-14. template editor で geometry、rotation、font size、`flipX` を保存し、1.4.0 project の section-only selection および 2.4.0 manifest fields を確認する。VP-02 では line へ template ID を保存せず、2.5.0 manifest の parent section reference と video playback state を確認する
+14. template editor で geometry、rotation、font size、`flipX` を保存し、1.9.0 project の section-only selection および 2.9.0 manifest fields を確認する。line へ template ID を保存せず、current manifest の parent section reference と video playback state を確認する
 15. compact line card の4行表示、ID / control subline、speaker name-only、visual / voice compact controls、詳細設定 modal、section header の selector を確認し、persistent state change line の full preview と通常 line の dialogue-only preview を比較する
 16. 十分な desktop viewport の実ブラウザで ScriptPage の usable content pane が約 `1500px` になり、他フェーズの width policy を変えず、4行カードと media pane が horizontal overflow なしで表示されることを測定する。video playing / paused / ended、static media、未挿入の media pane が preview と最小 action だけになっていることを確認し、ended では最終描画フレームまたは thumbnail preview と `[停止] [変更]` だけが表示されることも確認して、参照画像と同等の情報密度のスクリーンショットを保存する
-17. 片方の character を意図的に画面外へ配置し、editor、line-card preview、`RenderManifest 2.4.0` / `2.5.0`、Web Player、Remotion の代表フレームで同じ composition clipping を確認する。VP-02 の video fixture では pause 中の frame 保持、video audio 停止、speech / BGM / sound effect 継続、resume source position を確認する
+17. 片方の character を意図的に画面外へ配置し、editor、line-card preview、current `RenderManifest 2.9.0`、Web Player、Remotion の代表フレームで同じ composition clipping を確認する。compatibility manifest は別 fixture とし、video fixture では pause 中の frame 保持、video audio 停止、speech / BGM / sound effect 継続、resume source position を確認する
 18. 全 5 element の geometry、rotation、font size、`flipX` を変更してから template-level の「デフォルトに戻す」を実行し、canonical seed への復帰、metadata / preview state の保持、個別 reset control 不在を確認する
 19. 代表フレームの画像比較
 20. 短い MP4 とサムネイルの生成
