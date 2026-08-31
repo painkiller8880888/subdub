@@ -43,6 +43,17 @@ function zIndexForClass(markup: string, className: string): number {
   return Number(zIndex);
 }
 
+function shapeStyleForKind(markup: string, kind: "circle" | "box"): string {
+  const style = new RegExp(
+    `<div[^>]*class="line-overlay line-overlay-${kind}"[^>]*>.*?<span aria-hidden="true" style="([^"]*)"`,
+    "su"
+  ).exec(markup)?.[1];
+  if (style === undefined) {
+    throw new Error(`shape style is missing for ${kind}`);
+  }
+  return style;
+}
+
 describe("LineOverlayLayer fixed z-order", () => {
   it("renders Remotion overlays above generic content and below characters", () => {
     const markup = renderToStaticMarkup(
@@ -77,5 +88,47 @@ describe("LineOverlayLayer fixed z-order", () => {
       zIndexForClass(markup, "screen-layout-dialogue"),
       zIndexForClass(markup, "screen-layout-section-title")
     ]).toEqual([1, 2, 3, 5, 6]);
+  });
+
+  it("renders circles and boxes as transparent outlines that fill their bounds", () => {
+    const markup = renderToStaticMarkup(
+      createElement(LineOverlayLayer, {
+        overlays: [
+          overlay as LineOverlayLayerItem,
+          {
+            ...overlay,
+            id: "line-overlay-line-one-box-1",
+            kind: "box"
+          } as LineOverlayLayerItem
+        ]
+      })
+    );
+
+    for (const kind of ["circle", "box"] as const) {
+      const style = shapeStyleForKind(markup, kind);
+      expect(style).toContain("background-color:transparent");
+      expect(style).toContain("border-style:solid");
+      expect(style).toContain("display:block");
+      expect(style).toContain("height:100%");
+      expect(style).toContain("width:100%");
+    }
+  });
+
+  it("scales the arrow shaft and head together inside the overlay bounds", () => {
+    const markup = renderToStaticMarkup(
+      createElement(LineOverlayLayer, {
+        overlays: [
+          {
+            ...overlay,
+            id: "line-overlay-line-one-arrow-1",
+            kind: "arrow"
+          } as LineOverlayLayerItem
+        ]
+      })
+    );
+
+    expect(markup).toContain('preserveAspectRatio="none"');
+    expect(markup).toContain('viewBox="0 0 100 100"');
+    expect(markup).toContain('d="M4 35 H70 V10 L100 50 L70 90 V65 H4 Z"');
   });
 });
