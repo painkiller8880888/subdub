@@ -1,3 +1,5 @@
+import { promises as fs } from "node:fs";
+
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -90,6 +92,19 @@ const bgmAsset = {
 } satisfies AssetListItem;
 
 describe("edit page read model", () => {
+  it("uses enabled sections for edit candidates and retains disabled settings separately", async () => {
+    const source = (
+      await fs.readFile("src/web/EditPage.tsx", "utf8")
+    ).replaceAll("\r\n", "\n");
+
+    expect(source).toContain("const enabledScriptSections");
+    expect(source).toContain("const disabledScriptSections");
+    expect(source).toContain(
+      "createEditSectionReadModels(\n    enabledScriptSections"
+    );
+    expect(source).toContain("RetainedDisabledSectionSettings");
+  });
+
   it("converts seconds input to deterministic integer milliseconds", () => {
     expect(editVideoSecondsInputToStartMs("")).toEqual({
       kind: "empty",

@@ -893,7 +893,7 @@ input:focus-visible {
 .workflow-steps {
   display: grid;
   gap: 0.45rem;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   list-style: none;
   margin: 0;
   padding: 0;
@@ -1257,6 +1257,48 @@ input:focus-visible {
 .edit-section-list {
   display: grid;
   gap: 1rem;
+}
+
+.edit-retained-disabled-sections {
+  background: #f8faff;
+  border: 1px solid #c7d0df;
+  border-radius: 0.7rem;
+  display: grid;
+  gap: 0.6rem;
+  padding: 1rem;
+}
+
+.edit-retained-disabled-sections h2,
+.edit-retained-disabled-sections p {
+  margin: 0;
+}
+
+.edit-retained-disabled-sections > p:not(.eyebrow) {
+  color: #59647b;
+}
+
+.edit-retained-disabled-sections ul {
+  display: grid;
+  gap: 0.45rem;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.edit-retained-disabled-sections li {
+  align-items: baseline;
+  border-top: 1px solid #d7deea;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 0.8rem;
+  padding-top: 0.55rem;
+}
+
+.edit-retained-disabled-sections li code,
+.edit-retained-disabled-sections li span {
+  color: #59647b;
+  font-size: max(calc(0.82rem - 2px), var(--ui-font-size-minimum));
+  overflow-wrap: anywhere;
 }
 
 .edit-section-flow {
@@ -2310,6 +2352,142 @@ input:focus-visible {
   color: #59647b;
   font-size: max(calc(0.78rem - 2px), var(--ui-font-size-minimum));
   overflow-wrap: anywhere;
+}
+
+.script-section-header-main {
+  min-width: 0;
+}
+
+.script-section-name-field {
+  display: grid;
+  gap: 0.35rem;
+  margin-top: 0.55rem;
+  max-width: 32rem;
+}
+
+.script-section-name-field label {
+  color: #59647b;
+  font-size: max(calc(0.82rem - 2px), var(--ui-font-size-minimum));
+  font-weight: 700;
+}
+
+.script-section-name-input {
+  background: #fff;
+  border: 1px solid #aeb8ca;
+  border-radius: 0.45rem;
+  box-sizing: border-box;
+  color: #172033;
+  font-size: max(calc(1.2rem - 2px), var(--ui-font-size-minimum));
+  font-weight: 800;
+  min-height: 2.75rem;
+  padding: 0.5rem 0.65rem;
+  width: 100%;
+}
+
+.script-section-header-actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  justify-content: flex-end;
+}
+
+.script-section-add-form {
+  background: #f8faff;
+  border: 1px solid #c7d0df;
+  border-radius: 0.8rem;
+  display: grid;
+  gap: 0.8rem;
+  padding: 1rem 1.2rem;
+}
+
+.script-section-add-form h2,
+.script-section-add-form p {
+  margin: 0;
+}
+
+.script-section-add-form > div:first-child {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.script-section-add-form > div:first-child p:last-child {
+  color: #59647b;
+}
+
+.script-disabled-sections {
+  background: #f8faff;
+  border: 1px solid #c7d0df;
+  border-radius: 0.8rem;
+  display: grid;
+  gap: 0.8rem;
+  padding: 1rem 1.2rem;
+}
+
+.script-disabled-sections > div:first-child {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.script-disabled-sections h2,
+.script-disabled-sections p {
+  margin: 0;
+}
+
+.script-disabled-sections > div:first-child p:last-child {
+  color: #59647b;
+}
+
+.script-disabled-section-list {
+  display: grid;
+  gap: 0.55rem;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.script-disabled-section-item {
+  align-items: center;
+  border-top: 1px solid #d7deea;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem 0.9rem;
+  padding-top: 0.65rem;
+}
+
+.script-disabled-section-meta {
+  align-items: baseline;
+  display: flex;
+  flex: 1 1 18rem;
+  flex-wrap: wrap;
+  gap: 0.4rem 0.7rem;
+  min-width: 0;
+}
+
+.script-disabled-section-meta code,
+.script-disabled-section-meta span {
+  color: #59647b;
+  font-size: max(calc(0.82rem - 2px), var(--ui-font-size-minimum));
+  overflow-wrap: anywhere;
+}
+
+.script-disabled-section-item details {
+  flex-basis: 100%;
+}
+
+.script-disabled-section-item summary {
+  color: #1e4f9a;
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.script-disabled-section-item details ul {
+  margin: 0.55rem 0 0;
+  padding-left: 1.25rem;
+}
+
+.script-disabled-section-item details code {
+  color: #59647b;
 }
 
 .script-line-card-visual-selected {
@@ -4242,7 +4420,7 @@ textarea[aria-invalid="true"] {
   }
 
   .workflow-steps {
-    grid-template-columns: repeat(5, minmax(4.5rem, 1fr));
+    grid-template-columns: repeat(3, minmax(4.5rem, 1fr));
     overflow-x: auto;
     padding-bottom: 0.25rem;
   }

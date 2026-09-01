@@ -9,15 +9,11 @@ import {
 describe("workflow indicator", () => {
   it("keeps the script and edit steps in order", () => {
     expect(WORKFLOW_STEPS.map((step) => step.id)).toEqual([
-      "brief",
-      "outline",
       "production",
       "edit",
       "output"
     ]);
     expect(WORKFLOW_STEPS.map((step) => step.label)).toEqual([
-      "企画",
-      "構成案",
       "台本",
       "編集",
       "出力"
@@ -25,12 +21,6 @@ describe("workflow indicator", () => {
   });
 
   it("links each step to the existing workflow screen", () => {
-    expect(workflowStepPath("project/1", "brief")).toBe(
-      "/projects/project%2F1/brief"
-    );
-    expect(workflowStepPath("project/1", "outline")).toBe(
-      "/projects/project%2F1/outline"
-    );
     expect(workflowStepPath("project/1", "production")).toBe(
       "/projects/project%2F1/script"
     );

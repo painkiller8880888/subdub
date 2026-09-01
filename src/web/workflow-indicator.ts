@@ -1,15 +1,5 @@
 export const WORKFLOW_STEPS = [
   {
-    id: "brief",
-    label: "企画",
-    description: "元資料と企画条件"
-  },
-  {
-    id: "outline",
-    label: "構成案",
-    description: "章立てと要点"
-  },
-  {
     id: "production",
     label: "台本",
     description: "台本・ビジュアル・VOICEVOX音声"
@@ -26,8 +16,19 @@ export const WORKFLOW_STEPS = [
   }
 ] as const;
 
-export type WorkflowStepId = (typeof WORKFLOW_STEPS)[number]["id"];
+type CurrentWorkflowStepId = (typeof WORKFLOW_STEPS)[number]["id"];
+
+/**
+ * These IDs are kept only so the unreachable legacy planning components can
+ * still be type-checked while their routes remain outside the current SPA.
+ */
+type LegacyWorkflowStepId = "brief" | "outline";
+export type WorkflowStepId = CurrentWorkflowStepId | LegacyWorkflowStepId;
 export type WorkflowStepStatus = "past" | "current" | "future";
+
+function currentWorkflowStep(step: WorkflowStepId): CurrentWorkflowStepId {
+  return step === "brief" || step === "outline" ? "production" : step;
+}
 
 export function workflowStepPath(
   projectId: string,
@@ -52,11 +53,13 @@ export function workflowStepStatus(
   currentStep: WorkflowStepId,
   step: WorkflowStepId
 ): WorkflowStepStatus {
+  const normalizedCurrentStep = currentWorkflowStep(currentStep);
+  const normalizedStep = currentWorkflowStep(step);
   const currentIndex = WORKFLOW_STEPS.findIndex(
-    (candidate) => candidate.id === currentStep
+    (candidate) => candidate.id === normalizedCurrentStep
   );
   const stepIndex = WORKFLOW_STEPS.findIndex(
-    (candidate) => candidate.id === step
+    (candidate) => candidate.id === normalizedStep
   );
 
   if (stepIndex < currentIndex) {
