@@ -87,6 +87,10 @@ import {
 } from "../../media-frame.js";
 import { validateVisualPlaybackSequence } from "../../timeline/visual-playback.js";
 import type { VisualPlaybackCue } from "../../schema/visual-playback.js";
+import {
+  createEffectiveRenderProject,
+  type EffectiveRenderProject
+} from "./effective-render-project.js";
 
 export const RENDER_MANIFEST_VERSION = "2.9.0" as const;
 export const RENDER_MANIFEST_V28_VERSION = "2.8.0" as const;
@@ -124,6 +128,7 @@ export const RENDER_MANIFEST_ERROR_CODE = {
   outlineNotApproved: "OUTLINE_NOT_APPROVED",
   scriptNotApproved: "SCRIPT_NOT_APPROVED",
   visualsNotApproved: "VISUALS_NOT_APPROVED",
+  noEnabledSection: "NO_ENABLED_SECTION",
   outlineStale: "OUTLINE_SOURCE_HASH_MISMATCH",
   scriptStale: "SCRIPT_OUTLINE_HASH_MISMATCH",
   emptyScript: "SCRIPT_EMPTY",
@@ -1221,12 +1226,12 @@ function resolvedLayoutForTemplate(
 }
 
 function linePrioritySet(
-  project: z.infer<typeof videoProjectSchema>,
+  assignments: EffectiveRenderProject["visualAssignments"],
   lineEntries: readonly LineEntry[]
 ): Set<string> {
   const entryById = new Map(lineEntries.map((entry) => [entry.line.id, entry]));
   const priority = new Set<string>();
-  for (const assignment of project.visuals.assignments) {
+  for (const assignment of assignments) {
     if (!assignment.display.prioritizeVisual) {
       continue;
     }
@@ -1278,6 +1283,7 @@ function elapsedMediaMs(
 
 type VisualSegmentBuildInput = Readonly<{
   readonly project: z.infer<typeof videoProjectSchema>;
+  readonly assignments: EffectiveRenderProject["visualAssignments"];
   readonly lineEntries: readonly LineEntry[];
   readonly lineRangeById: ReadonlyMap<string, TimelineLineRange>;
   readonly lineIndexById: ReadonlyMap<string, LineEntry>;
@@ -1295,6 +1301,7 @@ type VisualSegmentBuildInput = Readonly<{
 
 function buildVisualSegments({
   project,
+  assignments,
   lineEntries,
   lineRangeById,
   lineIndexById,
@@ -1306,7 +1313,7 @@ function buildVisualSegments({
   diagnostics
 }: VisualSegmentBuildInput): RenderVisualV24[] {
   const assignmentById = new Map(
-    project.visuals.assignments.map((assignment) => [assignment.id, assignment])
+    assignments.map((assignment) => [assignment.id, assignment])
   );
   const segments: Array<{ value: RenderVisualV24; inputIndex: number }> = [];
 
@@ -2217,12 +2224,11 @@ export function compileRenderManifestV24(
   const projectRaw = input.project ?? input.videoProject;
   const audioRaw = input.audioIndex ?? input.audio;
   const projectResult = videoProjectSchema.safeParse(projectRaw);
+  const effectiveProject = projectResult.success
+    ? createEffectiveRenderProject(projectResult.data)
+    : undefined;
   const currentLineIds = projectResult.success
-    ? new Set(
-        projectResult.data.script.sections.flatMap((section) =>
-          section.lines.map((line) => line.id)
-        )
-      )
+    ? effectiveProject?.lineIds
     : undefined;
   const effectiveAudioIndexRaw =
     currentLineIds === undefined || !isPlainRecord(audioRaw)
@@ -2232,6 +2238,19 @@ export function compileRenderManifestV24(
             currentLineIds.has(lineId)
           )
         );
+  if (
+    projectResult.success &&
+    projectResult.data.script.sections.length > 0 &&
+    effectiveProject?.sections.length === 0
+  ) {
+    addDiagnostic(
+      diagnostics,
+      RENDER_MANIFEST_ERROR_CODE.noEnabledSection,
+      ["script", "sections"],
+      "at least one script section must be enabled for output"
+    );
+    return failure(diagnostics);
+  }
   const audioResult = voicevoxAudioIndexSchema.safeParse(
     effectiveAudioIndexRaw
   );
@@ -2292,6 +2311,8 @@ export function compileRenderManifestV24(
   }
 
   const project = projectResult.data;
+  const renderProject =
+    effectiveProject ?? createEffectiveRenderProject(project);
   const effectiveAudioIndex = audioResult.data;
   const sourceProjectHash = sha256CanonicalJson(project);
 
@@ -2299,6 +2320,9 @@ export function compileRenderManifestV24(
     assignmentIndex,
     assignment
   ] of project.visuals.assignments.entries()) {
+    if (!renderProject.visualAssignments.includes(assignment)) {
+      continue;
+    }
     if (
       assignment.display.kind === "video" &&
       assignment.display.playbackCues.length > 0
@@ -2325,7 +2349,7 @@ export function compileRenderManifestV24(
     );
   }
   for (const [sectionIndex, section] of project.script.sections.entries()) {
-    if (section.lines.length === 0) {
+    if (section.enabled && section.lines.length === 0) {
       addDiagnostic(
         diagnostics,
         RENDER_MANIFEST_ERROR_CODE.emptySection,
@@ -2338,24 +2362,32 @@ export function compileRenderManifestV24(
 
   const lineEntries: LineEntry[] = project.script.sections.flatMap(
     (section, sectionIndex) =>
-      section.lines.map((line, lineIndex) => ({
-        sectionIndex,
-        sectionId: section.id,
-        lineIndex,
-        line
-      }))
+      renderProject.sectionIds.has(section.id)
+        ? section.lines.map((line, lineIndex) => ({
+            sectionIndex,
+            sectionId: section.id,
+            lineIndex,
+            line
+          }))
+        : []
   );
   const lineIndexById = new Map(
     lineEntries.map((entry) => [entry.line.id, entry])
   );
   const templateBindingByLineId = new Map<string, ResolvedScreenTemplate>();
   const sectionTemplateBindingById = new Map<string, ResolvedScreenTemplate>();
-  const linePriority = linePrioritySet(project, lineEntries);
+  const linePriority = linePrioritySet(
+    renderProject.visualAssignments,
+    lineEntries
+  );
   const charactersForLayout = project.characters.map((character) => ({
     id: character.id
   }));
   const resolvedLayoutByLineId = new Map<string, ResolvedScreenLayout>();
   for (const [sectionIndex, section] of project.script.sections.entries()) {
+    if (!renderProject.sectionIds.has(section.id)) {
+      continue;
+    }
     const binding = screenTemplates.get(section.screenTemplateId);
     if (binding === undefined) {
       addDiagnostic(
@@ -2504,6 +2536,9 @@ export function compileRenderManifestV24(
     assignmentIndex,
     assignment
   ] of project.visuals.assignments.entries()) {
+    if (!renderProject.visualAssignments.includes(assignment)) {
+      continue;
+    }
     const asset = requireAsset(
       assetLookup,
       assignment.projectMediaPath,
@@ -2567,6 +2602,9 @@ export function compileRenderManifestV24(
   }
 
   for (const [sectionIndex, section] of project.script.sections.entries()) {
+    if (!renderProject.sectionIds.has(section.id)) {
+      continue;
+    }
     if (section.background.kind !== "image") {
       continue;
     }
@@ -2587,6 +2625,9 @@ export function compileRenderManifestV24(
 
   const editVideoAssets = new Map<string, RenderManifestAssetMetadata>();
   for (const [elementIndex, element] of project.edit.videoElements.entries()) {
+    if (!renderProject.videoElements.includes(element)) {
+      continue;
+    }
     const asset = requireAsset(
       assetLookup,
       element.projectMediaPath,
@@ -2629,6 +2670,9 @@ export function compileRenderManifestV24(
   }
 
   for (const [bgmIndex, bgm] of project.edit.sectionBgms.entries()) {
+    if (!renderProject.sectionBgms.includes(bgm)) {
+      continue;
+    }
     const asset = requireAsset(
       assetLookup,
       bgm.projectMediaPath,
@@ -2655,6 +2699,9 @@ export function compileRenderManifestV24(
 
   const soundEffectAssets = new Map<string, RenderManifestAssetMetadata>();
   for (const [effectIndex, effect] of project.audio.soundEffects.entries()) {
+    if (!renderProject.soundEffects.includes(effect)) {
+      continue;
+    }
     const asset = requireAsset(
       assetLookup,
       effect.projectMediaPath,
@@ -2923,6 +2970,9 @@ export function compileRenderManifestV24(
       assignmentIndex,
       assignment
     ] of project.visuals.assignments.entries()) {
+      if (!renderProject.visualAssignments.includes(assignment)) {
+        continue;
+      }
       const start = lineRanges.find(
         (line) => line.id === assignment.startLineId
       );
@@ -2950,7 +3000,7 @@ export function compileRenderManifestV24(
     if (!visualRangeError) {
       try {
         visualRanges = calculateVisualRanges(
-          project.visuals.assignments,
+          renderProject.visualAssignments,
           lineRanges
         );
       } catch (error) {
@@ -2985,7 +3035,7 @@ export function compileRenderManifestV24(
   );
   const lineRangeById = new Map(lineRanges.map((range) => [range.id, range]));
   const editVideoTimeline = calculateEditVideoTimeline(
-    project.edit.videoElements.map((element, inputIndex) => {
+    renderProject.videoElements.map((element, inputIndex) => {
       const asset = editVideoAssets.get(element.id);
       if (asset?.durationMs === undefined || asset.durationMs === null) {
         throw new Error(`edit video duration is missing: ${element.id}`);
@@ -3057,7 +3107,7 @@ export function compileRenderManifestV24(
     }))
   };
   const referencedScreenTemplateIds = sortedUniqueStrings(
-    project.script.sections.map((section) => section.screenTemplateId)
+    renderProject.sections.map((section) => section.screenTemplateId)
   );
   const screenTemplateForHash = referencedScreenTemplateIds.map(
     (templateId) => {
@@ -3076,7 +3126,7 @@ export function compileRenderManifestV24(
                   binding.template.elements
                 )
               },
-        sectionIds: project.script.sections
+        sectionIds: renderProject.sections
           .filter((section) => section.screenTemplateId === templateId)
           .map((section) => section.id)
       };
@@ -3132,6 +3182,7 @@ export function compileRenderManifestV24(
 
   const visualValues = buildVisualSegments({
     project,
+    assignments: renderProject.visualAssignments,
     lineEntries,
     lineRangeById,
     lineIndexById,
@@ -3143,7 +3194,7 @@ export function compileRenderManifestV24(
     diagnostics
   });
 
-  const sectionLayouts: RenderSectionLayout[] = project.script.sections.map(
+  const sectionLayouts: RenderSectionLayout[] = renderProject.sections.map(
     (section) => {
       const binding = sectionTemplateBindingById.get(section.id);
       if (binding === undefined) {
@@ -3173,7 +3224,7 @@ export function compileRenderManifestV24(
     characterSelection: characterSelectionForHash,
     screenTemplateSelection: referencedScreenTemplateIds.map((templateId) => ({
       templateId,
-      sections: project.script.sections
+      sections: renderProject.sections
         .filter((section) => section.screenTemplateId === templateId)
         .map((section) => section.id)
     })),
@@ -3182,7 +3233,7 @@ export function compileRenderManifestV24(
     visualSegments: visualValues
   });
 
-  const renderBackgrounds = project.script.sections.map((section) => {
+  const renderBackgrounds = renderProject.sections.map((section) => {
     const range = sectionRangeById.get(section.id);
     if (range === undefined) {
       throw new Error(`section range is missing: ${section.id}`);
@@ -3200,7 +3251,7 @@ export function compileRenderManifestV24(
   });
 
   const renderAudioTracks = stableTimelineSort(
-    project.edit.sectionBgms.map((bgm, inputIndex) => {
+    renderProject.sectionBgms.map((bgm, inputIndex) => {
       const range = sectionRangeById.get(bgm.sectionId);
       if (range === undefined) {
         throw new Error(`BGM section range is missing: ${bgm.sectionId}`);
@@ -3225,7 +3276,7 @@ export function compileRenderManifestV24(
   );
 
   const renderSoundEffects = stableTimelineSort(
-    project.audio.soundEffects.map((effect, inputIndex) => {
+    renderProject.soundEffects.map((effect, inputIndex) => {
       const lineRange = lineRangeById.get(effect.lineId);
       const lineEntry = lineIndexById.get(effect.lineId);
       const asset = soundEffectAssets.get(effect.id);
@@ -3358,14 +3409,20 @@ type PlaybackFrameSample = Readonly<{
   readonly sourceFrame: number;
 }>;
 
-function playbackScriptForProject(project: z.infer<typeof videoProjectSchema>) {
+function playbackScriptForSections(
+  sections: ReadonlyArray<
+    z.infer<typeof videoProjectSchema>["script"]["sections"][number]
+  >
+) {
   return {
-    sections: project.script.sections.map((section) => ({
+    sections: sections.map((section) => ({
       id: section.id,
       lines: section.lines.map((line) => ({ id: line.id }))
     }))
   };
 }
+
+type PlaybackScript = ReturnType<typeof playbackScriptForSections>;
 
 function v25LayoutIntervals(
   baseManifest: RenderManifestV24
@@ -3398,14 +3455,18 @@ function projectWithoutPlaybackCues(
 
 function validateV25PlaybackCues(
   project: z.infer<typeof videoProjectSchema>,
-  diagnostics: RenderManifestDiagnostic[]
+  diagnostics: RenderManifestDiagnostic[],
+  renderProject: EffectiveRenderProject
 ): boolean {
-  const script = playbackScriptForProject(project);
+  const script = playbackScriptForSections(renderProject.sections);
   let valid = true;
   for (const [
     assignmentIndex,
     assignment
   ] of project.visuals.assignments.entries()) {
+    if (!renderProject.visualAssignments.includes(assignment)) {
+      continue;
+    }
     const result = validateVisualPlaybackSequence(assignment, script);
     if (result.success) {
       continue;
@@ -3455,7 +3516,7 @@ function buildV25VideoSegments(
   >["visuals"]["assignments"][number],
   baseVisual: Extract<RenderVisualV24, { kind: "video" }>,
   baseLines: readonly RenderLineV24[],
-  script: ReturnType<typeof playbackScriptForProject>,
+  script: PlaybackScript,
   fps: number,
   assignmentIndex: number,
   baseCompilerInputHash: string,
@@ -3688,7 +3749,7 @@ function toV25Visual(
   >["visuals"]["assignments"][number],
   baseVisual: RenderVisualV24,
   baseLines: readonly RenderLineV24[],
-  script: ReturnType<typeof playbackScriptForProject>,
+  script: PlaybackScript,
   fps: number,
   assignmentIndex: number,
   baseCompilerInputHash: string,
@@ -3761,7 +3822,10 @@ export function compileRenderManifestV25(
   }
 
   const diagnostics: RenderManifestDiagnostic[] = [];
-  if (!validateV25PlaybackCues(projectResult.data, diagnostics)) {
+  const renderProject = createEffectiveRenderProject(projectResult.data);
+  if (
+    !validateV25PlaybackCues(projectResult.data, diagnostics, renderProject)
+  ) {
     return failure(diagnostics);
   }
 
@@ -3779,9 +3843,9 @@ export function compileRenderManifestV25(
   const baseManifest = baseResult.manifest;
   const sectionLayouts = baseManifest.sectionLayouts;
   const layoutIntervals = v25LayoutIntervals(baseManifest);
-  const playbackScript = playbackScriptForProject(projectResult.data);
+  const playbackScript = playbackScriptForSections(renderProject.sections);
   const assignmentById = new Map(
-    projectResult.data.visuals.assignments.map((assignment) => [
+    renderProject.visualAssignments.map((assignment) => [
       assignment.id,
       assignment
     ])
@@ -4078,6 +4142,7 @@ export function compileRenderManifestV28(
     diagnostics
   );
   const project = projectResult.data;
+  const renderProject = createEffectiveRenderProject(project);
   const templateById = new Map(
     [...templates.values()].map((binding) => [
       binding.template.templateId,
@@ -4091,6 +4156,9 @@ export function compileRenderManifestV28(
   >();
 
   for (const [elementIndex, element] of project.edit.videoElements.entries()) {
+    if (!renderProject.videoElements.includes(element)) {
+      continue;
+    }
     if (element.text.length === 0 || element.textTemplateId === null) {
       continue;
     }
@@ -4139,7 +4207,7 @@ export function compileRenderManifestV28(
   }
 
   const elementById = new Map(
-    project.edit.videoElements.map((element) => [element.id, element])
+    renderProject.videoElements.map((element) => [element.id, element])
   );
   const inserts: RenderInsertV28[] = baseResult.manifest.inserts.map(
     (insert) => {
@@ -4199,6 +4267,7 @@ export function compileRenderManifestV28(
 function resolveLineOverlays(
   project: ReturnType<typeof videoProjectSchema.parse>,
   manifest: RenderManifestV28,
+  effectiveLineIds: ReadonlySet<string>,
   diagnostics: RenderManifestDiagnostic[]
 ): RenderLineOverlay[] {
   const lineOrder = new Map(
@@ -4211,6 +4280,9 @@ function resolveLineOverlays(
     sourceIndex,
     overlay
   ] of project.overlays.lineOverlays.entries()) {
+    if (!effectiveLineIds.has(overlay.lineId)) {
+      continue;
+    }
     const line = manifest.lines.find(
       (candidate) => candidate.id === overlay.lineId
     );
@@ -4282,9 +4354,11 @@ export function compileRenderManifestV29(
   }
 
   const diagnostics: RenderManifestDiagnostic[] = [];
+  const renderProject = createEffectiveRenderProject(projectResult.data);
   const lineOverlays = resolveLineOverlays(
     projectResult.data,
     baseResult.manifest,
+    renderProject.lineIds,
     diagnostics
   );
   if (diagnostics.length > 0) {

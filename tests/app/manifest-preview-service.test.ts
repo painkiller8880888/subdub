@@ -135,6 +135,127 @@ describe("ManifestPreviewService", () => {
     });
   });
 
+  it("ignores disabled section templates, audio, and manifest assets", async () => {
+    const root = await createRoot();
+    const originalProject = createProject();
+    const manifest = createManifest(originalProject);
+    const project = structuredClone(originalProject) as VideoProject;
+    const mainSection = project.script.sections[1];
+    if (mainSection === undefined) {
+      throw new Error("the fixture main section is missing");
+    }
+    mainSection.enabled = false;
+    mainSection.screenTemplateId = "missing-while-disabled";
+
+    const mainVisual = manifest.visuals.find(
+      (visual) => visual.sourceAssignmentId === "visual-main-photo"
+    );
+    const mainBackground = manifest.backgrounds.find(
+      (background) => background.sectionId === mainSection.id
+    );
+    const mainTrack = manifest.audioTracks.find(
+      (track) => track.sectionId === mainSection.id
+    );
+    const mainEffect = manifest.soundEffects.find(
+      (effect) => effect.lineId === "main-learner-1"
+    );
+    if (
+      mainVisual === undefined ||
+      mainBackground?.background.kind !== "image" ||
+      mainTrack === undefined ||
+      mainEffect === undefined
+    ) {
+      throw new Error("the fixture main manifest dependencies are missing");
+    }
+
+    const disabledLineIds = new Set(mainSection.lines.map((line) => line.id));
+    const audioIndex = createRenderManifestAudioIndex(project);
+    for (const lineId of disabledLineIds) {
+      delete audioIndex[lineId];
+    }
+    manifest.sourceAssetChecksums = [
+      ...mainSection.lines.map((line) => ({
+        path: manifest.lines.find((candidate) => candidate.id === line.id)!
+          .audioPath,
+        sha256: "0".repeat(64)
+      })),
+      {
+        path: mainVisual.src,
+        sha256: "0".repeat(64)
+      },
+      {
+        path: mainBackground.background.src,
+        sha256: "0".repeat(64)
+      },
+      {
+        path: mainTrack.src,
+        sha256: "0".repeat(64)
+      },
+      {
+        path: mainEffect.src,
+        sha256: "0".repeat(64)
+      }
+    ];
+
+    const service = await createService(root, project, {
+      manifest,
+      audioIndex,
+      screenTemplateCatalog: {
+        findById: (templateId) =>
+          templateId === "screen-template-standard"
+            ? createStandardScreenTemplate("2026-08-10T00:00:00.000Z")
+            : undefined
+      }
+    });
+
+    const result = await service.get(projectId);
+
+    expect(result.canPlay).toBe(false);
+    expect(result.blockers.map((blocker) => blocker.code)).toEqual([
+      "MANIFEST_PROJECT_STALE"
+    ]);
+
+    mainSection.enabled = true;
+    const reenabledService = await createService(root, project, {
+      manifest,
+      audioIndex,
+      screenTemplateCatalog: {
+        findById: (templateId) =>
+          templateId === "screen-template-standard"
+            ? createStandardScreenTemplate("2026-08-10T00:00:00.000Z")
+            : undefined
+      }
+    });
+    const reenabled = await reenabledService.get(projectId);
+    expect(reenabled.blockers.map((blocker) => blocker.code)).toEqual(
+      expect.arrayContaining([
+        "SCREEN_TEMPLATE_REFERENCE_INVALID",
+        "AUDIO_INDEX_ENTRY_MISSING",
+        "ASSET_MISSING"
+      ])
+    );
+  });
+
+  it("reports NO_ENABLED_SECTION without requiring audio when all sections are disabled", async () => {
+    const root = await createRoot();
+    const project = createProject();
+    for (const section of project.script.sections) {
+      section.enabled = false;
+    }
+    const service = await createService(root, project, { audioIndex: {} });
+
+    const result = await service.get(projectId);
+
+    expect(result.canPlay).toBe(false);
+    expect(result.blockers.map((blocker) => blocker.code)).toEqual([
+      "NO_ENABLED_SECTION",
+      "MANIFEST_NOT_FOUND"
+    ]);
+    expect(result.blockers.map((blocker) => blocker.code)).not.toContain(
+      "AUDIO_INDEX_ENTRY_MISSING"
+    );
+  });
+
   it("reports a missing manifest as a normal blocked state", async () => {
     const root = await createRoot();
     const project = createProject();

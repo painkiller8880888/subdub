@@ -123,4 +123,25 @@ describe("RenderPreflightService", () => {
       status: 422
     });
   });
+
+  it("rejects a render when no script section is enabled", async () => {
+    const preflight = new RenderPreflightService({
+      projectRepository: { read: async () => project },
+      manifestPreviewService: {
+        get: async () =>
+          preview("stale", manifest, [
+            {
+              code: "NO_ENABLED_SECTION",
+              message: "no enabled section",
+              target: { kind: "script" }
+            }
+          ])
+      }
+    });
+
+    await expect(preflight.validate(projectId)).rejects.toMatchObject({
+      code: RENDER_JOB_ERROR_CODE.manifestInvalid,
+      status: 422
+    });
+  });
 });

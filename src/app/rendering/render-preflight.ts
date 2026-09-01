@@ -38,6 +38,13 @@ export class RenderPreflightService implements RenderPreflightServicePort {
 
     if (preview.state !== "current" || preview.manifest === null) {
       const codes = blockerCodes(preview.blockers);
+      if (codes.has("NO_ENABLED_SECTION")) {
+        throw new RenderJobError(
+          RENDER_JOB_ERROR_CODE.manifestInvalid,
+          422,
+          "At least one script section must be enabled before rendering."
+        );
+      }
       if (
         codes.has("ASSET_MISSING") ||
         codes.has("AUDIO_INDEX_ENTRY_MISSING")

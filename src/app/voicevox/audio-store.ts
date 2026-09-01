@@ -77,6 +77,11 @@ export type VoicevoxAudioStoreOptions = {
   readonly now?: () => Date;
 };
 
+export type VoicevoxAudioIndexReadOptions = Readonly<{
+  /** Restrict validation and returned entries to the current render lines. */
+  readonly lineIds?: ReadonlySet<string>;
+}>;
+
 export type VoicevoxAudioStoreInput = {
   readonly projectId: unknown;
   readonly lineId: unknown;
@@ -240,21 +245,29 @@ export class VoicevoxAudioStore {
     return this.audioRelativePath(parsed.data);
   }
 
-  async readIndex(projectId: unknown): Promise<VoicevoxAudioIndex> {
+  async readIndex(
+    projectId: unknown,
+    options: VoicevoxAudioIndexReadOptions = {}
+  ): Promise<VoicevoxAudioIndex> {
     const parsedProjectId = idSchema.safeParse(projectId);
     if (!parsedProjectId.success) {
       throw new VoicevoxAudioStoreError("VOICEVOX_AUDIO_STORE_INPUT_INVALID");
     }
 
     return this.withProjectAudioUpdateLock(parsedProjectId.data, () =>
-      this.readIndexUnlocked(parsedProjectId.data)
+      this.readIndexUnlocked(parsedProjectId.data, options.lineIds)
     );
   }
 
   private async readIndexUnlocked(
-    projectId: string
+    projectId: string,
+    lineIds?: ReadonlySet<string>
   ): Promise<VoicevoxAudioIndex> {
     const parsedProjectId = idSchema.parse(projectId);
+
+    if (lineIds !== undefined && lineIds.size === 0) {
+      return {};
+    }
 
     const relativePath = `projects/${parsedProjectId}/${VOICEVOX_AUDIO_INDEX_RELATIVE_PATH}`;
     const filePath = await this.resolveExistingFilePath(relativePath);
@@ -276,7 +289,16 @@ export class VoicevoxAudioStore {
       throw new VoicevoxAudioStoreError("VOICEVOX_AUDIO_STORE_INDEX_INVALID");
     }
 
-    const parsedIndex = voicevoxAudioIndexSchema.safeParse(parsedJson);
+    const effectiveJson =
+      lineIds === undefined ||
+      typeof parsedJson !== "object" ||
+      parsedJson === null ||
+      Array.isArray(parsedJson)
+        ? parsedJson
+        : Object.fromEntries(
+            Object.entries(parsedJson).filter(([lineId]) => lineIds.has(lineId))
+          );
+    const parsedIndex = voicevoxAudioIndexSchema.safeParse(effectiveJson);
     if (!parsedIndex.success) {
       throw new VoicevoxAudioStoreError("VOICEVOX_AUDIO_STORE_INDEX_INVALID");
     }

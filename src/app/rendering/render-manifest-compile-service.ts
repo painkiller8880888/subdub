@@ -37,6 +37,10 @@ import { insertTextTemplateSchema } from "../../schema/insert-text-template.js";
 import type { VoicevoxAudioIndex } from "../voicevox/audio-index.js";
 import type { VoicevoxAudioStore } from "../voicevox/audio-store.js";
 import { RENDER_JOB_ERROR_CODE, RenderJobError } from "./render-job-errors.js";
+import {
+  createEffectiveRenderProject,
+  type EffectiveRenderProject
+} from "./effective-render-project.js";
 
 type ProjectReader = Pick<ProjectRepository, "read">;
 type AssetDetailReader = Pick<AssetRepository, "findAssetDetail">;
@@ -66,8 +70,13 @@ function assertScreenTemplateReferences(
   screenTemplateCatalog: ScreenTemplateSnapshotPort
 ): void {
   if (
-    validateVideoProjectScreenTemplateReferences(project, screenTemplateCatalog)
-      .length === 0
+    validateVideoProjectScreenTemplateReferences(
+      project,
+      screenTemplateCatalog,
+      {
+        enabledOnly: true
+      }
+    ).length === 0
   ) {
     return;
   }
@@ -83,8 +92,9 @@ function screenTemplateSnapshotForProject(
   project: VideoProject,
   screenTemplateCatalog: ScreenTemplateSnapshotPort
 ): ScreenTemplate[] | undefined {
+  const renderProject = createEffectiveRenderProject(project);
   const ids = new Set<string>();
-  for (const section of project.script.sections) {
+  for (const section of renderProject.sections) {
     ids.add(section.screenTemplateId);
   }
 
@@ -107,8 +117,9 @@ function insertTextTemplateSnapshotForProject(
   project: VideoProject,
   catalog: InsertTextTemplateSnapshotPort
 ): InsertTextTemplate[] {
+  const renderProject = createEffectiveRenderProject(project);
   const ids = new Set(
-    project.edit.videoElements.flatMap((element) =>
+    renderProject.videoElements.flatMap((element) =>
       element.text.length > 0 && element.textTemplateId !== null
         ? [element.textTemplateId]
         : []
@@ -202,6 +213,7 @@ async function appendEditVideoMetadata(
   metadata: AssetMetadataByPath,
   workspaceRoot: string,
   project: VideoProject,
+  renderProject: EffectiveRenderProject,
   assetRepository: AssetDetailReader
 ): Promise<void> {
   const projectRoot = path.resolve(
@@ -209,7 +221,7 @@ async function appendEditVideoMetadata(
     "projects",
     project.metadata.id
   );
-  for (const element of project.edit.videoElements) {
+  for (const element of renderProject.videoElements) {
     const filePath = path.resolve(
       projectRoot,
       ...element.projectMediaPath.split("/")
@@ -251,6 +263,7 @@ async function appendBgmMetadata(
   metadata: AssetMetadataByPath,
   workspaceRoot: string,
   project: VideoProject,
+  renderProject: EffectiveRenderProject,
   assetRepository: AssetDetailReader
 ): Promise<void> {
   const projectRoot = path.resolve(
@@ -258,7 +271,7 @@ async function appendBgmMetadata(
     "projects",
     project.metadata.id
   );
-  for (const bgm of project.edit.sectionBgms) {
+  for (const bgm of renderProject.sectionBgms) {
     const detail = assetRepository.findAssetDetail(
       bgm.assetId,
       bgm.assetVersion
@@ -303,14 +316,15 @@ async function appendBgmMetadata(
 async function appendImageBackgroundMetadata(
   metadata: AssetMetadataByPath,
   workspaceRoot: string,
-  project: VideoProject
+  project: VideoProject,
+  renderProject: EffectiveRenderProject
 ): Promise<void> {
   const projectRoot = path.resolve(
     workspaceRoot,
     "projects",
     project.metadata.id
   );
-  for (const section of project.script.sections) {
+  for (const section of renderProject.sections) {
     if (section.background.kind !== "image") {
       continue;
     }
@@ -342,8 +356,12 @@ async function assetMetadataForProject(
   assetRepository: AssetDetailReader
 ): Promise<readonly RenderManifestAssetMetadata[]> {
   const metadata: AssetMetadataByPath = new Map();
+  const renderProject = createEffectiveRenderProject(project);
 
-  for (const entry of Object.values(audioIndex)) {
+  for (const [lineId, entry] of Object.entries(audioIndex)) {
+    if (!renderProject.lineIds.has(lineId)) {
+      continue;
+    }
     addAssetMetadata(metadata, {
       path: entry.audioPath,
       kind: "audio",
@@ -352,7 +370,7 @@ async function assetMetadataForProject(
     });
   }
 
-  for (const assignment of project.visuals.assignments) {
+  for (const assignment of renderProject.visualAssignments) {
     appendAssetMetadata(
       metadata,
       assetRepository,
@@ -363,7 +381,7 @@ async function assetMetadataForProject(
     );
   }
 
-  for (const effect of project.audio.soundEffects) {
+  for (const effect of renderProject.soundEffects) {
     appendAssetMetadata(
       metadata,
       assetRepository,
@@ -374,7 +392,12 @@ async function assetMetadataForProject(
     );
   }
 
-  await appendImageBackgroundMetadata(metadata, workspaceRoot, project);
+  await appendImageBackgroundMetadata(
+    metadata,
+    workspaceRoot,
+    project,
+    renderProject
+  );
 
   for (const visual of snapshot) {
     for (const variant of visual.variants) {
@@ -392,9 +415,16 @@ async function assetMetadataForProject(
     metadata,
     workspaceRoot,
     project,
+    renderProject,
     assetRepository
   );
-  await appendBgmMetadata(metadata, workspaceRoot, project, assetRepository);
+  await appendBgmMetadata(
+    metadata,
+    workspaceRoot,
+    project,
+    renderProject,
+    assetRepository
+  );
   return [...metadata.values()];
 }
 
@@ -419,6 +449,7 @@ export class RenderManifestInputBuilder {
 
   async build(projectId: unknown): Promise<RenderManifestCompilerInput> {
     const project = await this.projectRepository.read(projectId);
+    const renderProject = createEffectiveRenderProject(project);
     assertScreenTemplateReferences(project, this.screenTemplateCatalog);
     const screenTemplateCatalogSnapshot = screenTemplateSnapshotForProject(
       project,
@@ -431,7 +462,9 @@ export class RenderManifestInputBuilder {
             project,
             this.insertTextTemplateCatalog
           );
-    const audioIndex = await this.audioStore.readIndex(projectId);
+    const audioIndex = await this.audioStore.readIndex(projectId, {
+      lineIds: renderProject.lineIds
+    });
     const characterVisualCatalog =
       await this.characterVisualCatalogService.verifyFiles();
 

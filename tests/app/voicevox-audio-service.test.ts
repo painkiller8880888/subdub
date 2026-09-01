@@ -535,6 +535,48 @@ describe("VoicevoxAudioService", () => {
     ).toBeDefined();
   });
 
+  it("filters invalid audio entries outside the requested render lines", async () => {
+    const root = await createRoot();
+    const store = new VoicevoxAudioStore({
+      workspaceRoot: root,
+      now: () => fixedNow
+    });
+    const harness = createService(
+      store,
+      createPrepared(firstLine, firstSpeaker, "a".repeat(64)),
+      createVoicevoxWavFixture()
+    );
+    const enabledEntry = await harness.service.generate(
+      createInput(firstLine, firstCharacter, firstSpeaker)
+    );
+    const indexPath = path.join(
+      root,
+      "projects",
+      projectId,
+      "cache",
+      "audio-index.json"
+    );
+    const rawIndex = JSON.parse(await readIndexRaw(root)) as Record<
+      string,
+      unknown
+    >;
+    rawIndex["disabled-line"] = {
+      ...(rawIndex[firstLine.id] as Record<string, unknown>),
+      lineId: "disabled-line",
+      audioPath: "../outside.wav"
+    };
+    await fs.writeFile(indexPath, `${JSON.stringify(rawIndex)}\n`, "utf8");
+
+    await expect(
+      store.readIndex(projectId, { lineIds: new Set([firstLine.id]) })
+    ).resolves.toEqual({ [firstLine.id]: enabledEntry });
+
+    await fs.writeFile(indexPath, "{broken\n", "utf8");
+    await expect(
+      store.readIndex(projectId, { lineIds: new Set() })
+    ).resolves.toEqual({});
+  });
+
   it("rejects unsafe IDs and cache keys before filesystem access", async () => {
     const root = await createRoot();
     const realpath = vi.fn(async () => {

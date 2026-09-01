@@ -1,4 +1,5 @@
 export * from "./render-manifest-compiler.js";
+export * from "./effective-render-project.js";
 export * from "./render-manifest-store.js";
 export * from "./render-job-errors.js";
 export * from "./render-job-service.js";
