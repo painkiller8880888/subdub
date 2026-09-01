@@ -1773,13 +1773,8 @@ describe("compileRenderManifest", () => {
     });
   });
 
-  it("collects outline, stale, audio, and material diagnostics without stage approvals", () => {
+  it("collects audio and material diagnostics without stage approvals", () => {
     const project = structuredClone(videoProjectFixture) as VideoProject;
-    project.outline.status = "draft";
-    project.script.status = "needs_review";
-    project.visuals.status = "draft";
-    project.outline.sourceHash = "1".repeat(64);
-    project.script.outlineHash = "2".repeat(64);
     const result = compileRenderManifest({
       project,
       audioIndex: {},
@@ -1789,15 +1784,9 @@ describe("compileRenderManifest", () => {
     expect(result.success).toBe(false);
     expect(diagnosticCodes(result)).toEqual(
       expect.arrayContaining([
-        "OUTLINE_NOT_APPROVED",
-        "OUTLINE_SOURCE_HASH_MISMATCH",
-        "SCRIPT_OUTLINE_HASH_MISMATCH",
         "AUDIO_INDEX_ENTRY_MISSING",
         "ASSET_METADATA_MISSING"
       ])
-    );
-    expect(diagnosticCodes(result)).not.toEqual(
-      expect.arrayContaining(["SCRIPT_NOT_APPROVED", "VISUALS_NOT_APPROVED"])
     );
     if (result.success) {
       return;
@@ -1816,8 +1805,6 @@ describe("compileRenderManifest", () => {
 
   it("compiles valid data without script or visual approval status", () => {
     const project = structuredClone(videoProjectFixture) as VideoProject;
-    project.script.status = "draft";
-    project.visuals.status = "needs_review";
 
     const result = compileRenderManifest(validInput(project));
 

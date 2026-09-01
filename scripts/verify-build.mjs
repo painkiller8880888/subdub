@@ -18,8 +18,11 @@ const migrationJournal = JSON.parse(
 assert.ok(Array.isArray(migrationJournal.entries));
 const expectedMigrationCount = migrationJournal.entries.length;
 
+let first;
+let second;
+
 try {
-  const first = await initializeServer({ workspaceRoot, staticRoot });
+  first = await initializeServer({ workspaceRoot, staticRoot });
   const firstHistory = first.database.connection
     .prepare("SELECT hash, created_at FROM __drizzle_migrations")
     .all();
@@ -52,7 +55,7 @@ try {
 
   const projectPage = await first.app.inject({
     method: "GET",
-    url: `/projects/${createdProjectId}/brief`
+    url: `/projects/${createdProjectId}/script`
   });
   assert.equal(projectPage.statusCode, 200);
   assert.match(projectPage.headers["content-type"], /^text\/html/);
@@ -67,24 +70,35 @@ try {
   });
   assert.equal(sourceSave.statusCode, 200);
   const sourceSaved = sourceSave.json();
+  assert.equal(sourceSaved.revision, 1);
 
-  const briefSave = await first.app.inject({
-    method: "PUT",
-    url: `/api/projects/${createdProjectId}/brief`,
-    payload: {
-      brief: {
-        ...created.data.brief,
-        audience: "Build verification audience"
-      },
-      expectedRevision: sourceSaved.revision
-    }
+  const currentProjectResponse = await first.app.inject({
+    method: "GET",
+    url: `/api/projects/${createdProjectId}`
   });
-  assert.equal(briefSave.statusCode, 200);
+  assert.equal(currentProjectResponse.statusCode, 200);
+  const currentProject = currentProjectResponse.json().data;
+  assert.equal(currentProject.schemaVersion, "1.9.0");
+  assert.equal(Object.hasOwn(currentProject, "source"), false);
+  assert.equal(Object.hasOwn(currentProject, "brief"), false);
+  assert.equal(Object.hasOwn(currentProject, "outline"), false);
+  assert.deepEqual(
+    currentProject.script.sections.map(({ name, enabled }) => ({
+      name,
+      enabled
+    })),
+    [
+      { name: "導入", enabled: true },
+      { name: "本編", enabled: true },
+      { name: "締め", enabled: true }
+    ]
+  );
 
   await first.app.close();
   assert.equal(first.database.connection.open, false);
+  first = undefined;
 
-  const second = await initializeServer({ workspaceRoot, staticRoot });
+  second = await initializeServer({ workspaceRoot, staticRoot });
   const secondHistory = second.database.connection
     .prepare("SELECT hash, created_at FROM __drizzle_migrations")
     .all();
@@ -95,10 +109,10 @@ try {
     url: `/api/projects/${createdProjectId}`
   });
   assert.equal(persistedProject.statusCode, 200);
-  assert.equal(
-    persistedProject.json().data.brief.audience,
-    "Build verification audience"
-  );
+  assert.equal(persistedProject.json().data.schemaVersion, "1.9.0");
+  assert.equal(Object.hasOwn(persistedProject.json().data, "source"), false);
+  assert.equal(Object.hasOwn(persistedProject.json().data, "brief"), false);
+  assert.equal(Object.hasOwn(persistedProject.json().data, "outline"), false);
 
   const persistedSource = await second.app.inject({
     method: "GET",
@@ -112,14 +126,21 @@ try {
 
   const persistedProjectPage = await second.app.inject({
     method: "GET",
-    url: `/projects/${createdProjectId}/brief`
+    url: `/projects/${createdProjectId}/script`
   });
   assert.equal(persistedProjectPage.statusCode, 200);
 
   await second.app.close();
   assert.equal(second.database.connection.open, false);
+  second = undefined;
 
-  console.log("build migration resolution verified");
+  console.log("build V19 project resolution verified");
 } finally {
+  if (second !== undefined) {
+    await second.app.close().catch(() => undefined);
+  }
+  if (first !== undefined) {
+    await first.app.close().catch(() => undefined);
+  }
   await rm(workspaceRoot, { recursive: true, force: true });
 }

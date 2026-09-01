@@ -9,7 +9,10 @@ import {
   createStandardScreenTemplate,
   STANDARD_SCREEN_TEMPLATE_ID
 } from "../../../src/app/screen-templates/screen-template-seed.js";
-import { videoProjectFixture } from "../video-project.js";
+import {
+  legacyVideoProjectFixture,
+  videoProjectFixture
+} from "../video-project.js";
 
 export const ALTERNATE_SCREEN_TEMPLATE_ID =
   "screen-template-alternate" as const;
@@ -146,31 +149,38 @@ export function createScreenTemplateProjectFixture(): VideoProject {
 
 export function createLineOverrideScreenTemplateProjectFixture(): unknown {
   const project = structuredClone(
-    createScreenTemplateProjectFixture()
-  ) as unknown as {
+    createLegacyScreenTemplateProjectFixture()
+  ) as {
     schemaVersion: string;
     script: {
       sections: Array<{
+        screenTemplateId?: string;
         lines: Array<Record<string, unknown>>;
       }>;
     };
+    visuals: {
+      assignments: Array<{
+        display: {
+          displayCoordinateSpace?: string;
+          playbackCues?: unknown;
+        };
+      }>;
+    };
   };
-  delete (project as unknown as Record<string, unknown>).overlays;
   project.schemaVersion = "1.3.0";
-  removeEditInsertTextFields(project);
-  for (const section of project.script.sections) {
+  const sectionTemplateIds = [
+    STANDARD_SCREEN_TEMPLATE_ID,
+    ALTERNATE_SCREEN_TEMPLATE_ID,
+    ALTERNATE_SCREEN_TEMPLATE_ID
+  ];
+  for (const [sectionIndex, section] of project.script.sections.entries()) {
+    section.screenTemplateId = sectionTemplateIds[sectionIndex];
     for (const line of section.lines) {
       line.screenTemplateId = null;
     }
   }
-  const visuals = (
-    project as unknown as {
-      visuals: {
-        assignments: Array<{ display: { playbackCues?: unknown } }>;
-      };
-    }
-  ).visuals;
-  for (const assignment of visuals.assignments) {
+  for (const assignment of project.visuals.assignments) {
+    assignment.display.displayCoordinateSpace = "legacy-media-frame";
     delete assignment.display.playbackCues;
   }
   const overrideLine = project.script.sections[1]?.lines[1];
@@ -182,9 +192,7 @@ export function createLineOverrideScreenTemplateProjectFixture(): unknown {
 }
 
 export function createLegacyScreenTemplateProjectFixture(): unknown {
-  const project = structuredClone(
-    createScreenTemplateProjectFixture()
-  ) as unknown as {
+  const project = structuredClone(legacyVideoProjectFixture) as unknown as {
     schemaVersion: string;
     script: {
       sections: Array<{
@@ -197,10 +205,22 @@ export function createLegacyScreenTemplateProjectFixture(): unknown {
         display: { displayCoordinateSpace?: string; playbackCues?: unknown };
       }>;
     };
+    edit: {
+      videoElements: Array<Record<string, unknown>>;
+    };
   };
   delete (project as unknown as Record<string, unknown>).overlays;
   project.schemaVersion = "1.2.0";
-  removeEditInsertTextFields(project);
+  const sourceEdit = createScreenTemplateProjectFixture().edit;
+  const cutin = sourceEdit.videoElements[0];
+  if (cutin !== undefined) {
+    const legacyCutin = { ...cutin } as Record<string, unknown>;
+    delete legacyCutin.text;
+    delete legacyCutin.textTemplateId;
+    delete legacyCutin.startMs;
+    delete legacyCutin.playbackRate;
+    project.edit.videoElements = [legacyCutin];
+  }
   for (const section of project.script.sections) {
     delete section.screenTemplateId;
     for (const line of section.lines) {
@@ -212,37 +232,6 @@ export function createLegacyScreenTemplateProjectFixture(): unknown {
     delete assignment.display.playbackCues;
   }
   return project;
-}
-
-function removeEditInsertTextFields(project: unknown): void {
-  if (
-    typeof project !== "object" ||
-    project === null ||
-    Array.isArray(project)
-  ) {
-    return;
-  }
-  const edit = (project as { edit?: unknown }).edit;
-  if (typeof edit !== "object" || edit === null || Array.isArray(edit)) {
-    return;
-  }
-  const videoElements = (edit as { videoElements?: unknown }).videoElements;
-  if (!Array.isArray(videoElements)) {
-    return;
-  }
-  for (const element of videoElements) {
-    if (
-      typeof element !== "object" ||
-      element === null ||
-      Array.isArray(element)
-    ) {
-      continue;
-    }
-    delete (element as Record<string, unknown>).text;
-    delete (element as Record<string, unknown>).textTemplateId;
-    delete (element as Record<string, unknown>).startMs;
-    delete (element as Record<string, unknown>).playbackRate;
-  }
 }
 
 export function createStandardAndAlternateTemplateSnapshot(): ScreenTemplate[] {

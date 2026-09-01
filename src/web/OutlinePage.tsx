@@ -8,7 +8,8 @@ import {
   type OpenQuestion,
   type Outline,
   type OutlineSection,
-  type VideoProject
+  type VideoProject,
+  type VideoProjectV18
 } from "../schema/index.js";
 import {
   ApiClientError,
@@ -440,12 +441,17 @@ export function OutlinePage() {
     enabled: projectId !== undefined,
     retry: false
   });
+  const legacyProject =
+    projectQuery.data !== undefined &&
+    "source" in projectQuery.data &&
+    "brief" in projectQuery.data &&
+    "outline" in projectQuery.data
+      ? (projectQuery.data as unknown as VideoProjectV18)
+      : undefined;
   const modelsQuery = useQuery({
     queryKey: ["models"],
     queryFn: () => fetchModels(),
-    enabled:
-      projectQuery.data !== undefined &&
-      projectQuery.data.outline.sections.length === 0,
+    enabled: legacyProject?.outline.sections.length === 0,
     retry: false
   });
   const [draft, setDraft] = useState<Outline | null>(null);
@@ -515,7 +521,9 @@ export function OutlinePage() {
         });
         revisionRef.current = saved.revision;
         queryClient.setQueryData(["projects", projectId], saved);
-        const serverDraft = cloneOutline(saved.outline);
+        const serverDraft = cloneOutline(
+          (saved as unknown as VideoProjectV18).outline
+        );
         lastSavedRef.current = serverDraft;
         const currentDraft = draftRef.current;
         if (currentDraft === null) {
@@ -546,20 +554,20 @@ export function OutlinePage() {
   useEffect(() => {
     if (
       projectId === undefined ||
-      projectQuery.data === undefined ||
+      legacyProject === undefined ||
       initializedForProjectRef.current === projectId ||
       coordinatorRef.current === null
     ) {
       return;
     }
-    const nextDraft = cloneOutline(projectQuery.data.outline);
-    revisionRef.current = projectQuery.data.revision;
+    const nextDraft = cloneOutline(legacyProject.outline);
+    revisionRef.current = legacyProject.revision;
     draftRef.current = nextDraft;
     lastSavedRef.current = cloneOutline(nextDraft);
     initializedForProjectRef.current = projectId;
     setDraft(nextDraft);
     coordinatorRef.current.reset();
-  }, [projectId, projectQuery.data]);
+  }, [legacyProject, projectId]);
 
   useEffect(() => {
     if (modelsQuery.data === undefined) {
@@ -575,21 +583,25 @@ export function OutlinePage() {
     ) {
       return;
     }
-    const defaultModelId = projectQuery.data?.aiSettings.defaultModelId;
+    const defaultModelId = legacyProject?.aiSettings.defaultModelId;
     setSelectedModelId(
       visibleModels.find((model) => model.id === defaultModelId)?.id ??
         visibleModels[0]?.id ??
         null
     );
-  }, [
-    modelPricingFilter,
-    modelsQuery.data,
-    projectQuery.data,
-    selectedModelId
-  ]);
+  }, [modelPricingFilter, modelsQuery.data, legacyProject, selectedModelId]);
 
   if (projectId === undefined) {
     return <Navigate replace to="/projects" />;
+  }
+
+  if (projectQuery.data !== undefined && legacyProject === undefined) {
+    return (
+      <Navigate
+        replace
+        to={`/projects/${encodeURIComponent(projectId)}/script`}
+      />
+    );
   }
 
   function updateDraft(nextDraft: Outline): void {
@@ -712,8 +724,9 @@ export function OutlinePage() {
       if (!result.isSuccess || result.data === undefined) {
         return;
       }
-      const nextDraft = cloneOutline(result.data.outline);
-      revisionRef.current = result.data.revision;
+      const nextProject = result.data as unknown as VideoProjectV18;
+      const nextDraft = cloneOutline(nextProject.outline);
+      revisionRef.current = nextProject.revision;
       draftRef.current = nextDraft;
       lastSavedRef.current = cloneOutline(nextDraft);
       setDraft(nextDraft);
@@ -767,7 +780,9 @@ export function OutlinePage() {
       });
       revisionRef.current = saved.revision;
       queryClient.setQueryData(["projects", projectId], saved);
-      const nextDraft = cloneOutline(saved.outline);
+      const nextDraft = cloneOutline(
+        (saved as unknown as VideoProjectV18).outline
+      );
       draftRef.current = nextDraft;
       lastSavedRef.current = cloneOutline(nextDraft);
       setDraft(nextDraft);
@@ -802,7 +817,9 @@ export function OutlinePage() {
   function applyProjectResult(saved: VideoProject): void {
     revisionRef.current = saved.revision;
     queryClient.setQueryData(["projects", projectId], saved);
-    const nextDraft = cloneOutline(saved.outline);
+    const nextDraft = cloneOutline(
+      (saved as unknown as VideoProjectV18).outline
+    );
     draftRef.current = nextDraft;
     lastSavedRef.current = cloneOutline(nextDraft);
     setDraft(nextDraft);
@@ -880,7 +897,16 @@ export function OutlinePage() {
     );
   }
 
-  const project = projectQuery.data as VideoProject;
+  if (legacyProject === undefined) {
+    return (
+      <Navigate
+        replace
+        to={`/projects/${encodeURIComponent(projectId)}/script`}
+      />
+    );
+  }
+
+  const project = legacyProject;
   const stale = hasStaleSource(draft, project.source.sha256);
   const orderErrors = outlineOrderErrors(draft);
   const unresolvedQuestions = countOpenQuestions(draft);

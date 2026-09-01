@@ -42,6 +42,7 @@ import {
   previewRenderAcceptedResponseSchema,
   renderRunStatusResponseSchema
 } from "../../src/schema/api.js";
+import { legacyVideoProjectFixture } from "../fixtures/video-project.js";
 
 function jsonResponse(body: unknown, status: number): Response {
   return new Response(JSON.stringify(body), {
@@ -158,7 +159,7 @@ describe("web API client", () => {
       searchAiRuns({
         from: "2026-08-10T00:00:00.000Z",
         to: "2026-08-12T00:00:00.000Z",
-        taskKind: "outline_generation",
+        taskKind: "visual_search_intent",
         modelId: "google/gemma-4-31b-it",
         status: "failed",
         decision: "undecided",
@@ -171,7 +172,7 @@ describe("web API client", () => {
     const query = new URLSearchParams(requestUrl.split("?", 2)[1]);
     expect(query.get("from")).toBe("2026-08-10T00:00:00.000Z");
     expect(query.get("to")).toBe("2026-08-12T00:00:00.000Z");
-    expect(query.get("taskKind")).toBe("outline_generation");
+    expect(query.get("taskKind")).toBe("visual_search_intent");
     expect(query.get("modelId")).toBe("google/gemma-4-31b-it");
     expect(query.get("status")).toBe("failed");
     expect(query.get("decision")).toBe("undecided");
@@ -207,7 +208,7 @@ describe("web API client", () => {
     const result = await exportAiRuns({
       from: "2026-08-10T00:00:00.000Z",
       to: "2026-08-12T00:00:00.000Z",
-      taskKind: "outline_generation",
+      taskKind: "visual_search_intent",
       modelId: "google/gemma-4-31b-it",
       status: "failed",
       decision: "undecided",
@@ -220,7 +221,7 @@ describe("web API client", () => {
     const query = new URLSearchParams(queryString);
     expect(query.get("from")).toBe("2026-08-10T00:00:00.000Z");
     expect(query.get("to")).toBe("2026-08-12T00:00:00.000Z");
-    expect(query.get("taskKind")).toBe("outline_generation");
+    expect(query.get("taskKind")).toBe("visual_search_intent");
     expect(query.get("modelId")).toBe("google/gemma-4-31b-it");
     expect(query.get("status")).toBe("failed");
     expect(query.get("decision")).toBe("undecided");
@@ -392,7 +393,7 @@ describe("web API client", () => {
 
     await expect(
       saveProjectOutline(project.metadata.id, {
-        outline: project.outline,
+        outline: legacyVideoProjectFixture.outline,
         expectedRevision: project.revision
       })
     ).resolves.toEqual(project);
@@ -419,7 +420,7 @@ describe("web API client", () => {
       "/api/projects/outline-client-project/outline/review"
     ]);
     expect(JSON.parse(String(calls[0]?.init?.body))).toEqual({
-      outline: project.outline,
+      outline: legacyVideoProjectFixture.outline,
       expectedRevision: project.revision
     });
     expect(JSON.parse(String(calls[2]?.init?.body))).toEqual({

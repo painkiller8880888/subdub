@@ -5,7 +5,6 @@ import * as path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { AssetRepository } from "../../src/app/assets/asset-repository.js";
-import { computeOutlineHash } from "../../src/app/projects/script-domain.js";
 import { createEmptyVideoProject } from "../../src/app/projects/empty-video-project.js";
 import { ProjectRepository } from "../../src/app/projects/project-repository.js";
 import { VisualSuggestionService } from "../../src/app/projects/visual-suggestion-service.js";
@@ -85,45 +84,18 @@ async function setupProject(
     SOURCE,
     created.revision
   );
-  const candidate = structuredClone(videoProjectFixture) as VideoProject;
-  candidate.metadata = {
-    ...candidate.metadata,
-    id: created.metadata.id,
-    createdAt: sourceProject.metadata.createdAt,
-    updatedAt: sourceProject.metadata.updatedAt
-  };
-  candidate.source = sourceProject.source;
-  candidate.aiSettings = {
-    ...candidate.aiSettings,
-    defaultModelId: "default-model",
-    taskModelOverrides: { visual_search_intent: "task-model" },
-    ...aiSettings
-  };
-  candidate.outline = {
-    ...candidate.outline,
-    status: "approved",
-    sourceHash: sourceProject.source.sha256,
-    sections: candidate.outline.sections.map((section) => ({
-      ...section,
-      sourceRefs: section.sourceRefs.map((sourceRef) => ({
-        ...sourceRef,
-        sourceId: sourceProject.source.id
-      }))
-    }))
-  };
-  candidate.script = {
-    ...candidate.script,
-    status: "approved",
-    outlineHash: computeOutlineHash(candidate.outline)
-  };
-  candidate.visuals = {
-    status: "draft",
-    suggestionRunIds: [],
-    assignments: []
-  };
   const project = await repository.save(
     created.metadata.id,
-    candidate,
+    {
+      ...sourceProject,
+      script: structuredClone(videoProjectFixture.script),
+      aiSettings: {
+        ...sourceProject.aiSettings,
+        defaultModelId: "default-model",
+        taskModelOverrides: { visual_search_intent: "task-model" },
+        ...aiSettings
+      }
+    },
     sourceProject.revision
   );
   const assetRepository = new AssetRepository(database.database);
@@ -387,6 +359,7 @@ describe("VisualSuggestionService", () => {
     const runLog = aiRunLogSchema.parse(JSON.parse(runJson));
     expect(runLog).toMatchObject({
       taskKind: "visual_search_intent",
+      sourceHash: null,
       status: "succeeded",
       modelId: "task-model",
       modelSelectionSource: "task_override",
@@ -402,6 +375,32 @@ describe("VisualSuggestionService", () => {
       schemaValidation: "passed"
     });
     expect(runJson).not.toContain("unique visual");
+  });
+
+  it("generates current visual suggestions without requiring source.md", async () => {
+    const setup = await readySetup();
+    await fs.rm(
+      path.join(
+        setup.workspaceRoot,
+        "projects",
+        setup.project.metadata.id,
+        "source"
+      ),
+      { recursive: true, force: true }
+    );
+    const chat = createService(setup, intent());
+
+    await expect(
+      chat.service.generate(setup.project.metadata.id, {
+        startLineId: "main-mentor-1",
+        endLineId: "main-learner-1",
+        expectedRevision: setup.project.revision
+      })
+    ).resolves.toMatchObject({
+      revision: setup.project.revision + 1,
+      data: { runId: "visual-suggestion-run" }
+    });
+    expect(chat.chatAdapter.complete).toHaveBeenCalledTimes(1);
   });
 
   it("stores each successful backend candidate with its run, model, and prompt version", async () => {
@@ -634,7 +633,13 @@ describe("VisualSuggestionService", () => {
     );
     const draftSaved = await draftSetup.repository.save(
       draftSetup.project.metadata.id,
-      { ...draftProject, script: { ...draftProject.script, status: "draft" } },
+      {
+        ...draftProject,
+        metadata: {
+          ...draftProject.metadata,
+          title: "Draft suggestion project"
+        }
+      },
       draftProject.revision
     );
     const draftSuggestion = await createService(

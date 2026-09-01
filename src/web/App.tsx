@@ -24,7 +24,8 @@ import {
 import {
   projectBriefSchema,
   type ProjectBrief,
-  type VideoProject
+  type VideoProject,
+  type VideoProjectV18
 } from "../schema/index.js";
 import {
   ApiClientError,
@@ -58,10 +59,6 @@ import { AiRunsPage } from "./AiRunsPage";
 import { VisualAssignmentsPage } from "./VisualAssignmentsPage";
 import { WorkflowIndicator } from "./WorkflowIndicator";
 import { WorkspaceLayout } from "./WorkspaceLayout";
-
-function projectBriefPath(projectId: string): string {
-  return `/projects/${encodeURIComponent(projectId)}/brief`;
-}
 
 function projectOutlinePath(projectId: string): string {
   return `/projects/${encodeURIComponent(projectId)}/outline`;
@@ -106,7 +103,7 @@ function getErrorMessage(error: unknown, fallback: string): string {
 function ProjectSummaryCard({ project }: { project: ProjectSummary }) {
   return (
     <li className="project-card">
-      <Link className="project-card-link" to={projectBriefPath(project.id)}>
+      <Link className="project-card-link" to={projectScriptPath(project.id)}>
         <span className="project-card-title">{project.title}</span>
         <span className="project-card-meta">
           {project.department || "部門未設定"}
@@ -202,7 +199,7 @@ function NewProjectPage() {
     mutationFn: (input: ProjectCreateRequest) => createProject(input),
     onSuccess: async (project) => {
       await queryClient.invalidateQueries({ queryKey: ["projects"] });
-      navigate(projectBriefPath(project.metadata.id));
+      navigate(projectScriptPath(project.metadata.id));
     }
   });
 
@@ -323,8 +320,22 @@ type ProjectSaveRequest =
       expectedRevision: number;
     };
 
+function legacyProjectFromCurrent(
+  project: VideoProject | undefined
+): VideoProjectV18 | undefined {
+  if (
+    project === undefined ||
+    !("source" in project) ||
+    !("brief" in project) ||
+    !("outline" in project)
+  ) {
+    return undefined;
+  }
+  return project as unknown as VideoProjectV18;
+}
+
 function projectToBriefDraft(
-  project: VideoProject,
+  project: VideoProjectV18,
   markdown: string
 ): BriefDraft {
   return {
@@ -378,6 +389,7 @@ function ProjectBriefPage() {
     enabled: projectId !== undefined,
     retry: false
   });
+  const legacyProject = legacyProjectFromCurrent(projectQuery.data);
   const [draft, setDraft] = useState<BriefDraft | null>(null);
   const [autosaveState, setAutosaveState] = useState<AutosaveState>({
     status: "idle",
@@ -430,7 +442,7 @@ function ProjectBriefPage() {
       return {
         ...source,
         revision: project.revision,
-        sha256: project.source.sha256,
+        sha256: source.sha256,
         ...(request.kind === "source"
           ? { markdown: request.markdown }
           : {})
@@ -556,6 +568,7 @@ function ProjectBriefPage() {
       coordinator === null ||
       initializedForProjectRef.current === projectId ||
       projectQuery.data === undefined ||
+      legacyProject === undefined ||
       sourceQuery.data === undefined ||
       projectQuery.isError ||
       sourceQuery.isError
@@ -584,7 +597,7 @@ function ProjectBriefPage() {
     setSnapshotMismatch(false);
     snapshotRefetchSignatureRef.current = null;
     const nextDraft = projectToBriefDraft(
-      projectQuery.data,
+      legacyProject,
       sourceQuery.data.markdown
     );
     initializedForProjectRef.current = projectIdRef.current;
@@ -595,6 +608,7 @@ function ProjectBriefPage() {
     coordinator.reset();
   }, [
     coordinator,
+    legacyProject,
     projectId,
     projectQuery.data,
     projectQuery.isError,
@@ -604,6 +618,10 @@ function ProjectBriefPage() {
 
   if (projectId === undefined) {
     return <Navigate replace to="/projects" />;
+  }
+
+  if (projectQuery.data !== undefined && legacyProject === undefined) {
+    return <Navigate replace to={projectScriptPath(projectId)} />;
   }
 
   function updateDraft(nextDraft: BriefDraft): void {
@@ -660,10 +678,15 @@ function ProjectBriefPage() {
         sourceResult.isSuccess &&
         projectResult.data !== undefined &&
         sourceResult.data !== undefined &&
+        legacyProjectFromCurrent(projectResult.data) !== undefined &&
         projectResult.data.revision === sourceResult.data.revision
       ) {
+        const nextLegacyProject = legacyProjectFromCurrent(projectResult.data);
+        if (nextLegacyProject === undefined) {
+          return;
+        }
         const nextDraft = projectToBriefDraft(
-          projectResult.data,
+          nextLegacyProject,
           sourceResult.data.markdown
         );
         initializedForProjectRef.current = projectIdRef.current;

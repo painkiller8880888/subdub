@@ -152,91 +152,61 @@ function line(
   };
 }
 
-function section(
-  id: string,
-  outlineSectionId: string,
-  name: string,
-  lines: ScriptLine[]
-): ScriptSection {
+function section(id: string, name: string, lines: ScriptLine[]): ScriptSection {
   return {
     id,
-    outlineSectionId,
     name,
+    enabled: true,
     screenTemplateId: "screen-template-standard",
     background: { kind: "solid", colorToken: "background" },
     lines
   };
 }
 
-export function createRepresentativeFrameScript(
-  outlineHash: string,
-  outlineSectionIds: readonly string[] = [
-    "outline-intro",
-    "outline-main",
-    "outline-outro"
-  ]
-): Script {
+export function createRepresentativeFrameScript(): Script {
   return {
-    status: "draft",
-    origin: "manual",
-    outlineHash,
     sections: [
-      section(
-        "section-intro",
-        outlineSectionIds[0] ?? "outline-intro",
-        "Introduction",
-        [
-          line(
-            "fixture-intro-mentor",
-            "character-mentor",
-            "Welcome to the SubDub request guide.",
-            "Welcome to the SubDub request guide.",
-            "explain"
-          ),
-          line(
-            "fixture-intro-learner",
-            "character-learner",
-            "We will create a request together.",
-            "We will create a request together.",
-            "neutral"
-          )
-        ]
-      ),
-      section(
-        "section-main",
-        outlineSectionIds[1] ?? "outline-main",
-        "Request",
-        [
-          line(
-            "fixture-main-mentor",
-            "character-mentor",
-            "Create a new SubDub request.",
-            "Create a new SubDub request.",
-            "explain"
-          ),
-          line(
-            "fixture-main-learner",
-            "character-learner",
-            "Verify the SubDub material before saving.",
-            "Verify the SubDub material before saving.",
-            "caution"
-          )
-        ]
-      ),
-      section(
-        "section-outro",
-        outlineSectionIds[2] ?? "outline-outro",
-        "Completion",
-        [
-          line(
-            "fixture-outro-mentor",
-            "character-mentor",
-            "Confirm the result and finish the request.",
-            "Confirm the result and finish the request.",
-            "smile"
-          )
-        ]
-      )
+      section("section-intro", "Introduction", [
+        line(
+          "fixture-intro-mentor",
+          "character-mentor",
+          "Welcome to the SubDub request guide.",
+          "Welcome to the SubDub request guide.",
+          "explain"
+        ),
+        line(
+          "fixture-intro-learner",
+          "character-learner",
+          "We will create a request together.",
+          "We will create a request together.",
+          "neutral"
+        )
+      ]),
+      section("section-main", "Request", [
+        line(
+          "fixture-main-mentor",
+          "character-mentor",
+          "Create a new SubDub request.",
+          "Create a new SubDub request.",
+          "explain"
+        ),
+        line(
+          "fixture-main-learner",
+          "character-learner",
+          "Verify the SubDub material before saving.",
+          "Verify the SubDub material before saving.",
+          "caution"
+        )
+      ]),
+      section("section-outro", "Completion", [
+        line(
+          "fixture-outro-mentor",
+          "character-mentor",
+          "Confirm the result and finish the request.",
+          "Confirm the result and finish the request.",
+          "smile"
+        )
+      ])
     ]
   };
 }

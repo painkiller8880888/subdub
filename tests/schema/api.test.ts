@@ -55,7 +55,7 @@ describe("shared API contract", () => {
       exportVersion: "1.0.0",
       runId: "run-example",
       projectId: "project-example",
-      taskKind: "outline_generation",
+      taskKind: "visual_search_intent",
       modelId: "google/gemma-4-31b-it",
       responseModel: "provider/gemma",
       status: "succeeded",

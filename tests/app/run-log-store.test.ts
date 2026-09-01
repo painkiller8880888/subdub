@@ -48,7 +48,7 @@ function aiLog(
     },
     outputs: status === "succeeded" ? [{ checksum: hash }] : [],
     errorCode: null,
-    taskKind: "outline_generation" as const,
+    taskKind: "visual_search_intent" as const,
     sourceHash: hash,
     modelId: "fixture/model",
     modelSelectionSource: "default" as const,
@@ -298,6 +298,7 @@ describe("RunLogStore", () => {
     );
     await expect(store.read(projectId, "legacy-ai")).resolves.toMatchObject({
       kind: "ai",
+      taskKind: "outline_generation",
       projectRevision: 1,
       outputs: [{ checksum: hash }]
     });

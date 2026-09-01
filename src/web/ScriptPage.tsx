@@ -47,7 +47,6 @@ import {
   assignProjectVisual,
   generateAllProjectVoice,
   generateProjectVoice,
-  initializeProjectScript,
   searchAssets,
   saveProjectLineOverlays,
   saveProjectScript,
@@ -67,12 +66,10 @@ import {
   deleteScriptLine,
   duplicateScriptLine,
   isProjectContextCurrent,
-  isScriptInitializationAllowed,
   moveScriptLine,
   parseBulkScript,
   reconcileScriptLineIdsWithMap,
   resolveScriptLineId,
-  scriptStatusAfterEdit,
   updateScriptSection,
   updateScriptLine,
   validateScriptDraft,
@@ -120,10 +117,6 @@ function charactersPath(projectId: string): string {
   return `/projects/${encodeURIComponent(projectId)}/characters`;
 }
 
-function outlinePath(projectId: string): string {
-  return `/projects/${encodeURIComponent(projectId)}/outline`;
-}
-
 function editPath(projectId: string): string {
   return `/projects/${encodeURIComponent(projectId)}/edit`;
 }
@@ -153,15 +146,8 @@ function errorDetails(error: unknown): string[] {
   );
 }
 
-function scriptStatusLabel(status: Script["status"]): string {
-  switch (status) {
-    case "approved":
-      return "互換 status（approved）";
-    case "needs_review":
-      return "要確認";
-    default:
-      return "編集中";
-  }
+function scriptStatusLabel(): string {
+  return "編集中";
 }
 
 function voiceStatusLabel(status: VoiceLineGenerationStatus["status"]): string {
@@ -922,7 +908,6 @@ export function ScriptPage() {
   const [bulkText, setBulkText] = useState("");
   const [bulkErrors, setBulkErrors] = useState<BulkPasteError[]>([]);
   const [pendingNavigation, setPendingNavigation] = useState(false);
-  const [initializationError, setInitializationError] = useState<unknown>(null);
   const [voiceError, setVoiceError] = useState<unknown>(null);
   const [pickerLineId, setPickerLineId] = useState<string | null>(null);
   const [pickerError, setPickerError] = useState<string | null>(null);
@@ -942,10 +927,10 @@ export function ScriptPage() {
   const [overlayError, setOverlayError] = useState<unknown>(null);
   const projectIdRef = useRef(projectId ?? "");
   const projectGenerationRef = useRef(0);
+  const initializedForProjectRef = useRef<string | null>(null);
   const revisionRef = useRef(0);
   const draftRef = useRef<Script | null>(null);
   const lastSavedRef = useRef<Script | null>(null);
-  const initializedForProjectRef = useRef<string | null>(null);
   const coordinatorRef = useRef<AutosaveCoordinator<Script> | null>(null);
   const mediaActionPendingRef = useRef(false);
   const [coordinator, setCoordinator] =
@@ -1150,7 +1135,6 @@ export function ScriptPage() {
     revisionRef.current = project.revision;
     draftRef.current = nextDraft;
     lastSavedRef.current = cloneScript(project.script);
-    initializedForProjectRef.current = project.metadata.id;
     setDraft(nextDraft);
     setBulkSectionIndex(0);
     setPickerLineId(null);
@@ -1192,8 +1176,7 @@ export function ScriptPage() {
       latestDraft
     );
     const reconciledDraft = {
-      ...reconciliation.script,
-      status: project.script.status
+      ...reconciliation.script
     };
     lastSavedRef.current = cloneScript(project.script);
     draftRef.current = reconciledDraft;
@@ -1235,7 +1218,6 @@ export function ScriptPage() {
     setDraft(null);
     setBulkText("");
     setBulkErrors([]);
-    setInitializationError(null);
     setVoiceError(null);
     setPickerLineId(null);
     setPickerError(null);
@@ -1260,55 +1242,10 @@ export function ScriptPage() {
     ) {
       return;
     }
+    initializedForProjectRef.current = projectId;
     revisionRef.current = projectQuery.data.revision;
-    if (projectQuery.data.script.sections.length > 0) {
-      adoptProject(projectQuery.data);
-    } else {
-      initializedForProjectRef.current = projectIdRef.current;
-      setDraft(null);
-      coordinator.reset();
-    }
+    adoptProject(projectQuery.data);
   }, [coordinator, projectId, projectQuery.data, projectQuery.isError]);
-
-  const initializeMutation = useMutation({
-    mutationFn: ({
-      projectId: initializationProjectId,
-      expectedRevision
-    }: {
-      projectId: string;
-      projectGeneration: number;
-      expectedRevision: number;
-    }) =>
-      initializeProjectScript(initializationProjectId, { expectedRevision }),
-    onSuccess: (project, variables) => {
-      updateMutationCaches(project);
-      if (
-        !isProjectContextCurrent(
-          projectIdRef.current,
-          projectGenerationRef.current,
-          variables.projectId,
-          variables.projectGeneration
-        )
-      ) {
-        return;
-      }
-      setInitializationError(null);
-      adoptProject(project);
-    },
-    onError: (error, variables) => {
-      if (
-        isProjectContextCurrent(
-          projectIdRef.current,
-          projectGenerationRef.current,
-          variables.projectId,
-          variables.projectGeneration
-        )
-      ) {
-        setInitializationError(error);
-      }
-    },
-    retry: false
-  });
 
   if (projectId === undefined) {
     return <Navigate replace to="/projects" />;
@@ -1330,15 +1267,7 @@ export function ScriptPage() {
     ) {
       return;
     }
-    initializedForProjectRef.current = null;
-    if (result.data.script.sections.length > 0) {
-      adoptProject(result.data);
-    } else {
-      revisionRef.current = result.data.revision;
-      initializedForProjectRef.current = projectIdRef.current;
-      setDraft(null);
-      coordinatorRef.current?.reset();
-    }
+    adoptProject(result.data);
   }
 
   async function navigateAway(
@@ -1370,14 +1299,9 @@ export function ScriptPage() {
   }
 
   function updateDraft(nextDraft: Script): void {
-    const status = scriptStatusAfterEdit(
-      draftRef.current?.status ?? nextDraft.status,
-      nextDraft.status
-    );
-    const statusDraft = { ...nextDraft, status };
-    draftRef.current = statusDraft;
-    setDraft(statusDraft);
-    coordinatorRef.current?.update(statusDraft);
+    draftRef.current = nextDraft;
+    setDraft(nextDraft);
+    coordinatorRef.current?.update(nextDraft);
   }
 
   function updateLine(
@@ -2294,9 +2218,6 @@ export function ScriptPage() {
   const mediaPickerError =
     mediaPickerQueries.find((query) => query.isError)?.error ?? null;
   const mediaMutationPending = mediaActionPending || mediaMutation.isPending;
-  const isInitializing = initializeMutation.isPending;
-  const isReadyToInitialize =
-    project !== undefined && isScriptInitializationAllowed(project);
   const issues =
     draft !== null && project !== undefined
       ? validateScriptDraft(draft, project.characters)
@@ -2355,81 +2276,14 @@ export function ScriptPage() {
   }
 
   if (draft === null) {
-    const reason =
-      project.outline.status !== "approved"
-        ? "構成案が未承認です。構成案画面で確認・承認してください。"
-        : project.outline.sourceHash !== project.source.sha256
-          ? "元資料が更新されているため、構成案を再確認してください。"
-          : "台本を初期化できます。";
     return (
       <main className="page-shell narrow-shell">
         <p className="back-link">
-          <Link to={outlinePath(projectId)}>構成案へ戻る</Link>
+          <Link to="/projects">プロジェクト一覧へ戻る</Link>
         </p>
-        <WorkflowIndicator
-          projectId={projectId}
-          currentStep="production"
-          onNavigate={(event, destination) =>
-            void navigateAway(event, destination)
-          }
-        />
-        <div className="production-character-assets-action">
-          <Link className="button" to={charactersPath(projectId)}>
-            キャラクター素材を設定
-          </Link>
-        </div>
-        <header className="page-header page-header-stacked">
-          <p className="eyebrow">台本</p>
-          <h1>{project.metadata.title}</h1>
-          <p>
-            構成案のセクション構造を引き継いで、台本中心の制作を開始します。
-          </p>
-          <div className="page-header-actions">
-            <Link className="button" to={outlinePath(projectId)}>
-              構成案を確認
-            </Link>
-          </div>
-        </header>
-        <section className="message-panel" aria-live="polite">
-          <h2>台本編集を開始</h2>
-          <p>{reason}</p>
-          {!isReadyToInitialize ? (
-            <p>
-              構成案を承認し、元資料との不一致を解消すると開始できます。既存の台本データは削除しません。
-            </p>
-          ) : null}
-          {initializationError !== null ? (
-            <div className="message-panel message-panel-error" role="alert">
-              <p>
-                {getErrorMessage(
-                  initializationError,
-                  "台本の初期化に失敗しました。"
-                )}
-              </p>
-              {errorDetails(initializationError).length > 0 ? (
-                <ul>
-                  {errorDetails(initializationError).map((detail) => (
-                    <li key={detail}>{detail}</li>
-                  ))}
-                </ul>
-              ) : null}
-            </div>
-          ) : null}
-          <button
-            className="button button-primary"
-            type="button"
-            disabled={!isReadyToInitialize || isInitializing}
-            onClick={() =>
-              initializeMutation.mutate({
-                projectId: projectIdRef.current,
-                projectGeneration: projectGenerationRef.current,
-                expectedRevision: project.revision
-              })
-            }
-          >
-            {isInitializing ? "初期化中…" : "台本編集を開始"}
-          </button>
-        </section>
+        <p className="status-message" role="status">
+          台本を準備しています…
+        </p>
       </main>
     );
   }
@@ -2558,7 +2412,7 @@ export function ScriptPage() {
       <div className="autosave-status" role="status" aria-live="polite">
         <strong>{autosaveMessage}</strong>
         <span>更新番号 {revisionRef.current}</span>
-        <span>{scriptStatusLabel(draft.status)}</span>
+        <span>{scriptStatusLabel()}</span>
       </div>
 
       {catalogQuery.isError ? (
@@ -2762,9 +2616,7 @@ export function ScriptPage() {
                   <div>
                     <p className="eyebrow">セクション</p>
                     <h2>{section.name}</h2>
-                    <code>
-                      {section.id} / 構成案ID: {section.outlineSectionId}
-                    </code>
+                    <code>{section.id}</code>
                     <div className="script-section-template-control">
                       <label htmlFor={`${section.id}-screen-template`}>
                         画面テンプレート
@@ -2952,6 +2804,7 @@ export function ScriptPage() {
                 <button
                   className="button script-section-add-line"
                   type="button"
+                  onMouseDown={(event) => event.preventDefault()}
                   onClick={() => addLine(sectionIndex)}
                 >
                   セリフを追加

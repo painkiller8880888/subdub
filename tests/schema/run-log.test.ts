@@ -61,33 +61,35 @@ describe("runLogSchema", () => {
     ).toBe("running");
     const aiBase = { ...common("succeeded") };
     Reflect.deleteProperty(aiBase, "renderKind");
+    const aiLog = {
+      ...aiBase,
+      kind: "ai" as const,
+      engine: null,
+      model: "fixture/model",
+      taskKind: "visual_search_intent" as const,
+      sourceHash: hash,
+      modelId: "fixture/model",
+      modelSelectionSource: "default" as const,
+      responseModel: "fixture/model",
+      provider: "fixture-provider",
+      zdr: true,
+      dataCollection: "deny" as const,
+      providerFallbacks: true as const,
+      responseTimeMs: 10,
+      httpAttemptCount: 1,
+      promptTokens: 2,
+      completionTokens: 3,
+      totalTokens: 5,
+      costCredits: 0.25,
+      schemaValidation: "passed" as const,
+      imageInput: false,
+      tools: false,
+      outputs: [{ checksum: hash }]
+    };
+    expect(runLogSchema.parse(aiLog).status).toBe("succeeded");
     expect(
-      runLogSchema.parse({
-        ...aiBase,
-        kind: "ai",
-        engine: null,
-        model: "fixture/model",
-        taskKind: "outline_generation",
-        sourceHash: hash,
-        modelId: "fixture/model",
-        modelSelectionSource: "default",
-        responseModel: "fixture/model",
-        provider: "fixture-provider",
-        zdr: true,
-        dataCollection: "deny",
-        providerFallbacks: true,
-        responseTimeMs: 10,
-        httpAttemptCount: 1,
-        promptTokens: 2,
-        completionTokens: 3,
-        totalTokens: 5,
-        costCredits: 0.25,
-        schemaValidation: "passed",
-        imageInput: false,
-        tools: false,
-        outputs: [{ checksum: hash }]
-      }).status
-    ).toBe("succeeded");
+      runLogSchema.parse({ ...aiLog, taskKind: "outline_generation" })
+    ).toMatchObject({ taskKind: "outline_generation" });
     expect(runLogSchema.parse(common("failed")).errorCode).toBe(
       "RENDER_FAILED"
     );

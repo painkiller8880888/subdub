@@ -54,7 +54,7 @@ function makeRun(options: {
     outputs: status === "succeeded" ? [{ checksum: hash }] : [],
     errorCode: status === "failed" ? (options.errorCode ?? "AI_FAILED") : null,
     kind: "ai",
-    taskKind: options.taskKind ?? "outline_generation",
+    taskKind: options.taskKind ?? "visual_search_intent",
     sourceHash: hash,
     modelId: options.modelId ?? null,
     modelSelectionSource: "default",
@@ -121,9 +121,9 @@ function makeCandidate(options: {
     generationRunId: options.generationRunId,
     projectId: options.projectId,
     projectRevision: options.projectRevision,
-    taskKind: "outline_generation",
-    targetKind: "outline",
-    targetId: "outline",
+    taskKind: "visual_search_intent",
+    targetKind: "visual_line_range",
+    targetId: "main-mentor-1:main-learner-1",
     candidateKey: options.candidateId,
     candidateJson: {
       candidateId: options.candidateId,
@@ -153,9 +153,9 @@ function makeDecision(options: {
     projectId: options.projectId,
     projectRevisionBefore: options.projectRevisionBefore,
     projectRevisionAfter: options.projectRevisionBefore + 1,
-    taskKind: "outline_generation",
-    targetKind: "outline",
-    targetId: "outline",
+    taskKind: "visual_search_intent",
+    targetKind: "visual_line_range",
+    targetId: "main-mentor-1:main-learner-1",
     decision: options.decision,
     beforeJson: {
       fixture: "before",
@@ -206,7 +206,7 @@ function createFixture() {
           runId: "run-empty",
           projectId: "project-one",
           queuedAt: "2026-08-11T01:00:00.000Z",
-          taskKind: "script_generation",
+          taskKind: "opencode",
           modelId: "google/gemma-4-31b-it",
           responseModel: "provider/gemma",
           responseTimeMs: 50
@@ -220,6 +220,7 @@ function createFixture() {
           runId: "run-false",
           projectId: "project-two",
           queuedAt: "2026-08-11T05:00:00.000Z",
+          taskKind: "layout_review",
           modelId: "other/model",
           responseModel: "provider/other",
           schemaValidation: "failed",
@@ -331,6 +332,32 @@ function createFixture() {
 }
 
 describe("AiRunSearchService", () => {
+  it("keeps historical AI task kinds visible in search and export", async () => {
+    const fixture = createFixture();
+    fixture.runsByProject.get("project-one")!.push(
+      makeRun({
+        runId: "run-legacy-outline",
+        projectId: "project-one",
+        queuedAt: "2026-08-11T00:00:00.000Z",
+        taskKind: "outline_generation"
+      })
+    );
+
+    const result = await fixture.service.search(makeQuery());
+    expect(result.items).toContainEqual(
+      expect.objectContaining({
+        runId: "run-legacy-outline",
+        taskKind: "outline_generation"
+      })
+    );
+    expect(() =>
+      aiRunExportRecordSchema.parse({
+        exportVersion: "1.0.0",
+        ...result.items.find((item) => item.runId === "run-legacy-outline")
+      })
+    ).not.toThrow();
+  });
+
   it("joins projects, excludes non-AI runs, summarizes before pagination, and sorts ties", async () => {
     const fixture = createFixture();
 
@@ -401,7 +428,7 @@ describe("AiRunSearchService", () => {
         to: "2026-08-11T05:00:00.000Z"
       })
     ).resolves.toEqual(["run-undecided"]);
-    await expect(search({ taskKind: "script_generation" })).resolves.toEqual([
+    await expect(search({ taskKind: "opencode" })).resolves.toEqual([
       "run-empty"
     ]);
     await expect(search({ modelId: "google/gemma-4-31b-it" })).resolves.toEqual(
@@ -424,7 +451,7 @@ describe("AiRunSearchService", () => {
       "run-undecided"
     ]);
     await expect(
-      search({ taskKind: "outline_generation", modelId: "other/model" })
+      search({ taskKind: "layout_review", modelId: "other/model" })
     ).resolves.toEqual(["run-false"]);
   });
 
@@ -447,9 +474,9 @@ describe("AiRunSearchService", () => {
         to: "2026-08-11T05:00:00.000Z"
       })
     ).resolves.toEqual(["run-undecided"]);
-    await expect(exportIds({ taskKind: "script_generation" })).resolves.toEqual(
-      ["run-empty"]
-    );
+    await expect(exportIds({ taskKind: "opencode" })).resolves.toEqual([
+      "run-empty"
+    ]);
     await expect(
       exportIds({ modelId: "google/gemma-4-31b-it" })
     ).resolves.toEqual(["run-mixed", "run-empty"]);
@@ -464,7 +491,7 @@ describe("AiRunSearchService", () => {
       "run-mixed"
     ]);
     await expect(
-      exportIds({ taskKind: "outline_generation", modelId: "other/model" })
+      exportIds({ taskKind: "layout_review", modelId: "other/model" })
     ).resolves.toEqual(["run-false"]);
   });
 

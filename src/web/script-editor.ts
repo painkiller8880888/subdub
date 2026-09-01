@@ -228,10 +228,7 @@ export function reconcileScriptLineIdsWithMap(
 
   for (const [sectionIndex, submittedSection] of submitted.sections.entries()) {
     const savedSection = saved.sections[sectionIndex];
-    if (
-      savedSection === undefined ||
-      savedSection.outlineSectionId !== submittedSection.outlineSectionId
-    ) {
+    if (savedSection === undefined || savedSection.id !== submittedSection.id) {
       continue;
     }
 
@@ -335,10 +332,13 @@ export function isVisualSuggestionContextCurrent(
   );
 }
 
+export type LegacyScriptStatus = "draft" | "needs_review" | "approved";
+
+/** @deprecated Script status was removed from the 1.9.0 current contract. */
 export function scriptStatusAfterEdit(
-  previousStatus: Script["status"],
-  candidateStatus: Script["status"]
-): Script["status"] {
+  previousStatus: LegacyScriptStatus,
+  candidateStatus: LegacyScriptStatus
+): LegacyScriptStatus {
   return previousStatus === "approved" ? "needs_review" : candidateStatus;
 }
 
@@ -502,9 +502,6 @@ export function validateScriptDraft(
 }
 
 export function isScriptInitializationAllowed(project: VideoProject): boolean {
-  return (
-    project.script.sections.length === 0 &&
-    project.outline.status === "approved" &&
-    project.outline.sourceHash === project.source.sha256
-  );
+  void project;
+  return false;
 }

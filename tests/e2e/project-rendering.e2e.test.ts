@@ -23,9 +23,7 @@ import { initializeServer } from "../../src/api/server.js";
 import { AssetRepository } from "../../src/app/assets/asset-repository.js";
 import { CharacterVisualRepository } from "../../src/app/character-visuals/character-visual-repository.js";
 import { CharacterVisualCatalogService } from "../../src/app/character-visuals/character-visual-service.js";
-import { OutlineGenerationService } from "../../src/app/projects/outline-generation-service.js";
 import { ProjectRepository } from "../../src/app/projects/project-repository.js";
-import { computeOutlineHash } from "../../src/app/projects/script-domain.js";
 import { ScreenTemplateRepository } from "../../src/app/screen-templates/screen-template-repository.js";
 import { createStandardScreenTemplate } from "../../src/app/screen-templates/screen-template-seed.js";
 import {
@@ -78,9 +76,7 @@ import {
   createVoicevoxWavFixture
 } from "../fixtures/voicevox.js";
 import {
-  createRepresentativeFrameOutlineCandidate,
   createRepresentativeFrameScript,
-  representativeFrameBrief,
   representativeFrameMarkdown
 } from "../fixtures/e2e/representative-frame-project.js";
 import { compareRepresentativeImages } from "../helpers/image-comparison.js";
@@ -280,49 +276,6 @@ function allProjectLines(
   project: VideoProject
 ): VideoProject["script"]["sections"][number]["lines"] {
   return project.script.sections.flatMap((section) => section.lines);
-}
-
-function createFixtureOutlineGenerationService(
-  repository: ProjectRepository
-): OutlineGenerationService {
-  const model = {
-    id: "google/gemma-4-31b-it",
-    displayName: "MVP final fixture model",
-    contextLength: 131_072,
-    inputPrice: "0",
-    outputPrice: "0",
-    outputModalities: ["text"],
-    supportedParameters: ["structured_outputs"],
-    expirationDate: null,
-    structuredOutputs: true,
-    zdrAvailable: true
-  } as const;
-
-  return new OutlineGenerationService({
-    repository,
-    modelService: {
-      listModels: async () => ({
-        models: [model],
-        fetchedAt: "2026-08-11T00:00:00.000Z",
-        cached: false
-      })
-    },
-    chatAdapter: {
-      complete: async () => ({
-        candidate: createRepresentativeFrameOutlineCandidate(),
-        responseModel: model.id,
-        provider: "MVP fixture provider",
-        usage: {
-          promptTokens: 128,
-          completionTokens: 96,
-          totalTokens: 224,
-          costCredits: 0
-        },
-        attempts: 1
-      })
-    },
-    createId: () => "fixture-ai-outline-run"
-  });
 }
 
 async function waitForVoiceJob(
@@ -1118,13 +1071,7 @@ describe("MVP final verification E2E", () => {
           { recursive: true }
         );
         const projectRepository = new ProjectRepository({ workspaceRoot });
-        const outlineGenerationService =
-          createFixtureOutlineGenerationService(projectRepository);
-        server = await initializeServer({
-          workspaceRoot,
-          projectRepository,
-          outlineGenerationService
-        });
+        server = await initializeServer({ workspaceRoot, projectRepository });
 
         const metanStyleId = 10_001;
         const zundamonStyleId = 10_002;
@@ -1175,100 +1122,19 @@ describe("MVP final verification E2E", () => {
         project = projectMutationResponseSchema.parse(
           sourceResponse.json()
         ).data;
-        const sourceHash = createHash("sha256")
-          .update(representativeFrameMarkdown, "utf8")
-          .digest("hex");
         expect(project.revision).toBe(1);
-        expect(project.source.sha256).toBe(sourceHash);
-
-        const briefResponse = await server.app.inject({
-          method: "PUT",
-          url: `/api/projects/${projectId}/brief`,
-          payload: {
-            brief: representativeFrameBrief,
-            expectedRevision: project.revision
-          }
-        });
-        expect(briefResponse.statusCode).toBe(200);
-        project = projectMutationResponseSchema.parse(
-          briefResponse.json()
-        ).data;
-        expect(project.revision).toBe(2);
-        expect(project.brief).toEqual(representativeFrameBrief);
-
-        const aiOutlineResponse = await server.app.inject({
-          method: "POST",
-          url: `/api/projects/${projectId}/outline/generate`,
-          payload: {
-            expectedRevision: project.revision,
-            modelId: "google/gemma-4-31b-it"
-          }
-        });
-        expect(aiOutlineResponse.statusCode, aiOutlineResponse.body).toBe(200);
-        project = projectMutationResponseSchema.parse(
-          aiOutlineResponse.json()
-        ).data;
-        expect(project.revision).toBe(3);
-        expect(project.outline.status).toBe("needs_review");
-
-        const aiGeneratedTitle = project.outline.sections[0]?.title;
-        if (aiGeneratedTitle === undefined) {
-          throw new Error(
-            "The AI outline fixture did not contain a first section."
-          );
-        }
-        const humanOutline = structuredClone(project.outline);
-        const firstHumanSection = humanOutline.sections[0];
-        if (firstHumanSection === undefined) {
-          throw new Error(
-            "The human outline fixture did not contain a first section."
-          );
-        }
-        firstHumanSection.title = `${aiGeneratedTitle} (human revised)`;
-        firstHumanSection.humanDirectives = {
-          ...firstHumanSection.humanDirectives,
-          requiredItems: ["Human-approved purpose"]
-        };
-        expect(firstHumanSection.title).not.toBe(aiGeneratedTitle);
-        const humanOutlineResponse = await server.app.inject({
-          method: "PUT",
-          url: `/api/projects/${projectId}/outline`,
-          payload: {
-            outline: humanOutline,
-            expectedRevision: project.revision
-          }
-        });
-        expect(humanOutlineResponse.statusCode).toBe(200);
-        project = projectMutationResponseSchema.parse(
-          humanOutlineResponse.json()
-        ).data;
-        expect(project.outline.sections[0]?.title).toBe(
-          firstHumanSection.title
-        );
-        expect(project.outline.sections[0]?.title).not.toBe(aiGeneratedTitle);
-        const outlineApprovalResponse = await server.app.inject({
-          method: "POST",
-          url: `/api/projects/${projectId}/outline/approve`,
-          payload: { expectedRevision: project.revision }
-        });
-        expect(outlineApprovalResponse.statusCode).toBe(200);
-        project = projectMutationResponseSchema.parse(
-          outlineApprovalResponse.json()
-        ).data;
-        expect(project.outline.status).toBe("approved");
-
-        const initializeScriptResponse = await server.app.inject({
-          method: "POST",
-          url: `/api/projects/${projectId}/script/initialize`,
-          payload: { expectedRevision: project.revision }
-        });
-        expect(initializeScriptResponse.statusCode).toBe(200);
-        project = projectMutationResponseSchema.parse(
-          initializeScriptResponse.json()
-        ).data;
+        expect(project).not.toHaveProperty("source");
+        expect(project).not.toHaveProperty("brief");
+        expect(project).not.toHaveProperty("outline");
+        expect(project.schemaVersion).toBe("1.9.0");
         expect(project.script.sections).toHaveLength(3);
+        expect(project.script.sections.map((section) => section.name)).toEqual([
+          "導入",
+          "本編",
+          "締め"
+        ]);
         expect(
-          project.script.sections.every((section) => section.lines.length === 0)
+          project.script.sections.every((section) => section.enabled)
         ).toBe(true);
 
         const customVisualCreateResponse = await server.app.inject({
@@ -1460,14 +1326,12 @@ describe("MVP final verification E2E", () => {
           characterBindingResponse.json()
         ).data;
 
-        const baseScriptDraft = createRepresentativeFrameScript(
-          computeOutlineHash(project.outline),
-          project.outline.sections.map((section) => section.id)
-        );
+        const baseScriptDraft = createRepresentativeFrameScript();
         const scriptDraft = {
           ...baseScriptDraft,
-          sections: baseScriptDraft.sections.map((section) => ({
+          sections: baseScriptDraft.sections.map((section, sectionIndex) => ({
             ...section,
+            id: project.script.sections[sectionIndex]?.id ?? section.id,
             lines: section.lines.map((line) => {
               if (line.speakerId !== "character-mentor") {
                 return line;
@@ -1489,19 +1353,7 @@ describe("MVP final verification E2E", () => {
         project = projectMutationResponseSchema.parse(
           scriptResponse.json()
         ).data;
-        expect(project.script.status).toBe("draft");
         expect(allProjectLines(project)).toHaveLength(5);
-
-        const scriptApprovalResponse = await server.app.inject({
-          method: "POST",
-          url: `/api/projects/${projectId}/script/approve`,
-          payload: { expectedRevision: project.revision }
-        });
-        expect(scriptApprovalResponse.statusCode).toBe(200);
-        project = projectMutationResponseSchema.parse(
-          scriptApprovalResponse.json()
-        ).data;
-        expect(project.script.status).toBe("approved");
 
         const terminologyResponse = await server.app.inject({
           method: "POST",
@@ -2196,22 +2048,6 @@ describe("MVP final verification E2E", () => {
         expect(thumbnailStats.width).toBe(1280);
         expect(thumbnailStats.height).toBe(720);
 
-        const aiRunId = project.outline.generationRunId;
-        if (aiRunId === null) {
-          throw new Error("The approved outline did not retain its AI run ID.");
-        }
-        const aiRunLog = await runLogStore.read(projectId, aiRunId);
-        expect(aiRunLog).toMatchObject({
-          kind: "ai",
-          taskKind: "outline_generation",
-          projectId,
-          status: "succeeded",
-          schemaValidation: "passed"
-        });
-        expect(aiRunLog.projectRevision).toBeLessThan(project.revision);
-        expect(aiRunLog.inputHash).toMatch(/^[0-9a-f]{64}$/);
-        expect(aiRunLog.outputs[0]?.checksum).toMatch(/^[0-9a-f]{64}$/);
-
         const voiceRunLog = await runLogStore.read(
           projectId,
           voiceAccepted.runId
@@ -2241,7 +2077,7 @@ describe("MVP final verification E2E", () => {
           (runLog) => runLog.kind
         );
         expect(runKinds).toEqual(
-          expect.arrayContaining(["ai", "voice", "manifest", "render"])
+          expect.arrayContaining(["voice", "manifest", "render"])
         );
 
         const normalProject = await projectRepository.read(projectId);
@@ -2290,10 +2126,11 @@ describe("MVP final verification E2E", () => {
           reloadedProjectResponse.json()
         ).data;
         expect(reloadedProject.metadata.id).toBe(projectId);
-        expect(reloadedProject.source.sha256).toBe(sourceHash);
-        expect(reloadedProject.outline.status).toBe("approved");
-        expect(reloadedProject.script.status).toBe("approved");
-        expect(reloadedProject.script.origin).toBe("manual");
+        expect(reloadedProject.schemaVersion).toBe("1.9.0");
+        expect(reloadedProject).not.toHaveProperty("source");
+        expect(reloadedProject).not.toHaveProperty("brief");
+        expect(reloadedProject).not.toHaveProperty("outline");
+        expect(allProjectLines(reloadedProject)).toHaveLength(5);
         expect(reloadedProject.visuals.status).toBe("approved");
         expect(reloadedProject.edit.sectionBgms).toEqual(
           project.edit.sectionBgms
@@ -2323,7 +2160,6 @@ describe("MVP final verification E2E", () => {
         expect(await sha256File(thumbnailPath)).toBe(thumbnailOutputChecksum);
 
         for (const runId of [
-          aiRunId,
           voiceAccepted.runId,
           firstCompile.runId,
           mp4Accepted.runId,

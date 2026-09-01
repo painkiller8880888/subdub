@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { createEmptyVideoProject } from "../../src/app/projects/empty-video-project.js";
 import {
   CURRENT_VIDEO_PROJECT_SCHEMA_VERSION,
   migrateVideoProject,
@@ -12,9 +13,13 @@ import {
   videoProjectV13Schema,
   videoProjectV16Schema,
   videoProjectV17Schema,
+  videoProjectV18Schema,
   videoProjectSchema
 } from "../../src/schema/index.js";
-import { videoProjectFixture } from "../fixtures/video-project.js";
+import {
+  legacyVideoProjectFixture,
+  videoProjectFixture
+} from "../fixtures/video-project.js";
 
 function clone<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
@@ -23,7 +28,7 @@ function clone<T>(value: T): T {
 function legacyProject(
   schemaVersion: "1.0.0" | "1.1.0"
 ): Record<string, unknown> {
-  const legacy = clone(videoProjectFixture) as unknown as Record<
+  const legacy = clone(legacyVideoProjectFixture) as unknown as Record<
     string,
     unknown
   >;
@@ -115,6 +120,176 @@ function legacyProject(
 }
 
 describe("video project schema migration", () => {
+  it("keeps V19 strict and rejects removed root, script, and AI fields", () => {
+    const withRemovedRootFields = clone(
+      videoProjectFixture
+    ) as unknown as Record<string, unknown>;
+    withRemovedRootFields.source = legacyVideoProjectFixture.source;
+    withRemovedRootFields.brief = legacyVideoProjectFixture.brief;
+    withRemovedRootFields.outline = legacyVideoProjectFixture.outline;
+    expect(videoProjectSchema.safeParse(withRemovedRootFields).success).toBe(
+      false
+    );
+
+    const withRemovedScriptFields = clone(
+      videoProjectFixture
+    ) as unknown as Record<string, unknown>;
+    withRemovedScriptFields.script = {
+      ...videoProjectFixture.script,
+      status: "draft",
+      origin: "manual",
+      outlineHash: "a".repeat(64)
+    };
+    expect(videoProjectSchema.safeParse(withRemovedScriptFields).success).toBe(
+      false
+    );
+
+    const withLegacyTaskKind = clone(videoProjectFixture) as unknown as Record<
+      string,
+      unknown
+    >;
+    withLegacyTaskKind.aiSettings = {
+      ...videoProjectFixture.aiSettings,
+      taskModelOverrides: {
+        ...videoProjectFixture.aiSettings.taskModelOverrides,
+        outline_generation: "legacy-model"
+      }
+    };
+    expect(videoProjectSchema.safeParse(withLegacyTaskKind).success).toBe(
+      false
+    );
+  });
+
+  it("migrates a non-empty V18 project without changing IDs or references", () => {
+    const legacy = clone(legacyVideoProjectFixture) as unknown as Record<
+      string,
+      unknown
+    >;
+    const legacyAiSettings = legacy.aiSettings as Record<string, unknown>;
+    legacyAiSettings.taskModelOverrides = {
+      outline_generation: "legacy-outline-model",
+      script_generation: "legacy-script-model",
+      script_review: "legacy-review-model",
+      visual_search_intent: "visual-model",
+      layout_review: "layout-model",
+      opencode: "code-model"
+    };
+
+    expect(videoProjectV18Schema.safeParse(legacy).success).toBe(true);
+    const expectedSections = legacyVideoProjectFixture.script.sections.map(
+      (section) => ({
+        id: section.id,
+        name: section.name,
+        background: section.background,
+        screenTemplateId: section.screenTemplateId,
+        lines: section.lines
+      })
+    );
+    const expectedVisualReferences =
+      legacyVideoProjectFixture.visuals.assignments.map((assignment) => ({
+        startLineId: assignment.startLineId,
+        endLineId: assignment.endLineId
+      }));
+    const expectedSoundEffectReferences =
+      legacyVideoProjectFixture.audio.soundEffects.map(
+        (effect) => effect.lineId
+      );
+    const expectedBgmReferences =
+      legacyVideoProjectFixture.edit.sectionBgms.map((bgm) => bgm.sectionId);
+
+    const result = migrateVideoProjectWithDiagnostics(legacy);
+    const migrated = videoProjectSchema.parse(result.project);
+
+    expect(migrated.schemaVersion).toBe(CURRENT_VIDEO_PROJECT_SCHEMA_VERSION);
+    expect(migrated.script.sections).toEqual(
+      expectedSections.map((section) => ({ ...section, enabled: true }))
+    );
+    expect(
+      migrated.visuals.assignments.map((assignment) => ({
+        startLineId: assignment.startLineId,
+        endLineId: assignment.endLineId
+      }))
+    ).toEqual(expectedVisualReferences);
+    expect(migrated.audio.soundEffects.map((effect) => effect.lineId)).toEqual(
+      expectedSoundEffectReferences
+    );
+    expect(migrated.edit.sectionBgms.map((bgm) => bgm.sectionId)).toEqual(
+      expectedBgmReferences
+    );
+    expect(migrated.aiSettings.taskModelOverrides).toEqual({
+      visual_search_intent: "visual-model",
+      layout_review: "layout-model",
+      opencode: "code-model"
+    });
+    expect(migrated).not.toHaveProperty("source");
+    expect(migrated).not.toHaveProperty("brief");
+    expect(migrated).not.toHaveProperty("outline");
+    expect(migrated.script).not.toHaveProperty("status");
+    expect(migrated.script).not.toHaveProperty("origin");
+    expect(migrated.script).not.toHaveProperty("outlineHash");
+    expect(result.logEntries).toEqual([
+      {
+        migrationId: result.migrationId,
+        fromSchemaVersion: "1.8.0",
+        toSchemaVersion: "1.9.0",
+        kind: "video_project_v19_shape",
+        removedRootFields: ["source", "brief", "outline"],
+        existingOutlineSectionCount: 3,
+        existingScriptSectionCount: 3,
+        starterSectionsCreated: false
+      }
+    ]);
+    expect(legacy.source).toEqual(legacyVideoProjectFixture.source);
+  });
+
+  it("seeds exactly three deterministic sections for an empty V18 project", () => {
+    const legacy = clone(legacyVideoProjectFixture) as unknown as Record<
+      string,
+      unknown
+    >;
+    const script = legacy.script as { sections: unknown[] };
+    script.sections = [];
+    (legacy.visuals as { assignments: unknown[] }).assignments = [];
+    (legacy.overlays as { lineOverlays: unknown[] }).lineOverlays = [];
+    (legacy.audio as { soundEffects: unknown[] }).soundEffects = [];
+    (
+      legacy.edit as { videoElements: unknown[]; sectionBgms: unknown[] }
+    ).videoElements = [];
+    (
+      legacy.edit as { videoElements: unknown[]; sectionBgms: unknown[] }
+    ).sectionBgms = [];
+
+    expect(videoProjectV18Schema.safeParse(legacy).success).toBe(true);
+    const result = migrateVideoProjectWithDiagnostics(legacy);
+    const migrated = videoProjectSchema.parse(result.project);
+    const expected = createEmptyVideoProject({
+      projectId: "manual-video-project",
+      createdAt: legacyVideoProjectFixture.metadata.createdAt
+    });
+
+    expect(migrated.script.sections).toEqual(expected.script.sections);
+    expect(migrated.script.sections.map((section) => section.name)).toEqual([
+      "導入",
+      "本編",
+      "締め"
+    ]);
+    expect(migrated.script.sections.every((section) => section.enabled)).toBe(
+      true
+    );
+    expect(result.logEntries).toEqual([
+      expect.objectContaining({
+        existingOutlineSectionCount: 3,
+        existingScriptSectionCount: 0,
+        starterSectionsCreated: true
+      })
+    ]);
+
+    const retry = migrateVideoProjectWithDiagnostics(migrated);
+    expect(retry.migrated).toBe(false);
+    expect(retry.project).toBe(migrated);
+    expect(retry.logEntries).toEqual([]);
+  });
+
   it("upgrades the 1.0.0 fixed mapping to explicit bindings and section selections", () => {
     const legacy = legacyProject("1.0.0");
 
@@ -160,7 +335,7 @@ describe("video project schema migration", () => {
     expect(result.migrationId).toMatch(
       /^video-project-migration-[0-9a-f]{64}$/
     );
-    expect(result.logEntries).toHaveLength(3);
+    expect(result.logEntries).toHaveLength(4);
     expect(result.logEntries[0]).toMatchObject({
       fromSchemaVersion: "1.1.0",
       toSchemaVersion: "1.2.0",
@@ -175,10 +350,19 @@ describe("video project schema migration", () => {
       kind: "screen_template_selection",
       templateId: "screen-template-standard"
     });
+    expect(result.logEntries[3]).toMatchObject({
+      fromSchemaVersion: "1.8.0",
+      toSchemaVersion: "1.9.0",
+      kind: "video_project_v19_shape",
+      removedRootFields: ["source", "brief", "outline"],
+      existingOutlineSectionCount: 3,
+      existingScriptSectionCount: 3,
+      starterSectionsCreated: false
+    });
 
     const migrated = videoProjectSchema.parse(result.project);
-    expect(migrated.schemaVersion).toBe("1.8.0");
-    expect(migrated.revision).toBe(12);
+    expect(migrated.schemaVersion).toBe("1.9.0");
+    expect(migrated.revision).toBe(13);
     expect(
       migrated.script.sections.every(
         (section) => section.screenTemplateId === "screen-template-standard"
@@ -225,11 +409,11 @@ describe("video project schema migration", () => {
     const migrated = migrateVideoProject(current);
 
     expect(migrated).toBe(current);
-    expect((migrated as typeof current).schemaVersion).toBe("1.8.0");
+    expect((migrated as typeof current).schemaVersion).toBe("1.9.0");
   });
 
   it("adds an empty line overlay plan when migrating 1.7.0", () => {
-    const legacy = clone(videoProjectFixture) as unknown as Record<
+    const legacy = clone(legacyVideoProjectFixture) as unknown as Record<
       string,
       unknown
     >;
@@ -241,15 +425,15 @@ describe("video project schema migration", () => {
     expect(videoProjectV17Schema.safeParse(legacy).success).toBe(true);
     const migrated = videoProjectSchema.parse(migrateVideoProject(legacy));
 
-    expect(migrated.schemaVersion).toBe("1.8.0");
-    expect(migrated.revision).toBe(5);
+    expect(migrated.schemaVersion).toBe("1.9.0");
+    expect(migrated.revision).toBe(6);
     expect(migrated.overlays).toEqual({ lineOverlays: [] });
     expect(migrated.visuals).toEqual(visuals);
     expect(legacy).not.toHaveProperty("overlays");
   });
 
   it("adds edit video timing defaults when migrating 1.6.0", () => {
-    const legacy = clone(videoProjectFixture) as unknown as {
+    const legacy = clone(legacyVideoProjectFixture) as unknown as {
       schemaVersion: string;
       revision: number;
       edit: {
@@ -279,8 +463,8 @@ describe("video project schema migration", () => {
     const migrated = videoProjectSchema.parse(migrateVideoProject(legacy));
 
     expect(migrated).toMatchObject({
-      schemaVersion: "1.8.0",
-      revision: 10,
+      schemaVersion: "1.9.0",
+      revision: 11,
       edit: {
         videoElements: [
           {
@@ -295,7 +479,7 @@ describe("video project schema migration", () => {
   });
 
   it("adds empty cues to video assignments through a strict 1.4.0 boundary", () => {
-    const legacy = clone(videoProjectFixture) as unknown as Record<
+    const legacy = clone(legacyVideoProjectFixture) as unknown as Record<
       string,
       unknown
     >;
@@ -318,8 +502,8 @@ describe("video project schema migration", () => {
 
     expect(result.migrated).toBe(true);
     const migrated = videoProjectSchema.parse(result.project);
-    expect(migrated.schemaVersion).toBe("1.8.0");
-    expect(migrated.revision).toBe(16);
+    expect(migrated.schemaVersion).toBe("1.9.0");
+    expect(migrated.revision).toBe(17);
     expect(migrated.visuals.assignments[0]?.display).toMatchObject({
       kind: "video",
       playbackCues: []
@@ -334,7 +518,7 @@ describe("video project schema migration", () => {
   });
 
   it("removes 1.3.0 line overrides and logs only non-null overrides", () => {
-    const project = clone(videoProjectFixture) as unknown as Record<
+    const project = clone(legacyVideoProjectFixture) as unknown as Record<
       string,
       unknown
     >;
@@ -373,7 +557,7 @@ describe("video project schema migration", () => {
     });
 
     expect(result.migrated).toBe(true);
-    expect(result.logEntries).toHaveLength(1);
+    expect(result.logEntries).toHaveLength(2);
     expect(result.logEntries[0]).toMatchObject({
       fromSchemaVersion: "1.3.0",
       toSchemaVersion: "1.4.0",
@@ -385,8 +569,8 @@ describe("video project schema migration", () => {
     });
 
     const migrated = videoProjectSchema.parse(result.project);
-    expect(migrated.schemaVersion).toBe("1.8.0");
-    expect(migrated.revision).toBe((project.revision as number) + 5);
+    expect(migrated.schemaVersion).toBe("1.9.0");
+    expect(migrated.revision).toBe((project.revision as number) + 6);
     expect(
       migrated.script.sections.map((section) => section.screenTemplateId)
     ).toEqual(script.sections.map((section) => section.screenTemplateId));
@@ -404,7 +588,7 @@ describe("video project schema migration", () => {
   });
 
   it("rejects malformed 1.3.0 input before migration", () => {
-    const malformed = clone(videoProjectFixture) as unknown as Record<
+    const malformed = clone(legacyVideoProjectFixture) as unknown as Record<
       string,
       unknown
     >;
@@ -421,7 +605,7 @@ describe("video project schema migration", () => {
   });
 
   it("does not mutate a strict 1.2.0 project when the standard template is unavailable", () => {
-    const project = clone(videoProjectFixture) as unknown as Record<
+    const project = clone(legacyVideoProjectFixture) as unknown as Record<
       string,
       unknown
     >;
@@ -458,7 +642,7 @@ describe("video project schema migration", () => {
   });
 
   it("does not migrate when the standard template is inactive", () => {
-    const project = clone(videoProjectFixture) as unknown as Record<
+    const project = clone(legacyVideoProjectFixture) as unknown as Record<
       string,
       unknown
     >;

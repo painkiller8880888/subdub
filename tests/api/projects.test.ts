@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import { promises as fs } from "node:fs";
 import { tmpdir } from "node:os";
 import * as path from "node:path";
@@ -93,9 +92,14 @@ describe("project API", () => {
     );
     await expect(fs.access(projectFile)).resolves.toBeUndefined();
     await expect(fs.readFile(sourceFile, "utf8")).resolves.toBe("");
-    expect(created.data.source.sha256).toBe(
-      createHash("sha256").update("").digest("hex")
+    expect(created.data).not.toHaveProperty("source");
+    expect(created.data.schemaVersion).toBe("1.9.0");
+    expect(created.data.script.sections.map((section) => section.name)).toEqual(
+      ["導入", "本編", "締め"]
     );
+    expect(
+      created.data.script.sections.every((section) => section.enabled)
+    ).toBe(true);
     const savedProject = JSON.parse(await fs.readFile(projectFile, "utf8"));
     expect(savedProject).toEqual(created.data);
 

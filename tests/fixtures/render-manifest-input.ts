@@ -1,4 +1,3 @@
-import { computeOutlineHash } from "../../src/app/projects/script-domain.js";
 import { legacyCharacterVariantCatalog } from "../../src/app/character-visuals/character-visual-seed.js";
 import { createStandardScreenTemplate } from "../../src/app/screen-templates/screen-template-seed.js";
 import type {
@@ -125,9 +124,6 @@ export function createRenderManifestInput(
   overrides: Partial<RenderManifestCompilerInput> = {}
 ): RenderManifestCompilerInput {
   const currentProject = structuredClone(project) as VideoProject;
-  currentProject.script.outlineHash = computeOutlineHash(
-    currentProject.outline
-  );
   const audioIndex = createRenderManifestAudioIndex(currentProject);
   return {
     project: currentProject,

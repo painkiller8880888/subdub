@@ -4,9 +4,9 @@ import {
   type AiRunExportQuery,
   type AiRunSearchQuery
 } from "../schema/api.js";
-import { aiTaskKindSchema } from "../schema/video-project.js";
+import { runLogAiTaskKindSchema } from "../schema/run-log.js";
 
-export const aiRunTaskKinds = aiTaskKindSchema.options;
+export const aiRunTaskKinds = runLogAiTaskKindSchema.options;
 
 export type AiRunFilterDraft = {
   readonly from: string;

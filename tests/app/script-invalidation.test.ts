@@ -159,29 +159,28 @@ describe("classifyScriptChange", () => {
 });
 
 describe("applyEditedScript", () => {
-  it("keeps an approved script approved when content is unchanged", () => {
+  it("keeps the current script shape when content is unchanged", () => {
     const project = projectFixture();
     const result = applyEditedScript(project, structuredClone(project.script));
 
     expect(result.impact.contentChanged).toBe(false);
-    expect(result.project.script.status).toBe("approved");
+    expect(result.project.script).toEqual(project.script);
   });
 
-  it("returns an approved script to needs_review when content changes", () => {
+  it("does not add a stage status when content changes", () => {
     const project = projectFixture();
     const candidate = editFirstLine(project.script, { spokenText: "変更後" });
     const result = applyEditedScript(project, candidate);
 
-    expect(result.project.script.status).toBe("needs_review");
+    expect(result.project.script).not.toHaveProperty("status");
   });
 
-  it("keeps the candidate status for an unapproved script", () => {
+  it("accepts current scripts without a legacy status field", () => {
     const project = projectFixture();
-    project.script.status = "needs_review";
     const candidate = editFirstLine(project.script, { spokenText: "変更後" });
     const result = applyEditedScript(project, candidate);
 
-    expect(result.project.script.status).toBe("needs_review");
+    expect(result.project.script).not.toHaveProperty("status");
   });
 
   it("marks visuals as needs_review only on a structural change with meaningful visuals", () => {

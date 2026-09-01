@@ -45,8 +45,8 @@ function createSection(
 ): ScriptSection {
   return {
     id: "script-section-main",
-    outlineSectionId: "outline-main",
     name: "操作",
+    enabled: true,
     screenTemplateId,
     background: { kind: "solid", colorToken: "background" },
     lines: [...lines]

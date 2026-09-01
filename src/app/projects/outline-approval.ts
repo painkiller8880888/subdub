@@ -1,5 +1,8 @@
 import type { ApiErrorDetail } from "../../schema/api.js";
-import type { VideoProject } from "../../schema/video-project.js";
+import type {
+  VideoProject,
+  VideoProjectV18
+} from "../../schema/video-project.js";
 
 export const OUTLINE_APPROVAL_ERROR_CODE =
   "OUTLINE_APPROVAL_VALIDATION_FAILED" as const;
@@ -29,7 +32,7 @@ function addIssue(
 }
 
 function validateQuestions(
-  questions: VideoProject["outline"]["openQuestions"],
+  questions: VideoProjectV18["outline"]["openQuestions"],
   pathPrefix: Array<string | number>,
   details: ApiErrorDetail[]
 ): void {
@@ -58,10 +61,18 @@ function validateQuestions(
 }
 
 export function validateOutlineForApproval(
-  project: VideoProject,
+  project: VideoProject | VideoProjectV18,
   currentSourceHash: string
 ): void {
   const details: ApiErrorDetail[] = [];
+  if (!("outline" in project)) {
+    addIssue(
+      details,
+      ["outline"],
+      "outline approval is only available for legacy project data"
+    );
+    throw new OutlineApprovalError(details);
+  }
   const { outline } = project;
 
   if (outline.sections.length < 3) {

@@ -20,7 +20,6 @@ import {
   editPlanSchema,
   editVideoPlacementSchema,
   videoProjectSchema,
-  aiTaskKindSchema,
   characterVisualBindingSchema
 } from "./video-project.js";
 import { lineOverlayPlanSchema } from "./line-overlay.js";
@@ -70,6 +69,7 @@ import {
 import { previewPresetSchema } from "./render-profile.js";
 import {
   runErrorCodeSchema,
+  runLogAiTaskKindSchema,
   runStatusSchema
 } from "./run-log.js";
 import {
@@ -716,7 +716,7 @@ export const aiRunStatusFilterSchema = z.enum(["succeeded", "failed"]);
 const aiRunFilterQueryShape = {
   from: isoUtcDateTimeSchema.optional(),
   to: isoUtcDateTimeSchema.optional(),
-  taskKind: aiTaskKindSchema.optional(),
+  taskKind: runLogAiTaskKindSchema.optional(),
   modelId: z.string().min(1).optional(),
   status: aiRunStatusFilterSchema.optional(),
   decision: aiRunDecisionFilterSchema.optional(),
@@ -753,7 +753,7 @@ export const aiRunSearchQuerySchema = strictObject({
 export const aiRunSearchItemSchema = strictObject({
   runId: idSchema,
   projectId: idSchema,
-  taskKind: aiTaskKindSchema,
+  taskKind: runLogAiTaskKindSchema,
   modelId: z.string().min(1).nullable(),
   responseModel: z.string().min(1).nullable(),
   status: runStatusSchema,
@@ -775,7 +775,7 @@ export const aiRunExportRecordSchema = strictObject({
   exportVersion: z.literal(AI_RUN_EXPORT_VERSION),
   runId: idSchema,
   projectId: idSchema,
-  taskKind: aiTaskKindSchema,
+  taskKind: runLogAiTaskKindSchema,
   modelId: z.string().min(1).nullable(),
   responseModel: z.string().min(1).nullable(),
   status: runStatusSchema,
@@ -1048,16 +1048,7 @@ export const scriptSaveRequestSchema = z
     script: scriptSchema,
     expectedRevision: nonNegativeIntegerSchema
   })
-  .strict()
-  .superRefine((request, ctx) => {
-    if (request.script.status === "approved") {
-      ctx.addIssue({
-        code: "custom",
-        path: ["script", "status"],
-        message: "script approval is only available through the approval workflow"
-      });
-    }
-  });
+  .strict();
 
 export const modelsQuerySchema = z
   .object({

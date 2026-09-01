@@ -203,7 +203,6 @@ describe("VisualAssignmentService", () => {
     const project = clone(videoProjectFixture) as VideoProject;
     project.metadata.id = PROJECT_ID;
     project.metadata.updatedAt = NOW;
-    project.script.status = "draft";
     project.visuals.assignments = [];
     videoProjectSchema.parse(project);
     const projectFile = path.join(projectRoot, "project.json");

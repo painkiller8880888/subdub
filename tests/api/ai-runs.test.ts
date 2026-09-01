@@ -59,7 +59,7 @@ describe("GET /api/ai-runs", () => {
 
     const response = await app.inject({
       method: "GET",
-      url: "/api/ai-runs?from=2026-08-10T00:00:00.000Z&to=2026-08-12T00:00:00.000Z&taskKind=outline_generation&modelId=google%2Fgemma-4-31b-it&status=failed&decision=undecided&errorCode=OPENROUTER_TIMEOUT&limit=7&offset=14"
+      url: "/api/ai-runs?from=2026-08-10T00:00:00.000Z&to=2026-08-12T00:00:00.000Z&taskKind=visual_search_intent&modelId=google%2Fgemma-4-31b-it&status=failed&decision=undecided&errorCode=OPENROUTER_TIMEOUT&limit=7&offset=14"
     });
 
     expect(response.statusCode).toBe(200);
@@ -69,7 +69,7 @@ describe("GET /api/ai-runs", () => {
     expect(search).toHaveBeenCalledWith({
       from: "2026-08-10T00:00:00.000Z",
       to: "2026-08-12T00:00:00.000Z",
-      taskKind: "outline_generation",
+      taskKind: "visual_search_intent",
       modelId: "google/gemma-4-31b-it",
       status: "failed",
       decision: "undecided",
@@ -142,7 +142,7 @@ describe("GET /api/ai-runs", () => {
 
     const response = await app.inject({
       method: "GET",
-      url: "/api/ai-runs/export?from=2026-08-10T00:00:00.000Z&to=2026-08-12T00:00:00.000Z&taskKind=outline_generation&modelId=google%2Fgemma-4-31b-it&status=failed&decision=undecided&errorCode=OPENROUTER_TIMEOUT"
+      url: "/api/ai-runs/export?from=2026-08-10T00:00:00.000Z&to=2026-08-12T00:00:00.000Z&taskKind=visual_search_intent&modelId=google%2Fgemma-4-31b-it&status=failed&decision=undecided&errorCode=OPENROUTER_TIMEOUT"
     });
 
     expect(response.statusCode).toBe(200);
@@ -153,12 +153,12 @@ describe("GET /api/ai-runs", () => {
       'attachment; filename="subdub-ai-runs.jsonl"'
     );
     expect(response.body).toBe(
-      '{"exportVersion":"1.0.0","taskKind":"outline_generation"}\n'
+      '{"exportVersion":"1.0.0","taskKind":"visual_search_intent"}\n'
     );
     expect(exportJsonLines).toHaveBeenCalledWith({
       from: "2026-08-10T00:00:00.000Z",
       to: "2026-08-12T00:00:00.000Z",
-      taskKind: "outline_generation",
+      taskKind: "visual_search_intent",
       modelId: "google/gemma-4-31b-it",
       status: "failed",
       decision: "undecided",
