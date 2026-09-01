@@ -5,8 +5,8 @@ import * as path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { createEmptyVideoProject } from "../../src/app/projects/empty-video-project.js";
+import { LegacyPlanningProjectService } from "../../src/app/projects/legacy-planning-project-service.js";
 import { ProjectRepository } from "../../src/app/projects/project-repository.js";
-import { ProjectService } from "../../src/app/projects/project-service.js";
 
 describe("script workflow compatibility boundary", () => {
   const roots: string[] = [];
@@ -31,7 +31,7 @@ describe("script workflow compatibility boundary", () => {
         createdAt: "2026-08-20T00:00:00.000Z"
       })
     );
-    const service = new ProjectService({ repository });
+    const service = new LegacyPlanningProjectService({ repository });
 
     await expect(
       service.initializeScript(project.metadata.id, {

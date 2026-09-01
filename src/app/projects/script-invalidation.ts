@@ -3,8 +3,8 @@ import type {
   ScriptLine,
   VideoProject
 } from "../../schema/video-project.js";
-import { hasMeaningfulVisuals } from "./project-invalidation.js";
-import { scriptContentChanged } from "./script-domain.js";
+import { scriptContentChanged } from "./current-script-domain.js";
+import { hasMeaningfulVisuals } from "./current-project-invalidation.js";
 
 export type ScriptStaleTarget = "visuals" | "audio" | "manifest";
 

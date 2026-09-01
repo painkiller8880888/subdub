@@ -53,7 +53,7 @@ import {
   IMPROVEMENT_LOG_ERROR_CODE,
   ImprovementLogError
 } from "./improvement-log-errors.js";
-import { hasMeaningfulVisuals } from "./project-invalidation.js";
+import { hasMeaningfulVisuals } from "./current-project-invalidation.js";
 import {
   NodeVisualAssignmentFileSystem,
   type VisualAssignmentFileSystem

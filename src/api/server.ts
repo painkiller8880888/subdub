@@ -203,8 +203,7 @@ export async function initializeServer(
     const resolvedProjectService =
       suppliedProjectService ??
       new ProjectService({
-        repository: resolvedProjectRepository,
-        improvementLogRepository: resolvedImprovementLogRepository
+        repository: resolvedProjectRepository
       });
     const resolvedProjectEditService =
       suppliedProjectEditService ??
