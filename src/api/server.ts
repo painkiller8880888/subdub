@@ -205,8 +205,7 @@ export async function initializeServer(
       suppliedProjectService ??
       new ProjectService({
         repository: resolvedProjectRepository,
-        improvementLogRepository: resolvedImprovementLogRepository,
-        screenTemplateCatalog: resolvedScreenTemplateService
+        improvementLogRepository: resolvedImprovementLogRepository
       });
     const resolvedProjectEditService =
       suppliedProjectEditService ??

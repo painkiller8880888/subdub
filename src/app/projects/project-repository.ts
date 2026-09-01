@@ -23,7 +23,6 @@ import {
   type ProjectMigrationLogEntry
 } from "./video-project-migration.js";
 import {
-  validateVideoProjectScreenTemplateReferences,
   type ScreenTemplateCatalogPort
 } from "./screen-template-selection.js";
 
@@ -289,6 +288,28 @@ function candidateValidationFailedError(
   );
 }
 
+function assertScriptSectionsRetained(
+  currentProject: Pick<VideoProject, "script">,
+  candidateProject: Pick<VideoProject, "script">
+): void {
+  const candidateSectionIds = new Set(
+    candidateProject.script.sections.map((section) => section.id)
+  );
+  if (
+    currentProject.script.sections.some(
+      (section) => !candidateSectionIds.has(section.id)
+    )
+  ) {
+    throw candidateValidationFailedError([
+      {
+        path: ["script", "sections"],
+        message:
+          "existing script sections cannot be hard-deleted; set enabled=false instead"
+      }
+    ]);
+  }
+}
+
 function currentProjectIdMismatchError(): ProjectRepositoryError {
   return new ProjectRepositoryError(
     "PROJECT_CURRENT_ID_MISMATCH",
@@ -492,21 +513,6 @@ export class ProjectRepository {
     this.screenTemplateCatalog = options.screenTemplateCatalog;
   }
 
-  private assertScreenTemplateReferences(project: VideoProject): void {
-    if (this.screenTemplateCatalog === undefined) {
-      return;
-    }
-    const issues = validateVideoProjectScreenTemplateReferences(
-      project,
-      this.screenTemplateCatalog
-    );
-    if (issues.length > 0) {
-      throw candidateValidationFailedError(
-        issues.map((issue) => ({ path: issue.path, message: issue.message }))
-      );
-    }
-  }
-
   private async readUnlocked(projectId: string): Promise<VideoProject> {
     const paths = await this.resolveProjectPaths(projectId);
     return this.readProjectWithExpectedId(projectId, paths);
@@ -686,8 +692,6 @@ export class ProjectRepository {
         }
       ]);
     }
-
-    this.assertScreenTemplateReferences(candidateResult.data);
 
     const projectId = this.validateProjectId(candidateResult.data.metadata.id);
     return this.withSaveLock(projectId, () =>
@@ -891,11 +895,6 @@ export class ProjectRepository {
       projectId,
       paths
     );
-    const scriptResult = scriptSchema.safeParse(script);
-    if (!scriptResult.success) {
-      throw candidateValidationFailedError(validationIssues(scriptResult.error));
-    }
-
     const expectedRevisionResult =
       nonNegativeIntegerSchema.safeParse(expectedRevision);
     if (!expectedRevisionResult.success) {
@@ -904,6 +903,12 @@ export class ProjectRepository {
     if (expectedRevisionResult.data !== currentProject.revision) {
       throw revisionConflictError();
     }
+
+    const scriptResult = scriptSchema.safeParse(script);
+    if (!scriptResult.success) {
+      throw candidateValidationFailedError(validationIssues(scriptResult.error));
+    }
+    assertScriptSectionsRetained(currentProject, { script: scriptResult.data });
 
     const updatedProjectResult = videoProjectSchema.safeParse({
       ...currentProject,
@@ -919,8 +924,6 @@ export class ProjectRepository {
         validationIssues(updatedProjectResult.error)
       );
     }
-
-    this.assertScreenTemplateReferences(updatedProjectResult.data);
 
     return this.writeProjectCandidate(paths, updatedProjectResult.data);
   }
@@ -1135,8 +1138,6 @@ export class ProjectRepository {
         validationIssues(updatedProjectResult.error)
       );
     }
-
-    this.assertScreenTemplateReferences(updatedProjectResult.data);
 
     const serializedProject = `${JSON.stringify(
       updatedProjectResult.data,

@@ -13,6 +13,7 @@ import {
   videoProjectSchema,
   type VideoProject
 } from "../../src/schema/index.js";
+import { createScriptSection } from "../../src/app/projects/starter-script-sections.js";
 import { createEmptyVideoProject } from "../fixtures/empty-video-project.js";
 import {
   legacyVideoProjectFixture,
@@ -301,6 +302,25 @@ describe("ProjectRepository", () => {
     expect(renameCount).toBe(0);
     expect(await listTemporaryFiles()).toEqual([]);
     expectSafeExternalError(error);
+  });
+
+  it("checks the revision before rejecting a stale script hard delete", async () => {
+    const repository = new ProjectRepository(workspaceRoot);
+    const current = clone(videoProjectFixture);
+    const currentWithAddedSection = clone(videoProjectFixture);
+    currentWithAddedSection.script.sections.push(
+      createScriptSection("section-added-by-other-client", "別クライアントの追加")
+    );
+    await repository.save(projectId, currentWithAddedSection, current.revision);
+
+    const error = await expectRepositoryError(
+      () => repository.saveScript(projectId, current.script, current.revision),
+      "PROJECT_REVISION_CONFLICT",
+      409
+    );
+
+    expect(error.status).toBe(409);
+    expect((await repository.read(projectId)).script.sections).toHaveLength(4);
   });
 
   it("serializes concurrent saves so only one update succeeds", async () => {

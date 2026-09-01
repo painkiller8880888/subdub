@@ -148,6 +148,38 @@ describe("classifyScriptChange", () => {
     expect(impact.structuralChanged).toBe(false);
   });
 
+  it("marks only the manifest stale when a section is renamed", () => {
+    const current = projectFixture().script;
+    const candidate: Script = {
+      ...current,
+      sections: current.sections.map((section, index) =>
+        index === 1 ? { ...section, name: "変更後の本編" } : section
+      )
+    };
+
+    const impact = classifyScriptChange(current, candidate);
+
+    expect(impact.contentChanged).toBe(true);
+    expect(impact.structuralChanged).toBe(false);
+    expect(impact.staleTargets).toEqual(["manifest"]);
+  });
+
+  it("marks only the manifest stale when a section is deactivated", () => {
+    const current = projectFixture().script;
+    const candidate: Script = {
+      ...current,
+      sections: current.sections.map((section, index) =>
+        index === 1 ? { ...section, enabled: false } : section
+      )
+    };
+
+    const impact = classifyScriptChange(current, candidate);
+
+    expect(impact.contentChanged).toBe(true);
+    expect(impact.structuralChanged).toBe(false);
+    expect(impact.staleTargets).toEqual(["manifest"]);
+  });
+
   it("returns no stale targets for an unchanged script", () => {
     const current = projectFixture().script;
     const impact = classifyScriptChange(current, structuredClone(current));
@@ -221,6 +253,86 @@ describe("applyEditedScript", () => {
     expect(result.project.thumbnail).toEqual(project.thumbnail);
     expect(result.project.revision).toBe(project.revision);
     expect(result.project.metadata).toEqual(project.metadata);
+  });
+
+  it("deactivates and reactivates the same section without changing downstream data", () => {
+    const project = projectFixture();
+    const sectionToToggle = project.script.sections[1];
+    if (sectionToToggle === undefined) {
+      throw new Error("The test fixture must contain a main section.");
+    }
+    const downstream = {
+      visuals: structuredClone(project.visuals),
+      overlays: structuredClone(project.overlays),
+      audio: structuredClone(project.audio),
+      edit: structuredClone(project.edit)
+    };
+    const deactivatedScript: Script = {
+      ...project.script,
+      sections: project.script.sections.map((section) =>
+        section.id === sectionToToggle.id
+          ? { ...section, enabled: false }
+          : section
+      )
+    };
+
+    const deactivated = applyEditedScript(project, deactivatedScript);
+    expect(deactivated.project.script.sections[1]).toEqual({
+      ...sectionToToggle,
+      enabled: false
+    });
+    expect(deactivated.project.visuals.assignments).toEqual(
+      downstream.visuals.assignments
+    );
+    expect(deactivated.project.overlays).toEqual(downstream.overlays);
+    expect(deactivated.project.audio).toEqual(downstream.audio);
+    expect(deactivated.project.edit).toEqual(downstream.edit);
+
+    const reactivatedScript: Script = {
+      ...deactivated.project.script,
+      sections: deactivated.project.script.sections.map((section) =>
+        section.id === sectionToToggle.id
+          ? { ...section, enabled: true }
+          : section
+      )
+    };
+    const reactivated = applyEditedScript(
+      deactivated.project,
+      reactivatedScript
+    );
+
+    expect(reactivated.project.script).toEqual(project.script);
+    expect(reactivated.project.visuals.assignments).toEqual(
+      downstream.visuals.assignments
+    );
+    expect(reactivated.project.overlays).toEqual(downstream.overlays);
+    expect(reactivated.project.audio).toEqual(downstream.audio);
+    expect(reactivated.project.edit).toEqual(downstream.edit);
+  });
+
+  it("reorders sections by stable ID without rewriting downstream references", () => {
+    const project = projectFixture();
+    const candidate: Script = {
+      ...project.script,
+      sections: [
+        project.script.sections[2]!,
+        project.script.sections[0]!,
+        project.script.sections[1]!
+      ]
+    };
+
+    const result = applyEditedScript(project, candidate);
+
+    expect(result.impact.structuralChanged).toBe(true);
+    expect(result.project.script.sections.map((section) => section.id)).toEqual(
+      ["section-outro", "section-intro", "section-main"]
+    );
+    expect(result.project.visuals.assignments).toEqual(
+      project.visuals.assignments
+    );
+    expect(result.project.overlays).toEqual(project.overlays);
+    expect(result.project.audio).toEqual(project.audio);
+    expect(result.project.edit).toEqual(project.edit);
   });
 
   it("extends a static assignment through multiple appended lines", () => {
@@ -437,6 +549,35 @@ describe("pruneInvalidatedDownstreamReferences", () => {
         (effect) => effect.id === "effect-confirm"
       )
     ).toBe(true);
+  });
+
+  it("keeps line deletion invalidation semantics inside a disabled section", () => {
+    const project = projectFixture();
+    const disabledSection = project.script.sections[2];
+    if (disabledSection === undefined) {
+      throw new Error("The test fixture must contain an outro section.");
+    }
+    project.script.sections[2] = { ...disabledSection, enabled: false };
+    const candidate = {
+      ...project.script,
+      sections: project.script.sections.map((section, index) =>
+        index === 2 ? { ...section, lines: section.lines.slice(1) } : section
+      )
+    };
+
+    const result = applyEditedScript(project, candidate);
+
+    expect(result.impact.structuralChanged).toBe(true);
+    expect(
+      result.project.visuals.assignments.some(
+        (assignment) => assignment.id === "visual-outro-document"
+      )
+    ).toBe(false);
+    expect(
+      result.project.audio.soundEffects.some(
+        (effect) => effect.id === "effect-attention"
+      )
+    ).toBe(false);
   });
 
   it("drops only the visual assignment whose range is reversed by a reorder", () => {
