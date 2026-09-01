@@ -235,6 +235,42 @@ describe("VoicevoxGenerationService", { timeout: 30_000 }, () => {
     expect(harness.client.synthesize).not.toHaveBeenCalled();
   }, 15_000);
 
+  it("limits status and audio-index inspection to requested lines", async () => {
+    const harness = await createHarness();
+    const accepted = await harness.service.generateAll(projectId);
+    await expect(waitForJob(harness.service, accepted.runId)).resolves.toBe(
+      "succeeded"
+    );
+
+    const indexPath = path.join(
+      harness.workspaceRoot,
+      "projects",
+      projectId,
+      "cache",
+      "audio-index.json"
+    );
+    const rawIndex = JSON.parse(await fs.readFile(indexPath, "utf8")) as Record<
+      string,
+      Record<string, unknown>
+    >;
+    const disabledLine = harness.getProject().script.sections[1]!.lines[0]!;
+    rawIndex[disabledLine.id] = {
+      ...rawIndex[disabledLine.id],
+      audioPath: "../outside.wav"
+    };
+    await fs.writeFile(indexPath, `${JSON.stringify(rawIndex)}\n`, "utf8");
+
+    const enabledLine = harness.getProject().script.sections[0]!.lines[0]!;
+    await expect(
+      harness.service.getStatus(projectId, {
+        lineIds: new Set([enabledLine.id])
+      })
+    ).resolves.toMatchObject({
+      available: true,
+      lines: [{ lineId: enabledLine.id, status: "current" }]
+    });
+  });
+
   it("reports generating while the selected line job is in flight", async () => {
     const harness = await createHarness();
     const line = harness.getProject().script.sections[0]!.lines[0]!;

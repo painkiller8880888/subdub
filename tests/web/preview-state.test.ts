@@ -136,6 +136,30 @@ describe("preview state helpers", () => {
     ]);
   });
 
+  it("shows a dedicated blocker when all script sections are disabled", () => {
+    const viewModel = createPreviewViewModel(
+      data({
+        state: "stale",
+        canPlay: false,
+        blockers: [
+          {
+            code: "NO_ENABLED_SECTION",
+            message: "server fallback must not be shown",
+            target: { kind: "script" }
+          }
+        ]
+      }),
+      "manual-video-project"
+    );
+
+    expect(viewModel.blockers[0]).toMatchObject({
+      message:
+        "有効なセクションがありません。少なくとも1つのセクションを有効にしてください。",
+      targetLabel: "台本を確認",
+      href: "/projects/manual-video-project/script"
+    });
+  });
+
   it("turns compile diagnostics into actionable missing-item labels", () => {
     const diagnostics = createPreviewCompileDiagnosticViewModel([
       {

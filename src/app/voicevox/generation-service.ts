@@ -125,6 +125,11 @@ export type VoicevoxGenerationServiceOptions = {
   readonly runLogStore?: RunLogStorePort;
 };
 
+export type VoicevoxGenerationStatusOptions = Readonly<{
+  /** Restrict inspection to the lines participating in the current render. */
+  readonly lineIds?: ReadonlySet<string>;
+}>;
+
 type RuntimeLineState = {
   readonly runId: string;
   readonly state: "generating" | "failed";
@@ -454,13 +459,18 @@ export class VoicevoxGenerationService {
     );
   }
 
-  async getStatus(projectId: unknown): Promise<VoiceGenerationStatusData> {
+  async getStatus(
+    projectId: unknown,
+    options: VoicevoxGenerationStatusOptions = {}
+  ): Promise<VoiceGenerationStatusData> {
     const safeProjectId = idSchema.parse(projectId);
     const project = await this.repository.read(safeProjectId);
     const jobs = this.jobs.list(safeProjectId);
+    const requestedLineIds =
+      options.lineIds === undefined ? undefined : [...options.lineIds];
 
     try {
-      const inspections = await this.inspectProject(project);
+      const inspections = await this.inspectProject(project, requestedLineIds);
       return {
         available: true,
         lines: inspections.map((inspection) =>
@@ -475,9 +485,12 @@ export class VoicevoxGenerationService {
       return {
         available: false,
         unavailableCode: VOICEVOX_GENERATION_ERROR_CODE.unavailable,
-        lines: allLines(project).map(({ line }) =>
-          this.fallbackLineStatus(safeProjectId, line.id)
-        ),
+        lines: allLines(project)
+          .filter(
+            ({ line }) =>
+              options.lineIds === undefined || options.lineIds.has(line.id)
+          )
+          .map(({ line }) => this.fallbackLineStatus(safeProjectId, line.id)),
         jobs
       };
     }
@@ -642,7 +655,7 @@ export class VoicevoxGenerationService {
     lineIds?: readonly string[],
     providedContext?: VoicevoxQueryResolutionContext
   ): Promise<LineInspection[]> {
-    const index = await this.readIndex(project.metadata.id);
+    const index = await this.readIndex(project.metadata.id, lineIds);
     const speakers = await this.resolveProjectSpeakers(project);
     const queryContext: VoicevoxQueryResolutionContext =
       providedContext ?? (await this.queryService.resolveContext());
@@ -822,9 +835,12 @@ export class VoicevoxGenerationService {
     }
   }
 
-  private async readIndex(projectId: string) {
+  private async readIndex(projectId: string, lineIds?: readonly string[]) {
     try {
-      return await this.audioStore.readIndex(projectId);
+      return await this.audioStore.readIndex(
+        projectId,
+        lineIds === undefined ? undefined : { lineIds: new Set(lineIds) }
+      );
     } catch (error) {
       if (
         error instanceof VoicevoxAudioStoreError &&

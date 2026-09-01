@@ -188,6 +188,246 @@ function compileTemplateBoundaryVideoSegments(playbackRate: number) {
 }
 
 describe("compileRenderManifest", () => {
+  it("compiles an enabled-only timeline while retaining disabled dependencies in the project", () => {
+    const project = structuredClone(videoProjectFixture) as VideoProject;
+    const mainSection = project.script.sections.find(
+      (section) => section.id === "section-main"
+    );
+    if (mainSection === undefined) {
+      throw new Error("the fixture main section is missing");
+    }
+    mainSection.enabled = false;
+    mainSection.screenTemplateId = "missing-while-disabled";
+    project.edit.videoElements = [
+      {
+        id: "edit-disabled-cutin",
+        role: "cutin",
+        assetId: "asset-disabled-cutin",
+        assetVersion: 1,
+        assetChecksum: "1".repeat(64),
+        projectMediaPath: "media/disabled-cutin.mp4",
+        placement: {
+          kind: "before_section",
+          sectionId: mainSection.id,
+          order: 0
+        },
+        startMs: null,
+        playbackRate: 1,
+        volume: 1,
+        text: "",
+        textTemplateId: null
+      }
+    ];
+    project.overlays.lineOverlays = [
+      {
+        id: "overlay-disabled",
+        lineId: mainSection.lines[0]!.id,
+        kind: "box",
+        transform: {
+          x: 0.1,
+          y: 0.1,
+          width: 0.2,
+          height: 0.2,
+          rotationDeg: 0
+        },
+        colorToken: "warning",
+        text: null,
+        animation: "pulse"
+      }
+    ];
+
+    const baseInput = createRenderManifestInput(project);
+    const audioIndex = baseInput.audioIndex as VoicevoxAudioIndex;
+    const disabledLineIds = new Set(mainSection.lines.map((line) => line.id));
+    const disabledAssetPaths = new Set([
+      ...mainSection.lines.map((line) => audioIndex[line.id]?.audioPath),
+      "media/application-form.png",
+      "backgrounds/application-system.png",
+      "media/bgm-main.mp3",
+      "media/confirm.wav",
+      "media/disabled-cutin.mp4"
+    ]);
+    const filteredAudioIndex = Object.fromEntries(
+      Object.entries(audioIndex).filter(
+        ([lineId]) => !disabledLineIds.has(lineId)
+      )
+    ) as VoicevoxAudioIndex;
+    const filteredAssetMetadata = (
+      baseInput.assetMetadata as readonly RenderManifestAssetMetadata[]
+    ).filter((asset) => !disabledAssetPaths.has(asset.path));
+
+    const result = compileRenderManifest({
+      ...baseInput,
+      audioIndex: filteredAudioIndex,
+      assetMetadata: filteredAssetMetadata
+    });
+
+    expect(result.success).toBe(true);
+    if (!result.success) {
+      return;
+    }
+
+    expect(result.manifest.manifestVersion).toBe("2.9.0");
+    expect(result.manifest.lines.map((line) => line.id)).toEqual([
+      "intro-mentor-1",
+      "intro-learner-1",
+      "outro-mentor-1"
+    ]);
+    expect(
+      result.manifest.visuals.map((visual) => visual.sourceAssignmentId)
+    ).toEqual(["visual-intro-video", "visual-outro-document"]);
+    expect(
+      result.manifest.sectionLayouts.map((layout) => layout.sectionId)
+    ).toEqual(["section-intro", "section-outro"]);
+    expect(
+      result.manifest.backgrounds.map((background) => background.sectionId)
+    ).toEqual(["section-intro", "section-outro"]);
+    expect(result.manifest.audioTracks.map((track) => track.id)).toEqual([
+      "bgm-intro"
+    ]);
+    expect(result.manifest.soundEffects.map((effect) => effect.id)).toEqual([
+      "effect-attention"
+    ]);
+    expect(result.manifest.lineOverlays).toEqual([]);
+    expect(result.manifest.inserts).toEqual([]);
+    expect(
+      result.manifest.sourceAssetChecksums.some((asset) =>
+        disabledAssetPaths.has(asset.path)
+      )
+    ).toBe(false);
+
+    const introLastLine = result.manifest.lines[1];
+    const outroLine = result.manifest.lines[2];
+    expect(outroLine?.from).toBe(
+      (introLastLine?.from ?? 0) + (introLastLine?.durationInFrames ?? 0)
+    );
+
+    mainSection.enabled = true;
+    mainSection.screenTemplateId = "screen-template-standard";
+    const reenabled = compileRenderManifest(createRenderManifestInput(project));
+    expect(reenabled.success).toBe(true);
+    if (!reenabled.success) {
+      return;
+    }
+    expect(reenabled.manifest.lines).toHaveLength(5);
+    expect(
+      reenabled.manifest.visuals.map((visual) => visual.sourceAssignmentId)
+    ).toEqual([
+      "visual-intro-video",
+      "visual-main-photo",
+      "visual-outro-document"
+    ]);
+    expect(reenabled.manifest.audioTracks.map((track) => track.id)).toEqual([
+      "bgm-intro",
+      "bgm-main"
+    ]);
+    expect(reenabled.manifest.soundEffects.map((effect) => effect.id)).toEqual([
+      "effect-confirm",
+      "effect-attention"
+    ]);
+    expect(reenabled.manifest.inserts.map((insert) => insert.id)).toEqual([
+      "edit-disabled-cutin"
+    ]);
+    expect(
+      reenabled.manifest.lineOverlays.map((overlay) => overlay.id)
+    ).toEqual(["overlay-disabled"]);
+    expect(reenabled.manifest.compilerInputHash).not.toBe(
+      result.manifest.compilerInputHash
+    );
+    expect(reenabled.manifest.sourceProjectHash).not.toBe(
+      result.manifest.sourceProjectHash
+    );
+  });
+
+  it("fails closed with NO_ENABLED_SECTION when all sections are disabled", () => {
+    const project = structuredClone(videoProjectFixture) as VideoProject;
+    for (const section of project.script.sections) {
+      section.enabled = false;
+    }
+
+    const input = createRenderManifestInput(project);
+    const result = compileRenderManifest({
+      ...input,
+      audioIndex: undefined,
+      assetMetadata: undefined
+    });
+
+    expect(result.success).toBe(false);
+    expect(diagnosticCodes(result)).toContain("NO_ENABLED_SECTION");
+    expect(result.manifest).toBeNull();
+  });
+
+  it("anchors before_first and after_last inserts to the enabled section collection", () => {
+    const project = structuredClone(videoProjectFixture) as VideoProject;
+    const videoAssignment = project.visuals.assignments.find(
+      (assignment) => assignment.display.kind === "video"
+    );
+    if (videoAssignment === undefined) {
+      throw new Error("the fixture video assignment is missing");
+    }
+    project.script.sections[0]!.enabled = false;
+    project.edit.videoElements = [
+      {
+        id: "edit-intro-enabled-first",
+        role: "intro",
+        assetId: videoAssignment.assetId,
+        assetVersion: 1,
+        assetChecksum: videoAssignment.assetChecksum,
+        projectMediaPath: videoAssignment.projectMediaPath,
+        placement: { kind: "before_first_section" },
+        startMs: null,
+        playbackRate: 1,
+        volume: 1,
+        text: "",
+        textTemplateId: null
+      },
+      {
+        id: "edit-outro-enabled-last",
+        role: "outro",
+        assetId: videoAssignment.assetId,
+        assetVersion: 1,
+        assetChecksum: videoAssignment.assetChecksum,
+        projectMediaPath: videoAssignment.projectMediaPath,
+        placement: { kind: "after_last_section" },
+        startMs: null,
+        playbackRate: 1,
+        volume: 1,
+        text: "",
+        textTemplateId: null
+      }
+    ];
+
+    const result = compileRenderManifest(createRenderManifestInput(project));
+
+    expect(result.success).toBe(true);
+    if (!result.success) {
+      return;
+    }
+    expect(result.manifest.inserts.map((insert) => insert.id)).toEqual([
+      "edit-intro-enabled-first",
+      "edit-outro-enabled-last"
+    ]);
+    expect(result.manifest.inserts[0]?.from).toBe(0);
+    expect(result.manifest.lines[0]?.from).toBe(
+      result.manifest.inserts[0]?.durationInFrames
+    );
+    const lastLine = result.manifest.lines.at(-1);
+    expect(result.manifest.inserts[1]?.from).toBe(
+      (lastLine?.from ?? 0) + (lastLine?.durationInFrames ?? 0)
+    );
+  });
+
+  it("still validates structural references stored under disabled sections", () => {
+    const project = structuredClone(videoProjectFixture) as VideoProject;
+    project.script.sections[1]!.enabled = false;
+    project.audio.soundEffects[0]!.lineId = "missing-disabled-line";
+
+    const result = compileRenderManifest(createRenderManifestInput(project));
+
+    expect(result.success).toBe(false);
+    expect(diagnosticCodes(result)).toContain("VIDEO_PROJECT_SCHEMA_INVALID");
+  });
+
   it("ignores orphan audio entries in the manifest and compiler input hash", () => {
     const input = validInput();
     const withOrphan = inputWithOrphanAudioEntry();

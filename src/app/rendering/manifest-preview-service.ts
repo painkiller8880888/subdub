@@ -32,6 +32,10 @@ import { insertTextTemplateContentHash } from "../insert-text-templates/insert-t
 import type { VoicevoxGenerationService } from "../voicevox/generation-service.js";
 import { VoicevoxAudioStore } from "../voicevox/audio-store.js";
 import type { VoicevoxAudioIndex } from "../voicevox/audio-index.js";
+import {
+  createEffectiveRenderProject,
+  type EffectiveRenderProject
+} from "./effective-render-project.js";
 
 export type ManifestPreviewServiceOptions = {
   readonly workspaceRoot: string;
@@ -90,7 +94,9 @@ const blockerMessages: Readonly<Record<string, string>> = {
   INSERT_TEXT_TEMPLATE_REFERENCE_INVALID:
     "選択された挿入文字テンプレートが見つからないか無効です。編集画面の設定を修正してください。",
   MANIFEST_INSERT_TEXT_TEMPLATE_STALE:
-    "保存済みプレビューの挿入文字テンプレートが更新されています。プレビューを再生成してください。"
+    "保存済みプレビューの挿入文字テンプレートが更新されています。プレビューを再生成してください。",
+  NO_ENABLED_SECTION:
+    "有効なセクションがありません。少なくとも1つのセクションを有効にしてください。"
 };
 
 function isPathInside(rootPath: string, candidatePath: string): boolean {
@@ -188,6 +194,121 @@ function sourceAssetTarget(
   return toTarget("asset", { path: assetPath });
 }
 
+function currentManifestAssetPaths(
+  project: VideoProject,
+  renderProject: EffectiveRenderProject,
+  manifest: RenderManifest
+): ReadonlySet<string> {
+  const paths = new Set<string>();
+  const assignmentIds = new Set(
+    renderProject.visualAssignments.map((assignment) => assignment.id)
+  );
+  const elementIds = new Set(
+    renderProject.videoElements.map((element) => element.id)
+  );
+
+  for (const line of manifest.lines) {
+    if (renderProject.lineIds.has(line.id)) {
+      paths.add(line.audioPath);
+    }
+  }
+  for (const visual of manifest.visuals) {
+    if (assignmentIds.has(visual.sourceAssignmentId)) {
+      paths.add(visual.src);
+    }
+  }
+  for (const background of manifest.backgrounds) {
+    if (
+      renderProject.sectionIds.has(background.sectionId) &&
+      background.background.kind === "image"
+    ) {
+      paths.add(background.background.src);
+    }
+  }
+  for (const track of manifest.audioTracks) {
+    if (renderProject.sectionIds.has(track.sectionId)) {
+      paths.add(track.src);
+    }
+  }
+  for (const effect of manifest.soundEffects) {
+    if (renderProject.lineIds.has(effect.lineId)) {
+      paths.add(effect.src);
+    }
+  }
+  for (const insert of manifest.inserts) {
+    if (elementIds.has(insert.id)) {
+      paths.add(insert.src);
+    }
+  }
+
+  const characterVariantKeys = new Set<string>();
+  for (const character of project.characters) {
+    const visualId = character.characterVisual.visualId;
+    const variantId = character.characterVisual.idleVariantId;
+    if (visualId !== null && variantId !== null) {
+      characterVariantKeys.add(`${visualId}\u0000${variantId}`);
+    }
+  }
+  const characterById = new Map(
+    project.characters.map((character) => [character.id, character])
+  );
+  for (const section of renderProject.sections) {
+    for (const line of section.lines) {
+      const visualId = characterById.get(line.speakerId)?.characterVisual
+        .visualId;
+      if (
+        visualId !== undefined &&
+        visualId !== null &&
+        line.characterVariantId
+      ) {
+        characterVariantKeys.add(`${visualId}\u0000${line.characterVariantId}`);
+      }
+    }
+  }
+  for (const variant of manifest.characterVariants) {
+    if (
+      !characterVariantKeys.has(`${variant.visualId}\u0000${variant.variantId}`)
+    ) {
+      continue;
+    }
+    for (const file of Object.values(variant.files)) {
+      paths.add(file.path);
+    }
+  }
+
+  return paths;
+}
+
+function allManifestAssetPaths(manifest: RenderManifest): ReadonlySet<string> {
+  const paths = new Set<string>();
+  for (const line of manifest.lines) {
+    paths.add(line.audioPath);
+  }
+  for (const visual of manifest.visuals) {
+    paths.add(visual.src);
+  }
+  for (const background of manifest.backgrounds) {
+    if (background.background.kind === "image") {
+      paths.add(background.background.src);
+    }
+  }
+  for (const track of manifest.audioTracks) {
+    paths.add(track.src);
+  }
+  for (const effect of manifest.soundEffects) {
+    paths.add(effect.src);
+  }
+  for (const insert of manifest.inserts) {
+    paths.add(insert.src);
+  }
+  for (const variant of manifest.characterVariants) {
+    for (const file of Object.values(variant.files)) {
+      paths.add(file.path);
+    }
+  }
+  return paths;
+}
+
 function addBlocker(
   blockers: ManifestPreviewBlocker[],
   code: string,
@@ -260,27 +381,39 @@ export class ManifestPreviewService {
   async get(projectId: unknown): Promise<ManifestPreviewData> {
     const safeProjectId = idSchema.parse(projectId);
     const project = await this.projectRepository.read(safeProjectId);
+    const renderProject = createEffectiveRenderProject(project);
     const manifestResult = await this.manifestStore.readDetailed(safeProjectId);
     const blockers: ManifestPreviewBlocker[] = [];
 
-    this.addProjectStageBlockers(project, blockers);
+    this.addProjectStageBlockers(project, renderProject, blockers);
+    if (
+      project.script.sections.length > 0 &&
+      renderProject.sections.length === 0
+    ) {
+      addBlocker(blockers, "NO_ENABLED_SECTION", toTarget("script"));
+    }
 
     let audioIndex: VoicevoxAudioIndex | undefined;
     try {
-      audioIndex = await this.audioStore.readIndex(safeProjectId);
+      audioIndex = await this.audioStore.readIndex(safeProjectId, {
+        lineIds: renderProject.lineIds
+      });
     } catch {
-      addBlocker(blockers, "AUDIO_INDEX_UNREADABLE", toTarget("voice"));
+      if (renderProject.lineIds.size > 0) {
+        addBlocker(blockers, "AUDIO_INDEX_UNREADABLE", toTarget("voice"));
+      }
     }
     const manifest =
       manifestResult.status === "valid" ? manifestResult.manifest : null;
     const voiceLineStatuses = await this.readVoiceLineStatuses(
       safeProjectId,
-      audioIndex
+      audioIndex,
+      renderProject.lineIds
     );
 
-    if (audioIndex !== undefined) {
+    if (audioIndex !== undefined && renderProject.lineIds.size > 0) {
       await this.addAudioBlockers(
-        project,
+        renderProject,
         manifest,
         audioIndex,
         voiceLineStatuses,
@@ -296,9 +429,23 @@ export class ManifestPreviewService {
           toTarget("manifest", { path: "cache/render-manifest.json" })
         );
       }
-      this.addScreenTemplateStaleBlockers(manifest, blockers);
-      this.addInsertTextTemplateStaleBlockers(manifest, blockers);
-      await this.addAssetBlockers(safeProjectId, manifest, blockers);
+      this.addScreenTemplateStaleBlockers(
+        manifest,
+        renderProject.sectionIds,
+        blockers
+      );
+      this.addInsertTextTemplateStaleBlockers(
+        manifest,
+        new Set(renderProject.videoElements.map((element) => element.id)),
+        blockers
+      );
+      await this.addAssetBlockers(
+        safeProjectId,
+        project,
+        renderProject,
+        manifest,
+        blockers
+      );
     } else if (manifestResult.status === "missing") {
       addBlocker(
         blockers,
@@ -342,11 +489,13 @@ export class ManifestPreviewService {
 
   private addProjectStageBlockers(
     project: VideoProject,
+    renderProject: EffectiveRenderProject,
     blockers: ManifestPreviewBlocker[]
   ): void {
     for (const issue of validateVideoProjectScreenTemplateReferences(
       project,
-      this.screenTemplateCatalog
+      this.screenTemplateCatalog,
+      { enabledOnly: true }
     )) {
       const sectionIndex = issue.path[2];
       const section =
@@ -367,7 +516,7 @@ export class ManifestPreviewService {
       );
     }
     if (this.insertTextTemplateCatalog !== undefined) {
-      for (const element of project.edit.videoElements) {
+      for (const element of renderProject.videoElements) {
         if (element.text.length === 0 || element.textTemplateId === null) {
           continue;
         }
@@ -387,6 +536,7 @@ export class ManifestPreviewService {
 
   private addScreenTemplateStaleBlockers(
     manifest: RenderManifest,
+    sectionIds: ReadonlySet<string>,
     blockers: ManifestPreviewBlocker[]
   ): void {
     const referencedTemplates = new Map<
@@ -394,6 +544,9 @@ export class ManifestPreviewService {
       { readonly revision: number; readonly hash: string }
     >();
     for (const layout of manifest.sectionLayouts) {
+      if (!sectionIds.has(layout.sectionId)) {
+        continue;
+      }
       referencedTemplates.set(layout.templateId, {
         revision: layout.templateRevision,
         hash: layout.templateHash
@@ -420,12 +573,16 @@ export class ManifestPreviewService {
 
   private addInsertTextTemplateStaleBlockers(
     manifest: RenderManifest,
+    elementIds: ReadonlySet<string>,
     blockers: ManifestPreviewBlocker[]
   ): void {
     if (this.insertTextTemplateCatalog === undefined) {
       return;
     }
     for (const insert of manifest.inserts) {
+      if (!elementIds.has(insert.id)) {
+        continue;
+      }
       if (insert.text === null) {
         continue;
       }
@@ -450,7 +607,7 @@ export class ManifestPreviewService {
   }
 
   private async addAudioBlockers(
-    project: VideoProject,
+    renderProject: EffectiveRenderProject,
     manifest: RenderManifest | null,
     audioIndex: VoicevoxAudioIndex,
     voiceLineStatuses: ReadonlyMap<string, VoiceLineGenerationStatus["status"]>,
@@ -459,7 +616,7 @@ export class ManifestPreviewService {
     const manifestLines = new Map(
       manifest?.lines.map((line) => [line.id, line]) ?? []
     );
-    for (const line of project.script.sections.flatMap(
+    for (const line of renderProject.sections.flatMap(
       (section) => section.lines
     )) {
       const target = toTarget("voice", {
@@ -493,13 +650,16 @@ export class ManifestPreviewService {
 
   private async readVoiceLineStatuses(
     projectId: string,
-    audioIndex: VoicevoxAudioIndex | undefined
+    audioIndex: VoicevoxAudioIndex | undefined,
+    lineIds: ReadonlySet<string>
   ): Promise<ReadonlyMap<string, VoiceLineGenerationStatus["status"]>> {
     if (audioIndex === undefined || Object.keys(audioIndex).length === 0) {
       return new Map();
     }
     try {
-      const status = await this.voiceGenerationService.getStatus(projectId);
+      const status = await this.voiceGenerationService.getStatus(projectId, {
+        lineIds
+      });
       return new Map(
         status.lines.map((line) => [line.lineId, line.status] as const)
       );
@@ -512,10 +672,21 @@ export class ManifestPreviewService {
 
   private async addAssetBlockers(
     projectId: string,
+    project: VideoProject,
+    renderProject: EffectiveRenderProject,
     manifest: RenderManifest,
     blockers: ManifestPreviewBlocker[]
   ): Promise<void> {
+    const allowedPaths = currentManifestAssetPaths(
+      project,
+      renderProject,
+      manifest
+    );
+    const allPaths = allManifestAssetPaths(manifest);
     for (const asset of manifest.sourceAssetChecksums) {
+      if (allPaths.has(asset.path) && !allowedPaths.has(asset.path)) {
+        continue;
+      }
       const target = sourceAssetTarget(manifest, asset.path);
       let filePath: string;
       try {

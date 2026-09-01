@@ -132,6 +132,102 @@ describe("RenderManifestInputBuilder", () => {
     );
   });
 
+  it("does not collect dependencies that belong only to a disabled section", async () => {
+    const project = structuredClone(videoProjectFixture) as VideoProject;
+    const mainSection = project.script.sections[1];
+    const mainAssignment = project.visuals.assignments.find(
+      (assignment) => assignment.startLineId === "main-mentor-1"
+    );
+    const mainEffect = project.audio.soundEffects.find(
+      (effect) => effect.lineId === "main-learner-1"
+    );
+    const mainBgm = project.edit.sectionBgms.find(
+      (bgm) => bgm.sectionId === "section-main"
+    );
+    if (
+      mainSection === undefined ||
+      mainAssignment === undefined ||
+      mainEffect === undefined ||
+      mainBgm === undefined
+    ) {
+      throw new Error("the fixture main dependencies are missing");
+    }
+    mainSection.enabled = false;
+    mainSection.screenTemplateId = "missing-while-disabled";
+    mainSection.background = {
+      kind: "image",
+      src: "backgrounds/missing-while-disabled.png",
+      fit: "cover"
+    };
+    project.visuals.assignments = [mainAssignment];
+    project.audio.soundEffects = [mainEffect];
+    project.edit.sectionBgms = [mainBgm];
+    project.edit.videoElements = [
+      {
+        id: "edit-disabled-cutin",
+        role: "cutin",
+        assetId: "asset-disabled-cutin",
+        assetVersion: 1,
+        assetChecksum: "1".repeat(64),
+        projectMediaPath: "media/disabled-cutin.mp4",
+        placement: {
+          kind: "before_section",
+          sectionId: mainSection.id,
+          order: 0
+        },
+        startMs: null,
+        playbackRate: 1,
+        volume: 1,
+        text: "",
+        textTemplateId: null
+      }
+    ];
+
+    const allAudio = createRenderManifestAudioIndex(project);
+    const audioIndex = Object.fromEntries(
+      Object.entries(allAudio).filter(
+        ([lineId]) => lineId.startsWith("intro-") || lineId.startsWith("outro-")
+      )
+    );
+    const builder = new RenderManifestInputBuilder({
+      workspaceRoot: "C:\\workspace",
+      projectRepository: { read: async () => project },
+      screenTemplateCatalog: {
+        findById: (templateId) =>
+          templateId === "screen-template-standard"
+            ? createStandardScreenTemplate("2026-08-10T00:00:00.000Z")
+            : undefined
+      },
+      assetRepository: { findAssetDetail: () => undefined },
+      characterVisualCatalogService: {
+        verifyFiles: async () => createLegacySnapshot()
+      },
+      audioStore: { readIndex: async () => audioIndex }
+    });
+
+    const input = await builder.build(project.metadata.id);
+    const metadata =
+      input.assetMetadata as readonly RenderManifestAssetMetadata[];
+
+    expect(input.screenTemplateCatalogSnapshot).toEqual([
+      expect.objectContaining({ templateId: "screen-template-standard" })
+    ]);
+    expect(
+      metadata.some((asset) =>
+        [
+          "backgrounds/missing-while-disabled.png",
+          "media/disabled-cutin.mp4",
+          mainAssignment.projectMediaPath,
+          mainBgm.projectMediaPath,
+          mainEffect.projectMediaPath
+        ].includes(asset.path)
+      )
+    ).toBe(false);
+
+    const result = compileRenderManifest(input);
+    expect(result.success).toBe(true);
+  });
+
   it("collects an image background and compiles the verified fixture input", async () => {
     const workspaceRoot = await fs.mkdtemp(
       path.join(tmpdir(), "subdub-manifest-input-builder-")

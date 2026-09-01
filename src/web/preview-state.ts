@@ -50,6 +50,8 @@ const compileDiagnosticTitles: Readonly<Record<string, string>> = {
     "挿入文字テンプレートが見つかりません。編集画面のテンプレート設定を確認してください。",
   INSERT_TEXT_TEMPLATE_INACTIVE:
     "挿入文字テンプレートが無効です。編集画面で有効なテンプレートを選択してください。",
+  NO_ENABLED_SECTION:
+    "有効なセクションがありません。少なくとも1つのセクションを有効にしてください。",
   SCRIPT_EMPTY: "台本にセリフがありません。",
   SCRIPT_SECTION_EMPTY: "セリフがないセクションがあります。",
   AUDIO_INDEX_ENTRY_MISSING: "セリフに必要な音声が未生成です。",
@@ -105,6 +107,8 @@ const blockerMessages: Readonly<Record<string, string>> = {
     "台本の内容を検証できません。入力と構成案との整合性を確認してください。",
   SCRIPT_OUTLINE_HASH_MISMATCH:
     "構成案が更新されています。台本を確認して再承認してください。",
+  NO_ENABLED_SECTION:
+    "有効なセクションがありません。少なくとも1つのセクションを有効にしてください。",
   VISUALS_NOT_APPROVED:
     "素材の割り当てを検証できません。範囲・素材状態・表示設定を確認してください。",
   AUDIO_INDEX_ENTRY_MISSING: "必要な音声が未生成です。音声を生成してください。",
@@ -148,6 +152,7 @@ const blockerOrder: readonly string[] = [
   "OUTLINE_SOURCE_HASH_MISMATCH",
   "SCRIPT_NOT_APPROVED",
   "SCRIPT_OUTLINE_HASH_MISMATCH",
+  "NO_ENABLED_SECTION",
   "INSERT_TEXT_TEMPLATE_REFERENCE_INVALID",
   "VISUALS_NOT_APPROVED",
   "AUDIO_INDEX_UNREADABLE",
