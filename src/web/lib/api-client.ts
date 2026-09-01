@@ -22,13 +22,7 @@ import {
   characterVisualResponseSchema,
   characterVisualUpdateRequestSchema,
   characterVisualVariantMultipartRequestSchema,
-  outlineApproveRequestSchema,
-  outlineRejectRequestSchema,
-  outlineGenerateRequestSchema,
-  outlineReviewRequestSchema,
-  outlineSaveRequestSchema,
   modelsResponseSchema,
-  projectBriefSaveRequestSchema,
   projectCharactersSaveRequestSchema,
   projectCreateRequestSchema,
   projectCreateResponseSchema,
@@ -38,8 +32,6 @@ import {
   projectListResponseSchema,
   projectLineOverlaysSaveRequestSchema,
   projectMutationResponseSchema,
-  projectSourceReadResponseSchema,
-  projectSourceSaveRequestSchema,
   screenTemplateCreateRequestSchema,
   screenTemplateListQuerySchema,
   screenTemplateListResponseSchema,
@@ -54,8 +46,6 @@ import {
   insertTextTemplateResponseSchema,
   insertTextTemplateStatusChangeRequestSchema,
   insertTextTemplateUpdateRequestSchema,
-  scriptApproveRequestSchema,
-  scriptInitializeRequestSchema,
   scriptSaveRequestSchema,
   terminologyCreateRequestSchema,
   terminologyListQuerySchema,
@@ -94,20 +84,12 @@ import {
   type AiRunExportQuery,
   type AiRunSearchData,
   type AiRunSearchQuery,
-  type OutlineApproveRequest,
-  type OutlineRejectRequest,
-  type OutlineGenerateRequest,
-  type OutlineReviewRequest,
-  type OutlineSaveRequest,
-  type ProjectBriefSaveRequest,
   type ProjectCharactersSaveRequest,
   type ProjectCreateRequest,
   type ProjectEditResponse,
   type ProjectEditSaveRequest,
   type ProjectLineOverlaysSaveRequest,
   type ModelsResponse,
-  type ProjectSourceContent,
-  type ProjectSourceSaveRequest,
   type ScreenTemplateCreateRequest,
   type ScreenTemplateDetail,
   type ScreenTemplateListQuery,
@@ -118,8 +100,6 @@ import {
   type InsertTextTemplateListQuery,
   type InsertTextTemplateSummary,
   type InsertTextTemplateUpdateRequest,
-  type ScriptApproveRequest,
-  type ScriptInitializeRequest,
   type ScriptSaveRequest,
   type ProjectSummary,
   type TerminologyCreateRequest,
@@ -654,54 +634,6 @@ export function projectPreviewDownloadUrl(
     .join("/")}`;
 }
 
-export async function fetchProjectSource(
-  projectId: string
-): Promise<ProjectSourceContent & { revision: number }> {
-  const response = await fetchApi(
-    `/api/projects/${encodeURIComponent(projectId)}/source`,
-    projectSourceReadResponseSchema
-  );
-  return { ...response.data, revision: response.revision };
-}
-
-export async function saveProjectSource(
-  projectId: string,
-  input: ProjectSourceSaveRequest
-): Promise<VideoProject> {
-  const validatedInput = projectSourceSaveRequestSchema.parse(input);
-  const response = await fetchApi(
-    `/api/projects/${encodeURIComponent(projectId)}/source`,
-    projectMutationResponseSchema,
-    {
-      method: "PUT",
-      headers: {
-        "content-type": "application/json"
-      },
-      body: JSON.stringify(validatedInput)
-    }
-  );
-  return response.data;
-}
-
-export async function saveProjectBrief(
-  projectId: string,
-  input: ProjectBriefSaveRequest
-): Promise<VideoProject> {
-  const validatedInput = projectBriefSaveRequestSchema.parse(input);
-  const response = await fetchApi(
-    `/api/projects/${encodeURIComponent(projectId)}/brief`,
-    projectMutationResponseSchema,
-    {
-      method: "PUT",
-      headers: {
-        "content-type": "application/json"
-      },
-      body: JSON.stringify(validatedInput)
-    }
-  );
-  return response.data;
-}
-
 export async function saveProjectCharacterVisualBindings(
   projectId: string,
   input: ProjectCharactersSaveRequest
@@ -712,120 +644,6 @@ export async function saveProjectCharacterVisualBindings(
     projectMutationResponseSchema,
     {
       method: "PUT",
-      headers: {
-        "content-type": "application/json"
-      },
-      body: JSON.stringify(validatedInput)
-    }
-  );
-  return response.data;
-}
-
-export async function generateProjectOutline(
-  projectId: string,
-  input: OutlineGenerateRequest
-): Promise<VideoProject> {
-  const validatedInput = outlineGenerateRequestSchema.parse(input);
-  const response = await fetchApi(
-    `/api/projects/${encodeURIComponent(projectId)}/outline/generate`,
-    projectMutationResponseSchema,
-    {
-      method: "POST",
-      headers: {
-        "content-type": "application/json"
-      },
-      body: JSON.stringify(validatedInput)
-    }
-  );
-  return response.data;
-}
-
-export async function saveProjectOutline(
-  projectId: string,
-  input: OutlineSaveRequest
-): Promise<VideoProject> {
-  const validatedInput = outlineSaveRequestSchema.parse(input);
-  const response = await fetchApi(
-    `/api/projects/${encodeURIComponent(projectId)}/outline`,
-    projectMutationResponseSchema,
-    {
-      method: "PUT",
-      headers: {
-        "content-type": "application/json"
-      },
-      body: JSON.stringify(validatedInput)
-    }
-  );
-  return response.data;
-}
-
-export async function approveProjectOutline(
-  projectId: string,
-  input: OutlineApproveRequest
-): Promise<VideoProject> {
-  const validatedInput = outlineApproveRequestSchema.parse(input);
-  const response = await fetchApi(
-    `/api/projects/${encodeURIComponent(projectId)}/outline/approve`,
-    projectMutationResponseSchema,
-    {
-      method: "POST",
-      headers: {
-        "content-type": "application/json"
-      },
-      body: JSON.stringify(validatedInput)
-    }
-  );
-  return response.data;
-}
-
-export async function rejectProjectOutline(
-  projectId: string,
-  input: OutlineRejectRequest
-): Promise<VideoProject> {
-  const validatedInput = outlineRejectRequestSchema.parse(input);
-  const response = await fetchApi(
-    `/api/projects/${encodeURIComponent(projectId)}/outline/reject`,
-    projectMutationResponseSchema,
-    {
-      method: "POST",
-      headers: {
-        "content-type": "application/json"
-      },
-      body: JSON.stringify(validatedInput)
-    }
-  );
-  return response.data;
-}
-
-export async function reviewProjectOutline(
-  projectId: string,
-  input: OutlineReviewRequest
-): Promise<VideoProject> {
-  const validatedInput = outlineReviewRequestSchema.parse(input);
-  const response = await fetchApi(
-    `/api/projects/${encodeURIComponent(projectId)}/outline/review`,
-    projectMutationResponseSchema,
-    {
-      method: "POST",
-      headers: {
-        "content-type": "application/json"
-      },
-      body: JSON.stringify(validatedInput)
-    }
-  );
-  return response.data;
-}
-
-export async function initializeProjectScript(
-  projectId: string,
-  input: ScriptInitializeRequest
-): Promise<VideoProject> {
-  const validatedInput = scriptInitializeRequestSchema.parse(input);
-  const response = await fetchApi(
-    `/api/projects/${encodeURIComponent(projectId)}/script/initialize`,
-    projectMutationResponseSchema,
-    {
-      method: "POST",
       headers: {
         "content-type": "application/json"
       },
@@ -864,25 +682,6 @@ export async function saveProjectLineOverlays(
     projectMutationResponseSchema,
     {
       method: "PUT",
-      headers: {
-        "content-type": "application/json"
-      },
-      body: JSON.stringify(validatedInput)
-    }
-  );
-  return response.data;
-}
-
-export async function approveProjectScript(
-  projectId: string,
-  input: ScriptApproveRequest
-): Promise<VideoProject> {
-  const validatedInput = scriptApproveRequestSchema.parse(input);
-  const response = await fetchApi(
-    `/api/projects/${encodeURIComponent(projectId)}/script/approve`,
-    projectMutationResponseSchema,
-    {
-      method: "POST",
       headers: {
         "content-type": "application/json"
       },

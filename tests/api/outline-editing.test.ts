@@ -69,9 +69,9 @@ describe("legacy outline APIs", () => {
     ]);
 
     for (const response of responses) {
-      expect(response.statusCode).toBe(422);
+      expect(response.statusCode).toBe(404);
       expect(apiErrorResponseSchema.parse(response.json()).error.code).toBe(
-        "PROJECT_CANDIDATE_VALIDATION_FAILED"
+        "API_NOT_FOUND"
       );
     }
 

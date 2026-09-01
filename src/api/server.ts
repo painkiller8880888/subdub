@@ -11,7 +11,6 @@ import {
 } from "../app/projects/project-repository.js";
 import { ProjectService } from "../app/projects/project-service.js";
 import { ProjectEditService } from "../app/projects/project-edit-service.js";
-import { OutlineGenerationService } from "../app/projects/outline-generation-service.js";
 import { VisualSuggestionService } from "../app/projects/visual-suggestion-service.js";
 import { VisualAssignmentService } from "../app/projects/visual-assignment-service.js";
 import { TerminologyRepository } from "../app/terminology/terminology-repository.js";
@@ -204,8 +203,7 @@ export async function initializeServer(
     const resolvedProjectService =
       suppliedProjectService ??
       new ProjectService({
-        repository: resolvedProjectRepository,
-        improvementLogRepository: resolvedImprovementLogRepository
+        repository: resolvedProjectRepository
       });
     const resolvedProjectEditService =
       suppliedProjectEditService ??
@@ -214,14 +212,6 @@ export async function initializeServer(
         assetRepository: resolvedAssetRepository,
         workspaceRoot,
         libraryRoot: path.join(workspaceRoot, "library")
-      });
-    const resolvedOutlineGenerationService =
-      appOptions.outlineGenerationService ??
-      new OutlineGenerationService({
-        repository: resolvedProjectRepository,
-        modelService: resolvedModelService,
-        chatAdapter: resolvedChatAdapter,
-        improvementLogRepository: resolvedImprovementLogRepository
       });
     const resolvedVisualSuggestionService =
       appOptions.visualSuggestionService ??
@@ -329,7 +319,6 @@ export async function initializeServer(
     const app = buildApp({
       ...appOptions,
       modelService: resolvedModelService,
-      outlineGenerationService: resolvedOutlineGenerationService,
       visualSuggestionService: resolvedVisualSuggestionService,
       visualAssignmentService: resolvedVisualAssignmentService,
       projectService: resolvedProjectService,

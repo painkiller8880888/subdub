@@ -75,10 +75,7 @@ import {
   createVoicevoxSpeakersFixture,
   createVoicevoxWavFixture
 } from "../fixtures/voicevox.js";
-import {
-  createRepresentativeFrameScript,
-  representativeFrameMarkdown
-} from "../fixtures/e2e/representative-frame-project.js";
+import { createRepresentativeFrameScript } from "../fixtures/e2e/representative-frame-project.js";
 import { compareRepresentativeImages } from "../helpers/image-comparison.js";
 import {
   ALTERNATE_SCREEN_TEMPLATE_ID,
@@ -1110,19 +1107,6 @@ describe("MVP final verification E2E", () => {
         expect(project.revision).toBe(0);
         expect(project.characters).toHaveLength(2);
 
-        const sourceResponse = await server.app.inject({
-          method: "PUT",
-          url: `/api/projects/${projectId}/source`,
-          payload: {
-            markdown: representativeFrameMarkdown,
-            expectedRevision: project.revision
-          }
-        });
-        expect(sourceResponse.statusCode).toBe(200);
-        project = projectMutationResponseSchema.parse(
-          sourceResponse.json()
-        ).data;
-        expect(project.revision).toBe(1);
         expect(project).not.toHaveProperty("source");
         expect(project).not.toHaveProperty("brief");
         expect(project).not.toHaveProperty("outline");

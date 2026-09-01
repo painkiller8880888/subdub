@@ -23,7 +23,7 @@ describe("legacy script workflow APIs", () => {
     );
   });
 
-  it("rejects initialization and approval because V19 starts with a script", async () => {
+  it("retires initialization and approval because V19 starts with a script", async () => {
     const workspaceRoot = await fs.mkdtemp(
       path.join(tmpdir(), "subdub-script-approval-")
     );
@@ -46,9 +46,9 @@ describe("legacy script workflow APIs", () => {
         url: `/api/projects/${created.metadata.id}/${pathSuffix}`,
         payload: { expectedRevision: created.revision }
       });
-      expect(response.statusCode).toBe(422);
+      expect(response.statusCode).toBe(404);
       expect(apiErrorResponseSchema.parse(response.json()).error.code).toBe(
-        "PROJECT_CANDIDATE_VALIDATION_FAILED"
+        "API_NOT_FOUND"
       );
     }
   });

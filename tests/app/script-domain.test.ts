@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   assertNoRemovedScriptSections,
   normalizeEditedScriptIds
-} from "../../src/app/projects/script-domain.js";
+} from "../../src/app/projects/current-script-domain.js";
 import { createScriptSection } from "../../src/app/projects/starter-script-sections.js";
 import type { Script, VideoProject } from "../../src/schema/index.js";
 import { videoProjectFixture } from "../fixtures/video-project.js";

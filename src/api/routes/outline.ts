@@ -3,9 +3,16 @@ import type { FastifyInstance } from "fastify";
 import { OutlineGenerationService } from "../../app/projects/outline-generation-service.js";
 import {
   createApiSuccessResponse,
-  outlineGenerateRequestSchema,
   projectMutationResponseSchema
 } from "../../schema/api.js";
+import { outlineGenerateRequestSchema } from "../../schema/legacy-api.js";
+
+/**
+ * Compatibility-only route registration. The standard Fastify composition
+ * deliberately does not call this function; PC-04 retires the planning API
+ * from the current runtime while keeping the implementation available for
+ * isolated legacy maintenance.
+ */
 
 export function registerOutlineRoutes(
   app: FastifyInstance,

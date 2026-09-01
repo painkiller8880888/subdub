@@ -14,14 +14,16 @@ import {
 import {
   ApiClientError,
   ApiClientProtocolError,
-  approveProjectOutline,
-  rejectProjectOutline,
   fetchModels,
-  fetchProject,
+  fetchProject
+} from "./lib/api-client";
+import {
+  approveProjectOutline,
   generateProjectOutline,
+  rejectProjectOutline,
   reviewProjectOutline,
   saveProjectOutline
-} from "./lib/api-client";
+} from "./lib/legacy-api-client";
 import { AutosaveCoordinator, type AutosaveState } from "./brief-autosave";
 import { WorkflowIndicator } from "./WorkflowIndicator";
 import {

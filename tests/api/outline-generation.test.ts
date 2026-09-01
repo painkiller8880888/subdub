@@ -46,9 +46,9 @@ describe("legacy outline generation API", () => {
       url: `/api/projects/${created.metadata.id}/outline/generate`,
       payload: { expectedRevision: created.revision }
     });
-    expect(response.statusCode).toBe(422);
+    expect(response.statusCode).toBe(404);
     expect(apiErrorResponseSchema.parse(response.json()).error.code).toBe(
-      "PROJECT_CANDIDATE_VALIDATION_FAILED"
+      "API_NOT_FOUND"
     );
 
     const detail = await server.app.inject({

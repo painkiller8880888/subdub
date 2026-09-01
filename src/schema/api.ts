@@ -13,8 +13,6 @@ import {
   strictObject
 } from "./primitives.js";
 import {
-  outlineSchema,
-  projectBriefSchema,
   pronunciationSchema,
   scriptSchema,
   editPlanSchema,
@@ -814,34 +812,6 @@ export const aiRunSearchResponseSchema = strictObject({
   data: aiRunSearchDataSchema
 });
 
-export const projectSourceContentSchema = z
-  .object({
-    markdown: z.string(),
-    sha256: sha256Schema
-  })
-  .strict();
-
-export const projectSourceReadResponseSchema = z
-  .object({
-    data: projectSourceContentSchema,
-    revision: nonNegativeIntegerSchema
-  })
-  .strict();
-
-export const projectSourceSaveRequestSchema = z
-  .object({
-    markdown: z.string(),
-    expectedRevision: nonNegativeIntegerSchema
-  })
-  .strict();
-
-export const projectBriefSaveRequestSchema = z
-  .object({
-    brief: projectBriefSchema,
-    expectedRevision: nonNegativeIntegerSchema
-  })
-  .strict();
-
 /**
  * Edit mutations accept the selected asset ID and version. The checksum and
  * project path are resolved by the backend after that exact version has been
@@ -982,34 +952,6 @@ export const visualAssignmentSaveRequestSchema = visualAssignmentRequestSchema;
 
 export const visualAssignmentResponseSchema = projectMutationResponseSchema;
 
-export const outlineGenerateRequestSchema = z
-  .object({
-    expectedRevision: nonNegativeIntegerSchema,
-    modelId: z.string().min(1).optional()
-  })
-  .strict();
-
-export const outlineSaveRequestSchema = z
-  .object({
-    outline: outlineSchema,
-    expectedRevision: nonNegativeIntegerSchema
-  })
-  .strict();
-
-export const outlineApproveRequestSchema = z
-  .object({
-    expectedRevision: nonNegativeIntegerSchema,
-    reason: optionalImprovementReasonSchema
-  })
-  .strict();
-
-export const outlineRejectRequestSchema = z
-  .object({
-    expectedRevision: nonNegativeIntegerSchema,
-    reason: optionalImprovementReasonSchema
-  })
-  .strict();
-
 export const visualSuggestionCandidateRejectRequestSchema = strictObject({
   expectedRevision: nonNegativeIntegerSchema,
   reason: optionalImprovementReasonSchema
@@ -1024,24 +966,6 @@ export const improvementDecisionResponseSchema = strictObject({
   data: improvementDecisionSummarySchema,
   revision: nonNegativeIntegerSchema
 });
-
-export const outlineReviewRequestSchema = z
-  .object({
-    expectedRevision: nonNegativeIntegerSchema
-  })
-  .strict();
-
-export const scriptInitializeRequestSchema = z
-  .object({
-    expectedRevision: nonNegativeIntegerSchema
-  })
-  .strict();
-
-export const scriptApproveRequestSchema = z
-  .object({
-    expectedRevision: nonNegativeIntegerSchema
-  })
-  .strict();
 
 export const scriptSaveRequestSchema = z
   .object({
@@ -1390,16 +1314,6 @@ export type ProjectCreateResponse = z.infer<
 export type ProjectDetailResponse = z.infer<
   typeof projectDetailResponseSchema
 >;
-export type ProjectSourceContent = z.infer<typeof projectSourceContentSchema>;
-export type ProjectSourceReadResponse = z.infer<
-  typeof projectSourceReadResponseSchema
->;
-export type ProjectSourceSaveRequest = z.infer<
-  typeof projectSourceSaveRequestSchema
->;
-export type ProjectBriefSaveRequest = z.infer<
-  typeof projectBriefSaveRequestSchema
->;
 export type ProjectEditVideoElementInput = z.infer<
   typeof projectEditVideoElementInputSchema
 >;
@@ -1449,17 +1363,6 @@ export type VisualAssignmentSaveRequest = z.infer<
 export type VisualAssignmentResponse = z.infer<
   typeof visualAssignmentResponseSchema
 >;
-export type OutlineGenerateRequest = z.infer<
-  typeof outlineGenerateRequestSchema
->;
-export type OutlineSaveRequest = z.infer<typeof outlineSaveRequestSchema>;
-export type OutlineApproveRequest = z.infer<typeof outlineApproveRequestSchema>;
-export type OutlineRejectRequest = z.infer<typeof outlineRejectRequestSchema>;
-export type OutlineReviewRequest = z.infer<typeof outlineReviewRequestSchema>;
-export type ScriptInitializeRequest = z.infer<
-  typeof scriptInitializeRequestSchema
->;
-export type ScriptApproveRequest = z.infer<typeof scriptApproveRequestSchema>;
 export type ScriptSaveRequest = z.infer<typeof scriptSaveRequestSchema>;
 export type VisualSuggestionCandidateRejectRequest = z.infer<
   typeof visualSuggestionCandidateRejectRequestSchema

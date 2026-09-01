@@ -6,19 +6,17 @@ import Fastify, {
 } from "fastify";
 
 import { createApiSuccessResponse } from "../schema/api.js";
-import { ProjectService } from "../app/projects/project-service.js";
 import { createOpenRouterModelService } from "../openrouter/model-service.js";
-import { OutlineGenerationService } from "../app/projects/outline-generation-service.js";
 import type { AssetUploadLimits } from "../app/assets/asset-upload-limits.js";
 import { DEFAULT_ASSET_UPLOAD_LIMITS } from "../app/assets/asset-upload-limits.js";
 import { registerApiErrorHandler } from "./middleware/error-handler.js";
 import { registerNotFoundHandler } from "./middleware/not-found-handler.js";
 import { registerModelRoutes } from "./routes/models.js";
-import { registerOutlineRoutes } from "./routes/outline.js";
 import { registerVisualSuggestionRoutes } from "./routes/visual-suggestions.js";
 import {
   registerProjectRoutes,
-  type ProjectEditServicePort
+  type ProjectEditServicePort,
+  type ProjectServicePort
 } from "./routes/projects.js";
 import {
   registerTerminologyRoutes,
@@ -79,9 +77,8 @@ export type AppOptions = {
     ReturnType<typeof createOpenRouterModelService>,
     "listModels"
   >;
-  projectService?: ProjectService;
+  projectService?: ProjectServicePort;
   projectEditService?: ProjectEditServicePort;
-  outlineGenerationService?: Pick<OutlineGenerationService, "generate">;
   visualSuggestionService?: Pick<VisualSuggestionService, "generate"> &
     Partial<Pick<VisualSuggestionService, "rejectCandidate">>;
   visualAssignmentService?: import("./routes/visual-assignments.js").VisualAssignmentServicePort;
@@ -150,10 +147,6 @@ export function buildApp(options: AppOptions = {}): FastifyInstance {
       options.projectService,
       options.projectEditService
     );
-  }
-
-  if (options.outlineGenerationService !== undefined) {
-    registerOutlineRoutes(app, options.outlineGenerationService);
   }
 
   if (options.visualSuggestionService !== undefined) {
