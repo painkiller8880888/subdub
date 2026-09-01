@@ -904,7 +904,6 @@ export class ProjectRepository {
     if (expectedRevisionResult.data !== currentProject.revision) {
       throw revisionConflictError();
     }
-    await this.readValidatedSource(paths, currentProject);
 
     const updatedProjectResult = videoProjectSchema.safeParse({
       ...currentProject,

@@ -62,6 +62,12 @@ function getExportErrorMessage(error: unknown): string {
 
 function taskKindLabel(kind: AiRunSearchItem["taskKind"]): string {
   switch (kind) {
+    case "outline_generation":
+      return "過去の構成案生成";
+    case "script_generation":
+      return "過去の台本生成";
+    case "script_review":
+      return "過去の台本レビュー";
     case "visual_search_intent":
       return "ビジュアル候補の検索条件作成";
     case "layout_review":

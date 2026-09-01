@@ -75,4 +75,17 @@ describe("ProjectRepository source handling", () => {
       status: 422
     } satisfies Partial<ProjectRepositoryError>);
   });
+
+  it("saves the current V19 script without requiring source.md", async () => {
+    await fs.rm(
+      path.join(workspaceRoot, "projects", projectId, "source", "source.md")
+    );
+
+    await expect(
+      repository.saveScript(projectId, project.script, project.revision)
+    ).resolves.toMatchObject({
+      schemaVersion: "1.9.0",
+      revision: project.revision + 1
+    });
+  });
 });

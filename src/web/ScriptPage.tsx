@@ -927,6 +927,7 @@ export function ScriptPage() {
   const [overlayError, setOverlayError] = useState<unknown>(null);
   const projectIdRef = useRef(projectId ?? "");
   const projectGenerationRef = useRef(0);
+  const initializedForProjectRef = useRef<string | null>(null);
   const revisionRef = useRef(0);
   const draftRef = useRef<Script | null>(null);
   const lastSavedRef = useRef<Script | null>(null);
@@ -1210,6 +1211,7 @@ export function ScriptPage() {
       return;
     }
     projectGenerationRef.current += 1;
+    initializedForProjectRef.current = null;
     draftRef.current = null;
     lastSavedRef.current = null;
     revisionRef.current = 0;
@@ -1235,10 +1237,12 @@ export function ScriptPage() {
       projectId === undefined ||
       coordinator === null ||
       projectQuery.data === undefined ||
-      projectQuery.isError
+      projectQuery.isError ||
+      initializedForProjectRef.current === projectId
     ) {
       return;
     }
+    initializedForProjectRef.current = projectId;
     revisionRef.current = projectQuery.data.revision;
     adoptProject(projectQuery.data);
   }, [coordinator, projectId, projectQuery.data, projectQuery.isError]);
@@ -2800,6 +2804,7 @@ export function ScriptPage() {
                 <button
                   className="button script-section-add-line"
                   type="button"
+                  onMouseDown={(event) => event.preventDefault()}
                   onClick={() => addLine(sectionIndex)}
                 >
                   セリフを追加

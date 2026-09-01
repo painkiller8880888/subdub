@@ -1,6 +1,5 @@
 import { z } from "zod";
 
-import { aiTaskKindSchema, type AiTaskKind } from "./video-project.js";
 import { renderProfileSchema } from "./render-profile.js";
 import {
   idSchema,
@@ -16,6 +15,18 @@ const lowercaseSha256Schema = z
   .regex(/^[0-9a-f]{64}$/, "must be a lowercase SHA-256 hash");
 
 export const runKindSchema = z.enum(["ai", "voice", "manifest", "render"]);
+/**
+ * Run logs outlive the current project task selector. Keep historical task
+ * kinds readable even though VideoProject 1.9.0 only emits the current three.
+ */
+export const runLogAiTaskKindSchema = z.enum([
+  "outline_generation",
+  "script_generation",
+  "script_review",
+  "visual_search_intent",
+  "layout_review",
+  "opencode"
+]);
 export const runStatusSchema = z.enum([
   "queued",
   "running",
@@ -177,8 +188,10 @@ function addRunStatusIssues(
 const aiRunLogBaseSchema = strictObject({
   ...runLogInvariantFields,
   kind: z.literal("ai"),
-  taskKind: aiTaskKindSchema,
-  sourceHash: lowercaseSha256Schema,
+  taskKind: runLogAiTaskKindSchema,
+  // V19 current tasks do not require a source/source.md input. Legacy AI
+  // records keep their required source hash in legacyAiRunLogSchema below.
+  sourceHash: lowercaseSha256Schema.nullable(),
   modelId: z.string().min(1).nullable(),
   modelSelectionSource: z
     .enum(["run_override", "task_override", "default"])
@@ -249,7 +262,7 @@ export type VoiceRunLog = z.infer<typeof voiceRunLogBaseSchema>;
 export type ManifestRunLog = z.infer<typeof manifestRunLogBaseSchema>;
 export type CommonRenderRunLog = z.infer<typeof renderRunLogBaseSchema>;
 export type RunLog = z.infer<typeof runLogSchema>;
-export type RunLogAiTaskKind = AiTaskKind;
+export type RunLogAiTaskKind = z.infer<typeof runLogAiTaskKindSchema>;
 
 /*
  * These schemas describe the two contracts written by versions before
@@ -259,7 +272,7 @@ export type RunLogAiTaskKind = AiTaskKind;
 export const legacyAiRunLogSchema = strictObject({
   runId: idSchema,
   kind: z.literal("ai"),
-  taskKind: aiTaskKindSchema,
+  taskKind: runLogAiTaskKindSchema,
   projectId: idSchema,
   startRevision: nonNegativeIntegerSchema,
   sourceHash: sha256Schema,

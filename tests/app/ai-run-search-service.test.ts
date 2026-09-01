@@ -332,6 +332,32 @@ function createFixture() {
 }
 
 describe("AiRunSearchService", () => {
+  it("keeps historical AI task kinds visible in search and export", async () => {
+    const fixture = createFixture();
+    fixture.runsByProject.get("project-one")!.push(
+      makeRun({
+        runId: "run-legacy-outline",
+        projectId: "project-one",
+        queuedAt: "2026-08-11T00:00:00.000Z",
+        taskKind: "outline_generation"
+      })
+    );
+
+    const result = await fixture.service.search(makeQuery());
+    expect(result.items).toContainEqual(
+      expect.objectContaining({
+        runId: "run-legacy-outline",
+        taskKind: "outline_generation"
+      })
+    );
+    expect(() =>
+      aiRunExportRecordSchema.parse({
+        exportVersion: "1.0.0",
+        ...result.items.find((item) => item.runId === "run-legacy-outline")
+      })
+    ).not.toThrow();
+  });
+
   it("joins projects, excludes non-AI runs, summarizes before pagination, and sorts ties", async () => {
     const fixture = createFixture();
 

@@ -17,6 +17,13 @@ describe("ScriptPage workflow navigation", () => {
     expect(source).not.toContain("制作 台本・ビジュアル・音声");
   });
 
+  it("adopts the server project only once per project", async () => {
+    const source = await fs.readFile("src/web/ScriptPage.tsx", "utf8");
+
+    expect(source).toContain("initializedForProjectRef.current === projectId");
+    expect(source).toContain("initializedForProjectRef.current = null;");
+  });
+
   it("places the section line-add action after the section lines", async () => {
     const source = await fs.readFile("src/web/ScriptPage.tsx", "utf8");
     const sectionHeaderStart = source.indexOf(

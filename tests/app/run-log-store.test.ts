@@ -96,7 +96,7 @@ describe("RunLogStore", () => {
       JSON.stringify({
         runId: "a-legacy",
         kind: "ai",
-        taskKind: "visual_search_intent",
+        taskKind: "outline_generation",
         projectId,
         startRevision: 1,
         sourceHash: hash,
@@ -238,7 +238,7 @@ describe("RunLogStore", () => {
       JSON.stringify({
         runId: "legacy-ai",
         kind: "ai",
-        taskKind: "visual_search_intent",
+        taskKind: "outline_generation",
         projectId,
         startRevision: 1,
         sourceHash: hash,
@@ -298,6 +298,7 @@ describe("RunLogStore", () => {
     );
     await expect(store.read(projectId, "legacy-ai")).resolves.toMatchObject({
       kind: "ai",
+      taskKind: "outline_generation",
       projectRevision: 1,
       outputs: [{ checksum: hash }]
     });

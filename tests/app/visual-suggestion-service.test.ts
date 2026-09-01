@@ -359,6 +359,7 @@ describe("VisualSuggestionService", () => {
     const runLog = aiRunLogSchema.parse(JSON.parse(runJson));
     expect(runLog).toMatchObject({
       taskKind: "visual_search_intent",
+      sourceHash: null,
       status: "succeeded",
       modelId: "task-model",
       modelSelectionSource: "task_override",
@@ -374,6 +375,32 @@ describe("VisualSuggestionService", () => {
       schemaValidation: "passed"
     });
     expect(runJson).not.toContain("unique visual");
+  });
+
+  it("generates current visual suggestions without requiring source.md", async () => {
+    const setup = await readySetup();
+    await fs.rm(
+      path.join(
+        setup.workspaceRoot,
+        "projects",
+        setup.project.metadata.id,
+        "source"
+      ),
+      { recursive: true, force: true }
+    );
+    const chat = createService(setup, intent());
+
+    await expect(
+      chat.service.generate(setup.project.metadata.id, {
+        startLineId: "main-mentor-1",
+        endLineId: "main-learner-1",
+        expectedRevision: setup.project.revision
+      })
+    ).resolves.toMatchObject({
+      revision: setup.project.revision + 1,
+      data: { runId: "visual-suggestion-run" }
+    });
+    expect(chat.chatAdapter.complete).toHaveBeenCalledTimes(1);
   });
 
   it("stores each successful backend candidate with its run, model, and prompt version", async () => {

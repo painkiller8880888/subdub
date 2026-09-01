@@ -95,7 +95,7 @@ export type VisualSuggestionDecisionResult = {
 type RunState = {
   readonly runId: string;
   readonly startRevision: number;
-  readonly sourceHash: string;
+  readonly sourceHash: string | null;
   readonly inputHash: string;
   readonly startedAt: string;
   modelId: string | null;
@@ -346,25 +346,16 @@ function toSuggestionCandidates(
   });
 }
 
-function assertSuggestionAllowed(
-  project: VideoProject,
-  sourceHash: string
-): void {
-  void project;
-  void sourceHash;
-}
-
 function buildRunState(
   project: VideoProject,
   runId: string,
   inputHash: string,
-  sourceHash: string,
   startedAt: string
 ): RunState {
   return {
     runId,
     startRevision: project.revision,
-    sourceHash,
+    sourceHash: null,
     inputHash,
     startedAt,
     modelId: null,
@@ -427,17 +418,16 @@ export class VisualSuggestionService {
     input: unknown
   ): Promise<VisualSuggestionServiceResult> {
     const request = visualSuggestionRequestSchema.parse(input);
-    const snapshot = await this.repository.readGenerationSnapshot(projectId);
-    if (snapshot.project.revision !== request.expectedRevision) {
+    const project = await this.repository.read(projectId);
+    if (project.revision !== request.expectedRevision) {
       throw new ProjectRepositoryError(
         "PROJECT_REVISION_CONFLICT",
         409,
         "The project revision does not match the expected revision."
       );
     }
-    assertSuggestionAllowed(snapshot.project, snapshot.sourceHash);
     const target = resolveVisualSuggestionTarget(
-      snapshot.project,
+      project,
       request.startLineId,
       request.endLineId
     );
@@ -453,21 +443,20 @@ export class VisualSuggestionService {
     const runId = this.createId();
     const startedAtDate = this.now();
     const run = buildRunState(
-      snapshot.project,
+      project,
       runId,
       inputHash,
-      snapshot.sourceHash,
       startedAtDate.toISOString()
     );
     let runStarted = false;
 
     try {
-      await this.writeStartedRunLog(snapshot.project, run);
+      await this.writeStartedRunLog(project, run);
       runStarted = true;
 
       const models = await this.modelService.listModels();
       const resolution = resolveModel({
-        settings: snapshot.project.aiSettings,
+        settings: project.aiSettings,
         taskKind: "visual_search_intent",
         runOverride: request.modelId,
         models: models.models,
@@ -510,9 +499,9 @@ export class VisualSuggestionService {
           unknown
         >,
         maxTokens: this.reservedOutputTokens,
-        zdr: snapshot.project.aiSettings.zdr,
-        dataCollection: snapshot.project.aiSettings.dataCollection,
-        allowProviderFallbacks: snapshot.project.aiSettings.allowProviderFallbacks
+        zdr: project.aiSettings.zdr,
+        dataCollection: project.aiSettings.dataCollection,
+        allowProviderFallbacks: project.aiSettings.allowProviderFallbacks
       });
       Object.assign(run, responseDetails(response));
       run.responseTimeMs = Math.max(
@@ -585,11 +574,11 @@ export class VisualSuggestionService {
       const saved = await this.repository.save(
         projectId,
         {
-          ...snapshot.project,
+          ...project,
           visuals: {
-            ...snapshot.project.visuals,
+            ...project.visuals,
             suggestionRunIds: [
-              ...snapshot.project.visuals.suggestionRunIds,
+              ...project.visuals.suggestionRunIds,
               runId
             ]
           }
@@ -627,7 +616,7 @@ export class VisualSuggestionService {
       }
       if (runStarted) {
         await this.tryFinalizeRunLog(
-          snapshot.project,
+          project,
           run,
           "failed",
           errorCode(error)
@@ -654,8 +643,8 @@ export class VisualSuggestionService {
     const safeGenerationRunId = idSchema.parse(generationRunId);
     const safeAssetId = idSchema.parse(assetId);
     const request = visualSuggestionCandidateRejectRequestSchema.parse(input);
-    const snapshot = await this.repository.readGenerationSnapshot(safeProjectId);
-    if (snapshot.project.revision !== request.expectedRevision) {
+    const project = await this.repository.read(safeProjectId);
+    if (project.revision !== request.expectedRevision) {
       throw new ProjectRepositoryError(
         "PROJECT_REVISION_CONFLICT",
         409,
@@ -685,14 +674,14 @@ export class VisualSuggestionService {
         "The visual suggestion candidate relation is invalid."
       );
     }
-    if (!snapshot.project.visuals.suggestionRunIds.includes(safeGenerationRunId)) {
+    if (!project.visuals.suggestionRunIds.includes(safeGenerationRunId)) {
       throw new ImprovementLogError(
         IMPROVEMENT_LOG_ERROR_CODE.relationInvalid,
         422,
         "The visual suggestion run is not active for this project."
       );
     }
-    if (candidate.projectRevision !== snapshot.project.revision) {
+    if (candidate.projectRevision !== project.revision) {
       throw new ImprovementLogError(
         IMPROVEMENT_LOG_ERROR_CODE.relationInvalid,
         409,
@@ -709,7 +698,7 @@ export class VisualSuggestionService {
     }
     const [startLineId, endLineId] = targetParts;
     resolveVisualSuggestionTarget(
-      snapshot.project,
+      project,
       startLineId!,
       endLineId!
     );
@@ -741,8 +730,8 @@ export class VisualSuggestionService {
       decisionId: `${safeGenerationRunId}-decision-${safeAssetId}-rejected`,
       candidateId: candidate.candidateId,
       projectId: safeProjectId,
-      projectRevisionBefore: snapshot.project.revision,
-      projectRevisionAfter: snapshot.project.revision,
+      projectRevisionBefore: project.revision,
+      projectRevisionAfter: project.revision,
       decision: "rejected",
       after: null,
       reason: normalizeImprovementReason(request.reason),
@@ -755,7 +744,7 @@ export class VisualSuggestionService {
         decision: decision.decision,
         createdAt: decision.createdAt
       }),
-      revision: snapshot.project.revision
+      revision: project.revision
     };
   }
 
