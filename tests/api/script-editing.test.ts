@@ -105,6 +105,55 @@ describe("V19 script editing API", () => {
     );
   });
 
+  it("returns a revision conflict before hard-delete validation for a stale candidate", async () => {
+    const workspaceRoot = await fs.mkdtemp(
+      path.join(tmpdir(), "subdub-script-edit-stale-section-")
+    );
+    roots.push(workspaceRoot);
+    const server = await initializeServer({ workspaceRoot });
+    servers.push(server);
+
+    const createdResponse = await server.app.inject({
+      method: "POST",
+      url: "/api/projects",
+      payload: { title: "Stale script section project" }
+    });
+    const created = projectCreateResponseSchema.parse(
+      createdResponse.json()
+    ).data;
+    const staleScript = structuredClone(created.script);
+    const otherClientCandidate = {
+      ...created.script,
+      sections: [
+        ...created.script.sections,
+        createScriptSection("client-added-section", "別クライアントの追加")
+      ]
+    };
+
+    const otherClientResponse = await server.app.inject({
+      method: "PUT",
+      url: `/api/projects/${created.metadata.id}/script`,
+      payload: {
+        script: otherClientCandidate,
+        expectedRevision: created.revision
+      }
+    });
+    expect(otherClientResponse.statusCode).toBe(200);
+
+    const staleResponse = await server.app.inject({
+      method: "PUT",
+      url: `/api/projects/${created.metadata.id}/script`,
+      payload: {
+        script: staleScript,
+        expectedRevision: created.revision
+      }
+    });
+    expect(staleResponse.statusCode).toBe(409);
+    expect(apiErrorResponseSchema.parse(staleResponse.json()).error.code).toBe(
+      "PROJECT_REVISION_CONFLICT"
+    );
+  });
+
   it("supports section create, reorder, deactivate, reactivate, and persistence", async () => {
     const workspaceRoot = await fs.mkdtemp(
       path.join(tmpdir(), "subdub-script-section-lifecycle-")
@@ -230,7 +279,7 @@ describe("V19 script editing API", () => {
               ...section,
               name: "再有効化したセクション",
               enabled: true,
-              screenTemplateId: "screen-template-standard"
+              screenTemplateId: "missing-after-reactivation"
             }
           : section
       )
@@ -251,7 +300,8 @@ describe("V19 script editing API", () => {
     expect(reactivated.script.sections[0]).toMatchObject({
       id: addedSectionId,
       name: "再有効化したセクション",
-      enabled: true
+      enabled: true,
+      screenTemplateId: "missing-after-reactivation"
     });
 
     await server.app.close();
