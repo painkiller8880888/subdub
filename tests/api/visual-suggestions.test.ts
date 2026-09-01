@@ -5,7 +5,6 @@ import * as path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { buildApp } from "../../src/api/app.js";
-import { computeOutlineHash } from "../../src/app/projects/script-domain.js";
 import { createEmptyVideoProject } from "../../src/app/projects/empty-video-project.js";
 import { ProjectRepository } from "../../src/app/projects/project-repository.js";
 import { VisualSuggestionService } from "../../src/app/projects/visual-suggestion-service.js";
@@ -47,40 +46,19 @@ async function setupProject(workspaceRoot: string): Promise<VideoProject> {
     "# API visual source\n",
     created.revision
   );
-  const candidate = structuredClone(videoProjectFixture) as VideoProject;
-  candidate.metadata = {
-    ...candidate.metadata,
-    id: created.metadata.id,
-    createdAt: sourceProject.metadata.createdAt,
-    updatedAt: sourceProject.metadata.updatedAt
-  };
-  candidate.source = sourceProject.source;
-  candidate.outline = {
-    ...candidate.outline,
-    status: "approved",
-    sourceHash: sourceProject.source.sha256,
-    sections: candidate.outline.sections.map((section) => ({
-      ...section,
-      sourceRefs: section.sourceRefs.map((sourceRef) => ({
-        ...sourceRef,
-        sourceId: sourceProject.source.id
-      }))
-    }))
-  };
-  candidate.script = {
-    ...candidate.script,
-    status: "draft",
-    outlineHash: computeOutlineHash(candidate.outline)
-  };
-  candidate.aiSettings = {
-    ...candidate.aiSettings,
-    defaultModelId: "api-model",
-    taskModelOverrides: {}
-  };
-  candidate.visuals = {
-    status: "draft",
-    suggestionRunIds: [],
-    assignments: []
+  const candidate: VideoProject = {
+    ...sourceProject,
+    script: structuredClone(videoProjectFixture.script),
+    aiSettings: {
+      ...sourceProject.aiSettings,
+      defaultModelId: "api-model",
+      taskModelOverrides: {}
+    },
+    visuals: {
+      status: "draft",
+      suggestionRunIds: [],
+      assignments: []
+    }
   };
   return repository.save(
     created.metadata.id,

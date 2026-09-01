@@ -7,7 +7,7 @@ const NOW = new Date("2026-08-04T00:00:00.000Z");
 
 const settings = {
   defaultModelId: "default/model",
-  taskModelOverrides: { outline_generation: "task/model" },
+  taskModelOverrides: { visual_search_intent: "task/model" },
   zdr: true,
   dataCollection: "deny",
   allowProviderFallbacks: true
@@ -43,7 +43,7 @@ describe("OpenRouter model resolver", () => {
     expect(
       resolveModel({
         settings,
-        taskKind: "outline_generation",
+        taskKind: "visual_search_intent",
         runOverride: "run/model",
         models,
         now: () => NOW
@@ -52,7 +52,7 @@ describe("OpenRouter model resolver", () => {
     expect(
       resolveModel({
         settings,
-        taskKind: "outline_generation",
+        taskKind: "visual_search_intent",
         models,
         now: () => NOW
       })
@@ -64,7 +64,7 @@ describe("OpenRouter model resolver", () => {
     expect(
       resolveModel({
         settings: { ...settings, taskModelOverrides: {} },
-        taskKind: "outline_generation",
+        taskKind: "visual_search_intent",
         models,
         now: () => NOW
       })
@@ -73,7 +73,7 @@ describe("OpenRouter model resolver", () => {
 
   it("reports unselected, missing, unsupported, expired, and ZDR failures distinctly", () => {
     const baseInput = {
-      taskKind: "outline_generation" as const,
+      taskKind: "visual_search_intent" as const,
       models: [
         model("textless/model", { outputModalities: ["image"] }),
         model("unstructured/model", { structuredOutputs: false }),

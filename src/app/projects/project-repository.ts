@@ -9,7 +9,8 @@ import {
   outlineSchema,
   scriptSchema,
   videoProjectSchema,
-  type VideoProject
+  type VideoProject,
+  type VideoProjectV18
 } from "../../schema/index.js";
 import {
   RunLogStore,
@@ -402,16 +403,6 @@ function sourceReadFailedError(): ProjectRepositoryError {
   );
 }
 
-function sourceHashMismatchError(): ProjectRepositoryError {
-  return new ProjectRepositoryError(
-    "PROJECT_SOURCE_HASH_MISMATCH",
-    422,
-    "The project source hash does not match the project data.",
-    [],
-    "Project source integrity could not be verified."
-  );
-}
-
 function rollbackFailedError(): ProjectRepositoryError {
   return new ProjectRepositoryError(
     "PROJECT_ROLLBACK_FAILED",
@@ -792,6 +783,15 @@ export class ProjectRepository {
       projectId,
       paths
     );
+    if (!("brief" in currentProject)) {
+      throw candidateValidationFailedError([
+        {
+          path: ["brief"],
+          message: "brief is not part of the current project schema"
+        }
+      ]);
+    }
+    const legacyCurrentProject = currentProject as unknown as VideoProjectV18;
     const briefResult = projectBriefSchema.safeParse(brief);
     if (!briefResult.success) {
       throw candidateValidationFailedError(validationIssues(briefResult.error));
@@ -808,9 +808,10 @@ export class ProjectRepository {
     await this.readValidatedSource(paths, currentProject);
 
     const briefChanged =
-      JSON.stringify(currentProject.brief) !== JSON.stringify(briefResult.data);
+      JSON.stringify(legacyCurrentProject.brief) !==
+      JSON.stringify(briefResult.data);
     const baseProject = briefChanged
-      ? invalidateForUpstreamChange(currentProject)
+      ? invalidateForUpstreamChange(legacyCurrentProject)
       : currentProject;
     const updatedProjectResult = videoProjectSchema.safeParse({
       ...baseProject,
@@ -840,6 +841,15 @@ export class ProjectRepository {
       projectId,
       paths
     );
+    if (!("outline" in currentProject)) {
+      throw candidateValidationFailedError([
+        {
+          path: ["outline"],
+          message: "outline is not part of the current project schema"
+        }
+      ]);
+    }
+    const legacyCurrentProject = currentProject as unknown as VideoProjectV18;
     const outlineResult = outlineSchema.safeParse(outline);
     if (!outlineResult.success) {
       throw candidateValidationFailedError(validationIssues(outlineResult.error));
@@ -852,9 +862,9 @@ export class ProjectRepository {
     if (expectedRevisionResult.data !== currentProject.revision) {
       throw revisionConflictError();
     }
-    await this.readValidatedSource(paths, currentProject);
+    await this.readValidatedSource(paths, legacyCurrentProject);
     const updatedProjectResult = videoProjectSchema.safeParse({
-      ...currentProject,
+      ...legacyCurrentProject,
       revision: currentProject.revision + 1,
       outline: outlineResult.data,
       metadata: {
@@ -949,10 +959,6 @@ export class ProjectRepository {
     const updatedProjectResult = videoProjectSchema.safeParse({
       ...baseProject,
       revision: currentProject.revision + 1,
-      source: {
-        ...baseProject.source,
-        sha256: sha256(markdown)
-      },
       metadata: {
         ...currentProject.metadata,
         updatedAt: this.now().toISOString()
@@ -1469,8 +1475,9 @@ export class ProjectRepository {
 
   private async readValidatedSource(
     paths: ResolvedProjectPaths,
-    project: VideoProject
+    project: VideoProject | VideoProjectV18
   ): Promise<string> {
+    void project;
     const managementRootPath = await this.resolveExistingPath(
       this.workspaceRoot
     );
@@ -1515,9 +1522,6 @@ export class ProjectRepository {
       throw sourceReadFailedError();
     }
 
-    if (sha256(contents) !== project.source.sha256) {
-      throw sourceHashMismatchError();
-    }
     return contents;
   }
 

@@ -154,7 +154,7 @@ describe("ScreenTemplate cross-layer acceptance fixture", () => {
 
     expect(migrated.migrated).toBe(true);
     const project = videoProjectSchema.parse(migrated.project);
-    expect(project.schemaVersion).toBe("1.8.0");
+    expect(project.schemaVersion).toBe("1.9.0");
     expect(
       project.script.sections.every(
         (section) => section.screenTemplateId === STANDARD_SCREEN_TEMPLATE_ID
@@ -207,7 +207,7 @@ describe("ScreenTemplate cross-layer acceptance fixture", () => {
 
     const migrated = migrateVideoProjectWithDiagnostics(legacy);
     expect(migrated.migrated).toBe(true);
-    expect(migrated.logEntries).toHaveLength(1);
+    expect(migrated.logEntries).toHaveLength(2);
     expect(migrated.logEntries[0]).toMatchObject({
       fromSchemaVersion: "1.3.0",
       toSchemaVersion: "1.4.0",
@@ -219,7 +219,7 @@ describe("ScreenTemplate cross-layer acceptance fixture", () => {
     });
 
     const project = videoProjectSchema.parse(migrated.project);
-    expect(project.schemaVersion).toBe("1.8.0");
+    expect(project.schemaVersion).toBe("1.9.0");
     expect(project.script.sections[1]?.screenTemplateId).toBe(
       ALTERNATE_SCREEN_TEMPLATE_ID
     );

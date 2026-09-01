@@ -6,7 +6,6 @@ import * as path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
 import { legacyCharacterVariantCatalog } from "../../src/app/character-visuals/character-visual-seed.js";
-import { computeOutlineHash } from "../../src/app/projects/script-domain.js";
 import { createStandardScreenTemplate } from "../../src/app/screen-templates/screen-template-seed.js";
 import { RenderManifestInputBuilder } from "../../src/app/rendering/render-manifest-compile-service.js";
 import {
@@ -139,7 +138,6 @@ describe("RenderManifestInputBuilder", () => {
     );
     try {
       const project = structuredClone(videoProjectFixture);
-      project.script.outlineHash = computeOutlineHash(project.outline);
       project.visuals.assignments = [];
       project.edit.sectionBgms = [];
       project.audio.soundEffects = [];

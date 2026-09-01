@@ -2,10 +2,7 @@ import {
   videoProjectSchema,
   type VideoProject
 } from "../../schema/index.js";
-
-const EMPTY_SHA256 = "0".repeat(64);
-const EMPTY_SOURCE_SHA256 =
-  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+import { createStarterScriptSections } from "./starter-script-sections.js";
 
 export type EmptyVideoProjectOptions = {
   projectId: string;
@@ -78,7 +75,7 @@ export function createEmptyVideoProject(
   const manualVersion = options.manualVersion ?? "";
 
   const project: VideoProject = {
-    schemaVersion: "1.8.0",
+    schemaVersion: "1.9.0",
     revision: 0,
     metadata: {
       id: options.projectId,
@@ -98,20 +95,6 @@ export function createEmptyVideoProject(
         audioSampleRate: 48000,
         audioChannels: 2
       }
-    },
-    source: {
-      id: "source-main",
-      path: "source/source.md",
-      sha256: EMPTY_SOURCE_SHA256
-    },
-    brief: {
-      audience: "",
-      postViewingGoal: "",
-      prerequisites: [],
-      targetDurationSec: 1,
-      requiredItems: [],
-      prohibitedItems: [],
-      globalDirectives: []
     },
     aiSettings: {
       defaultModelId: "google/gemma-4-31b-it",
@@ -134,18 +117,8 @@ export function createEmptyVideoProject(
         "character.zundamon"
       )
     ],
-    outline: {
-      status: "draft",
-      sourceHash: EMPTY_SHA256,
-      generationRunId: null,
-      openQuestions: [],
-      sections: []
-    },
     script: {
-      status: "draft",
-      origin: "manual",
-      outlineHash: EMPTY_SHA256,
-      sections: []
+      sections: createStarterScriptSections(options.projectId)
     },
     visuals: {
       status: "draft",

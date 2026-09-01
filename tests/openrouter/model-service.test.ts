@@ -116,7 +116,7 @@ describe("OpenRouter model service", () => {
     expect(
       resolveModel({
         settings: baseSettings,
-        taskKind: "outline_generation",
+        taskKind: "visual_search_intent",
         models: result.models,
         now: () => NOW
       })
@@ -125,7 +125,7 @@ describe("OpenRouter model service", () => {
     expect(
       resolveModel({
         settings: { ...baseSettings, defaultModelId: "expired/model" },
-        taskKind: "outline_generation",
+        taskKind: "visual_search_intent",
         models: result.models,
         now: () => NOW
       })
@@ -134,7 +134,7 @@ describe("OpenRouter model service", () => {
     expect(
       resolveModel({
         settings: { ...baseSettings, defaultModelId: "image-only/model" },
-        taskKind: "outline_generation",
+        taskKind: "visual_search_intent",
         models: result.models,
         now: () => NOW
       })
@@ -161,7 +161,7 @@ describe("OpenRouter model service", () => {
           dataCollection: "deny",
           allowProviderFallbacks: true
         },
-        taskKind: "outline_generation",
+        taskKind: "visual_search_intent",
         models: result.models,
         now: () => NOW
       })
@@ -194,7 +194,7 @@ describe("OpenRouter model service", () => {
     expect(
       resolveModel({
         settings,
-        taskKind: "outline_generation",
+        taskKind: "visual_search_intent",
         models: [{ ...eligible, zdrAvailable: false }],
         now: () => NOW
       })
@@ -203,7 +203,7 @@ describe("OpenRouter model service", () => {
     expect(
       resolveModel({
         settings: { ...settings, zdr: false },
-        taskKind: "outline_generation",
+        taskKind: "visual_search_intent",
         models: [{ ...eligible, zdrAvailable: false }],
         now: () => NOW
       }).ok

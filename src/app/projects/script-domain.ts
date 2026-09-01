@@ -75,13 +75,10 @@ export function createScriptFromApprovedOutline(
 ): Script {
   const usedIds = new Set<string>();
   return {
-    status: "draft",
-    origin: "manual",
-    outlineHash: computeOutlineHash(outline),
     sections: outline.sections.map((outlineSection) => ({
       id: generatedId("script-section", createId, usedIds),
-      outlineSectionId: outlineSection.id,
       name: outlineSection.title,
+      enabled: true,
       background: { kind: "solid", colorToken: "background" },
       screenTemplateId: STANDARD_SCREEN_TEMPLATE_ID,
       lines: []
@@ -131,11 +128,11 @@ function assertMatchingSectionStructure(
   }
 
   for (const [index, currentSection] of current.sections.entries()) {
-    if (candidate.sections[index]?.outlineSectionId !== currentSection.outlineSectionId) {
+    if (candidate.sections[index]?.id !== currentSection.id) {
       throw new ScriptValidationError([
         {
-          path: ["script", "sections", index, "outlineSectionId"],
-          message: "script sections must keep the outline order"
+          path: ["script", "sections", index, "id"],
+          message: "script sections must keep their stable IDs"
         }
       ]);
     }
@@ -165,8 +162,6 @@ export function normalizeEditedScriptIds(
 
   return {
     ...candidate,
-    origin: currentProject.script.origin,
-    outlineHash: currentProject.script.outlineHash,
     sections: scriptSections
   };
 }
@@ -180,6 +175,7 @@ export function assertCanInitializeScript(
   project: VideoProject,
   currentSourceHash: string
 ): void {
+  void currentSourceHash;
   if (project.script.sections.length > 0) {
     throw new ScriptInitializationError([
       {
@@ -189,51 +185,18 @@ export function assertCanInitializeScript(
     ]);
   }
 
-  const details = [];
-  if (project.outline.status !== "approved") {
-    details.push({
-      path: ["outline", "status"],
-      message: "an approved outline is required before starting the script"
-    });
-  }
-  if (project.outline.sourceHash !== currentSourceHash) {
-    details.push({
-      path: ["outline", "sourceHash"],
-      message: "the outline is stale and must be reviewed"
-    });
-  }
-  if (details.length > 0) {
-    throw new ScriptInitializationError(details);
-  }
 }
 
 export function assertCanApproveScript(
   project: VideoProject,
   currentSourceHash: string
 ): void {
+  void currentSourceHash;
   const details: ApiErrorDetail[] = [];
   if (project.script.sections.length === 0) {
     details.push({
       path: ["script", "sections"],
       message: "台本が初期化されていません。"
-    });
-  }
-  if (project.outline.status !== "approved") {
-    details.push({
-      path: ["outline", "status"],
-      message: "構成案が承認されていません。"
-    });
-  }
-  if (project.outline.sourceHash !== currentSourceHash) {
-    details.push({
-      path: ["outline", "sourceHash"],
-      message: "構成案が stale です。構成案を見直してください。"
-    });
-  }
-  if (computeOutlineHash(project.outline) !== project.script.outlineHash) {
-    details.push({
-      path: ["script", "outlineHash"],
-      message: "台本の元となった構成案が変更されています。"
     });
   }
   if (details.length > 0) {

@@ -65,7 +65,7 @@ export const projectBriefSchema = strictObject({
   globalDirectives: z.array(z.string())
 });
 
-export const aiTaskKindSchema = z.enum([
+export const legacyAiTaskKindSchema = z.enum([
   "outline_generation",
   "script_generation",
   "script_review",
@@ -74,7 +74,13 @@ export const aiTaskKindSchema = z.enum([
   "opencode"
 ]);
 
-export const taskModelOverridesSchema = strictObject({
+export const aiTaskKindSchema = z.enum([
+  "visual_search_intent",
+  "layout_review",
+  "opencode"
+]);
+
+export const legacyTaskModelOverridesSchema = strictObject({
   outline_generation: z.string().optional(),
   script_generation: z.string().optional(),
   script_review: z.string().optional(),
@@ -83,12 +89,27 @@ export const taskModelOverridesSchema = strictObject({
   opencode: z.string().optional()
 });
 
-export const aiSettingsSchema = strictObject({
+export const taskModelOverridesSchema = strictObject({
+  visual_search_intent: z.string().optional(),
+  layout_review: z.string().optional(),
+  opencode: z.string().optional()
+});
+
+const aiSettingsFields = {
   defaultModelId: z.string().nullable(),
-  taskModelOverrides: taskModelOverridesSchema,
   zdr: z.boolean(),
   dataCollection: z.literal("deny"),
   allowProviderFallbacks: z.literal(true)
+};
+
+export const legacyAiSettingsSchema = strictObject({
+  ...aiSettingsFields,
+  taskModelOverrides: legacyTaskModelOverridesSchema
+});
+
+export const aiSettingsSchema = strictObject({
+  ...aiSettingsFields,
+  taskModelOverrides: taskModelOverridesSchema
 });
 
 export const mouthPairSchema = strictObject({
@@ -217,14 +238,27 @@ export const scriptSchemaV13 = strictObject({
 
 export const scriptLineSchema = scriptLineV12Schema;
 
-export const scriptSectionSchema = strictObject({
+export const scriptSectionV18Schema = strictObject({
   ...scriptSectionV12Schema.shape,
   screenTemplateId: idSchema,
   lines: z.array(scriptLineSchema)
 });
 
-export const scriptSchema = strictObject({
+export const scriptSchemaV18 = strictObject({
   ...scriptSchemaV12.shape,
+  sections: z.array(scriptSectionV18Schema)
+});
+
+export const scriptSectionSchema = strictObject({
+  id: idSchema,
+  name: z.string(),
+  enabled: z.boolean(),
+  background: backgroundDefinitionSchema,
+  screenTemplateId: idSchema,
+  lines: z.array(scriptLineSchema)
+});
+
+export const scriptSchema = strictObject({
   sections: z.array(scriptSectionSchema)
 });
 
@@ -456,7 +490,7 @@ const videoProjectV12BaseSchema = strictObject({
   metadata: projectMetadataSchema,
   source: projectSourceSchema,
   brief: projectBriefSchema,
-  aiSettings: aiSettingsSchema,
+  aiSettings: legacyAiSettingsSchema,
   characters: z.array(characterSchema).length(2),
   outline: outlineSchema,
   script: scriptSchemaV12,
@@ -472,7 +506,7 @@ const videoProjectV13BaseSchema = strictObject({
   metadata: projectMetadataSchema,
   source: projectSourceSchema,
   brief: projectBriefSchema,
-  aiSettings: aiSettingsSchema,
+  aiSettings: legacyAiSettingsSchema,
   characters: z.array(characterSchema).length(2),
   outline: outlineSchema,
   script: scriptSchemaV13,
@@ -488,10 +522,10 @@ const videoProjectV14BaseSchema = strictObject({
   metadata: projectMetadataSchema,
   source: projectSourceSchema,
   brief: projectBriefSchema,
-  aiSettings: aiSettingsSchema,
+  aiSettings: legacyAiSettingsSchema,
   characters: z.array(characterSchema).length(2),
   outline: outlineSchema,
-  script: scriptSchema,
+  script: scriptSchemaV18,
   visuals: visualPlanV14Schema,
   audio: audioPlanSchema,
   edit: editPlanV15Schema,
@@ -504,10 +538,10 @@ const videoProjectV15BaseSchema = strictObject({
   metadata: projectMetadataSchema,
   source: projectSourceSchema,
   brief: projectBriefSchema,
-  aiSettings: aiSettingsSchema,
+  aiSettings: legacyAiSettingsSchema,
   characters: z.array(characterSchema).length(2),
   outline: outlineSchema,
-  script: scriptSchema,
+  script: scriptSchemaV18,
   visuals: visualPlanV15Schema,
   audio: audioPlanSchema,
   edit: editPlanV15Schema,
@@ -520,10 +554,10 @@ const videoProjectV16BaseSchema = strictObject({
   metadata: projectMetadataSchema,
   source: projectSourceSchema,
   brief: projectBriefSchema,
-  aiSettings: aiSettingsSchema,
+  aiSettings: legacyAiSettingsSchema,
   characters: z.array(characterSchema).length(2),
   outline: outlineSchema,
-  script: scriptSchema,
+  script: scriptSchemaV18,
   visuals: visualPlanV15Schema,
   audio: audioPlanSchema,
   edit: editPlanV16Schema,
@@ -536,10 +570,10 @@ const videoProjectV17BaseSchema = strictObject({
   metadata: projectMetadataSchema,
   source: projectSourceSchema,
   brief: projectBriefSchema,
-  aiSettings: aiSettingsSchema,
+  aiSettings: legacyAiSettingsSchema,
   characters: z.array(characterSchema).length(2),
   outline: outlineSchema,
-  script: scriptSchema,
+  script: scriptSchemaV18,
   visuals: visualPlanV15Schema,
   audio: audioPlanSchema,
   edit: editPlanSchema,
@@ -551,13 +585,27 @@ const videoProjectV18BaseSchema = videoProjectV17BaseSchema.extend({
   overlays: lineOverlayPlanSchema
 });
 
+const videoProjectV19BaseSchema = strictObject({
+  schemaVersion: z.literal("1.9.0"),
+  revision: finiteNumberSchema.int().nonnegative(),
+  metadata: projectMetadataSchema,
+  aiSettings: aiSettingsSchema,
+  characters: z.array(characterSchema).length(2),
+  script: scriptSchema,
+  visuals: visualPlanV15Schema,
+  overlays: lineOverlayPlanSchema,
+  audio: audioPlanSchema,
+  edit: editPlanSchema,
+  thumbnail: thumbnailPlanSchema
+});
+
 const legacyVideoProjectV11BaseSchema = strictObject({
   schemaVersion: z.literal("1.1.0"),
   revision: finiteNumberSchema.int().nonnegative(),
   metadata: projectMetadataSchema,
   source: projectSourceSchema,
   brief: projectBriefSchema,
-  aiSettings: aiSettingsSchema,
+  aiSettings: legacyAiSettingsSchema,
   characters: z.array(characterSchema).length(2),
   outline: outlineSchema,
   script: scriptSchemaV12,
@@ -630,7 +678,8 @@ type VideoProjectDomainShape =
   | z.infer<typeof videoProjectV15BaseSchema>
   | z.infer<typeof videoProjectV16BaseSchema>
   | z.infer<typeof videoProjectV17BaseSchema>
-  | z.infer<typeof videoProjectV18BaseSchema>;
+  | z.infer<typeof videoProjectV18BaseSchema>
+  | z.infer<typeof videoProjectV19BaseSchema>;
 
 function refineVideoProject(
   project: VideoProjectDomainShape,
@@ -719,52 +768,64 @@ function refineVideoProject(
       }
     }
 
-    const outlineSectionEntries = project.outline.sections.map(
-      (section, index) => ({
-        value: section.id,
-        path: ["outline", "sections", index, "id"]
-      })
-    );
-    addDuplicateIssues(outlineSectionEntries, ctx, "outline section id");
+    if ("outline" in project) {
+      const outlineSectionEntries = project.outline.sections.map(
+        (section, index) => ({
+          value: section.id,
+          path: ["outline", "sections", index, "id"]
+        })
+      );
+      addDuplicateIssues(outlineSectionEntries, ctx, "outline section id");
 
-    const openQuestionEntries = [
-      ...project.outline.openQuestions.map((question, index) => ({
-        value: question.id,
-        path: ["outline", "openQuestions", index, "id"]
-      })),
-      ...project.outline.sections.flatMap((section, sectionIndex) =>
-        section.openQuestions.map((question, questionIndex) => ({
+      const openQuestionEntries = [
+        ...project.outline.openQuestions.map((question, index) => ({
           value: question.id,
-          path: [
-            "outline",
-            "sections",
-            sectionIndex,
-            "openQuestions",
-            questionIndex,
-            "id"
-          ]
-        }))
-      )
-    ];
-    addDuplicateIssues(openQuestionEntries, ctx, "open question id");
-
-    const outlineSectionIds = new Set(
-      project.outline.sections.map((section) => section.id)
-    );
-    for (const [sectionIndex, section] of project.outline.sections.entries()) {
-      for (const [sourceRefIndex, sourceRef] of section.sourceRefs.entries()) {
-        if (sourceRef.sourceId !== project.source.id) {
-          addReferenceIssue(
-            ctx,
-            [
+          path: ["outline", "openQuestions", index, "id"]
+        })),
+        ...project.outline.sections.flatMap((section, sectionIndex) =>
+          section.openQuestions.map((question, questionIndex) => ({
+            value: question.id,
+            path: [
               "outline",
               "sections",
               sectionIndex,
-              "sourceRefs",
-              sourceRefIndex,
-              "sourceId"
-            ],
-            "source reference must reference source.id"
+              "openQuestions",
+              questionIndex,
+              "id"
+            ]
+          }))
+        )
+      ];
+      addDuplicateIssues(openQuestionEntries, ctx, "open question id");
+
+      const outlineSectionIds = new Set(
+        project.outline.sections.map((section) => section.id)
+      );
+      for (const [sectionIndex, section] of project.outline.sections.entries()) {
+        for (const [sourceRefIndex, sourceRef] of section.sourceRefs.entries()) {
+          if (sourceRef.sourceId !== project.source.id) {
+            addReferenceIssue(
+              ctx,
+              [
+                "outline",
+                "sections",
+                sectionIndex,
+                "sourceRefs",
+                sourceRefIndex,
+                "sourceId"
+              ],
+              "source reference must reference source.id"
+            );
+          }
+        }
+      }
+
+      for (const [sectionIndex, section] of project.script.sections.entries()) {
+        if (!outlineSectionIds.has(section.outlineSectionId)) {
+          addReferenceIssue(
+            ctx,
+            ["script", "sections", sectionIndex, "outlineSectionId"],
+            "script section must reference an outline section"
           );
         }
       }
@@ -777,16 +838,6 @@ function refineVideoProject(
       })
     );
     addDuplicateIssues(scriptSectionEntries, ctx, "script section id");
-
-    for (const [sectionIndex, section] of project.script.sections.entries()) {
-      if (!outlineSectionIds.has(section.outlineSectionId)) {
-        addReferenceIssue(
-          ctx,
-          ["script", "sections", sectionIndex, "outlineSectionId"],
-          "script section must reference an outline section"
-        );
-      }
-    }
 
     const lineEntries = project.script.sections.flatMap(
       (section, sectionIndex) =>
@@ -1117,13 +1168,16 @@ export const videoProjectV17Schema =
   videoProjectV17BaseSchema.superRefine(refineVideoProject);
 export const videoProjectV18Schema =
   videoProjectV18BaseSchema.superRefine(refineVideoProject);
-export const videoProjectSchema = videoProjectV18Schema;
+export const videoProjectV19Schema =
+  videoProjectV19BaseSchema.superRefine(refineVideoProject);
+export const videoProjectSchema = videoProjectV19Schema;
 
 export type AiTaskKind = z.infer<typeof aiTaskKindSchema>;
 export type OutputSettings = z.infer<typeof outputSettingsSchema>;
 export type ProjectMetadata = z.infer<typeof projectMetadataSchema>;
 export type ProjectSource = z.infer<typeof projectSourceSchema>;
 export type ProjectBrief = z.infer<typeof projectBriefSchema>;
+export type LegacyAiSettings = z.infer<typeof legacyAiSettingsSchema>;
 export type AiSettings = z.infer<typeof aiSettingsSchema>;
 export type Character = z.infer<typeof characterSchema>;
 export type CharacterVisualBinding = z.infer<
@@ -1144,6 +1198,8 @@ export type ScriptV12 = z.infer<typeof scriptSchemaV12>;
 export type ScriptLineV13 = z.infer<typeof scriptLineV13Schema>;
 export type ScriptSectionV13 = z.infer<typeof scriptSectionV13Schema>;
 export type ScriptV13 = z.infer<typeof scriptSchemaV13>;
+export type ScriptSectionV18 = z.infer<typeof scriptSectionV18Schema>;
+export type ScriptV18 = z.infer<typeof scriptSchemaV18>;
 export type VisualAssignmentV12 = z.infer<typeof visualAssignmentV12Schema>;
 export type VisualAssignmentV13 = z.infer<typeof visualAssignmentV13Schema>;
 export type VisualAssignmentV14 = z.infer<typeof visualAssignmentV14Schema>;
@@ -1198,4 +1254,5 @@ export type VideoProjectV15 = z.infer<typeof videoProjectV15Schema>;
 export type VideoProjectV16 = z.infer<typeof videoProjectV16Schema>;
 export type VideoProjectV17 = z.infer<typeof videoProjectV17Schema>;
 export type VideoProjectV18 = z.infer<typeof videoProjectV18Schema>;
+export type VideoProjectV19 = z.infer<typeof videoProjectV19Schema>;
 export type VideoProject = z.infer<typeof videoProjectSchema>;

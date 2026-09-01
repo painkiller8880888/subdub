@@ -7,7 +7,6 @@ import {
   type CharacterVariantMapping,
   type CharacterVariantRenderType
 } from "../../assets/character-asset-manifest.js";
-import { computeOutlineHash } from "../projects/script-domain.js";
 import {
   calculateLineRanges,
   calculateEditVideoTimeline,
@@ -2317,30 +2316,6 @@ export function compileRenderManifestV24(
     }
   }
 
-  if (project.outline.status !== "approved") {
-    addDiagnostic(
-      diagnostics,
-      RENDER_MANIFEST_ERROR_CODE.outlineNotApproved,
-      ["outline", "status"],
-      "outline must be approved before manifest compilation"
-    );
-  }
-  if (project.outline.sourceHash !== project.source.sha256) {
-    addDiagnostic(
-      diagnostics,
-      RENDER_MANIFEST_ERROR_CODE.outlineStale,
-      ["outline", "sourceHash"],
-      "outline sourceHash does not match project.source.sha256"
-    );
-  }
-  if (computeOutlineHash(project.outline) !== project.script.outlineHash) {
-    addDiagnostic(
-      diagnostics,
-      RENDER_MANIFEST_ERROR_CODE.scriptStale,
-      ["script", "outlineHash"],
-      "script outlineHash does not match the current outline"
-    );
-  }
   if (project.script.sections.length === 0) {
     addDiagnostic(
       diagnostics,

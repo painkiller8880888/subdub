@@ -22,7 +22,6 @@ import {
   ProjectFileServiceError
 } from "../projects/project-file-service.js";
 import type { ProjectRepository } from "../projects/project-repository.js";
-import { computeOutlineHash } from "../projects/script-domain.js";
 import {
   validateVideoProjectScreenTemplateReferences,
   type ScreenTemplateSnapshotPort
@@ -345,15 +344,6 @@ export class ManifestPreviewService {
     project: VideoProject,
     blockers: ManifestPreviewBlocker[]
   ): void {
-    if (project.outline.status !== "approved") {
-      addBlocker(blockers, "OUTLINE_NOT_APPROVED", toTarget("outline"));
-    }
-    if (project.outline.sourceHash !== project.source.sha256) {
-      addBlocker(blockers, "OUTLINE_SOURCE_HASH_MISMATCH", toTarget("outline"));
-    }
-    if (computeOutlineHash(project.outline) !== project.script.outlineHash) {
-      addBlocker(blockers, "SCRIPT_OUTLINE_HASH_MISMATCH", toTarget("script"));
-    }
     for (const issue of validateVideoProjectScreenTemplateReferences(
       project,
       this.screenTemplateCatalog

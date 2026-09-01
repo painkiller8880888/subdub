@@ -286,16 +286,9 @@ export function applyEditedScript(
   candidate: Script
 ): { project: VideoProject; impact: ScriptChangeImpact } {
   const impact = classifyScriptChange(currentProject.script, candidate);
-  const status =
-    currentProject.script.status === "approved"
-      ? impact.contentChanged
-        ? "needs_review"
-        : "approved"
-      : candidate.status;
-
   let project: VideoProject = {
     ...currentProject,
-    script: { ...candidate, status }
+    script: candidate
   };
 
   if (impact.structuralChanged && hasMeaningfulVisuals(project)) {

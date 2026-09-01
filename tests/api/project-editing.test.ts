@@ -11,16 +11,12 @@ import {
   projectBriefSaveRequestSchema,
   projectCharactersSaveRequestSchema,
   projectCreateResponseSchema,
-  projectDetailResponseSchema,
   projectEditResponseSchema,
   projectEditSaveRequestSchema,
   projectMutationResponseSchema,
   projectSourceReadResponseSchema
 } from "../../src/schema/api.js";
-import {
-  videoProjectSchema,
-  type VideoProject
-} from "../../src/schema/index.js";
+import type { VideoProject } from "../../src/schema/index.js";
 
 describe("project source and brief APIs", () => {
   let workspaceRoot: string;
@@ -113,10 +109,8 @@ describe("project source and brief APIs", () => {
 
     expect(response.statusCode).toBe(200);
     expect(saved.data.revision).toBe(1);
-    expect(saved.data.source.sha256).toBe(
-      createHash("sha256").update(files.source).digest("hex")
-    );
-    expect(savedJson.source.sha256).toBe(saved.data.source.sha256);
+    expect(saved.data).not.toHaveProperty("source");
+    expect(savedJson).not.toHaveProperty("source");
     expect(files.source.toString("utf8")).toBe(markdown);
     expect(new Date(saved.data.metadata.updatedAt).getTime()).toBeGreaterThan(
       0
@@ -133,9 +127,8 @@ describe("project source and brief APIs", () => {
     expect(source.revision).toBe(1);
   });
 
-  it("saves every brief field without allowing other project fields to be replaced", async () => {
+  it("rejects legacy brief mutations for a V19 project", async () => {
     const project = await createProject();
-    const before = videoProjectSchema.parse(project);
     const brief = {
       audience: "new audience",
       postViewingGoal: "new goal",
@@ -150,23 +143,10 @@ describe("project source and brief APIs", () => {
       url: `/api/projects/${project.metadata.id}/brief`,
       payload: { brief, expectedRevision: 0 }
     });
-    const saved = projectMutationResponseSchema.parse(response.json());
-
-    expect(saved.data.brief).toEqual(brief);
-    expect(saved.data.source).toEqual(before.source);
-    expect(saved.data.metadata.id).toBe(before.metadata.id);
-    expect(saved.data.metadata.title).toBe(before.metadata.title);
-    expect(saved.data.metadata.createdAt).toBe(before.metadata.createdAt);
-    expect(saved.data.characters).toEqual(before.characters);
-    expect(saved.revision).toBe(1);
-
-    const detail = await server.app.inject({
-      method: "GET",
-      url: `/api/projects/${project.metadata.id}`
-    });
-    expect(projectDetailResponseSchema.parse(detail.json()).data.brief).toEqual(
-      brief
+    expect(parseError(response).code).toBe(
+      "PROJECT_CANDIDATE_VALIDATION_FAILED"
     );
+    expect(response.statusCode).toBe(422);
   });
 
   it("saves explicit project visual bindings through the character endpoint", async () => {
@@ -207,30 +187,9 @@ describe("project source and brief APIs", () => {
     expect(parseError(staleResponse).code).toBe("PROJECT_REVISION_CONFLICT");
   });
 
-  it("rejects invalid duration, unknown keys, and invalid expectedRevision without changing files", async () => {
+  it("rejects invalid expectedRevision without changing files", async () => {
     const project = await createProject();
     const before = await projectFiles(project.metadata.id);
-    const validRequest = {
-      brief: project.brief,
-      expectedRevision: 0
-    };
-
-    const invalidDuration = await server.app.inject({
-      method: "PUT",
-      url: `/api/projects/${project.metadata.id}/brief`,
-      payload: {
-        ...validRequest,
-        brief: { ...project.brief, targetDurationSec: 0 }
-      }
-    });
-    expect(parseError(invalidDuration).code).toBe("REQUEST_VALIDATION_FAILED");
-
-    const unknownKey = await server.app.inject({
-      method: "PUT",
-      url: `/api/projects/${project.metadata.id}/brief`,
-      payload: { ...validRequest, unknown: true }
-    });
-    expect(parseError(unknownKey).code).toBe("REQUEST_VALIDATION_FAILED");
 
     const invalidRevision = await server.app.inject({
       method: "PUT",
@@ -242,7 +201,7 @@ describe("project source and brief APIs", () => {
     expect(await projectFiles(project.metadata.id)).toEqual(before);
   });
 
-  it("rejects stale source and brief mutations with 409 and keeps the pair unchanged", async () => {
+  it("rejects stale source mutations with 409 and keeps the pair unchanged", async () => {
     const project = await createProject();
     const first = await server.app.inject({
       method: "PUT",
@@ -260,17 +219,10 @@ describe("project source and brief APIs", () => {
     expect(parseError(staleSource).code).toBe("PROJECT_REVISION_CONFLICT");
     expect(staleSource.statusCode).toBe(409);
 
-    const staleBrief = await server.app.inject({
-      method: "PUT",
-      url: `/api/projects/${project.metadata.id}/brief`,
-      payload: { brief: project.brief, expectedRevision: 0 }
-    });
-    expect(parseError(staleBrief).code).toBe("PROJECT_REVISION_CONFLICT");
-    expect(staleBrief.statusCode).toBe(409);
     expect(await projectFiles(project.metadata.id)).toEqual(before);
   });
 
-  it("returns a normalized hash mismatch error without exposing paths or Markdown", async () => {
+  it("reads the physical source without requiring a project source field", async () => {
     const project = await createProject();
     const directory = path.join(workspaceRoot, "projects", project.metadata.id);
     const tampered = "tampered private markdown";
@@ -284,12 +236,12 @@ describe("project source and brief APIs", () => {
       method: "GET",
       url: `/api/projects/${project.metadata.id}/source`
     });
-    const error = parseError(readResponse);
-    const serialized = JSON.stringify(error);
-    expect(error.code).toBe("PROJECT_SOURCE_HASH_MISMATCH");
-    expect(readResponse.statusCode).toBe(422);
-    expect(serialized).not.toContain(workspaceRoot);
-    expect(serialized).not.toContain(tampered);
+    const source = projectSourceReadResponseSchema.parse(readResponse.json());
+    expect(readResponse.statusCode).toBe(200);
+    expect(source.data.markdown).toBe(tampered);
+    expect(source.data.sha256).toBe(
+      createHash("sha256").update(tampered).digest("hex")
+    );
   });
 
   it("reads and saves the edit plan with a revision and server-owned input contract", async () => {

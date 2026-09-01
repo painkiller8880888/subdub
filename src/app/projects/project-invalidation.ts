@@ -1,4 +1,8 @@
-import type { Outline, VideoProject } from "../../schema/video-project.js";
+import type {
+  Outline,
+  VideoProject,
+  VideoProjectV18
+} from "../../schema/video-project.js";
 
 export function hasMeaningfulOutline(outline: Outline): boolean {
   return (
@@ -9,11 +13,13 @@ export function hasMeaningfulOutline(outline: Outline): boolean {
   );
 }
 
-function hasMeaningfulScript(project: VideoProject): boolean {
-  return project.script.sections.length > 0 || project.script.status !== "draft";
+function hasMeaningfulScript(project: VideoProjectV18): boolean {
+  return project.script.sections.length > 0;
 }
 
-export function hasMeaningfulVisuals(project: VideoProject): boolean {
+export function hasMeaningfulVisuals(
+  project: Pick<VideoProject, "visuals">
+): boolean {
   return (
     project.visuals.assignments.length > 0 ||
     project.visuals.suggestionRunIds.length > 0 ||
@@ -35,27 +41,32 @@ export function outlineContentChanged(
 }
 
 export function applyEditedOutline(
-  currentProject: VideoProject,
+  currentProject: VideoProject | VideoProjectV18,
   submittedOutline: Outline
-): { project: VideoProject; contentChanged: boolean } {
+): { project: VideoProject | VideoProjectV18; contentChanged: boolean } {
+  if (!("outline" in currentProject)) {
+    return { project: currentProject, contentChanged: false };
+  }
+  const legacyProject = currentProject as unknown as VideoProjectV18;
   const contentChanged = outlineContentChanged(
-    currentProject.outline,
+    legacyProject.outline,
     submittedOutline
   );
   const hasContent =
-    hasMeaningfulOutline(currentProject.outline) || hasMeaningfulOutline(submittedOutline);
-  const sourceHash = hasMeaningfulOutline(currentProject.outline)
-    ? currentProject.outline.sourceHash
-    : currentProject.source.sha256;
+    hasMeaningfulOutline(legacyProject.outline) ||
+    hasMeaningfulOutline(submittedOutline);
+  const sourceHash = hasMeaningfulOutline(legacyProject.outline)
+    ? legacyProject.outline.sourceHash
+    : legacyProject.source.sha256;
   const nextOutline: Outline = {
     ...submittedOutline,
     status: hasContent
       ? contentChanged
         ? "needs_review"
-        : currentProject.outline.status
+        : legacyProject.outline.status
       : "draft",
     sourceHash,
-    generationRunId: currentProject.outline.generationRunId,
+    generationRunId: legacyProject.outline.generationRunId,
     openQuestions: submittedOutline.openQuestions.map((question) => ({ ...question })),
     sections: submittedOutline.sections.map((section) => ({
       ...section,
@@ -74,15 +85,15 @@ export function applyEditedOutline(
     }))
   };
 
-  let project: VideoProject = {
-    ...currentProject,
+  let project: VideoProjectV18 = {
+    ...legacyProject,
     outline: nextOutline
   };
-  if (contentChanged && currentProject.outline.status === "approved") {
+  if (contentChanged && legacyProject.outline.status === "approved") {
     if (hasMeaningfulScript(project)) {
       project = {
         ...project,
-        script: { ...project.script, status: "needs_review" }
+        script: { ...project.script }
       };
     }
     if (hasMeaningfulVisuals(project)) {
@@ -96,18 +107,24 @@ export function applyEditedOutline(
   return { project, contentChanged };
 }
 
-export function invalidateForUpstreamChange(project: VideoProject): VideoProject {
-  let nextProject = project;
-  if (hasMeaningfulOutline(project.outline)) {
+export function invalidateForUpstreamChange(
+  project: VideoProject | VideoProjectV18
+): VideoProject | VideoProjectV18 {
+  if (!("outline" in project)) {
+    return project;
+  }
+  const legacyProject = project as unknown as VideoProjectV18;
+  let nextProject: VideoProjectV18 = legacyProject;
+  if (hasMeaningfulOutline(legacyProject.outline)) {
     nextProject = {
       ...nextProject,
-      outline: { ...project.outline, status: "needs_review" }
+      outline: { ...legacyProject.outline, status: "needs_review" }
     };
   }
-  if (hasMeaningfulScript(project)) {
+  if (hasMeaningfulScript(legacyProject)) {
     nextProject = {
       ...nextProject,
-      script: { ...project.script, status: "needs_review" }
+      script: { ...legacyProject.script }
     };
   }
   if (hasMeaningfulVisuals(project)) {

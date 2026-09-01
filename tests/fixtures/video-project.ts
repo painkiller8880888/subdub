@@ -1,4 +1,8 @@
-import type { VideoProject } from "../../src/schema/index.js";
+import {
+  videoProjectSchema,
+  type VideoProject,
+  type VideoProjectV18
+} from "../../src/schema/index.js";
 
 const SOURCE_HASH =
   "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
@@ -13,7 +17,7 @@ const AUDIO_CHECKSUM =
 const BGM_CHECKSUM =
   "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff";
 
-export const videoProjectFixture = {
+export const legacyVideoProjectFixture = {
   schemaVersion: "1.8.0",
   revision: 0,
   metadata: {
@@ -453,4 +457,42 @@ export const videoProjectFixture = {
     representativeVisualPath: "media/application-form.png",
     layout: "standard"
   }
-} satisfies VideoProject;
+} satisfies VideoProjectV18;
+
+/**
+ * The fixture used by current-project tests. Keep the complete V18 fixture
+ * above as an explicit compatibility input for migration and legacy-flow
+ * tests instead of allowing old fields to leak into the V19 fixture.
+ */
+export const videoProjectFixture: VideoProject = (() => {
+  const project = structuredClone(
+    legacyVideoProjectFixture
+  ) as unknown as Record<string, unknown>;
+  const aiSettings = project.aiSettings as Record<string, unknown>;
+  const legacyOverrides = aiSettings.taskModelOverrides as Record<
+    string,
+    unknown
+  >;
+  aiSettings.taskModelOverrides = Object.fromEntries(
+    ["visual_search_intent", "layout_review", "opencode"]
+      .filter((taskKind) => typeof legacyOverrides[taskKind] === "string")
+      .map((taskKind) => [taskKind, legacyOverrides[taskKind]])
+  );
+
+  const script = project.script as {
+    sections: Array<Record<string, unknown>>;
+  };
+  project.script = {
+    sections: script.sections.map((section) => {
+      const currentSection = { ...section };
+      delete currentSection.outlineSectionId;
+      return { ...currentSection, enabled: true };
+    })
+  };
+  delete project.source;
+  delete project.brief;
+  delete project.outline;
+  project.schemaVersion = "1.9.0";
+
+  return videoProjectSchema.parse(project);
+})();

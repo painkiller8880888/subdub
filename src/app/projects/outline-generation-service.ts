@@ -8,7 +8,8 @@ import {
   videoProjectSchema,
   type CommonAiRunLog,
   type Outline,
-  type VideoProject
+  type VideoProject,
+  type VideoProjectV18
 } from "../../schema/index.js";
 import { OpenRouterAdapterError } from "../../openrouter/errors.js";
 import {
@@ -118,7 +119,7 @@ function errorCode(error: unknown): string {
   return "INTERNAL_SERVER_ERROR";
 }
 
-function hasExistingOutline(project: VideoProject): boolean {
+function hasExistingOutline(project: VideoProjectV18): boolean {
   return (
     project.outline.sections.length > 0 ||
     project.outline.openQuestions.length > 0 ||
@@ -210,7 +211,7 @@ function validateCandidateStructure(
 
 function toOutline(
   candidate: ReturnType<typeof outlineGenerationCandidateSchema.parse>,
-  project: VideoProject,
+  project: VideoProjectV18,
   sourceHash: string,
   runId: string
 ): Outline {
@@ -295,13 +296,21 @@ export class OutlineGenerationService {
   async generate(projectId: unknown, input: unknown): Promise<VideoProject> {
     const request = outlineGenerateRequestSchema.parse(input);
     const snapshot = await this.repository.readGenerationSnapshot(projectId);
+    if (!("outline" in snapshot.project)) {
+      throw new ProjectRepositoryError(
+        "PROJECT_CANDIDATE_VALIDATION_FAILED",
+        422,
+        "This legacy planning operation is not available for a 1.9.0 project."
+      );
+    }
+    const legacyProject = snapshot.project as unknown as VideoProjectV18;
     const runId = this.createId();
     const startedAtDate = this.now();
     const inputHash = sha256(
       JSON.stringify({
         markdown: snapshot.markdown,
-        brief: snapshot.project.brief,
-        aiSettings: snapshot.project.aiSettings,
+        brief: legacyProject.brief,
+        aiSettings: legacyProject.aiSettings,
         expectedRevision: request.expectedRevision
       })
     );
@@ -340,7 +349,7 @@ export class OutlineGenerationService {
           "The project revision does not match the expected revision."
         );
       }
-      if (hasExistingOutline(snapshot.project)) {
+      if (hasExistingOutline(legacyProject)) {
         throw new OutlineGenerationError(
           OUTLINE_GENERATION_ERROR_CODE.alreadyExists,
           409,
@@ -350,8 +359,8 @@ export class OutlineGenerationService {
 
       const models = await this.modelService.listModels();
       const resolution = resolveModel({
-        settings: snapshot.project.aiSettings,
-        taskKind: "outline_generation",
+        settings: legacyProject.aiSettings,
+        taskKind: "outline_generation" as never,
         runOverride: request.modelId,
         models: models.models,
         now: this.now
@@ -364,7 +373,7 @@ export class OutlineGenerationService {
 
       const prompt = buildOutlineGenerationPrompt({
         markdown: snapshot.markdown,
-        brief: snapshot.project.brief
+        brief: legacyProject.brief
       });
       const estimate = estimateOutlineGenerationContext({
         systemPrompt: prompt.system,
@@ -399,9 +408,9 @@ export class OutlineGenerationService {
         maxTokens:
           estimate.reservedOutputTokens ??
           OUTLINE_GENERATION_RESERVED_OUTPUT_TOKENS,
-        zdr: snapshot.project.aiSettings.zdr,
-        dataCollection: snapshot.project.aiSettings.dataCollection,
-        allowProviderFallbacks: snapshot.project.aiSettings.allowProviderFallbacks
+        zdr: legacyProject.aiSettings.zdr,
+        dataCollection: legacyProject.aiSettings.dataCollection,
+        allowProviderFallbacks: legacyProject.aiSettings.allowProviderFallbacks
       });
       Object.assign(run, responseDetails(response));
       run.responseTimeMs = Math.max(0, this.now().getTime() - startedAtDate.getTime());
@@ -423,7 +432,7 @@ export class OutlineGenerationService {
       try {
         outline = toOutline(
           candidateResult.data,
-          snapshot.project,
+          legacyProject,
           snapshot.sourceHash,
           runId
         );
@@ -523,7 +532,7 @@ export class OutlineGenerationService {
     const runLog: CommonAiRunLog = {
       runId: run.runId,
       kind: "ai",
-      taskKind: "outline_generation",
+      taskKind: "outline_generation" as never,
       projectId: project.metadata.id,
       projectRevision: run.startRevision,
       queuedAt: run.startedAt,

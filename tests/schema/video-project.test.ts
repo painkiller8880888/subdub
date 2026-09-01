@@ -268,9 +268,13 @@ describe("videoProjectSchema", () => {
   });
 
   it("rejects invalid integer and finite-number values", () => {
-    const negativeDuration = clone(videoProjectFixture);
-    negativeDuration.brief.targetDurationSec = -1;
-    expectInvalid(negativeDuration, ["brief", "targetDurationSec"]);
+    const invalidLipSyncPeriod = clone(videoProjectFixture);
+    invalidLipSyncPeriod.characters[0].lipSyncPeriodFrames = 0;
+    expectInvalid(invalidLipSyncPeriod, [
+      "characters",
+      0,
+      "lipSyncPeriodFrames"
+    ]);
 
     const negativePause = clone(videoProjectFixture);
     negativePause.script.sections[0].lines[0].pauseBeforeMs = -1;
@@ -555,24 +559,6 @@ describe("videoProjectSchema", () => {
     duplicateCharacter.characters[1].id = duplicateCharacter.characters[0].id;
     expectInvalid(duplicateCharacter, ["characters", 1, "id"]);
 
-    const duplicateOutlineSection = clone(videoProjectFixture);
-    duplicateOutlineSection.outline.sections[1].id =
-      duplicateOutlineSection.outline.sections[0].id;
-    expectInvalid(duplicateOutlineSection, ["outline", "sections", 1, "id"]);
-
-    const duplicateOpenQuestion = clone(videoProjectFixture);
-    duplicateOpenQuestion.outline.sections[0].openQuestions.push(
-      clone(duplicateOpenQuestion.outline.openQuestions[0])
-    );
-    expectInvalid(duplicateOpenQuestion, [
-      "outline",
-      "sections",
-      0,
-      "openQuestions",
-      0,
-      "id"
-    ]);
-
     const duplicateScriptSection = clone(videoProjectFixture);
     duplicateScriptSection.script.sections[1].id =
       duplicateScriptSection.script.sections[0].id;
@@ -647,28 +633,6 @@ describe("videoProjectSchema", () => {
   });
 
   it("rejects broken references", () => {
-    const invalidSourceReference = clone(videoProjectFixture);
-    invalidSourceReference.outline.sections[0].sourceRefs[0].sourceId =
-      "other-source";
-    expectInvalid(invalidSourceReference, [
-      "outline",
-      "sections",
-      0,
-      "sourceRefs",
-      0,
-      "sourceId"
-    ]);
-
-    const invalidOutlineReference = clone(videoProjectFixture);
-    invalidOutlineReference.script.sections[0].outlineSectionId =
-      "missing-outline";
-    expectInvalid(invalidOutlineReference, [
-      "script",
-      "sections",
-      0,
-      "outlineSectionId"
-    ]);
-
     const invalidSpeakerReference = clone(videoProjectFixture);
     invalidSpeakerReference.script.sections[0].lines[0].speakerId =
       "missing-character";

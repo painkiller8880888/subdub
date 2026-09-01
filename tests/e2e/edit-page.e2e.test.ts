@@ -29,24 +29,24 @@ const projectId = "edit-page-dnd-ui-project";
 const sections = [
   {
     id: "section-first",
-    outlineSectionId: "outline-first",
     name: "最初のセクション",
+    enabled: true,
     screenTemplateId: "screen-template-standard",
     background: { kind: "solid", colorToken: "background" },
     lines: []
   },
   {
     id: "section-second",
-    outlineSectionId: "outline-second",
     name: "二番目のセクション",
+    enabled: true,
     screenTemplateId: "screen-template-standard",
     background: { kind: "solid", colorToken: "background" },
     lines: []
   },
   {
     id: "section-third",
-    outlineSectionId: "outline-third",
     name: "三番目のセクション",
+    enabled: true,
     screenTemplateId: "screen-template-standard",
     background: { kind: "solid", colorToken: "background" },
     lines: []
@@ -123,31 +123,6 @@ const emptyProject = createEmptyVideoProject({
 
 const initialProject = videoProjectSchema.parse({
   ...emptyProject,
-  outline: {
-    ...emptyProject.outline,
-    sections: sections.map((section, index) => ({
-      id: section.outlineSectionId,
-      order: index + 1,
-      role:
-        index === 0
-          ? "intro"
-          : index === sections.length - 1
-            ? "outro"
-            : "main",
-      title: section.name,
-      overview: section.name,
-      keyPoints: [],
-      targetDurationSec: 1,
-      sourceRefs: [{ sourceId: emptyProject.source.id, headingPath: [] }],
-      openQuestions: [],
-      humanDirectives: {
-        requiredItems: [],
-        prohibitedItems: [],
-        scriptConstraints: []
-      },
-      lockedFields: []
-    }))
-  },
   script: {
     ...emptyProject.script,
     sections

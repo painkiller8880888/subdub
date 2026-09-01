@@ -30,15 +30,12 @@ const project = createEmptyVideoProject({
   createdAt: "2026-08-05T00:00:00.000Z"
 });
 
-const script = {
-  status: "draft" as const,
-  origin: "manual" as const,
-  outlineHash: "0".repeat(64),
+const script: Script = {
   sections: [
     {
       id: "script-section-main",
-      outlineSectionId: "outline-main",
       name: "操作",
+      enabled: true,
       screenTemplateId: "screen-template-standard",
       background: { kind: "solid" as const, colorToken: "background" as const },
       lines: [

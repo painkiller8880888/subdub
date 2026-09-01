@@ -1048,16 +1048,7 @@ export const scriptSaveRequestSchema = z
     script: scriptSchema,
     expectedRevision: nonNegativeIntegerSchema
   })
-  .strict()
-  .superRefine((request, ctx) => {
-    if (request.script.status === "approved") {
-      ctx.addIssue({
-        code: "custom",
-        path: ["script", "status"],
-        message: "script approval is only available through the approval workflow"
-      });
-    }
-  });
+  .strict();
 
 export const modelsQuerySchema = z
   .object({

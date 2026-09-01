@@ -1,5 +1,5 @@
 import type { AssetTagDictionaryEntry } from "../assets/asset-repository.js";
-import type { OutlineSection, ScriptLine, ScriptSection, VideoProject } from "../../schema/index.js";
+import type { ScriptLine, ScriptSection, VideoProject } from "../../schema/index.js";
 import {
   VISUAL_SUGGESTION_ERROR_CODE,
   VisualSuggestionError
@@ -13,7 +13,6 @@ export const VISUAL_MEDIA_KINDS = [
 
 export type VisualSuggestionTarget = {
   readonly section: ScriptSection;
-  readonly outlineSection: OutlineSection;
   readonly startLine: ScriptLine;
   readonly endLine: ScriptLine;
   readonly lineIds: readonly string[];
@@ -107,20 +106,8 @@ export function resolveVisualSuggestionTarget(
       "The visual suggestion script section does not exist."
     );
   }
-  const outlineSection = project.outline.sections.find(
-    (candidate) => candidate.id === section.outlineSectionId
-  );
-  if (outlineSection === undefined) {
-    throw new VisualSuggestionError(
-      VISUAL_SUGGESTION_ERROR_CODE.notAllowed,
-      422,
-      "The visual suggestion section is not linked to an outline section."
-    );
-  }
-
   return {
     section,
-    outlineSection,
     startLine: section.lines[startLineIndex]!,
     endLine: section.lines[endLineIndex]!,
     lineIds: section.lines
@@ -149,9 +136,9 @@ export function buildVisualSuggestionPromptContext(
         subtitleText: line.subtitleText
       })),
     section: {
-      title: target.outlineSection.title,
-      overview: target.outlineSection.overview,
-      keyPoints: [...target.outlineSection.keyPoints]
+      title: target.section.name,
+      overview: "",
+      keyPoints: []
     },
     availableMediaKinds: [...VISUAL_MEDIA_KINDS],
     activeTagDictionary: tagDictionary.map((tag) => ({

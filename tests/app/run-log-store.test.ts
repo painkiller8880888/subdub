@@ -48,7 +48,7 @@ function aiLog(
     },
     outputs: status === "succeeded" ? [{ checksum: hash }] : [],
     errorCode: null,
-    taskKind: "outline_generation" as const,
+    taskKind: "visual_search_intent" as const,
     sourceHash: hash,
     modelId: "fixture/model",
     modelSelectionSource: "default" as const,
@@ -96,7 +96,7 @@ describe("RunLogStore", () => {
       JSON.stringify({
         runId: "a-legacy",
         kind: "ai",
-        taskKind: "outline_generation",
+        taskKind: "visual_search_intent",
         projectId,
         startRevision: 1,
         sourceHash: hash,
@@ -238,7 +238,7 @@ describe("RunLogStore", () => {
       JSON.stringify({
         runId: "legacy-ai",
         kind: "ai",
-        taskKind: "outline_generation",
+        taskKind: "visual_search_intent",
         projectId,
         startRevision: 1,
         sourceHash: hash,

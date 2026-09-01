@@ -30,16 +30,16 @@ import {
 const sections = [
   {
     id: "section-intro",
-    outlineSectionId: "outline-intro",
     name: "導入",
+    enabled: true,
     screenTemplateId: "screen-template-standard",
     background: { kind: "solid", colorToken: "background" },
     lines: []
   },
   {
     id: "section-main",
-    outlineSectionId: "outline-main",
     name: "操作手順",
+    enabled: true,
     screenTemplateId: "screen-template-standard",
     background: { kind: "solid", colorToken: "background" },
     lines: []
@@ -368,16 +368,16 @@ describe("edit page read model", () => {
       ...sections,
       {
         id: "section-outro",
-        outlineSectionId: "outline-outro",
         name: "まとめ",
+        enabled: true,
         screenTemplateId: "screen-template-standard",
         background: { kind: "solid", colorToken: "background" },
         lines: []
       },
       {
         id: "section-tail",
-        outlineSectionId: "outline-tail",
         name: "補足",
+        enabled: true,
         screenTemplateId: "screen-template-standard",
         background: { kind: "solid", colorToken: "background" },
         lines: []

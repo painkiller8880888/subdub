@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { ImprovementLogError } from "../../src/app/projects/improvement-log-errors.js";
 import { ImprovementLogRepository } from "../../src/app/projects/improvement-log-repository.js";
 import { initializeWorkspaceDatabase } from "../../src/db/initialize.js";
-import { videoProjectFixture } from "../fixtures/video-project.js";
+import { legacyVideoProjectFixture } from "../fixtures/video-project.js";
 
 const NOW = "2026-08-11T00:00:00.000Z";
 const SOURCE_HASH = "a".repeat(64);
@@ -84,14 +84,14 @@ describe("ImprovementLogRepository", () => {
       targetKind: "outline",
       targetId: "outline",
       candidateKey: "outline",
-      candidate: videoProjectFixture.outline,
+      candidate: legacyVideoProjectFixture.outline,
       modelId: "model-outline",
       responseModel: "provider/model-outline",
       promptVersion: "1.0.0",
       createdAt: NOW
     });
     expect(candidate.candidateChecksum).toMatch(/^[0-9a-f]{64}$/);
-    expect(candidate.candidateJson).toEqual(videoProjectFixture.outline);
+    expect(candidate.candidateJson).toEqual(legacyVideoProjectFixture.outline);
 
     await expect(
       repository.insertGenerationCandidate({
@@ -103,7 +103,7 @@ describe("ImprovementLogRepository", () => {
         targetKind: "outline",
         targetId: "outline",
         candidateKey: "outline",
-        candidate: videoProjectFixture.outline,
+        candidate: legacyVideoProjectFixture.outline,
         modelId: "model-outline",
         responseModel: null,
         promptVersion: "1.0.0",
@@ -125,7 +125,7 @@ describe("ImprovementLogRepository", () => {
       createdAt: NOW
     });
     expect(decision.reason).toBeNull();
-    expect(decision.beforeJson).toEqual(videoProjectFixture.outline);
+    expect(decision.beforeJson).toEqual(legacyVideoProjectFixture.outline);
     expect(decision.afterJson).toBeNull();
 
     const resend = await repository.insertDecision({
@@ -150,7 +150,7 @@ describe("ImprovementLogRepository", () => {
         projectRevisionBefore: 3,
         projectRevisionAfter: 4,
         decision: "accepted",
-        after: videoProjectFixture.outline,
+        after: legacyVideoProjectFixture.outline,
         reason: null,
         createdAt: NOW
       })
@@ -174,7 +174,7 @@ describe("ImprovementLogRepository", () => {
       promptVersion: "1.0.0",
       createdAt: NOW
     });
-    const assignment = videoProjectFixture.visuals.assignments[0];
+    const assignment = legacyVideoProjectFixture.visuals.assignments[0];
     expect(assignment).toBeDefined();
     const accepted = await repository.insertDecision({
       decisionId: "run-visual-decision-accepted",
@@ -198,7 +198,7 @@ describe("ImprovementLogRepository", () => {
       targetId: "outline",
       sourceHash: SOURCE_HASH,
       outlineHash: null,
-      payload: videoProjectFixture.outline,
+      payload: legacyVideoProjectFixture.outline,
       generationRunId: null,
       modelId: null,
       promptVersion: null,
@@ -212,7 +212,7 @@ describe("ImprovementLogRepository", () => {
       targetId: "outline",
       sourceHash: SOURCE_HASH,
       outlineHash: null,
-      payload: videoProjectFixture.outline,
+      payload: legacyVideoProjectFixture.outline,
       generationRunId: null,
       modelId: null,
       promptVersion: null,
@@ -261,7 +261,7 @@ describe("ImprovementLogRepository", () => {
       targetKind: "outline",
       targetId: "outline",
       candidateKey: "outline",
-      candidate: videoProjectFixture.outline,
+      candidate: legacyVideoProjectFixture.outline,
       modelId: "model",
       responseModel: null,
       promptVersion: "1.0.0",
@@ -275,7 +275,7 @@ describe("ImprovementLogRepository", () => {
         projectRevisionBefore: 1,
         projectRevisionAfter: 2,
         decision: "accepted",
-        after: videoProjectFixture.outline,
+        after: legacyVideoProjectFixture.outline,
         reason: null,
         createdAt: NOW
       })

@@ -67,7 +67,7 @@ describe("runLogSchema", () => {
         kind: "ai",
         engine: null,
         model: "fixture/model",
-        taskKind: "outline_generation",
+        taskKind: "visual_search_intent",
         sourceHash: hash,
         modelId: "fixture/model",
         modelSelectionSource: "default",

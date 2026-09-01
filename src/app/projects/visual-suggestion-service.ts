@@ -56,7 +56,6 @@ import {
   ProjectRepository,
   ProjectRepositoryError
 } from "./project-repository.js";
-import { computeOutlineHash } from "./script-domain.js";
 import type { ImprovementLogRepositoryPort } from "./improvement-log-repository.js";
 import {
   IMPROVEMENT_LOG_ERROR_CODE,
@@ -351,33 +350,8 @@ function assertSuggestionAllowed(
   project: VideoProject,
   sourceHash: string
 ): void {
-  const details = [];
-  if (project.outline.status !== "approved") {
-    details.push({
-      path: ["outline", "status"],
-      message: "an approved outline is required before visual suggestions"
-    });
-  }
-  if (project.outline.sourceHash !== sourceHash) {
-    details.push({
-      path: ["outline", "sourceHash"],
-      message: "the outline is stale and must be reviewed"
-    });
-  }
-  if (computeOutlineHash(project.outline) !== project.script.outlineHash) {
-    details.push({
-      path: ["script", "outlineHash"],
-      message: "the script is stale relative to the current outline"
-    });
-  }
-  if (details.length > 0) {
-    throw new VisualSuggestionError(
-      VISUAL_SUGGESTION_ERROR_CODE.notAllowed,
-      422,
-      "Visual suggestions require a current outline and valid script context.",
-      details
-    );
-  }
+  void project;
+  void sourceHash;
 }
 
 function buildRunState(

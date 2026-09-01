@@ -25,7 +25,8 @@ import {
   videoProjectSchema,
   type Outline,
   type Script,
-  type VideoProject
+  type VideoProject,
+  type VideoProjectV18
 } from "../../schema/index.js";
 import {
   ProjectRepository,
@@ -90,6 +91,17 @@ function projectSummary(project: VideoProject): ProjectSummary {
     createdAt: project.metadata.createdAt,
     updatedAt: project.metadata.updatedAt
   });
+}
+
+function requireLegacyProject(project: VideoProject): VideoProjectV18 {
+  if (!("outline" in project)) {
+    throw new ProjectRepositoryError(
+      "PROJECT_CANDIDATE_VALIDATION_FAILED",
+      422,
+      "This legacy planning operation is not available for a 1.9.0 project."
+    );
+  }
+  return project as unknown as VideoProjectV18;
 }
 
 function compareProjectSummaries(
@@ -316,12 +328,16 @@ export class ProjectService {
   async saveOutline(projectId: unknown, input: unknown): Promise<VideoProject> {
     const request = outlineSaveRequestSchema.parse(input);
     const currentProject = await this.repository.read(projectId);
+    const legacyProject = requireLegacyProject(currentProject);
     const normalizedOutline = normalizeOutlineIds(
-      currentProject.outline,
+      legacyProject.outline,
       request.outline,
       this.createId
     );
-    const { project } = applyEditedOutline(currentProject, normalizedOutline);
+    const { project } = applyEditedOutline(
+      legacyProject as unknown as VideoProject,
+      normalizedOutline
+    );
     return this.repository.save(projectId, project, request.expectedRevision);
   }
 
@@ -336,14 +352,15 @@ export class ProjectService {
       );
     }
 
-    validateOutlineForApproval(snapshot.project, snapshot.sourceHash);
+    const legacyProject = requireLegacyProject(snapshot.project);
+    validateOutlineForApproval(legacyProject, snapshot.sourceHash);
     const candidate = await this.findOutlineCandidate(
       snapshot.project.metadata.id,
-      snapshot.project.outline
+      legacyProject.outline
     );
     const saved = await this.repository.saveOutline(
       projectId,
-      { ...snapshot.project.outline, status: "approved" },
+      { ...legacyProject.outline, status: "approved" },
       request.expectedRevision
     );
     if (this.improvementLogRepository !== undefined) {
@@ -355,7 +372,7 @@ export class ProjectService {
           projectRevisionBefore: request.expectedRevision,
           projectRevisionAfter: saved.revision,
           decision: "accepted",
-          after: saved.outline,
+          after: (saved as unknown as VideoProjectV18).outline,
           reason: normalizeImprovementReason(request.reason),
           createdAt: this.now().toISOString()
         });
@@ -366,9 +383,9 @@ export class ProjectService {
         projectId: saved.metadata.id,
         projectRevision: saved.revision,
         targetId: "outline",
-        sourceHash: saved.source.sha256,
+        sourceHash: snapshot.sourceHash,
         outlineHash: null,
-        payload: saved.outline,
+        payload: (saved as unknown as VideoProjectV18).outline,
         generationRunId: candidate?.generationRunId ?? null,
         modelId: candidate?.modelId ?? null,
         promptVersion: candidate?.promptVersion ?? null,
@@ -388,7 +405,8 @@ export class ProjectService {
         "The project revision does not match the expected revision."
       );
     }
-    if (snapshot.project.outline.status === "approved") {
+    const legacyProject = requireLegacyProject(snapshot.project);
+    if (legacyProject.outline.status === "approved") {
       throw new ImprovementLogError(
         IMPROVEMENT_LOG_ERROR_CODE.rejectionNotAllowed,
         409,
@@ -396,9 +414,8 @@ export class ProjectService {
       );
     }
     if (
-      snapshot.project.outline.generationRunId === null ||
+      legacyProject.outline.generationRunId === null ||
       snapshot.project.script.sections.length > 0 ||
-      snapshot.project.script.status !== "draft" ||
       snapshot.project.visuals.assignments.length > 0 ||
       snapshot.project.visuals.suggestionRunIds.length > 0 ||
       snapshot.project.visuals.status !== "draft"
@@ -411,7 +428,7 @@ export class ProjectService {
     }
     const candidate = await this.findOutlineCandidate(
       snapshot.project.metadata.id,
-      snapshot.project.outline
+      legacyProject.outline
     );
     if (candidate === undefined || this.improvementLogRepository === undefined) {
       throw new ImprovementLogError(
@@ -468,7 +485,8 @@ export class ProjectService {
       );
     }
 
-    const currentOutline = snapshot.project.outline;
+    const legacyProject = requireLegacyProject(snapshot.project);
+    const currentOutline = legacyProject.outline;
     const reviewedOutline = {
       ...currentOutline,
       sourceHash: snapshot.sourceHash,
@@ -487,9 +505,10 @@ export class ProjectService {
   ): Promise<VideoProject> {
     const request = scriptInitializeRequestSchema.parse(input);
     const snapshot = await this.repository.readGenerationSnapshot(projectId);
+    const legacyProject = requireLegacyProject(snapshot.project);
     assertCanInitializeScript(snapshot.project, snapshot.sourceHash);
     const script = createScriptFromApprovedOutline(
-      snapshot.project.outline,
+      legacyProject.outline,
       this.createId
     );
     return this.repository.saveScript(
@@ -560,10 +579,7 @@ export class ProjectService {
     }
 
     assertCanApproveScript(snapshot.project, snapshot.sourceHash);
-    const script: Script = {
-      ...snapshot.project.script,
-      status: "approved"
-    };
+    const script: Script = snapshot.project.script;
     const updatedProject = {
       ...snapshot.project,
       script
@@ -577,7 +593,7 @@ export class ProjectService {
     this.assertScreenTemplateReferences(updatedProjectResult.data);
     const candidate = await this.findOutlineCandidate(
       snapshot.project.metadata.id,
-      snapshot.project.outline
+      requireLegacyProject(snapshot.project).outline
     );
     const saved = await this.repository.save(
       projectId,
@@ -591,10 +607,12 @@ export class ProjectService {
         projectId: saved.metadata.id,
         projectRevision: saved.revision,
         targetId: "script",
-        sourceHash: saved.source.sha256,
-        outlineHash: computeOutlineHash(saved.outline),
+        sourceHash: snapshot.sourceHash,
+        outlineHash: computeOutlineHash(
+          (saved as unknown as VideoProjectV18).outline
+        ),
         payload: {
-          outline: saved.outline,
+          outline: (saved as unknown as VideoProjectV18).outline,
           script: saved.script,
           characters: saved.characters
         },

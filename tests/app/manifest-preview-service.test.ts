@@ -8,7 +8,6 @@ import { afterEach, describe, expect, it } from "vitest";
 import { computeSourceProjectHash } from "../../src/app/rendering/render-manifest-compiler.js";
 import { ManifestPreviewService } from "../../src/app/rendering/manifest-preview-service.js";
 import { RenderManifestStore } from "../../src/app/rendering/render-manifest-store.js";
-import { computeOutlineHash } from "../../src/app/projects/script-domain.js";
 import { createStandardScreenTemplate } from "../../src/app/screen-templates/screen-template-seed.js";
 import type { ScreenTemplateSnapshotPort } from "../../src/app/projects/screen-template-selection.js";
 import type { VoicevoxAudioIndex } from "../../src/app/voicevox/audio-index.js";
@@ -31,7 +30,6 @@ async function createRoot(): Promise<string> {
 
 function createProject(): VideoProject {
   const project = structuredClone(videoProjectFixture) as VideoProject;
-  project.script.outlineHash = computeOutlineHash(project.outline);
   return project;
 }
 
@@ -346,39 +344,9 @@ describe("ManifestPreviewService", () => {
     ).toBe(true);
   });
 
-  it.each([
-    [
-      "outline approval",
-      (project: VideoProject) => (project.outline.status = "draft"),
-      "OUTLINE_NOT_APPROVED"
-    ],
-    [
-      "outline freshness",
-      (project: VideoProject) => (project.outline.sourceHash = "f".repeat(64)),
-      "OUTLINE_SOURCE_HASH_MISMATCH"
-    ],
-    [
-      "script freshness",
-      (project: VideoProject) => (project.script.outlineHash = "f".repeat(64)),
-      "SCRIPT_OUTLINE_HASH_MISMATCH"
-    ]
-  ])("distinguishes %s blockers", async (_name, change, expectedCode) => {
+  it("does not gate preview on legacy outline or script approval state", async () => {
     const root = await createRoot();
     const project = createProject();
-    const manifest = createManifest(project);
-    const service = await createService(root, project, { manifest });
-    change(project);
-
-    const result = await service.get(projectId);
-    expect(result.blockers.map((blocker) => blocker.code)).toContain(
-      expectedCode
-    );
-  });
-
-  it("does not gate preview on script or visual approval status", async () => {
-    const root = await createRoot();
-    const project = createProject();
-    project.script.status = "draft";
     project.visuals.status = "needs_review";
     const manifest = createManifest(project);
     const service = await createService(root, project, { manifest });

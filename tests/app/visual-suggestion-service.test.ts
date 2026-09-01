@@ -5,7 +5,6 @@ import * as path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { AssetRepository } from "../../src/app/assets/asset-repository.js";
-import { computeOutlineHash } from "../../src/app/projects/script-domain.js";
 import { createEmptyVideoProject } from "../../src/app/projects/empty-video-project.js";
 import { ProjectRepository } from "../../src/app/projects/project-repository.js";
 import { VisualSuggestionService } from "../../src/app/projects/visual-suggestion-service.js";
@@ -85,45 +84,18 @@ async function setupProject(
     SOURCE,
     created.revision
   );
-  const candidate = structuredClone(videoProjectFixture) as VideoProject;
-  candidate.metadata = {
-    ...candidate.metadata,
-    id: created.metadata.id,
-    createdAt: sourceProject.metadata.createdAt,
-    updatedAt: sourceProject.metadata.updatedAt
-  };
-  candidate.source = sourceProject.source;
-  candidate.aiSettings = {
-    ...candidate.aiSettings,
-    defaultModelId: "default-model",
-    taskModelOverrides: { visual_search_intent: "task-model" },
-    ...aiSettings
-  };
-  candidate.outline = {
-    ...candidate.outline,
-    status: "approved",
-    sourceHash: sourceProject.source.sha256,
-    sections: candidate.outline.sections.map((section) => ({
-      ...section,
-      sourceRefs: section.sourceRefs.map((sourceRef) => ({
-        ...sourceRef,
-        sourceId: sourceProject.source.id
-      }))
-    }))
-  };
-  candidate.script = {
-    ...candidate.script,
-    status: "approved",
-    outlineHash: computeOutlineHash(candidate.outline)
-  };
-  candidate.visuals = {
-    status: "draft",
-    suggestionRunIds: [],
-    assignments: []
-  };
   const project = await repository.save(
     created.metadata.id,
-    candidate,
+    {
+      ...sourceProject,
+      script: structuredClone(videoProjectFixture.script),
+      aiSettings: {
+        ...sourceProject.aiSettings,
+        defaultModelId: "default-model",
+        taskModelOverrides: { visual_search_intent: "task-model" },
+        ...aiSettings
+      }
+    },
     sourceProject.revision
   );
   const assetRepository = new AssetRepository(database.database);
@@ -634,7 +606,13 @@ describe("VisualSuggestionService", () => {
     );
     const draftSaved = await draftSetup.repository.save(
       draftSetup.project.metadata.id,
-      { ...draftProject, script: { ...draftProject.script, status: "draft" } },
+      {
+        ...draftProject,
+        metadata: {
+          ...draftProject.metadata,
+          title: "Draft suggestion project"
+        }
+      },
       draftProject.revision
     );
     const draftSuggestion = await createService(
