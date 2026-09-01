@@ -181,7 +181,7 @@ describe("models API", () => {
     });
   });
 
-  it("keeps project creation and source saving available without OpenRouter", async () => {
+  it("keeps project creation and current script editing available without OpenRouter", async () => {
     const workspaceRoot = await fs.mkdtemp(
       path.join(tmpdir(), "subdub-models-no-key-")
     );
@@ -205,15 +205,15 @@ describe("models API", () => {
       expect(createdResponse.statusCode).toBe(200);
       const created = createdResponse.json();
 
-      const sourceResponse = await server.app.inject({
+      const scriptResponse = await server.app.inject({
         method: "PUT",
-        url: `/api/projects/${created.data.metadata.id}/source`,
+        url: `/api/projects/${created.data.metadata.id}/script`,
         payload: {
-          markdown: "# Non-AI editing remains available",
+          script: created.data.script,
           expectedRevision: created.revision
         }
       });
-      expect(sourceResponse.statusCode).toBe(200);
+      expect(scriptResponse.statusCode).toBe(200);
     } finally {
       await server.app.close();
       await fs.rm(workspaceRoot, { recursive: true, force: true });

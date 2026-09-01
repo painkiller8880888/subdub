@@ -1,21 +1,23 @@
 import { randomUUID } from "node:crypto";
 
 import {
+  projectCharactersSaveRequestSchema,
+  projectCreateRequestSchema,
+  projectLineOverlaysSaveRequestSchema,
+  scriptSaveRequestSchema,
+  projectSummarySchema,
+  type ProjectSummary
+} from "../../schema/api.js";
+import {
   outlineApproveRequestSchema,
   outlineRejectRequestSchema,
   outlineReviewRequestSchema,
   outlineSaveRequestSchema,
   projectBriefSaveRequestSchema,
-  projectCharactersSaveRequestSchema,
-  projectCreateRequestSchema,
-  projectLineOverlaysSaveRequestSchema,
   projectSourceSaveRequestSchema,
   scriptApproveRequestSchema,
-  scriptInitializeRequestSchema,
-  scriptSaveRequestSchema,
-  projectSummarySchema,
-  type ProjectSummary
-} from "../../schema/api.js";
+  scriptInitializeRequestSchema
+} from "../../schema/legacy-api.js";
 import {
   normalizeImprovementReason,
   type AiGenerationCandidateRecord

@@ -32,11 +32,13 @@ import {
   ApiClientProtocolError,
   createProject,
   fetchProject,
+  fetchProjects
+} from "./lib/api-client";
+import {
   fetchProjectSource,
-  fetchProjects,
   saveProjectBrief,
   saveProjectSource
-} from "./lib/api-client";
+} from "./lib/legacy-api-client";
 import {
   AutosaveCoordinator,
   navigateAfterAutosave,

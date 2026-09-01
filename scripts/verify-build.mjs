@@ -60,17 +60,17 @@ try {
   assert.equal(projectPage.statusCode, 200);
   assert.match(projectPage.headers["content-type"], /^text\/html/);
 
-  const sourceSave = await first.app.inject({
+  const scriptSave = await first.app.inject({
     method: "PUT",
-    url: `/api/projects/${createdProjectId}/source`,
+    url: `/api/projects/${createdProjectId}/script`,
     payload: {
-      markdown: "# Build verification\n\nPersisted source",
+      script: created.data.script,
       expectedRevision: created.revision
     }
   });
-  assert.equal(sourceSave.statusCode, 200);
-  const sourceSaved = sourceSave.json();
-  assert.equal(sourceSaved.revision, 1);
+  assert.equal(scriptSave.statusCode, 200);
+  const scriptSaved = scriptSave.json();
+  assert.equal(scriptSaved.revision, 1);
 
   const currentProjectResponse = await first.app.inject({
     method: "GET",
@@ -114,15 +114,12 @@ try {
   assert.equal(Object.hasOwn(persistedProject.json().data, "brief"), false);
   assert.equal(Object.hasOwn(persistedProject.json().data, "outline"), false);
 
-  const persistedSource = await second.app.inject({
+  const retiredSource = await second.app.inject({
     method: "GET",
     url: `/api/projects/${createdProjectId}/source`
   });
-  assert.equal(persistedSource.statusCode, 200);
-  assert.equal(
-    persistedSource.json().data.markdown,
-    "# Build verification\n\nPersisted source"
-  );
+  assert.equal(retiredSource.statusCode, 404);
+  assert.equal(retiredSource.json().error.code, "API_NOT_FOUND");
 
   const persistedProjectPage = await second.app.inject({
     method: "GET",

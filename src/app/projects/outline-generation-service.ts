@@ -1,7 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 
 import {
-  outlineGenerateRequestSchema,
   outlineGenerationCandidateSchema,
   outlineGenerationJsonSchema,
   outlineSchema,
@@ -11,6 +10,7 @@ import {
   type VideoProject,
   type VideoProjectV18
 } from "../../schema/index.js";
+import { outlineGenerateRequestSchema } from "../../schema/legacy-api.js";
 import { OpenRouterAdapterError } from "../../openrouter/errors.js";
 import {
   resolveModel,

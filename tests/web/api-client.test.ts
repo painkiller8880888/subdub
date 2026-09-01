@@ -4,9 +4,6 @@ import { createEmptyVideoProject } from "../../src/app/projects/empty-video-proj
 import {
   ApiClientError,
   ApiClientProtocolError,
-  approveProjectOutline,
-  rejectProjectOutline,
-  approveProjectScript,
   assignProjectVisual,
   splitProjectVisualAssignment,
   createProject,
@@ -15,9 +12,6 @@ import {
   fetchProject,
   fetchProjects,
   fetchApi,
-  generateProjectOutline,
-  reviewProjectOutline,
-  saveProjectOutline,
   rejectProjectVisualSuggestionCandidate,
   searchAssets,
   fetchTerminology,
@@ -32,6 +26,14 @@ import {
   fetchProjectRenderStatus,
   projectPreviewDownloadUrl
 } from "../../src/web/lib/api-client.js";
+import {
+  approveProjectOutline,
+  approveProjectScript,
+  generateProjectOutline,
+  rejectProjectOutline,
+  reviewProjectOutline,
+  saveProjectOutline
+} from "../../src/web/lib/legacy-api-client.js";
 import {
   aiRunSearchResponseSchema,
   healthResponseSchema,

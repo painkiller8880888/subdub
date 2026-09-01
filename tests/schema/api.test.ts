@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import * as currentApiSchema from "../../src/schema/api.js";
 import {
   apiErrorResponseSchema,
   apiSuccessResponseSchema,
@@ -9,9 +10,45 @@ import {
   visualAssignmentRequestSchema,
   visualAssignmentUpdateRequestSchema
 } from "../../src/schema/api.js";
+import * as currentSchema from "../../src/schema/index.js";
+import * as currentApiClient from "../../src/web/lib/api-client.js";
 import { videoProjectFixture } from "../fixtures/video-project.js";
 
 describe("shared API contract", () => {
+  it("keeps retired planning contracts out of current barrels and clients", () => {
+    const retiredSchemas = [
+      "projectSourceReadResponseSchema",
+      "projectSourceSaveRequestSchema",
+      "projectBriefSaveRequestSchema",
+      "outlineGenerateRequestSchema",
+      "outlineSaveRequestSchema",
+      "outlineApproveRequestSchema",
+      "outlineRejectRequestSchema",
+      "outlineReviewRequestSchema",
+      "scriptInitializeRequestSchema",
+      "scriptApproveRequestSchema"
+    ];
+    for (const retiredSchema of retiredSchemas) {
+      expect(currentApiSchema).not.toHaveProperty(retiredSchema);
+      expect(currentSchema).not.toHaveProperty(retiredSchema);
+    }
+
+    for (const retiredClientFunction of [
+      "fetchProjectSource",
+      "saveProjectSource",
+      "saveProjectBrief",
+      "generateProjectOutline",
+      "saveProjectOutline",
+      "approveProjectOutline",
+      "rejectProjectOutline",
+      "reviewProjectOutline",
+      "initializeProjectScript",
+      "approveProjectScript"
+    ]) {
+      expect(currentApiClient).not.toHaveProperty(retiredClientFunction);
+    }
+  });
+
   it("requires data and omits revision when it has no meaning", () => {
     const response = createApiSuccessResponse({ status: "ok" });
 
