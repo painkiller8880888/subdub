@@ -1,8 +1,13 @@
 import { createHash } from "node:crypto";
 
 import type { ApiErrorDetail } from "../../schema/api.js";
-import { idSchema, type Outline, type Script, type VideoProject } from "../../schema/index.js";
-import { STANDARD_SCREEN_TEMPLATE_ID } from "../screen-templates/screen-template-seed.js";
+import {
+  idSchema,
+  type Outline,
+  type Script,
+  type VideoProject
+} from "../../schema/index.js";
+import { createScriptSection } from "./starter-script-sections.js";
 import {
   ScriptApprovalError,
   ScriptInitializationError,
@@ -75,15 +80,21 @@ export function createScriptFromApprovedOutline(
 ): Script {
   const usedIds = new Set<string>();
   return {
-    sections: outline.sections.map((outlineSection) => ({
-      id: generatedId("script-section", createId, usedIds),
-      name: outlineSection.title,
-      enabled: true,
-      background: { kind: "solid", colorToken: "background" },
-      screenTemplateId: STANDARD_SCREEN_TEMPLATE_ID,
-      lines: []
-    }))
+    sections: outline.sections.map((outlineSection) =>
+      createScriptSection(
+        generatedId("script-section", createId, usedIds),
+        outlineSection.title
+      )
+    )
   };
+}
+
+function scriptSectionEntries(script: Script) {
+  return script.sections.map((section, sectionIndex) => ({
+    section,
+    sectionIndex,
+    path: ["script", "sections", sectionIndex] as Array<string | number>
+  }));
 }
 
 function scriptLineEntries(script: Script) {
@@ -114,28 +125,37 @@ function assertUniqueLineIds(script: Script): void {
   }
 }
 
-function assertMatchingSectionStructure(
-  current: Script,
-  candidate: Script
-): void {
-  if (current.sections.length !== candidate.sections.length) {
-    throw new ScriptValidationError([
-      {
-        path: ["script", "sections"],
-        message: "script sections cannot be added, removed, or reordered"
-      }
-    ]);
-  }
-
-  for (const [index, currentSection] of current.sections.entries()) {
-    if (candidate.sections[index]?.id !== currentSection.id) {
+function assertUniqueSectionIds(script: Script): void {
+  const seen = new Set<string>();
+  for (const entry of scriptSectionEntries(script)) {
+    if (seen.has(entry.section.id)) {
       throw new ScriptValidationError([
         {
-          path: ["script", "sections", index, "id"],
-          message: "script sections must keep their stable IDs"
+          path: [...entry.path, "id"],
+          message: "script section id must be unique"
         }
       ]);
     }
+    seen.add(entry.section.id);
+  }
+}
+
+export function assertNoRemovedScriptSections(
+  current: Script,
+  candidate: Script
+): void {
+  const candidateIds = new Set(candidate.sections.map((section) => section.id));
+  const removedSections = current.sections.filter(
+    (section) => !candidateIds.has(section.id)
+  );
+  if (removedSections.length > 0) {
+    throw new ScriptValidationError([
+      {
+        path: ["script", "sections"],
+        message:
+          "existing script sections cannot be hard-deleted; set enabled=false instead"
+      }
+    ]);
   }
 }
 
@@ -144,21 +164,39 @@ export function normalizeEditedScriptIds(
   candidate: Script,
   createId: () => string
 ): Script {
+  assertUniqueSectionIds(candidate);
   assertUniqueLineIds(candidate);
-  assertMatchingSectionStructure(currentProject.script, candidate);
+  assertNoRemovedScriptSections(currentProject.script, candidate);
 
-  const currentLineIds = new Set(scriptLineEntries(currentProject.script).map(({ line }) => line.id));
-  const usedLineIds = new Set<string>();
-  const scriptSections = candidate.sections.map((section, sectionIndex) => ({
-    ...section,
-    id: currentProject.script.sections[sectionIndex]?.id ?? section.id,
-    lines: section.lines.map((line) => ({
-      ...line,
-      id: currentLineIds.has(line.id)
-        ? (usedLineIds.add(line.id), line.id)
-        : generatedId("script-line", createId, usedLineIds)
-    }))
-  }));
+  const currentSectionsById = new Map(
+    currentProject.script.sections.map((section) => [section.id, section])
+  );
+  const currentLineIds = new Set(
+    scriptLineEntries(currentProject.script).map(({ line }) => line.id)
+  );
+  const usedSectionIds = new Set(currentSectionsById.keys());
+  const usedLineIds = new Set(currentLineIds);
+  const scriptSections = candidate.sections.map((section) => {
+    const currentSection = currentSectionsById.get(section.id);
+    const sectionId =
+      currentSection?.id ?? generatedId("script-section", createId, usedSectionIds);
+    if (currentSection === undefined) {
+      // A client-provided section is a creation request. Allocate its identity
+      // here and start it from the canonical empty-section defaults.
+      return createScriptSection(sectionId, section.name);
+    }
+
+    return {
+      ...section,
+      id: currentSection.id,
+      lines: section.lines.map((line) => ({
+        ...line,
+        id: currentLineIds.has(line.id)
+          ? line.id
+          : generatedId("script-line", createId, usedLineIds)
+      }))
+    };
+  });
 
   return {
     ...candidate,

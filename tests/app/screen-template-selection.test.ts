@@ -40,4 +40,26 @@ describe("screen template selection", () => {
     expect(missingSection.screenTemplateId).toBe("missing-template");
     expect(inactiveSection.screenTemplateId).toBe("inactive-template");
   });
+
+  it("can skip catalog readiness checks for disabled sections", () => {
+    const project = projectFixture();
+    const disabledSection = project.script.sections[0]!;
+    disabledSection.enabled = false;
+    disabledSection.screenTemplateId = "missing-template";
+
+    const catalog = {
+      findById: (templateId: string) =>
+        templateId === "screen-template-standard"
+          ? { status: "active" as const }
+          : undefined
+    };
+    expect(
+      validateVideoProjectScreenTemplateReferences(project, catalog, {
+        enabledOnly: true
+      })
+    ).toEqual([]);
+    expect(
+      validateVideoProjectScreenTemplateReferences(project, catalog)
+    ).toHaveLength(1);
+  });
 });

@@ -24,6 +24,11 @@ export type ScreenTemplateReferenceIssue = Readonly<{
   readonly reason: "missing" | "inactive";
 }>;
 
+export type ScreenTemplateReferenceValidationOptions = Readonly<{
+  /** Skip catalog readiness checks for sections excluded from output. */
+  readonly enabledOnly?: boolean;
+}>;
+
 function referenceIssue(
   path: readonly (string | number)[],
   templateId: string,
@@ -55,11 +60,15 @@ function referenceIssue(
  */
 export function validateVideoProjectScreenTemplateReferences(
   project: Pick<VideoProject, "script">,
-  catalog: ScreenTemplateCatalogPort
+  catalog: ScreenTemplateCatalogPort,
+  options: ScreenTemplateReferenceValidationOptions = {}
 ): ScreenTemplateReferenceIssue[] {
   const issues: ScreenTemplateReferenceIssue[] = [];
 
   for (const [sectionIndex, section] of project.script.sections.entries()) {
+    if (options.enabledOnly === true && !section.enabled) {
+      continue;
+    }
     const sectionIssue = referenceIssue(
       ["script", "sections", sectionIndex, "screenTemplateId"],
       section.screenTemplateId,

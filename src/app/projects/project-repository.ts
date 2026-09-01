@@ -289,6 +289,28 @@ function candidateValidationFailedError(
   );
 }
 
+function assertScriptSectionsRetained(
+  currentProject: Pick<VideoProject, "script">,
+  candidateProject: Pick<VideoProject, "script">
+): void {
+  const candidateSectionIds = new Set(
+    candidateProject.script.sections.map((section) => section.id)
+  );
+  if (
+    currentProject.script.sections.some(
+      (section) => !candidateSectionIds.has(section.id)
+    )
+  ) {
+    throw candidateValidationFailedError([
+      {
+        path: ["script", "sections"],
+        message:
+          "existing script sections cannot be hard-deleted; set enabled=false instead"
+      }
+    ]);
+  }
+}
+
 function currentProjectIdMismatchError(): ProjectRepositoryError {
   return new ProjectRepositoryError(
     "PROJECT_CURRENT_ID_MISMATCH",
@@ -498,7 +520,8 @@ export class ProjectRepository {
     }
     const issues = validateVideoProjectScreenTemplateReferences(
       project,
-      this.screenTemplateCatalog
+      this.screenTemplateCatalog,
+      { enabledOnly: true }
     );
     if (issues.length > 0) {
       throw candidateValidationFailedError(
@@ -895,6 +918,7 @@ export class ProjectRepository {
     if (!scriptResult.success) {
       throw candidateValidationFailedError(validationIssues(scriptResult.error));
     }
+    assertScriptSectionsRetained(currentProject, { script: scriptResult.data });
 
     const expectedRevisionResult =
       nonNegativeIntegerSchema.safeParse(expectedRevision);

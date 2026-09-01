@@ -202,7 +202,8 @@ export class ProjectService {
     }
     const issues = validateVideoProjectScreenTemplateReferences(
       project,
-      this.screenTemplateCatalog
+      this.screenTemplateCatalog,
+      { enabledOnly: true }
     );
     if (issues.length > 0) {
       throw new ScriptValidationError(scriptValidationIssues(issues));

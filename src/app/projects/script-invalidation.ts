@@ -60,8 +60,21 @@ function structureChanged(current: Script, candidate: Script): boolean {
   }
 
   for (let sectionIndex = 0; sectionIndex < current.sections.length; sectionIndex += 1) {
-    const currentLines = current.sections[sectionIndex]?.lines ?? [];
-    const candidateLines = candidate.sections[sectionIndex]?.lines ?? [];
+    if (current.sections[sectionIndex]?.id !== candidate.sections[sectionIndex]?.id) {
+      return true;
+    }
+  }
+
+  const candidateSectionsById = new Map(
+    candidate.sections.map((section) => [section.id, section])
+  );
+  for (const currentSection of current.sections) {
+    const candidateSection = candidateSectionsById.get(currentSection.id);
+    if (candidateSection === undefined) {
+      return true;
+    }
+    const currentLines = currentSection.lines;
+    const candidateLines = candidateSection.lines;
     if (currentLines.length !== candidateLines.length) {
       return true;
     }
@@ -100,15 +113,30 @@ function manifestFieldsChanged(
   );
 }
 
-function sectionBackgroundChanged(
+function sectionPresentationChanged(
   current: Script,
   candidate: Script
 ): boolean {
-  return current.sections.some((section, sectionIndex) => {
-    const candidateSection = candidate.sections[sectionIndex];
+  if (
+    current.sections.length !== candidate.sections.length ||
+    current.sections.some(
+      (section, sectionIndex) =>
+        candidate.sections[sectionIndex]?.id !== section.id
+    )
+  ) {
+    return true;
+  }
+
+  const candidateSectionsById = new Map(
+    candidate.sections.map((section) => [section.id, section])
+  );
+  return current.sections.some((section) => {
+    const candidateSection = candidateSectionsById.get(section.id);
     return (
       candidateSection !== undefined &&
-      (!deepEqual(section.background, candidateSection.background) ||
+      (section.name !== candidateSection.name ||
+        section.enabled !== candidateSection.enabled ||
+        !deepEqual(section.background, candidateSection.background) ||
         section.screenTemplateId !== candidateSection.screenTemplateId)
     );
   });
@@ -153,7 +181,7 @@ export function classifyScriptChange(
     }
   }
 
-  if (sectionBackgroundChanged(current, candidate)) {
+  if (sectionPresentationChanged(current, candidate)) {
     staleTargets.add("manifest");
   }
 
