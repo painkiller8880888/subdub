@@ -1189,6 +1189,15 @@ input:focus-visible {
   width: 100%;
 }
 
+.script-editor-controls {
+  border: 0;
+  display: grid;
+  gap: 1rem;
+  margin: 0;
+  min-width: 0;
+  padding: 0;
+}
+
 .script-production-main,
 .script-visual-sidebar {
   display: grid;

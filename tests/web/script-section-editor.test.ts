@@ -46,6 +46,26 @@ describe("script section editor", () => {
     ]);
   });
 
+  it("moves across disabled sections by enabled display order", () => {
+    const current = script();
+    current.sections[1]!.enabled = false;
+
+    const movedUp = moveScriptSection(current, "section-outro", "up");
+    const movedDown = moveScriptSection(current, "section-intro", "down");
+
+    expect(movedUp.sections.map((section) => section.id)).toEqual([
+      "section-outro",
+      "section-main",
+      "section-intro"
+    ]);
+    expect(movedUp.sections[1]?.enabled).toBe(false);
+    expect(movedDown.sections.map((section) => section.id)).toEqual([
+      "section-outro",
+      "section-main",
+      "section-intro"
+    ]);
+  });
+
   it("creates a request-only section for server-side defaulting", () => {
     const current = script();
     const added = createPendingScriptSection(current, "補足");

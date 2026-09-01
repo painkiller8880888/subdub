@@ -34,7 +34,21 @@ describe("ScriptPage workflow navigation", () => {
     expect(source).toContain("無効なセクション (");
     expect(source).toContain("再有効化");
     expect(source).toContain("セクションを追加");
+    expect(source).toContain('className="script-editor-controls"');
+    expect(source).toContain("disabled={sectionMutationPending}");
     expect(source).not.toContain("セクションを削除");
+  });
+
+  it("bases section movement controls on enabled display order", async () => {
+    const source = await fs.readFile("src/web/ScriptPage.tsx", "utf8");
+
+    expect(source).toContain(
+      "({ section, sectionIndex }, enabledSectionIndex)"
+    );
+    expect(source).toContain("disabled={enabledSectionIndex === 0}");
+    expect(source).toMatch(
+      /enabledSectionIndex ===\s+enabledSectionEntries\.length - 1/u
+    );
   });
 
   it("places the section line-add action after the section lines", async () => {

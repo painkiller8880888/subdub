@@ -60,8 +60,24 @@ export function moveScriptSection(
     return next;
   }
 
-  const targetIndex = direction === "up" ? currentIndex - 1 : currentIndex + 1;
-  if (targetIndex < 0 || targetIndex >= next.sections.length) {
+  const enabledIndexes = next.sections.reduce<number[]>(
+    (indexes, section, index) => {
+      if (section.enabled) {
+        indexes.push(index);
+      }
+      return indexes;
+    },
+    []
+  );
+  const enabledPosition = enabledIndexes.indexOf(currentIndex);
+  if (enabledPosition < 0) {
+    return next;
+  }
+
+  const targetEnabledPosition =
+    direction === "up" ? enabledPosition - 1 : enabledPosition + 1;
+  const targetIndex = enabledIndexes[targetEnabledPosition];
+  if (targetIndex === undefined) {
     return next;
   }
 
