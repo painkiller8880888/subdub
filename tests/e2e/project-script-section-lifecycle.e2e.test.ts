@@ -32,6 +32,8 @@ const repositoryRoot = path.resolve(
 );
 const projectId = "pc-05-script-section-browser";
 const previewProjectId = "pc-05-preview-section-browser";
+const downstreamOverlayId = "overlay-main-confirm";
+const downstreamVoiceOverrides = { speedScale: 1.1 };
 const createdAt = "2026-01-01T00:00:00.000Z";
 const initialProject = createEmptyVideoProject({
   projectId,
@@ -133,6 +135,33 @@ function downstreamPreviewProject(): VideoProject {
   for (const section of project.script.sections) {
     section.screenTemplateId = standardTemplate.templateId;
   }
+  const mainLearnerLine = project.script.sections
+    .find((section) => section.id === "section-main")
+    ?.lines.find((line) => line.id === "main-learner-1");
+  if (mainLearnerLine === undefined) {
+    throw new Error("downstream voice fixture is missing");
+  }
+  mainLearnerLine.voiceOverrides = { ...downstreamVoiceOverrides };
+  project.overlays = {
+    ...project.overlays,
+    lineOverlays: [
+      {
+        id: downstreamOverlayId,
+        lineId: "main-learner-1",
+        kind: "label",
+        text: "確認",
+        transform: {
+          x: 0.24,
+          y: 0.24,
+          width: 0.2,
+          height: 0.1,
+          rotationDeg: 0
+        },
+        colorToken: "accent",
+        animation: "pulse"
+      }
+    ]
+  };
   return videoProjectSchema.parse(project);
 }
 
@@ -948,6 +977,12 @@ describe("project create and ScriptPage section lifecycle browser E2E", () => {
         const downstreamSection = currentProject().script.sections.find(
           (section) => section.id === downstreamSectionId
         );
+        const downstreamOverlay = currentProject().overlays.lineOverlays.find(
+          (overlay) => overlay.id === downstreamOverlayId
+        );
+        if (downstreamOverlay === undefined) {
+          throw new Error("downstream overlay fixture is missing");
+        }
         expect(downstreamSection?.lines.length).toBeGreaterThan(0);
         expect(currentProject().edit.sectionBgms).toEqual(
           expect.arrayContaining([
@@ -986,10 +1021,25 @@ describe("project create and ScriptPage section lifecycle browser E2E", () => {
           expect.arrayContaining([
             expect.objectContaining({
               id: "main-learner-1",
-              voiceOverrides: expect.any(Object)
+              voiceOverrides: downstreamVoiceOverrides
             })
           ])
         );
+        expect(downstreamOverlay).toEqual({
+          id: downstreamOverlayId,
+          lineId: "main-learner-1",
+          kind: "label",
+          text: "確認",
+          transform: {
+            x: 0.24,
+            y: 0.24,
+            width: 0.2,
+            height: 0.1,
+            rotationDeg: 0
+          },
+          colorToken: "accent",
+          animation: "pulse"
+        });
 
         const mainSectionCard = page.locator(".script-section-card").nth(1);
         const disableRequestPromise = page.waitForRequest((request) =>
@@ -1055,9 +1105,12 @@ describe("project create and ScriptPage section lifecycle browser E2E", () => {
           expect.arrayContaining([
             expect.objectContaining({
               id: "main-learner-1",
-              voiceOverrides: expect.any(Object)
+              voiceOverrides: downstreamVoiceOverrides
             })
           ])
+        );
+        expect(currentProject().overlays.lineOverlays).toEqual(
+          expect.arrayContaining([downstreamOverlay])
         );
 
         await navigateToPreview(page);
@@ -1101,6 +1154,21 @@ describe("project create and ScriptPage section lifecycle browser E2E", () => {
             (section) => section.id === downstreamSectionId
           )?.enabled
         ).toBe(true);
+        expect(
+          currentProject().script.sections.find(
+            (section) => section.id === downstreamSectionId
+          )?.lines
+        ).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({
+              id: "main-learner-1",
+              voiceOverrides: downstreamVoiceOverrides
+            })
+          ])
+        );
+        expect(currentProject().overlays.lineOverlays).toEqual(
+          expect.arrayContaining([downstreamOverlay])
+        );
 
         await navigateToPreview(page);
         await page.getByRole("heading", { name: "最新のプレビュー" }).waitFor();
