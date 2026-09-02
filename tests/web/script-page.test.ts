@@ -68,6 +68,20 @@ describe("ScriptPage workflow navigation", () => {
     expect(addLineButtonStart).toBeGreaterThan(lineListStart);
   });
 
+  it("renders the section header in two rows with a local collapse control", async () => {
+    const source = await fs.readFile("src/web/ScriptPage.tsx", "utf8");
+
+    expect(source).toContain('className="script-section-header-id"');
+    expect(source).toContain('className="script-section-header-row"');
+    expect(source).toContain('className="script-section-header-main"');
+    expect(source).toContain('className="script-section-header-actions"');
+    expect(source).toContain("script-section-collapse-button");
+    expect(source).toContain("aria-controls={`${section.id}-body`}");
+    expect(source).toContain("aria-expanded={!sectionCollapsed}");
+    expect(source).toContain("hidden={sectionCollapsed}");
+    expect(source).toContain("setCollapsedSectionIds(new Set())");
+  });
+
   it("shrinks UI font declarations while preserving the compact label size", async () => {
     const styles = await fs.readFile("src/web/styles.css", "utf8");
 

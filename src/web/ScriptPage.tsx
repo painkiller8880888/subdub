@@ -977,6 +977,9 @@ export function ScriptPage() {
   const [sectionMutationError, setSectionMutationError] =
     useState<unknown>(null);
   const [sectionMutationPending, setSectionMutationPending] = useState(false);
+  const [collapsedSectionIds, setCollapsedSectionIds] = useState<Set<string>>(
+    () => new Set()
+  );
   const [pendingNavigation, setPendingNavigation] = useState(false);
   const [voiceError, setVoiceError] = useState<unknown>(null);
   const [pickerLineId, setPickerLineId] = useState<string | null>(null);
@@ -1301,6 +1304,7 @@ export function ScriptPage() {
     setNewSectionValidationMessage(null);
     setSectionMutationError(null);
     setSectionMutationPending(false);
+    setCollapsedSectionIds(new Set());
     setVoiceError(null);
     setPickerLineId(null);
     setPickerError(null);
@@ -1709,6 +1713,18 @@ export function ScriptPage() {
       (script) => moveScriptSection(script, sectionId, direction),
       "台本を保存できないため、セクションの順序を変更できません。"
     );
+  }
+
+  function toggleSectionCollapsed(sectionId: string): void {
+    setCollapsedSectionIds((current) => {
+      const next = new Set(current);
+      if (next.has(sectionId)) {
+        next.delete(sectionId);
+      } else {
+        next.add(sectionId);
+      }
+      return next;
+    });
   }
 
   async function addSection(event: FormEvent<HTMLFormElement>): Promise<void> {
@@ -2907,245 +2923,277 @@ export function ScriptPage() {
                 const sectionTemplateIsCandidate = activeTemplates.some(
                   (template) => template.templateId === section.screenTemplateId
                 );
+                const sectionCollapsed = collapsedSectionIds.has(section.id);
 
                 return (
                   <section className="script-section-card" key={section.id}>
                     <header className="script-section-header">
-                      <div className="script-section-header-main">
+                      <div className="script-section-header-id">
                         <p className="eyebrow">セクション</p>
-                        <ScriptSectionNameEditor
-                          disabled={sectionMutationPending}
-                          onRename={(name) => renameSection(section.id, name)}
-                          section={section}
-                        />
                         <code>{section.id}</code>
-                        <div className="script-section-template-control">
-                          <label htmlFor={`${section.id}-screen-template`}>
-                            画面テンプレート
-                          </label>
-                          <select
-                            aria-invalid={
-                              !screenTemplateStatusIsSelectable(sectionTemplate)
-                            }
+                      </div>
+                      <div className="script-section-header-row">
+                        <div className="script-section-header-main">
+                          <ScriptSectionNameEditor
+                            disabled={sectionMutationPending}
+                            onRename={(name) => renameSection(section.id, name)}
+                            section={section}
+                          />
+                          <div className="script-section-template-control">
+                            <label htmlFor={`${section.id}-screen-template`}>
+                              画面テンプレート
+                            </label>
+                            <select
+                              aria-invalid={
+                                !screenTemplateStatusIsSelectable(
+                                  sectionTemplate
+                                )
+                              }
+                              disabled={
+                                screenTemplatesQuery.isError ||
+                                activeTemplates.length === 0
+                              }
+                              id={`${section.id}-screen-template`}
+                              value={section.screenTemplateId}
+                              onChange={(event) =>
+                                updateSectionTemplate(
+                                  sectionIndex,
+                                  event.target.value
+                                )
+                              }
+                            >
+                              {!sectionTemplateIsCandidate ? (
+                                <option value={section.screenTemplateId}>
+                                  {sectionTemplateError ??
+                                    `現在: ${screenTemplateName(sectionTemplate, activeTemplates)}`}
+                                </option>
+                              ) : null}
+                              {activeTemplates.map((template) => (
+                                <option
+                                  key={template.templateId}
+                                  value={template.templateId}
+                                >
+                                  {template.name}
+                                </option>
+                              ))}
+                            </select>
+                            {sectionTemplateError !== null ? (
+                              <span
+                                className="script-template-reference-error"
+                                role="alert"
+                              >
+                                {sectionTemplateError}
+                              </span>
+                            ) : null}
+                          </div>
+                          <div className="script-section-background-summary">
+                            <span>背景</span>
+                            <code>
+                              {sectionBackgroundSummary(section.background)}
+                            </code>
+                          </div>
+                        </div>
+                        <div className="script-section-header-actions">
+                          <button
+                            className="button button-small"
+                            disabled={enabledSectionIndex === 0}
+                            type="button"
+                            onClick={() => void moveSection(section.id, "up")}
+                          >
+                            上へ移動
+                          </button>
+                          <button
+                            className="button button-small"
                             disabled={
-                              screenTemplatesQuery.isError ||
-                              activeTemplates.length === 0
+                              enabledSectionIndex ===
+                              enabledSectionEntries.length - 1
                             }
-                            id={`${section.id}-screen-template`}
-                            value={section.screenTemplateId}
-                            onChange={(event) =>
-                              updateSectionTemplate(
-                                sectionIndex,
-                                event.target.value
-                              )
+                            type="button"
+                            onClick={() => void moveSection(section.id, "down")}
+                          >
+                            下へ移動
+                          </button>
+                          <button
+                            className="button button-small"
+                            disabled={sectionMutationPending}
+                            type="button"
+                            onClick={() =>
+                              void updateSectionEnabled(section.id, false)
                             }
                           >
-                            {!sectionTemplateIsCandidate ? (
-                              <option value={section.screenTemplateId}>
-                                {sectionTemplateError ??
-                                  `現在: ${screenTemplateName(sectionTemplate, activeTemplates)}`}
-                              </option>
-                            ) : null}
-                            {activeTemplates.map((template) => (
-                              <option
-                                key={template.templateId}
-                                value={template.templateId}
-                              >
-                                {template.name}
-                              </option>
-                            ))}
-                          </select>
-                          {sectionTemplateError !== null ? (
+                            無効化
+                          </button>
+                          <button
+                            aria-controls={`${section.id}-body`}
+                            aria-expanded={!sectionCollapsed}
+                            aria-label={`${section.name}を${sectionCollapsed ? "展開" : "折りたたむ"}`}
+                            className="button script-section-collapse-button"
+                            title={`${section.name}を${sectionCollapsed ? "展開" : "折りたたむ"}`}
+                            type="button"
+                            onClick={() => toggleSectionCollapsed(section.id)}
+                          >
                             <span
-                              className="script-template-reference-error"
-                              role="alert"
-                            >
-                              {sectionTemplateError}
-                            </span>
-                          ) : null}
+                              aria-hidden="true"
+                              className="script-section-collapse-icon"
+                            />
+                          </button>
                         </div>
-                        <div className="script-section-background-summary">
-                          <span>背景</span>
-                          <code>
-                            {sectionBackgroundSummary(section.background)}
-                          </code>
-                        </div>
-                      </div>
-                      <div className="script-section-header-actions">
-                        <button
-                          className="button button-small"
-                          disabled={enabledSectionIndex === 0}
-                          type="button"
-                          onClick={() => void moveSection(section.id, "up")}
-                        >
-                          上へ移動
-                        </button>
-                        <button
-                          className="button button-small"
-                          disabled={
-                            enabledSectionIndex ===
-                            enabledSectionEntries.length - 1
-                          }
-                          type="button"
-                          onClick={() => void moveSection(section.id, "down")}
-                        >
-                          下へ移動
-                        </button>
-                        <button
-                          className="button button-small"
-                          disabled={sectionMutationPending}
-                          type="button"
-                          onClick={() =>
-                            void updateSectionEnabled(section.id, false)
-                          }
-                        >
-                          無効化
-                        </button>
                       </div>
                     </header>
-                    {section.lines.length === 0 ? (
-                      <p className="status-message">セリフはまだありません。</p>
-                    ) : (
-                      <div className="script-line-list">
-                        {section.lines.map((line, lineIndex) => {
-                          const previewState = previewStates.get(
-                            previewLineKey(section.id, line.id)
-                          );
-                          if (previewState === undefined) {
-                            return null;
-                          }
-                          return (
-                            <ScriptLineCard
-                              key={line.id}
-                              line={line}
-                              sectionIndex={sectionIndex}
-                              lineIndex={lineIndex}
-                              project={project}
-                              catalog={catalog}
-                              catalogUnavailable={
-                                catalogQuery.isPending || catalogQuery.isError
-                              }
-                              previewState={previewState}
-                              linePreview={resolveScriptLineScreenPreview({
-                                projectId: project.metadata.id,
-                                project,
-                                section,
-                                line,
-                                catalog,
-                                manifest,
-                                assignments: previewState.assignments,
-                                assets
-                              })}
-                              issues={issues}
-                              voiceStatus={voiceStatusByLine.get(line.id)}
-                              voiceStatusLoading={voiceStatusQuery.isPending}
-                              voiceGenerationDisabled={
-                                voiceGenerationDisabled || issues.length > 0
-                              }
-                              voiceAvailable={
-                                voiceStatusQuery.data?.available === true
-                              }
-                              projectId={project.metadata.id}
-                              assets={assets}
-                              mediaMutationPending={mediaMutationPending}
-                              onChange={(update) =>
-                                updateLine(sectionIndex, lineIndex, update)
-                              }
-                              onMove={(direction) =>
-                                updateDraft(
-                                  moveScriptLine(
-                                    draft,
-                                    sectionIndex,
-                                    lineIndex,
-                                    direction
-                                  )
-                                )
-                              }
-                              onDuplicate={() =>
-                                updateDraft(
-                                  duplicateScriptLine(
-                                    draft,
-                                    sectionIndex,
-                                    lineIndex
-                                  )
-                                )
-                              }
-                              onDelete={() =>
-                                updateDraft(
-                                  deleteScriptLine(
-                                    draft,
-                                    sectionIndex,
-                                    lineIndex
-                                  )
-                                )
-                              }
-                              onGenerateVoice={() =>
-                                void generateVoiceLine(section.id, line.id)
-                              }
-                              onOpenOverlayEditor={() =>
-                                void openLineOverlayEditor(section.id, line.id)
-                              }
-                              onOpenPicker={() => openVisualPicker(line.id)}
-                              onStartMedia={() =>
-                                openMediaPicker(
-                                  {
-                                    sectionId: section.id,
-                                    lineId: line.id
-                                  },
-                                  "start"
-                                )
-                              }
-                              onPauseMedia={(assignmentId) =>
-                                pauseMedia(
-                                  { sectionId: section.id, lineId: line.id },
-                                  assignmentId
-                                )
-                              }
-                              onResumeMedia={(assignmentId) =>
-                                resumeMedia(
-                                  { sectionId: section.id, lineId: line.id },
-                                  assignmentId
-                                )
-                              }
-                              onEndMedia={(assignmentId) =>
-                                void requestEndMedia(
-                                  { sectionId: section.id, lineId: line.id },
-                                  assignmentId
-                                )
-                              }
-                              onReplaceMedia={(assignmentId) =>
-                                openMediaPicker(
-                                  {
-                                    sectionId: section.id,
-                                    lineId: line.id
-                                  },
-                                  "replace",
-                                  assignmentId
-                                )
-                              }
-                              onSplitMedia={(assignmentId) =>
-                                openMediaPicker(
-                                  {
-                                    sectionId: section.id,
-                                    lineId: line.id
-                                  },
-                                  "split",
-                                  assignmentId
-                                )
-                              }
-                            />
-                          );
-                        })}
-                      </div>
-                    )}
-                    <button
-                      className="button script-section-add-line"
-                      type="button"
-                      onMouseDown={(event) => event.preventDefault()}
-                      onClick={() => addLine(sectionIndex)}
+                    <div
+                      className="script-section-body"
+                      hidden={sectionCollapsed}
+                      id={`${section.id}-body`}
                     >
-                      セリフを追加
-                    </button>
+                      {section.lines.length === 0 ? (
+                        <p className="status-message">
+                          セリフはまだありません。
+                        </p>
+                      ) : (
+                        <div className="script-line-list">
+                          {section.lines.map((line, lineIndex) => {
+                            const previewState = previewStates.get(
+                              previewLineKey(section.id, line.id)
+                            );
+                            if (previewState === undefined) {
+                              return null;
+                            }
+                            return (
+                              <ScriptLineCard
+                                key={line.id}
+                                line={line}
+                                sectionIndex={sectionIndex}
+                                lineIndex={lineIndex}
+                                project={project}
+                                catalog={catalog}
+                                catalogUnavailable={
+                                  catalogQuery.isPending || catalogQuery.isError
+                                }
+                                previewState={previewState}
+                                linePreview={resolveScriptLineScreenPreview({
+                                  projectId: project.metadata.id,
+                                  project,
+                                  section,
+                                  line,
+                                  catalog,
+                                  manifest,
+                                  assignments: previewState.assignments,
+                                  assets
+                                })}
+                                issues={issues}
+                                voiceStatus={voiceStatusByLine.get(line.id)}
+                                voiceStatusLoading={voiceStatusQuery.isPending}
+                                voiceGenerationDisabled={
+                                  voiceGenerationDisabled || issues.length > 0
+                                }
+                                voiceAvailable={
+                                  voiceStatusQuery.data?.available === true
+                                }
+                                projectId={project.metadata.id}
+                                assets={assets}
+                                mediaMutationPending={mediaMutationPending}
+                                onChange={(update) =>
+                                  updateLine(sectionIndex, lineIndex, update)
+                                }
+                                onMove={(direction) =>
+                                  updateDraft(
+                                    moveScriptLine(
+                                      draft,
+                                      sectionIndex,
+                                      lineIndex,
+                                      direction
+                                    )
+                                  )
+                                }
+                                onDuplicate={() =>
+                                  updateDraft(
+                                    duplicateScriptLine(
+                                      draft,
+                                      sectionIndex,
+                                      lineIndex
+                                    )
+                                  )
+                                }
+                                onDelete={() =>
+                                  updateDraft(
+                                    deleteScriptLine(
+                                      draft,
+                                      sectionIndex,
+                                      lineIndex
+                                    )
+                                  )
+                                }
+                                onGenerateVoice={() =>
+                                  void generateVoiceLine(section.id, line.id)
+                                }
+                                onOpenOverlayEditor={() =>
+                                  void openLineOverlayEditor(
+                                    section.id,
+                                    line.id
+                                  )
+                                }
+                                onOpenPicker={() => openVisualPicker(line.id)}
+                                onStartMedia={() =>
+                                  openMediaPicker(
+                                    {
+                                      sectionId: section.id,
+                                      lineId: line.id
+                                    },
+                                    "start"
+                                  )
+                                }
+                                onPauseMedia={(assignmentId) =>
+                                  pauseMedia(
+                                    { sectionId: section.id, lineId: line.id },
+                                    assignmentId
+                                  )
+                                }
+                                onResumeMedia={(assignmentId) =>
+                                  resumeMedia(
+                                    { sectionId: section.id, lineId: line.id },
+                                    assignmentId
+                                  )
+                                }
+                                onEndMedia={(assignmentId) =>
+                                  void requestEndMedia(
+                                    { sectionId: section.id, lineId: line.id },
+                                    assignmentId
+                                  )
+                                }
+                                onReplaceMedia={(assignmentId) =>
+                                  openMediaPicker(
+                                    {
+                                      sectionId: section.id,
+                                      lineId: line.id
+                                    },
+                                    "replace",
+                                    assignmentId
+                                  )
+                                }
+                                onSplitMedia={(assignmentId) =>
+                                  openMediaPicker(
+                                    {
+                                      sectionId: section.id,
+                                      lineId: line.id
+                                    },
+                                    "split",
+                                    assignmentId
+                                  )
+                                }
+                              />
+                            );
+                          })}
+                        </div>
+                      )}
+                      <button
+                        className="button script-section-add-line"
+                        type="button"
+                        onMouseDown={(event) => event.preventDefault()}
+                        onClick={() => addLine(sectionIndex)}
+                      >
+                        セリフを追加
+                      </button>
+                    </div>
                   </section>
                 );
               }
