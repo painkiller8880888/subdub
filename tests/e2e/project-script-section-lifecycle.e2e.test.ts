@@ -34,6 +34,7 @@ const projectId = "pc-05-script-section-browser";
 const previewProjectId = "pc-05-preview-section-browser";
 const downstreamOverlayId = "overlay-main-confirm";
 const downstreamVoiceOverrides = { speedScale: 1.1 };
+const desktopViewport = { width: 1800, height: 1000 };
 const createdAt = "2026-01-01T00:00:00.000Z";
 const initialProject = createEmptyVideoProject({
   projectId,
@@ -228,6 +229,28 @@ async function waitForSectionNames(
     }`,
     [...expectedNames]
   );
+}
+
+async function expectNoHorizontalOverflow(
+  page: Page,
+  selector: string
+): Promise<void> {
+  const layouts = await page.locator(selector).evaluateAll((elements) =>
+    elements.map((element) => {
+      const browserElement = element as unknown as {
+        readonly clientWidth: number;
+        readonly scrollWidth: number;
+      };
+      return {
+        clientWidth: browserElement.clientWidth,
+        scrollWidth: browserElement.scrollWidth
+      };
+    })
+  );
+  expect(layouts.length).toBeGreaterThan(0);
+  for (const layout of layouts) {
+    expect(layout.scrollWidth).toBeLessThanOrEqual(layout.clientWidth);
+  }
 }
 
 function isScriptSaveRequestFor(
@@ -760,6 +783,7 @@ describe("project create and ScriptPage section lifecycle browser E2E", () => {
       const pageErrors: string[] = [];
       page.on("pageerror", (error) => pageErrors.push(error.message));
       try {
+        await page.setViewportSize(desktopViewport);
         await page.goto(`${webUrl}/projects/new`, {
           waitUntil: "domcontentloaded"
         });
@@ -781,6 +805,12 @@ describe("project create and ScriptPage section lifecycle browser E2E", () => {
           "2編集",
           "3出力"
         ]);
+        await expectNoHorizontalOverflow(page, ".script-editor-page");
+        await expectNoHorizontalOverflow(page, ".script-section-header");
+        await expectNoHorizontalOverflow(
+          page,
+          ".script-section-header-actions"
+        );
         await fs.mkdir(path.join(repositoryRoot, "artifacts", "issue-205"), {
           recursive: true
         });
@@ -876,6 +906,14 @@ describe("project create and ScriptPage section lifecycle browser E2E", () => {
         expect(
           await page.locator(".script-disabled-section-item code").textContent()
         ).toBe(initialProject.script.sections[2]?.id);
+        await expectNoHorizontalOverflow(page, ".script-editor-page");
+        await expectNoHorizontalOverflow(page, ".script-section-header");
+        await expectNoHorizontalOverflow(
+          page,
+          ".script-section-header-actions"
+        );
+        await expectNoHorizontalOverflow(page, ".script-disabled-sections");
+        await expectNoHorizontalOverflow(page, ".script-disabled-section-item");
         await page.screenshot({
           fullPage: true,
           path: path.join(
@@ -920,6 +958,12 @@ describe("project create and ScriptPage section lifecycle browser E2E", () => {
         expect(
           await page.locator(".script-disabled-section-item").count()
         ).toBe(0);
+        await expectNoHorizontalOverflow(page, ".script-editor-page");
+        await expectNoHorizontalOverflow(page, ".script-section-header");
+        await expectNoHorizontalOverflow(
+          page,
+          ".script-section-header-actions"
+        );
         await page.screenshot({
           fullPage: true,
           path: path.join(
