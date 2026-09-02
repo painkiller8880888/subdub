@@ -1589,6 +1589,8 @@ WebUI は単一ユーザーがローカル環境で使用し、同じ `project.j
 
 section は折りたたみ可能なカードとして表示する。各カードでは `id`、`name`、`enabled`、background、section template、lines を扱う。`導入`、`本編`、`締め` は初期名にすぎず、role、固定 cardinality、固定順序、構成案固有の概要・キーポイント・要確認事項を current section contract として要求しない。通常の削除は hard delete ではなく `enabled=false` とする。
 
+section header はデスクトップでは2行構成とする。1行目は「セクション」ラベルと section ID、2行目は左からセクション名、画面テンプレート、背景を並べ、右側へ上へ移動・下へ移動・無効化の操作を寄せる。折りたたみボタンも2行目の右端に置き、押下時は header を残したままその section の lines と「セリフを追加」操作を折りたたむ。折りたたみ状態は表示専用の UI state とし、`project.json` へ保存しない。
+
 無効 section も `project.json` に残し、lines、visual assignment、overlay、voice/audio cache、sound effect、section BGM、edit element の downstream reference を保持する。再有効化は同じ section ID で行う。既存 section ID が保存 candidate から消えた場合は hard delete として fail-closed にする。
 
 編集内容はプロジェクトフォルダーへ自動保存する。保存時は全 section を対象に structural validation を行い、出力時は enabled section のみを対象に output readiness validation を行う。outline approval、source hash、Script status は current workflow の開始条件・出力条件にしない。

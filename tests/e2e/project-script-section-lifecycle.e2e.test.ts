@@ -800,6 +800,27 @@ describe("project create and ScriptPage section lifecycle browser E2E", () => {
         await page.locator(".script-section-name-input").first().waitFor();
 
         expect(await sectionNames(page)).toEqual(["導入", "本編", "締め"]);
+        const firstSection = page.locator(".script-section-card").first();
+        const firstSectionCollapseButton = firstSection.locator(
+          ".script-section-collapse-button"
+        );
+        const firstSectionBody = firstSection.locator(".script-section-body");
+        expect(
+          await firstSectionCollapseButton.getAttribute("aria-expanded")
+        ).toBe("true");
+        expect(
+          await firstSectionCollapseButton.getAttribute("aria-label")
+        ).toBe("導入を折りたたむ");
+        await firstSectionCollapseButton.click();
+        expect(await firstSectionBody.getAttribute("hidden")).not.toBeNull();
+        expect(
+          await firstSectionCollapseButton.getAttribute("aria-expanded")
+        ).toBe("false");
+        expect(
+          await firstSectionCollapseButton.getAttribute("aria-label")
+        ).toBe("導入を展開");
+        await firstSectionCollapseButton.click();
+        expect(await firstSectionBody.getAttribute("hidden")).toBeNull();
         expect(await page.locator(".workflow-step").allTextContents()).toEqual([
           "1台本",
           "2編集",

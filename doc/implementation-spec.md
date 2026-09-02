@@ -3151,6 +3151,7 @@ project create
 
 - 1 ペイン: セクションとセリフカードを主役にする。プレビュー、保存状態、validation は補助表示として統合してよい。
 - 各セクション見出し: name、enabled、背景、ScreenTemplate、音声状態の確認。create / rename / reorder / deactivate / reactivate を行う。BGM の編集は `/projects/{projectId}/edit` で行う
+- section header はデスクトップでは2行構成とする。1行目に「セクション」ラベルと section ID、2行目に左詰めでセクション名・画面テンプレート・背景、右詰めで上へ移動・下へ移動・無効化、折りたたみボタンを置く。折りたたみ時も header は表示し、lines と「セリフを追加」だけを非表示にする。折りたたみ状態は保存対象ではない UI state とする。
 - セリフカード: metadata / controls block を第1行として数える4行 compact layout。1 行目は ID subline と control subline（speaker name-only、`ビジュアルを変更`、compact voice status、再生、再生成、音声調整）、2 行目は `subtitleText`、3 行目は visible label `[読み上げ]` と保存 field `spokenText`、4 行目は `詳細設定` と上へ移動、下へ移動、複製、削除。visible label に `よみがな` は使用しない
 - subtitle / 読み上げ表示は通常時に compact な 1 行とし、選択・編集時だけ input area へ expand する。音声調整の詳細は card 内へ常時展開せず modal / dialog で編集する。
 - 「ビジュアルを変更」modal picker: speaker に binding された `CharacterVisualSet` の active variant だけを表示し、preview、label、renderType、tags、選択中状態を表示する。通常カードにはこれらを常設せず、`mouth-pair` は `closed` / `open` を picker 内で表示する。
