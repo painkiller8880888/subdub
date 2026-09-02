@@ -330,8 +330,8 @@ export function CharacterAssetsPage() {
     return (
       <main className="page-shell narrow-shell">
         <p className="back-link">
-          <Link to={`/projects/${encodeURIComponent(projectId)}/brief`}>
-            企画画面へ戻る
+          <Link to={`/projects/${encodeURIComponent(projectId)}/script`}>
+            台本へ戻る
           </Link>
         </p>
         <section className="message-panel message-panel-error" role="alert">
@@ -379,8 +379,8 @@ export function CharacterAssetsPage() {
   return (
     <main className="page-shell character-assets-page">
       <p className="back-link">
-        <Link to={`/projects/${encodeURIComponent(projectId)}/brief`}>
-          企画画面へ戻る
+        <Link to={`/projects/${encodeURIComponent(projectId)}/script`}>
+          台本へ戻る
         </Link>
       </p>
       <WorkflowIndicator projectId={projectId} currentStep="production" />

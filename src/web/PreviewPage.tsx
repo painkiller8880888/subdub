@@ -108,8 +108,8 @@ export function PreviewPage() {
     return (
       <main className="page-shell narrow-shell">
         <p className="back-link">
-          <Link to={`/projects/${encodeURIComponent(projectId)}/brief`}>
-            プロジェクト概要へ戻る
+          <Link to={`/projects/${encodeURIComponent(projectId)}/script`}>
+            台本へ戻る
           </Link>
         </p>
         <p className="status-message" role="status">
@@ -123,8 +123,8 @@ export function PreviewPage() {
     return (
       <main className="page-shell narrow-shell">
         <p className="back-link">
-          <Link to={`/projects/${encodeURIComponent(projectId)}/brief`}>
-            プロジェクト概要へ戻る
+          <Link to={`/projects/${encodeURIComponent(projectId)}/script`}>
+            台本へ戻る
           </Link>
         </p>
         <section className="message-panel message-panel-error" role="alert">
@@ -147,6 +147,9 @@ export function PreviewPage() {
   const data = manifestQuery.data;
   const viewModel = createPreviewViewModel(data, projectId);
   const playerProps = createPreviewPlayerProps(data, projectId);
+  const noEnabledSection = data.blockers.some(
+    (blocker) => blocker.code === "NO_ENABLED_SECTION"
+  );
   const compileDiagnostics =
     compileMutation.data?.status === "failed"
       ? createPreviewCompileDiagnosticViewModel(
@@ -173,8 +176,8 @@ export function PreviewPage() {
   return (
     <main className="page-shell preview-page">
       <p className="back-link">
-        <Link to={`/projects/${encodeURIComponent(projectId)}/brief`}>
-          プロジェクト概要へ戻る
+        <Link to={`/projects/${encodeURIComponent(projectId)}/script`}>
+          台本へ戻る
         </Link>
       </p>
       <WorkflowIndicator projectId={projectId} currentStep="output" />
@@ -197,14 +200,16 @@ export function PreviewPage() {
           <button
             className="button button-primary"
             type="button"
-            disabled={compileMutation.isPending}
+            disabled={compileMutation.isPending || noEnabledSection}
             onClick={() => compileMutation.mutate()}
           >
-            {compileMutation.isPending
-              ? "プレビューを作成中…"
-              : data.manifest === null
-                ? "プレビューを作成"
-                : "プレビューを更新"}
+            {noEnabledSection
+              ? "有効なセクションがありません"
+              : compileMutation.isPending
+                ? "プレビューを作成中…"
+                : data.manifest === null
+                  ? "プレビューを作成"
+                  : "プレビューを更新"}
           </button>
           <button
             className="button"
@@ -238,6 +243,21 @@ export function PreviewPage() {
               ))}
             </ul>
           ) : null}
+        </section>
+      ) : null}
+
+      {noEnabledSection ? (
+        <section className="message-panel message-panel-warning" role="alert">
+          <h2>レンダリング対象の有効なセクションがありません</h2>
+          <p>
+            セクションのデータは保持されています。台本画面で再有効化するか、新しいセクションを追加すると、プレビューとMP4出力を再開できます。
+          </p>
+          <Link
+            className="button"
+            to={`/projects/${encodeURIComponent(projectId)}/script`}
+          >
+            台本でセクションを確認
+          </Link>
         </section>
       ) : null}
 
@@ -335,6 +355,7 @@ export function PreviewPage() {
             type="button"
             disabled={
               !viewModel.canPlay ||
+              noEnabledSection ||
               manifestQuery.isFetching ||
               compileMutation.isPending ||
               compileMutation.isError ||
@@ -414,9 +435,7 @@ export function PreviewPage() {
           aria-labelledby="preview-empty-title"
         >
           <h2 id="preview-empty-title">プレビューはまだ生成されていません</h2>
-          <p>
-            構成案、台本、ビジュアル、音声を確認してからプレビューを生成できます。
-          </p>
+          <p>台本、ビジュアル、音声を確認してからプレビューを生成できます。</p>
           <Link
             className="button button-primary"
             to={`/projects/${encodeURIComponent(projectId)}/script`}

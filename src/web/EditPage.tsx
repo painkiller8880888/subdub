@@ -802,6 +802,40 @@ function EditPlanSummary({
   );
 }
 
+function RetainedDisabledSectionSettings({
+  models
+}: {
+  readonly models: readonly EditSectionReadModel[];
+}) {
+  if (models.length === 0) {
+    return null;
+  }
+  return (
+    <section
+      aria-labelledby="edit-disabled-sections-title"
+      className="edit-retained-disabled-sections"
+    >
+      <p className="eyebrow">保持中の編集設定</p>
+      <h2 id="edit-disabled-sections-title">無効なセクションに紐づく設定</h2>
+      <p>
+        無効なセクションのBGMとカットインは保持しています。有効なセクションの候補や配置先には表示しません。
+      </p>
+      <ul>
+        {models.map((model) => (
+          <li key={model.section.id}>
+            <strong>{model.section.name}</strong>
+            <code>{model.section.id}</code>
+            <span>
+              BGM {model.bgm === undefined ? "なし" : "1件"} / カットイン{" "}
+              {model.cutins.length}件
+            </span>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
 function EditLoadError({
   error,
   projectError,
@@ -1221,7 +1255,7 @@ function EditPlanEditor({
               picker.role,
               picker.sectionId,
               asset,
-              project.script.sections[0]?.id
+              project.script.sections.find((section) => section.enabled)?.id
             )
           : replaceEditVideoElement(current, picker.elementId, asset);
     } else {
@@ -1281,11 +1315,21 @@ function EditPlanEditor({
   }
 
   const readModel = createEditPlanReadModel(draft);
+  const enabledScriptSections = project.script.sections.filter(
+    (section) => section.enabled
+  );
+  const disabledScriptSections = project.script.sections.filter(
+    (section) => !section.enabled
+  );
   const sectionModels = createEditSectionReadModels(
-    project.script.sections,
+    enabledScriptSections,
     readModel
   );
-  const sectionIds = project.script.sections.map((section) => section.id);
+  const disabledSectionModels = createEditSectionReadModels(
+    disabledScriptSections,
+    readModel
+  );
+  const sectionIds = enabledScriptSections.map((section) => section.id);
   const cutinDropTargets = createEditCutinDropTargets(sectionModels);
 
   function isSameDropTarget(
@@ -1379,7 +1423,7 @@ function EditPlanEditor({
       plan: EditPlan
     ): Array<readonly [string, string]> =>
       createEditSectionReadModels(
-        project.script.sections,
+        enabledScriptSections,
         createEditPlanReadModel(plan)
       ).flatMap((model) =>
         model.cutins.map((cutin) => [model.section.id, cutin.id] as const)
@@ -1623,9 +1667,7 @@ function EditPlanEditor({
             {readModel.intro === undefined ? (
               <button
                 className="button button-small"
-                disabled={
-                  interactionDisabled || project.script.sections.length === 0
-                }
+                disabled={interactionDisabled || sectionModels.length === 0}
                 type="button"
                 onClick={() =>
                   setPicker({ kind: "video", action: "add", role: "intro" })
@@ -1637,9 +1679,7 @@ function EditPlanEditor({
             {readModel.outro === undefined ? (
               <button
                 className="button button-small"
-                disabled={
-                  interactionDisabled || project.script.sections.length === 0
-                }
+                disabled={interactionDisabled || sectionModels.length === 0}
                 type="button"
                 onClick={() =>
                   setPicker({ kind: "video", action: "add", role: "outro" })
@@ -1653,9 +1693,15 @@ function EditPlanEditor({
 
         {sectionModels.length === 0 ? (
           <section className="message-panel" aria-live="polite">
-            <h2>台本セクションがありません</h2>
+            <h2>
+              {project.script.sections.length === 0
+                ? "台本セクションがありません"
+                : "有効な台本セクションがありません"}
+            </h2>
             <p>
-              台本を初期化すると、編集画面にセクションカードが表示されます。
+              {project.script.sections.length === 0
+                ? "台本を編集すると、編集画面にセクションカードが表示されます。"
+                : "すべてのセクションが無効です。設定とデータは保持されているため、台本画面で再有効化してください。"}
             </p>
             <Link
               className="button"
@@ -1942,6 +1988,7 @@ function EditPlanEditor({
             ) : null}
           </section>
         )}
+        <RetainedDisabledSectionSettings models={disabledSectionModels} />
       </main>
 
       {picker !== null ? (

@@ -49,7 +49,6 @@ import { CharacterAssetsPage } from "./CharacterAssetsPage";
 import { AssetsPage } from "./AssetsPage";
 import { CharacterVisualsPage } from "./CharacterVisualsPage";
 import { EditPage } from "./EditPage";
-import { OutlinePage } from "./OutlinePage";
 import { ScreenTemplateEditorPage } from "./ScreenTemplateEditorPage";
 import { ScreenTemplatesPage } from "./ScreenTemplatesPage";
 import { InsertTextTemplateEditorPage } from "./InsertTextTemplateEditorPage";
@@ -228,9 +227,7 @@ function NewProjectPage() {
       <header className="page-header page-header-stacked">
         <p className="eyebrow">新規作成</p>
         <h1>プロジェクトを作成</h1>
-        <p>
-          プロジェクト名を入力して、企画内容と元資料を登録するところから始めます。
-        </p>
+        <p>プロジェクト名を入力して、台本の編集を始めます。</p>
       </header>
 
       <form className="project-form" noValidate onSubmit={handleSubmit}>
@@ -375,7 +372,7 @@ function projectSummaryFromProject(project: VideoProject): ProjectSummary {
   };
 }
 
-function ProjectBriefPage() {
+export function ProjectBriefPage() {
   const { projectId } = useParams<{ projectId: string }>();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -1052,8 +1049,6 @@ export function App() {
         <Route element={<Navigate replace to="/projects" />} path="/" />
         <Route element={<ProjectsPage />} path="/projects" />
         <Route element={<NewProjectPage />} path="/projects/new" />
-        <Route element={<ProjectBriefPage />} path="/projects/:projectId/brief" />
-        <Route element={<OutlinePage />} path="/projects/:projectId/outline" />
         <Route
           element={<ScriptPage />}
           path="/projects/:projectId/script"

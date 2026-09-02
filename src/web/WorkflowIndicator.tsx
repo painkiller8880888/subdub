@@ -29,8 +29,12 @@ export function WorkflowIndicator({
       ? "production"
       : null;
   const activeStep = hashStep ?? currentStep;
+  const activeStepForCurrentWorkflow =
+    activeStep === "brief" || activeStep === "outline"
+      ? "production"
+      : activeStep;
   const activeIndex = WORKFLOW_STEPS.findIndex(
-    (step) => step.id === activeStep
+    (step) => step.id === activeStepForCurrentWorkflow
   );
   const activeStepLabel =
     WORKFLOW_STEPS[activeIndex]?.label ?? WORKFLOW_STEPS[0].label;
@@ -39,7 +43,7 @@ export function WorkflowIndicator({
     <nav
       aria-label="動画制作の工程"
       className="workflow-indicator"
-      data-current-step={activeStep}
+      data-current-step={activeStepForCurrentWorkflow}
     >
       <div className="workflow-indicator-header">
         <div>
@@ -54,7 +58,10 @@ export function WorkflowIndicator({
       </div>
       <ol className="workflow-steps">
         {WORKFLOW_STEPS.map((step, index) => {
-          const status = workflowStepStatus(activeStep, step.id);
+          const status = workflowStepStatus(
+            activeStepForCurrentWorkflow,
+            step.id
+          );
           const destination = workflowStepPath(projectId, step.id);
           return (
             <li

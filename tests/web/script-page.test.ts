@@ -24,6 +24,33 @@ describe("ScriptPage workflow navigation", () => {
     expect(source).toContain("initializedForProjectRef.current = null;");
   });
 
+  it("exposes section lifecycle actions and keeps the server response authoritative", async () => {
+    const source = await fs.readFile("src/web/ScriptPage.tsx", "utf8");
+
+    expect(source).toContain("createPendingScriptSection");
+    expect(source).toContain("moveScriptSection");
+    expect(source).toContain("updateScriptSectionLifecycle");
+    expect(source).toContain("expectedRevision: currentProject.revision");
+    expect(source).toContain("無効なセクション (");
+    expect(source).toContain("再有効化");
+    expect(source).toContain("セクションを追加");
+    expect(source).toContain('className="script-editor-controls"');
+    expect(source).toContain("disabled={sectionMutationPending}");
+    expect(source).not.toContain("セクションを削除");
+  });
+
+  it("bases section movement controls on enabled display order", async () => {
+    const source = await fs.readFile("src/web/ScriptPage.tsx", "utf8");
+
+    expect(source).toContain(
+      "({ section, sectionIndex }, enabledSectionIndex)"
+    );
+    expect(source).toContain("disabled={enabledSectionIndex === 0}");
+    expect(source).toMatch(
+      /enabledSectionIndex ===\s+enabledSectionEntries\.length - 1/u
+    );
+  });
+
   it("places the section line-add action after the section lines", async () => {
     const source = await fs.readFile("src/web/ScriptPage.tsx", "utf8");
     const sectionHeaderStart = source.indexOf(
@@ -73,7 +100,6 @@ describe("ScriptPage workflow navigation", () => {
     expect(source).toContain('className="script-line-details-dialog"');
     expect(source).toContain("再生成");
     expect(source).toContain(">詳細設定</");
-    expect(source).not.toContain("<details");
     expect(source).not.toMatch(/<audio[^>]*\bcontrols(?:\s|=|>)/);
     expect(source).not.toContain("candidate.role");
     expect(source).not.toContain("CharacterVariantPreview");

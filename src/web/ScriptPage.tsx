@@ -76,6 +76,13 @@ import {
   type BulkPasteError,
   type ScriptDraftIssue
 } from "./script-editor";
+import {
+  createPendingScriptSection,
+  moveScriptSection,
+  updateScriptSectionLifecycle,
+  type ScriptSectionMoveDirection
+} from "./script-section-editor";
+import { DEFAULT_SCRIPT_SECTION_NAME } from "../app/projects/starter-script-sections.js";
 import { CharacterVisualPickerModal } from "./CharacterVisualPicker";
 import { LineOverlayEditor } from "./LineOverlayEditor";
 import { VoiceAdjustmentEditor } from "./VoiceAdjustmentEditor";
@@ -865,6 +872,61 @@ function visualDisplayKindLabel(
   }
 }
 
+function ScriptSectionNameEditor({
+  section,
+  disabled,
+  onRename
+}: {
+  readonly section: ScriptSection;
+  readonly disabled: boolean;
+  readonly onRename: (name: string) => Promise<boolean>;
+}) {
+  const [value, setValue] = useState(section.name);
+
+  useEffect(() => {
+    setValue(section.name);
+  }, [section.name]);
+
+  async function commit(): Promise<void> {
+    const nextName = value.trim();
+    if (nextName.length === 0) {
+      setValue(section.name);
+      return;
+    }
+    if (nextName === section.name) {
+      if (nextName !== value) {
+        setValue(nextName);
+      }
+      return;
+    }
+    const saved = await onRename(nextName);
+    if (!saved) {
+      setValue(section.name);
+    }
+  }
+
+  return (
+    <div className="script-section-name-field">
+      <label htmlFor={`${section.id}-name`}>セクション名</label>
+      <input
+        aria-label={`${section.id}のセクション名`}
+        className="script-section-name-input"
+        disabled={disabled}
+        id={`${section.id}-name`}
+        value={value}
+        onChange={(event) => setValue(event.target.value)}
+        onBlur={() => void commit()}
+        onKeyDown={(event) => {
+          if (event.key === "Enter") {
+            event.preventDefault();
+            event.currentTarget.blur();
+          }
+        }}
+      />
+    </div>
+  );
+}
+
 export function ScriptPage() {
   const { projectId } = useParams<{ projectId: string }>();
   const navigate = useNavigate();
@@ -907,6 +969,14 @@ export function ScriptPage() {
   const [bulkSectionIndex, setBulkSectionIndex] = useState(0);
   const [bulkText, setBulkText] = useState("");
   const [bulkErrors, setBulkErrors] = useState<BulkPasteError[]>([]);
+  const [newSectionName, setNewSectionName] = useState(
+    DEFAULT_SCRIPT_SECTION_NAME
+  );
+  const [newSectionValidationMessage, setNewSectionValidationMessage] =
+    useState<string | null>(null);
+  const [sectionMutationError, setSectionMutationError] =
+    useState<unknown>(null);
+  const [sectionMutationPending, setSectionMutationPending] = useState(false);
   const [pendingNavigation, setPendingNavigation] = useState(false);
   const [voiceError, setVoiceError] = useState<unknown>(null);
   const [pickerLineId, setPickerLineId] = useState<string | null>(null);
@@ -933,6 +1003,7 @@ export function ScriptPage() {
   const lastSavedRef = useRef<Script | null>(null);
   const coordinatorRef = useRef<AutosaveCoordinator<Script> | null>(null);
   const mediaActionPendingRef = useRef(false);
+  const sectionMutationPendingRef = useRef(false);
   const [coordinator, setCoordinator] =
     useState<AutosaveCoordinator<Script> | null>(null);
 
@@ -1119,6 +1190,9 @@ export function ScriptPage() {
   function updateMutationCaches(project: VideoProject): void {
     queryClient.setQueryData(["projects", project.metadata.id], project);
     void queryClient.invalidateQueries({
+      queryKey: ["projects", project.metadata.id, "manifest"]
+    });
+    void queryClient.invalidateQueries({
       queryKey: ["voice-status", project.metadata.id]
     });
     queryClient.setQueryData<ProjectSummary[]>(["projects"], (summaries) =>
@@ -1136,7 +1210,12 @@ export function ScriptPage() {
     draftRef.current = nextDraft;
     lastSavedRef.current = cloneScript(project.script);
     setDraft(nextDraft);
-    setBulkSectionIndex(0);
+    const firstEnabledSectionIndex = project.script.sections.findIndex(
+      (section) => section.enabled
+    );
+    setBulkSectionIndex(
+      firstEnabledSectionIndex >= 0 ? firstEnabledSectionIndex : 0
+    );
     setPickerLineId(null);
     setPickerError(null);
     coordinatorRef.current?.reset();
@@ -1218,6 +1297,10 @@ export function ScriptPage() {
     setDraft(null);
     setBulkText("");
     setBulkErrors([]);
+    setNewSectionName(DEFAULT_SCRIPT_SECTION_NAME);
+    setNewSectionValidationMessage(null);
+    setSectionMutationError(null);
+    setSectionMutationPending(false);
     setVoiceError(null);
     setPickerLineId(null);
     setPickerError(null);
@@ -1252,6 +1335,8 @@ export function ScriptPage() {
   }
 
   async function reloadLatest(): Promise<void> {
+    setSectionMutationError(null);
+    setNewSectionValidationMessage(null);
     const reloadingProjectId = projectIdRef.current;
     const reloadingGeneration = projectGenerationRef.current;
     const result = await projectQuery.refetch();
@@ -1299,6 +1384,9 @@ export function ScriptPage() {
   }
 
   function updateDraft(nextDraft: Script): void {
+    if (sectionMutationPendingRef.current) {
+      return;
+    }
     draftRef.current = nextDraft;
     setDraft(nextDraft);
     coordinatorRef.current?.update(nextDraft);
@@ -1372,7 +1460,21 @@ export function ScriptPage() {
       usedIds.add(id);
       return createDefaultScriptLine(line.speakerId, id, line.spokenText);
     });
-    updateDraft(appendScriptLines(currentDraft, bulkSectionIndex, lines));
+    const selectedSection = currentDraft.sections[bulkSectionIndex];
+    const targetSectionIndex = selectedSection?.enabled
+      ? bulkSectionIndex
+      : currentDraft.sections.findIndex((section) => section.enabled);
+    if (targetSectionIndex < 0) {
+      setBulkErrors([
+        {
+          lineNumber: 1,
+          message: "有効なセクションがないため、セリフを追加できません。"
+        }
+      ]);
+      return;
+    }
+    setBulkSectionIndex(targetSectionIndex);
+    updateDraft(appendScriptLines(currentDraft, targetSectionIndex, lines));
     setBulkText("");
     setBulkErrors([]);
   }
@@ -1496,6 +1598,134 @@ export function ScriptPage() {
         projectIdRef.current
       ]) ?? projectQuery.data
     );
+  }
+
+  async function commitSectionMutation(
+    buildCandidate: (script: Script) => Script,
+    failureMessage: string
+  ): Promise<boolean> {
+    if (sectionMutationPendingRef.current) {
+      return false;
+    }
+    const requestProjectId = projectIdRef.current;
+    const requestGeneration = projectGenerationRef.current;
+    sectionMutationPendingRef.current = true;
+    setSectionMutationPending(true);
+    setSectionMutationError(null);
+    try {
+      const flushed = await coordinatorRef.current?.flush();
+      if (flushed !== true) {
+        if (
+          isProjectContextCurrent(
+            projectIdRef.current,
+            projectGenerationRef.current,
+            requestProjectId,
+            requestGeneration
+          )
+        ) {
+          setSectionMutationError(new Error(failureMessage));
+        }
+        return false;
+      }
+      if (
+        !isProjectContextCurrent(
+          projectIdRef.current,
+          projectGenerationRef.current,
+          requestProjectId,
+          requestGeneration
+        )
+      ) {
+        return false;
+      }
+      const currentProject = latestProject();
+      if (currentProject === undefined) {
+        setSectionMutationError(
+          new Error("プロジェクトを読み込んでから操作してください。")
+        );
+        return false;
+      }
+      const candidate = buildCandidate(cloneScript(currentProject.script));
+      if (JSON.stringify(candidate) === JSON.stringify(currentProject.script)) {
+        return true;
+      }
+      const savedProject = await saveMutationRef.current.mutateAsync({
+        projectId: currentProject.metadata.id,
+        script: candidate,
+        expectedRevision: currentProject.revision
+      });
+      if (
+        !isProjectContextCurrent(
+          projectIdRef.current,
+          projectGenerationRef.current,
+          requestProjectId,
+          requestGeneration
+        )
+      ) {
+        return false;
+      }
+      updateMutationCaches(savedProject);
+      adoptProject(savedProject);
+      return true;
+    } catch (error) {
+      if (
+        isProjectContextCurrent(
+          projectIdRef.current,
+          projectGenerationRef.current,
+          requestProjectId,
+          requestGeneration
+        )
+      ) {
+        setSectionMutationError(error);
+      }
+      return false;
+    } finally {
+      sectionMutationPendingRef.current = false;
+      setSectionMutationPending(false);
+    }
+  }
+
+  function renameSection(sectionId: string, name: string): Promise<boolean> {
+    return commitSectionMutation(
+      (script) => updateScriptSectionLifecycle(script, sectionId, { name }),
+      "台本を保存できないため、セクション名を変更できません。"
+    );
+  }
+
+  function updateSectionEnabled(
+    sectionId: string,
+    enabled: boolean
+  ): Promise<boolean> {
+    return commitSectionMutation(
+      (script) => updateScriptSectionLifecycle(script, sectionId, { enabled }),
+      "台本を保存できないため、セクションの有効状態を変更できません。"
+    );
+  }
+
+  function moveSection(
+    sectionId: string,
+    direction: ScriptSectionMoveDirection
+  ): Promise<boolean> {
+    return commitSectionMutation(
+      (script) => moveScriptSection(script, sectionId, direction),
+      "台本を保存できないため、セクションの順序を変更できません。"
+    );
+  }
+
+  async function addSection(event: FormEvent<HTMLFormElement>): Promise<void> {
+    event.preventDefault();
+    const name = newSectionName.trim();
+    if (name.length === 0) {
+      setNewSectionValidationMessage("セクション名を入力してください。");
+      return;
+    }
+    setNewSectionValidationMessage(null);
+    const saved = await commitSectionMutation(
+      (script) => createPendingScriptSection(script, name),
+      "台本を保存できないため、セクションを追加できません。"
+    );
+    if (saved) {
+      setNewSectionName(DEFAULT_SCRIPT_SECTION_NAME);
+    }
   }
 
   async function openLineOverlayEditor(
@@ -2222,19 +2452,33 @@ export function ScriptPage() {
     draft !== null && project !== undefined
       ? validateScriptDraft(draft, project.characters)
       : [];
+  const enabledSectionEntries =
+    draft === null
+      ? []
+      : draft.sections
+          .map((section, sectionIndex) => ({ section, sectionIndex }))
+          .filter(({ section }) => section.enabled);
+  const disabledSectionEntries =
+    draft === null
+      ? []
+      : draft.sections
+          .map((section, sectionIndex) => ({ section, sectionIndex }))
+          .filter(({ section }) => !section.enabled);
   const autosaveMessage = pendingNavigation
     ? "遷移前に保存しています…"
-    : autosaveState.status === "saving"
-      ? "保存中…"
-      : autosaveState.status === "saved"
-        ? "保存済み"
-        : autosaveState.status === "error"
-          ? "保存に失敗しました"
-          : autosaveState.status === "conflict"
-            ? "保存競合です"
-            : autosaveState.status === "pending"
-              ? "変更を保存する準備中…"
-              : "変更はありません";
+    : sectionMutationPending
+      ? "セクション変更を保存中…"
+      : autosaveState.status === "saving"
+        ? "保存中…"
+        : autosaveState.status === "saved"
+          ? "保存済み"
+          : autosaveState.status === "error"
+            ? "保存に失敗しました"
+            : autosaveState.status === "conflict"
+              ? "保存競合です"
+              : autosaveState.status === "pending"
+                ? "変更を保存する準備中…"
+                : "変更はありません";
 
   if (projectQuery.isError) {
     return (
@@ -2503,6 +2747,39 @@ export function ScriptPage() {
           </p>
         </section>
       ) : null}
+      {sectionMutationError !== null ? (
+        <section className="message-panel message-panel-error" role="alert">
+          <h2>セクションを保存できませんでした</h2>
+          <p>
+            {getErrorMessage(
+              sectionMutationError,
+              "変更は適用されていません。"
+            )}
+          </p>
+          {errorDetails(sectionMutationError).length > 0 ? (
+            <ul>
+              {errorDetails(sectionMutationError).map((detail) => (
+                <li key={detail}>{detail}</li>
+              ))}
+            </ul>
+          ) : null}
+          <button
+            className="button"
+            type="button"
+            onClick={() => void reloadLatest()}
+          >
+            最新データを再読込
+          </button>
+        </section>
+      ) : null}
+      {enabledSectionEntries.length === 0 ? (
+        <section className="message-panel message-panel-warning" role="status">
+          <h2>レンダリング対象の有効なセクションがありません</h2>
+          <p>
+            セクションのデータは保持されています。再有効化するか、新しいセクションを追加すると、プレビューとMP4出力を再開できます。
+          </p>
+        </section>
+      ) : null}
 
       <section
         aria-labelledby="voice-generation-title"
@@ -2548,271 +2825,419 @@ export function ScriptPage() {
       </section>
 
       <section aria-label="台本編集" className="script-production-main">
-        <form className="bulk-paste-panel" onSubmit={pasteLines}>
-          <div>
-            <h2>話者付きテキストの一括貼り付け</h2>
-            <p>
-              1行に1セリフを入力し、話者名と本文を半角または全角のコロンで区切ります。
-            </p>
-          </div>
-          <div className="form-field">
-            <label htmlFor="bulk-script-section">追加先セクション</label>
-            <select
-              id="bulk-script-section"
-              value={bulkSectionIndex}
-              onChange={(event) =>
-                setBulkSectionIndex(Number(event.target.value))
+        <fieldset
+          aria-busy={sectionMutationPending}
+          className="script-editor-controls"
+          disabled={sectionMutationPending}
+        >
+          <form className="bulk-paste-panel" onSubmit={pasteLines}>
+            <div>
+              <h2>話者付きテキストの一括貼り付け</h2>
+              <p>
+                1行に1セリフを入力し、話者名と本文を半角または全角のコロンで区切ります。
+              </p>
+            </div>
+            <div className="form-field">
+              <label htmlFor="bulk-script-section">追加先セクション</label>
+              <select
+                id="bulk-script-section"
+                disabled={
+                  sectionMutationPending || enabledSectionEntries.length === 0
+                }
+                value={
+                  enabledSectionEntries.some(
+                    ({ sectionIndex }) => sectionIndex === bulkSectionIndex
+                  )
+                    ? bulkSectionIndex
+                    : (enabledSectionEntries[0]?.sectionIndex ?? "")
+                }
+                onChange={(event) =>
+                  setBulkSectionIndex(Number(event.target.value))
+                }
+              >
+                {enabledSectionEntries.map(({ section, sectionIndex }) => (
+                  <option key={section.id} value={sectionIndex}>
+                    {section.name}（{section.id}）
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="form-field">
+              <label htmlFor="bulk-script-text">貼り付ける台本本文</label>
+              <textarea
+                id="bulk-script-text"
+                rows={5}
+                value={bulkText}
+                onChange={(event: ChangeEvent<HTMLTextAreaElement>) =>
+                  setBulkText(event.target.value)
+                }
+                placeholder="四国めたん：最初に申請画面を開きます。\nずんだもん: 右上の新規作成を押すのだ。"
+              />
+            </div>
+            {bulkErrors.length > 0 ? (
+              <ul className="form-error" role="alert">
+                {bulkErrors.map((error) => (
+                  <li key={`${error.lineNumber}-${error.message}`}>
+                    {error.lineNumber}行目: {error.message}
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+            <button
+              className="button"
+              disabled={
+                sectionMutationPending || enabledSectionEntries.length === 0
               }
+              type="submit"
             >
-              {draft.sections.map((section, index) => (
-                <option key={section.id} value={index}>
-                  {section.name}（{section.id}）
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="form-field">
-            <label htmlFor="bulk-script-text">貼り付ける台本本文</label>
-            <textarea
-              id="bulk-script-text"
-              rows={5}
-              value={bulkText}
-              onChange={(event: ChangeEvent<HTMLTextAreaElement>) =>
-                setBulkText(event.target.value)
-              }
-              placeholder="四国めたん：最初に申請画面を開きます。\nずんだもん: 右上の新規作成を押すのだ。"
-            />
-          </div>
-          {bulkErrors.length > 0 ? (
-            <ul className="form-error" role="alert">
-              {bulkErrors.map((error) => (
-                <li key={`${error.lineNumber}-${error.message}`}>
-                  {error.lineNumber}行目: {error.message}
-                </li>
-              ))}
-            </ul>
-          ) : null}
-          <button className="button" type="submit">
-            セリフカードへ追加
-          </button>
-        </form>
+              セリフカードへ追加
+            </button>
+          </form>
 
-        <section className="script-section-list" aria-label="台本セクション">
-          {draft.sections.map((section, sectionIndex) => {
-            const sectionTemplate = resolveScriptScreenTemplate(
-              section,
-              templateDetails,
-              templateLoadingIds
-            );
-            const sectionTemplateError =
-              screenTemplateReferenceMessage(sectionTemplate);
-            const sectionTemplateIsCandidate = activeTemplates.some(
-              (template) => template.templateId === section.screenTemplateId
-            );
+          <section className="script-section-list" aria-label="台本セクション">
+            {enabledSectionEntries.map(
+              ({ section, sectionIndex }, enabledSectionIndex) => {
+                const sectionTemplate = resolveScriptScreenTemplate(
+                  section,
+                  templateDetails,
+                  templateLoadingIds
+                );
+                const sectionTemplateError =
+                  screenTemplateReferenceMessage(sectionTemplate);
+                const sectionTemplateIsCandidate = activeTemplates.some(
+                  (template) => template.templateId === section.screenTemplateId
+                );
 
-            return (
-              <section className="script-section-card" key={section.id}>
-                <header className="script-section-header">
-                  <div>
-                    <p className="eyebrow">セクション</p>
-                    <h2>{section.name}</h2>
-                    <code>{section.id}</code>
-                    <div className="script-section-template-control">
-                      <label htmlFor={`${section.id}-screen-template`}>
-                        画面テンプレート
-                      </label>
-                      <select
-                        aria-invalid={
-                          !screenTemplateStatusIsSelectable(sectionTemplate)
-                        }
-                        disabled={
-                          screenTemplatesQuery.isError ||
-                          activeTemplates.length === 0
-                        }
-                        id={`${section.id}-screen-template`}
-                        value={section.screenTemplateId}
-                        onChange={(event) =>
-                          updateSectionTemplate(
-                            sectionIndex,
-                            event.target.value
-                          )
-                        }
-                      >
-                        {!sectionTemplateIsCandidate ? (
-                          <option value={section.screenTemplateId}>
-                            {sectionTemplateError ??
-                              `現在: ${screenTemplateName(sectionTemplate, activeTemplates)}`}
-                          </option>
-                        ) : null}
-                        {activeTemplates.map((template) => (
-                          <option
-                            key={template.templateId}
-                            value={template.templateId}
-                          >
-                            {template.name}
-                          </option>
-                        ))}
-                      </select>
-                      {sectionTemplateError !== null ? (
-                        <span
-                          className="script-template-reference-error"
-                          role="alert"
-                        >
-                          {sectionTemplateError}
-                        </span>
-                      ) : null}
-                    </div>
-                    <div className="script-section-background-summary">
-                      <span>背景</span>
-                      <code>
-                        {sectionBackgroundSummary(section.background)}
-                      </code>
-                    </div>
-                  </div>
-                </header>
-                {section.lines.length === 0 ? (
-                  <p className="status-message">セリフはまだありません。</p>
-                ) : (
-                  <div className="script-line-list">
-                    {section.lines.map((line, lineIndex) => {
-                      const previewState = previewStates.get(
-                        previewLineKey(section.id, line.id)
-                      );
-                      if (previewState === undefined) {
-                        return null;
-                      }
-                      return (
-                        <ScriptLineCard
-                          key={line.id}
-                          line={line}
-                          sectionIndex={sectionIndex}
-                          lineIndex={lineIndex}
-                          project={project}
-                          catalog={catalog}
-                          catalogUnavailable={
-                            catalogQuery.isPending || catalogQuery.isError
-                          }
-                          previewState={previewState}
-                          linePreview={resolveScriptLineScreenPreview({
-                            projectId: project.metadata.id,
-                            project,
-                            section,
-                            line,
-                            catalog,
-                            manifest,
-                            assignments: previewState.assignments,
-                            assets
-                          })}
-                          issues={issues}
-                          voiceStatus={voiceStatusByLine.get(line.id)}
-                          voiceStatusLoading={voiceStatusQuery.isPending}
-                          voiceGenerationDisabled={
-                            voiceGenerationDisabled || issues.length > 0
-                          }
-                          voiceAvailable={
-                            voiceStatusQuery.data?.available === true
-                          }
-                          projectId={project.metadata.id}
-                          assets={assets}
-                          mediaMutationPending={mediaMutationPending}
-                          onChange={(update) =>
-                            updateLine(sectionIndex, lineIndex, update)
-                          }
-                          onMove={(direction) =>
-                            updateDraft(
-                              moveScriptLine(
-                                draft,
-                                sectionIndex,
-                                lineIndex,
-                                direction
-                              )
-                            )
-                          }
-                          onDuplicate={() =>
-                            updateDraft(
-                              duplicateScriptLine(
-                                draft,
-                                sectionIndex,
-                                lineIndex
-                              )
-                            )
-                          }
-                          onDelete={() =>
-                            updateDraft(
-                              deleteScriptLine(draft, sectionIndex, lineIndex)
-                            )
-                          }
-                          onGenerateVoice={() =>
-                            void generateVoiceLine(section.id, line.id)
-                          }
-                          onOpenOverlayEditor={() =>
-                            void openLineOverlayEditor(section.id, line.id)
-                          }
-                          onOpenPicker={() => openVisualPicker(line.id)}
-                          onStartMedia={() =>
-                            openMediaPicker(
-                              {
-                                sectionId: section.id,
-                                lineId: line.id
-                              },
-                              "start"
-                            )
-                          }
-                          onPauseMedia={(assignmentId) =>
-                            pauseMedia(
-                              { sectionId: section.id, lineId: line.id },
-                              assignmentId
-                            )
-                          }
-                          onResumeMedia={(assignmentId) =>
-                            resumeMedia(
-                              { sectionId: section.id, lineId: line.id },
-                              assignmentId
-                            )
-                          }
-                          onEndMedia={(assignmentId) =>
-                            void requestEndMedia(
-                              { sectionId: section.id, lineId: line.id },
-                              assignmentId
-                            )
-                          }
-                          onReplaceMedia={(assignmentId) =>
-                            openMediaPicker(
-                              {
-                                sectionId: section.id,
-                                lineId: line.id
-                              },
-                              "replace",
-                              assignmentId
-                            )
-                          }
-                          onSplitMedia={(assignmentId) =>
-                            openMediaPicker(
-                              {
-                                sectionId: section.id,
-                                lineId: line.id
-                              },
-                              "split",
-                              assignmentId
-                            )
-                          }
+                return (
+                  <section className="script-section-card" key={section.id}>
+                    <header className="script-section-header">
+                      <div className="script-section-header-main">
+                        <p className="eyebrow">セクション</p>
+                        <ScriptSectionNameEditor
+                          disabled={sectionMutationPending}
+                          onRename={(name) => renameSection(section.id, name)}
+                          section={section}
                         />
-                      );
-                    })}
-                  </div>
-                )}
-                <button
-                  className="button script-section-add-line"
-                  type="button"
-                  onMouseDown={(event) => event.preventDefault()}
-                  onClick={() => addLine(sectionIndex)}
-                >
-                  セリフを追加
-                </button>
-              </section>
-            );
-          })}
-        </section>
+                        <code>{section.id}</code>
+                        <div className="script-section-template-control">
+                          <label htmlFor={`${section.id}-screen-template`}>
+                            画面テンプレート
+                          </label>
+                          <select
+                            aria-invalid={
+                              !screenTemplateStatusIsSelectable(sectionTemplate)
+                            }
+                            disabled={
+                              screenTemplatesQuery.isError ||
+                              activeTemplates.length === 0
+                            }
+                            id={`${section.id}-screen-template`}
+                            value={section.screenTemplateId}
+                            onChange={(event) =>
+                              updateSectionTemplate(
+                                sectionIndex,
+                                event.target.value
+                              )
+                            }
+                          >
+                            {!sectionTemplateIsCandidate ? (
+                              <option value={section.screenTemplateId}>
+                                {sectionTemplateError ??
+                                  `現在: ${screenTemplateName(sectionTemplate, activeTemplates)}`}
+                              </option>
+                            ) : null}
+                            {activeTemplates.map((template) => (
+                              <option
+                                key={template.templateId}
+                                value={template.templateId}
+                              >
+                                {template.name}
+                              </option>
+                            ))}
+                          </select>
+                          {sectionTemplateError !== null ? (
+                            <span
+                              className="script-template-reference-error"
+                              role="alert"
+                            >
+                              {sectionTemplateError}
+                            </span>
+                          ) : null}
+                        </div>
+                        <div className="script-section-background-summary">
+                          <span>背景</span>
+                          <code>
+                            {sectionBackgroundSummary(section.background)}
+                          </code>
+                        </div>
+                      </div>
+                      <div className="script-section-header-actions">
+                        <button
+                          className="button button-small"
+                          disabled={enabledSectionIndex === 0}
+                          type="button"
+                          onClick={() => void moveSection(section.id, "up")}
+                        >
+                          上へ移動
+                        </button>
+                        <button
+                          className="button button-small"
+                          disabled={
+                            enabledSectionIndex ===
+                            enabledSectionEntries.length - 1
+                          }
+                          type="button"
+                          onClick={() => void moveSection(section.id, "down")}
+                        >
+                          下へ移動
+                        </button>
+                        <button
+                          className="button button-small"
+                          disabled={sectionMutationPending}
+                          type="button"
+                          onClick={() =>
+                            void updateSectionEnabled(section.id, false)
+                          }
+                        >
+                          無効化
+                        </button>
+                      </div>
+                    </header>
+                    {section.lines.length === 0 ? (
+                      <p className="status-message">セリフはまだありません。</p>
+                    ) : (
+                      <div className="script-line-list">
+                        {section.lines.map((line, lineIndex) => {
+                          const previewState = previewStates.get(
+                            previewLineKey(section.id, line.id)
+                          );
+                          if (previewState === undefined) {
+                            return null;
+                          }
+                          return (
+                            <ScriptLineCard
+                              key={line.id}
+                              line={line}
+                              sectionIndex={sectionIndex}
+                              lineIndex={lineIndex}
+                              project={project}
+                              catalog={catalog}
+                              catalogUnavailable={
+                                catalogQuery.isPending || catalogQuery.isError
+                              }
+                              previewState={previewState}
+                              linePreview={resolveScriptLineScreenPreview({
+                                projectId: project.metadata.id,
+                                project,
+                                section,
+                                line,
+                                catalog,
+                                manifest,
+                                assignments: previewState.assignments,
+                                assets
+                              })}
+                              issues={issues}
+                              voiceStatus={voiceStatusByLine.get(line.id)}
+                              voiceStatusLoading={voiceStatusQuery.isPending}
+                              voiceGenerationDisabled={
+                                voiceGenerationDisabled || issues.length > 0
+                              }
+                              voiceAvailable={
+                                voiceStatusQuery.data?.available === true
+                              }
+                              projectId={project.metadata.id}
+                              assets={assets}
+                              mediaMutationPending={mediaMutationPending}
+                              onChange={(update) =>
+                                updateLine(sectionIndex, lineIndex, update)
+                              }
+                              onMove={(direction) =>
+                                updateDraft(
+                                  moveScriptLine(
+                                    draft,
+                                    sectionIndex,
+                                    lineIndex,
+                                    direction
+                                  )
+                                )
+                              }
+                              onDuplicate={() =>
+                                updateDraft(
+                                  duplicateScriptLine(
+                                    draft,
+                                    sectionIndex,
+                                    lineIndex
+                                  )
+                                )
+                              }
+                              onDelete={() =>
+                                updateDraft(
+                                  deleteScriptLine(
+                                    draft,
+                                    sectionIndex,
+                                    lineIndex
+                                  )
+                                )
+                              }
+                              onGenerateVoice={() =>
+                                void generateVoiceLine(section.id, line.id)
+                              }
+                              onOpenOverlayEditor={() =>
+                                void openLineOverlayEditor(section.id, line.id)
+                              }
+                              onOpenPicker={() => openVisualPicker(line.id)}
+                              onStartMedia={() =>
+                                openMediaPicker(
+                                  {
+                                    sectionId: section.id,
+                                    lineId: line.id
+                                  },
+                                  "start"
+                                )
+                              }
+                              onPauseMedia={(assignmentId) =>
+                                pauseMedia(
+                                  { sectionId: section.id, lineId: line.id },
+                                  assignmentId
+                                )
+                              }
+                              onResumeMedia={(assignmentId) =>
+                                resumeMedia(
+                                  { sectionId: section.id, lineId: line.id },
+                                  assignmentId
+                                )
+                              }
+                              onEndMedia={(assignmentId) =>
+                                void requestEndMedia(
+                                  { sectionId: section.id, lineId: line.id },
+                                  assignmentId
+                                )
+                              }
+                              onReplaceMedia={(assignmentId) =>
+                                openMediaPicker(
+                                  {
+                                    sectionId: section.id,
+                                    lineId: line.id
+                                  },
+                                  "replace",
+                                  assignmentId
+                                )
+                              }
+                              onSplitMedia={(assignmentId) =>
+                                openMediaPicker(
+                                  {
+                                    sectionId: section.id,
+                                    lineId: line.id
+                                  },
+                                  "split",
+                                  assignmentId
+                                )
+                              }
+                            />
+                          );
+                        })}
+                      </div>
+                    )}
+                    <button
+                      className="button script-section-add-line"
+                      type="button"
+                      onMouseDown={(event) => event.preventDefault()}
+                      onClick={() => addLine(sectionIndex)}
+                    >
+                      セリフを追加
+                    </button>
+                  </section>
+                );
+              }
+            )}
+          </section>
+          <form className="script-section-add-form" onSubmit={addSection}>
+            <div>
+              <p className="eyebrow">台本の構成</p>
+              <h2>セクションを追加</h2>
+              <p>
+                新しいセクションはサーバー側でIDと初期表示設定が割り当てられます。
+              </p>
+            </div>
+            <div className="form-field">
+              <label htmlFor="new-script-section-name">
+                新しいセクション名
+              </label>
+              <input
+                id="new-script-section-name"
+                value={newSectionName}
+                disabled={sectionMutationPending}
+                onChange={(event) => {
+                  setNewSectionName(event.target.value);
+                  setNewSectionValidationMessage(null);
+                }}
+              />
+            </div>
+            {newSectionValidationMessage !== null ? (
+              <p className="form-error" role="alert">
+                {newSectionValidationMessage}
+              </p>
+            ) : null}
+            <button
+              className="button button-primary"
+              disabled={sectionMutationPending}
+              type="submit"
+            >
+              {sectionMutationPending ? "保存中…" : "セクションを追加"}
+            </button>
+          </form>
+          {disabledSectionEntries.length > 0 ? (
+            <section
+              aria-labelledby="disabled-script-sections-title"
+              className="script-disabled-sections"
+            >
+              <div>
+                <p className="eyebrow">保持中のデータ</p>
+                <h2 id="disabled-script-sections-title">
+                  無効なセクション ({disabledSectionEntries.length})
+                </h2>
+                <p>
+                  セリフと設定は保持され、プレビューとMP4出力のレンダリング対象から外れています。
+                </p>
+              </div>
+              <ul className="script-disabled-section-list">
+                {disabledSectionEntries.map(({ section }) => (
+                  <li className="script-disabled-section-item" key={section.id}>
+                    <div className="script-disabled-section-meta">
+                      <strong>{section.name}</strong>
+                      <code>{section.id}</code>
+                      <span>{section.lines.length}件のセリフを保持中</span>
+                    </div>
+                    <button
+                      className="button button-small"
+                      disabled={sectionMutationPending}
+                      type="button"
+                      onClick={() =>
+                        void updateSectionEnabled(section.id, true)
+                      }
+                    >
+                      再有効化
+                    </button>
+                    <details>
+                      <summary>内容を確認</summary>
+                      {section.lines.length === 0 ? (
+                        <p className="status-message">セリフはありません。</p>
+                      ) : (
+                        <ul>
+                          {section.lines.map((line) => (
+                            <li key={line.id}>
+                              <code>{line.id}</code> {line.subtitleText}
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </details>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          ) : null}
+        </fieldset>
       </section>
 
       {mediaSplitConfirmation !== null ? (

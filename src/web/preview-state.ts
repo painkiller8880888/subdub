@@ -216,8 +216,8 @@ function targetView(
   switch (target.kind) {
     case "outline":
       return {
-        label: "構成案を確認",
-        href: `/projects/${projectPath}/outline`
+        label: "台本を確認",
+        href: `/projects/${projectPath}/script`
       };
     case "script":
       return { label: "台本を確認", href: `/projects/${projectPath}/script` };
